@@ -15,8 +15,8 @@ GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-pro-latest', 'gemini-2.5-pro']
 GEMINI_DEFAULT = 'gemini-flash-latest'          # the free tier has no quota for the pro models (limit 0); flash works. Switch when billing is enabled
 VERTEX_URL = 'https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent'      # Vertex AI express mode: keys that start with AQ.
-VERTEX_MODELS = ['gemini-2.5-pro', 'gemini-3.1-pro-preview', 'gemini-2.5-flash']
-PROVIDERS = dict(vertex=dict(models=VERTEX_MODELS, default='gemini-2.5-pro', env=('VERTEX_API_KEY', 'GOOGLE_CLOUD_API_KEY')), gemini=dict(models=GEMINI_MODELS, default=GEMINI_DEFAULT, env=('GEMINI_API_KEY', 'GOOGLE_API_KEY')), anthropic=dict(models=MODELS, default=DEFAULT_MODEL, env=('ANTHROPIC_API_KEY',)))
+VERTEX_MODELS = ['gemini-3.1-pro-preview', 'gemini-3.8-flash', 'gemini-2.5-pro']      # the only 3.x pro this key can reach (3.0, 3.5-3.8 pro, -latest aliases: 404)
+PROVIDERS = dict(vertex=dict(models=VERTEX_MODELS, default='gemini-3.1-pro-preview', env=('VERTEX_API_KEY', 'GOOGLE_CLOUD_API_KEY')), gemini=dict(models=GEMINI_MODELS, default=GEMINI_DEFAULT, env=('GEMINI_API_KEY', 'GOOGLE_API_KEY')), anthropic=dict(models=MODELS, default=DEFAULT_MODEL, env=('ANTHROPIC_API_KEY',)))
 
 
 class LLMError(Exception): pass

@@ -298,15 +298,28 @@ def cmd_script(a):
     from strata360.edit import techniques as TQ, optimise as O, script as SC
     from strata360.gps import track
     cfg = config.load(a.name); rd = config.race_dir(a.name); notes = N.load(a.name); tp = config.track_path(a.name, cfg); tr = track.load(tp) if tp else None
-    cdir = os.path.join(rd, 'clips'); cands = {}
+    cdir = os.path.join(rd, 'clips'); cands = {}; clips = []
     for f in sorted(glob.glob(os.path.join(cdir, '*', 'candidates.json'))):
-        for c in json.load(open(f))['candidates']: cands[c['id']] = c
-    if not cands: sys.exit('no candidates yet: ./strata360 run RACE --stages candidates')
+        cj = json.load(open(os.path.join(os.path.dirname(f), 'clip.json'))); cd = json.load(open(f))
+        for c in cd['candidates']: cands[c['id']] = c
+        clips.append(dict(id=cj['clip_id'], start_utc=cj['time']['start_utc'], duration_s=cj['video']['source_frames'] / cj['video']['nominal_fps'], candidates=cd['candidates'], unusable=cd.get('unusable') or []))
+    if not clips: sys.exit('no candidates yet: ./strata360 run RACE --stages candidates')
+    n_dirs = len(glob.glob(os.path.join(cdir, '*', 'clip.json')))
+    if len(clips) < n_dirs: print(f'WARNING: {n_dirs - len(clips)} clip(s) have no candidates yet (their stages are unfinished) and are not in this plan')
+    from strata360.edit import chrono as CH
     lib = TQ.load(); music = O.Music(bpm=120.0, beats=int(round(a.length * 2)))
-    plan = O.plan([O.Candidate(id=c['id'], clip=c['clip'], quality=c['quality'], energy=c['energy'], min_dur=c['min_dur'], max_dur=c['max_dur'], features=c['features']) for c in cands.values()], lib, music, O.Settings(seed=a.seed))
+    plan = CH.plan(clips, lib, music, CH.Settings(seed=a.seed)); bad = CH.violations(plan, lib, music, clips)
+    if bad: sys.exit('the plan broke its own rules: ' + '; '.join(bad[:5]))
+    start_of = {c['id']: c['start_utc'] for c in clips}
+    def cand_dict(sg):
+        c = cands.get(sg.cand.id)
+        if c: return c
+        import datetime as _dt
+        t0 = _dt.datetime.fromisoformat(start_of[sg.cand.clip].replace('Z', '+00:00')) + _dt.timedelta(seconds=sg.cand.start_s)
+        return dict(id=sg.cand.id, clip=sg.cand.clip, start_s=sg.cand.start_s, end_s=sg.cand.end_s, start_utc=t0.strftime('%Y-%m-%dT%H:%M:%SZ'), features=sg.cand.features, people=None)
     facts = []
-    for i, s in enumerate(plan):
-        facts.append(SC.segment_facts(dict(index=i, start_s=s.start * music.beat_s, dur_s=s.beats * music.beat_s, technique=s.tech.id, in_s=getattr(s, 'in_s', 0.0)), cands[s.cand.id], cdir, tr, notes, cfg.get('timezone', 'Europe/Brussels')))
+    for i, sg in enumerate(plan):
+        facts.append(SC.segment_facts(dict(index=i, start_s=sg.start * music.beat_s, dur_s=sg.beats * music.beat_s, technique=sg.tech.id, in_s=sg.in_s), cand_dict(sg), cdir, tr, notes, cfg.get('timezone', 'Europe/Brussels')))
     race_line = ''
     if tr is not None:
         race_line = f"The race: {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours."
