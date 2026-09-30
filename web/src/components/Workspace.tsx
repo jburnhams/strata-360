@@ -3,6 +3,8 @@ import { api, type ClipInfo } from '../api'
 import { usePoll } from '../usePoll'
 import ProjectProgress from './ProjectProgress'
 import TrackPanel from './TrackPanel'
+import ClockPanel from './ClockPanel'
+import WhoPanel from './WhoPanel'
 import NoteBox from './NoteBox'
 import ClipView from './ClipView'
 import { Skeleton } from './Skeleton'
@@ -37,6 +39,8 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <FilmDetails folder={folder} />
             <ProjectProgress folder={folder} />
             <TrackPanel folder={folder} />
+            <ClockPanel folder={folder} />
+            <WhoPanel folder={folder} />
             <NoteBox folder={folder} title="Notes for the whole folder" placeholder="What was this? Who was there? What is the story of the day, in your own words…" />
             <ScriptPanel folder={folder} onOpen={c => { setFocus(undefined); setSel(c) }} />
             <VoiceoverPanel folder={folder} />

@@ -40,6 +40,8 @@ export interface VoiceoverState { engines: { id: string; label: string; voices: 
 export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | 'rendering' | 'done' | 'error'; running: boolean; key?: string; frames_done?: number; frames_total?: number; placeholders?: string[]; error?: string | null; length_s?: number }
 export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; bitrate: string }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean }
 export interface MusicState { file: string | null; analysis: { bpm: number; offset_s: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number } | null }
+export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
+export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
@@ -111,6 +113,12 @@ export const api = {
     return j as MusicState & { warning?: string }
   },
   removeMusic: (folder: string) => fetch('/api/music?' + q({ folder }), { method: 'DELETE' }),
+  clock: (folder: string) => call<ClockState>('/api/clock?' + q({ folder })),
+  clockSuggest: (folder: string) => call<{ current: number; suggestions: { offset_s: number; votes: number; confidence: number; score: number; clips?: string[] }[] }>('/api/clock/suggest?' + q({ folder })),
+  setClock: (folder: string, offset_seconds: number) => call<{ clock: ClockState; retimed: number }>('/api/clock', { folder, offset_seconds }),
+  who: (folder: string, refresh = false) => call<WhoState>('/api/who?' + q({ folder, refresh: refresh ? 'true' : 'false' })),
+  whoSheetUrl: (folder: string, v: number) => '/api/who/sheet?' + q({ folder, v: String(v) }),
+  setWho: (folder: string, me: number[]) => call<{ ok: boolean }>('/api/who', { folder, me }),
   editGet: (folder: string) => call<EditResponse>('/api/edit?' + q({ folder })),
   propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; keep?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
   override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState }>('/api/edit/override', { folder, ...body }),

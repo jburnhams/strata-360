@@ -421,6 +421,57 @@ def create_app(roots, token=None):
         if not film or not os.path.exists(film): raise HTTPException(404, 'not rendered yet')
         return FileResponse(film, media_type='video/mp4', filename='film.mp4')
 
+    @api.get('/api/who', dependencies=[Depends(auth)])
+    def get_who(folder: str, refresh: bool = False):                                     # the face clusters found in the footage, the suggested one for the wearer, and whether a profile is saved
+        from strata360.analysis import identity
+        f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f); cj = os.path.join(rd, 'people', 'clusters.json'); prof = os.path.join(ROOT_DIR, 'profiles', cfg.get('profile', 'me') + '.npz')
+        if refresh or not os.path.exists(cj):
+            try: identity.run(rd, profiles_dir=os.path.join(ROOT_DIR, 'profiles'))
+            except SystemExit as e: return dict(ready=False, reason=str(e), profile=os.path.exists(prof))
+        d = json.load(open(cj)); return dict(ready=True, clusters=d['clusters'][:30], suggested=d['suggested_wearer'], profile=os.path.exists(prof), sheet=os.path.exists(os.path.join(rd, 'people', 'clusters.png')))
+
+    @api.get('/api/who/sheet')
+    def get_who_sheet(request: Request, folder: str):
+        auth(request); p = os.path.join(config.race_dir(folder_of(folder)), 'people', 'clusters.png')
+        if not os.path.exists(p): raise HTTPException(404)
+        return FileResponse(p, media_type='image/png', headers={'Cache-Control': 'no-cache'})
+
+    @api.post('/api/who', dependencies=[Depends(auth)])
+    def post_who(body: dict):                                                            # {folder, me: [cluster numbers]}: save them as the wearer's face profile and let the waiting stages continue
+        from strata360.analysis import identity
+        f = folder_of(body.get('folder')); rd = config.race_dir(f); cfg = config.load(f)
+        try: ids = [int(x) for x in body.get('me', [])]
+        except (TypeError, ValueError): raise HTTPException(400, 'me: a list of cluster numbers')
+        if not ids: raise HTTPException(400, 'choose at least one cluster')
+        try: identity.run(rd, me=','.join(map(str, ids)), profiles_dir=os.path.join(ROOT_DIR, 'profiles'), label=cfg.get('profile', 'me'))
+        except SystemExit as e: raise HTTPException(400, str(e))
+        start_job(f, ('run',)); return dict(ok=True)
+
+    def clock_state(f):
+        cfg = config.load(f); ck = cfg.get('camera_clock', {}); cur = float(ck.get('offset_seconds', 0.0)) + 3600 * float(ck.get('utc_offset_hours', 0.0))
+        return dict(offset_s=cur, verified=bool(ck.get('verified')), note=ck.get('note'), drift_s_per_day=ck.get('drift_s_per_day'), anchors=ck.get('anchors', []), has_track=config.track_path(f, cfg) is not None)
+
+    @api.get('/api/clock', dependencies=[Depends(auth)])
+    def get_clock(folder: str):                                                          # the camera clock correction: seconds the camera is ahead of UTC (370 = the camera shows 6 min 10 s too late)
+        return clock_state(folder_of(folder))
+
+    @api.get('/api/clock/suggest', dependencies=[Depends(auth)])
+    def get_clock_suggest(folder: str):                                                  # votes from running starts/stops seen by both the camera and the GPS (analysis/../gps/anchors.py)
+        from strata360.gps import anchors as A, track
+        f = folder_of(folder); cfg = config.load(f); tp = config.track_path(f, cfg)
+        if not tp: raise HTTPException(400, 'add the race track first')
+        cur = clock_state(f)['offset_s']; return dict(current=cur, suggestions=A.suggest(config.race_dir(f), track.load(tp), prior_s=cur))
+
+    @api.post('/api/clock', dependencies=[Depends(auth)])
+    def post_clock(body: dict):                                                          # {folder, offset_seconds}: set the offset; every clip is re-timed and the stages that use the track are redone
+        from strata360.pipeline import runner
+        f = folder_of(body.get('folder'))
+        try: off = float(body['offset_seconds'])
+        except (KeyError, TypeError, ValueError): raise HTTPException(400, 'offset_seconds: a number')
+        if abs(off) > 86400: raise HTTPException(400, 'the offset is larger than a day')
+        cfg = config.load(f); ck = cfg.setdefault('camera_clock', {}); ck['utc_offset_hours'] = 0.0; ck['offset_seconds'] = off; ck['verified'] = True; ck['note'] = 'set in the app'; config.save(f, cfg)
+        res = runner.run(f, ['ingest'], None, False); return dict(clock=clock_state(f), retimed=len(res))
+
     @api.get('/api/music', dependencies=[Depends(auth)])
     def get_music(folder: str):                                                          # the music track of the project and what was found in it
         from strata360.edit import project as PJ
