@@ -14,6 +14,7 @@ import cv2, numpy as np
 from strata360.pipeline import config
 from strata360.render import camera as cam
 from strata360.render.flat import Globe, projection, view_rays
+from strata360.render.film import compose, layout
 
 FPS = 25.0
 
@@ -66,6 +67,44 @@ def stab_matrices(osv):
     return lambda k: B.T @ quat_to_R(np.asarray(T['quat'][min(k, len(T['quat']) - 1)])).T @ P.T
 
 
+class PreviewSource:
+    """Frames of the planned windows from the clips' proxies (upright equirect), through the real renderer's projection (EquirectView). A clip without a proxy gives a dark card."""
+    def __init__(self, folder, segs, framing, w, h, decode_w):
+        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w = folder, segs, framing, w, h, decode_w; self.V = EquirectView(w, h); self.info = {}; self.done = 0
+
+    def _clip(self, clip):
+        if clip not in self.info:
+            p = proxy_of(self.folder, clip); side = json.load(open(os.path.splitext(p)[0] + '.json')) if p else None
+            self.info[clip] = dict(proxy=p, side=side, ts=np.array([f['t_s'] for f in side['frames']]) if side else None, stab=None)
+        return self.info[clip]
+
+    def frames(self, k, a0, a1, yaw_extra=None):
+        sg = self.segs[k]; clip = sg['clip']; ci = self._clip(clip); m = a1 - a0
+        if m <= 0: return
+        if not ci['proxy']:
+            for _ in range(m): yield card(self.w, self.h, f'{clip[-9:]}: proxy not made yet')
+            return
+        path = cam.CameraPath.from_dict(self.framing[sg['id']]); self.V.set_background(path.bg, **path.bg_opts); side = ci['side']; ez = np.array([0.0, 0.0, 1.0])
+        t_from = sg['clip_start_s'] + a0 / FPS; fr_n = len(side['frames']); Ms = None
+        if path.ref != 'world':                                                          # heading-follow and body paths need the stabilisation of each frame (as the real renderer)
+            if ci['stab'] is None: ci['stab'] = stab_matrices(json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json')))['source_files']['osv'])
+            idx = np.clip(np.round(np.maximum(t_from + np.arange(m) / FPS, 0.0) * FPS).astype(int), 0, fr_n - 1); Ms = [ci['stab'](side['frames'][j]['source_frame']) for j in idx]
+        P = path.evaluate(np.arange(a0, a1) / FPS, Ms, FPS)
+        W0, H0 = side['size']; dw = min(self.decode_w, W0); dh = dw // 2; lead = max(-t_from, 0.0)                       # time before the clip starts: the first frame is held
+        dec = subprocess.Popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0):.3f}', '-i', ci['proxy'], '-t', f'{(m / FPS) + 0.2:.3f}', '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', str(FPS), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        fr = None; skip = int(round(lead * FPS))
+        try:
+            for i in range(m):
+                if i >= skip or fr is None:                                                  # before the clip starts (skip frames) the first frame is held
+                    buf = dec.stdout.read(dw * dh * 3)
+                    if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3)
+                    elif fr is None: fr = np.zeros((dh, dw, 3), np.uint8)                   # (past the end of the clip the last frame is held)
+                self.V.set_fov(P['fov'][i], P['dist'][i], P['disc'][i] if P['use_disc'] else None); yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0)
+                vdir = cam.direction(yaw, P['pitch'][i]); yield self.V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))
+        finally:
+            dec.stdout.close(); dec.terminate(); dec.wait()
+
+
 def encoder_args():
     """Hardware H.264 where there is one (cheap on the CPU, which the rest of the processing needs), else x264."""
     try: enc = subprocess.run(['ffmpeg', '-v', 'quiet', '-encoders'], capture_output=True, text=True, timeout=20).stdout
@@ -112,38 +151,17 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
     enc = subprocess.Popen(['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', str(FPS), '-i', '-', '-i', os.path.join(d, 'audio.wav'), '-map', '0:v', '-map', '1:a', *encoder_args(),
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
                             '-hls_segment_filename', os.path.join(d, 'seg%05d.ts'), os.path.join(d, 'index.m3u8')], stdin=subprocess.PIPE)
-    V = EquirectView(w, h); done = 0; last = 0.0; clipinfo = {}; ez = np.array([0.0, 0.0, 1.0])
+    src = PreviewSource(folder, segs, framing, w, h, decode_w); last = [0.0]
+    def emit(img):
+        enc.stdin.write(img.tobytes()); src.done += 1
+        if time.time() - last[0] > 1.0: last[0] = time.time(); status('rendering', src.done); progress and progress(src.done, total)
+    done = 0
     try:
-        for gi, sg in enumerate(segs):
-            n = bounds[gi] - starts[gi]; clip = sg['clip']; p = proxy_of(folder, clip); fr = None; path = cam.CameraPath.from_dict(framing[sg['id']]); V.set_background(path.bg, **path.bg_opts)
-            side = json.load(open(os.path.splitext(p)[0] + '.json')) if p else None
-            if p and clip not in clipinfo: clipinfo[clip] = (np.array([f['t_s'] for f in side['frames']]), stab_matrices(json.load(open(os.path.join(config.race_dir(folder), 'clips', clip, 'clip.json')))['source_files']['osv']) if path.ref != 'world' else None)
-            Ms = None
-            if p:
-                ts_p, sm = clipinfo[clip]; j0 = int(np.argmin(np.abs(ts_p - sg['clip_start_s'])))
-                if path.ref != 'world':
-                    if sm is None: sm = clipinfo[clip] = (ts_p, stab_matrices(json.load(open(os.path.join(config.race_dir(folder), 'clips', clip, 'clip.json')))['source_files']['osv'])); sm = sm[1]
-                    Ms = [sm(side['frames'][min(j0 + i, len(side['frames']) - 1)]['source_frame']) for i in range(n)]
-            P = path.evaluate(np.arange(n) / FPS, Ms, FPS) if p else None; dec = None
-            if p:
-                W0, H0 = side['size']; dw = min(decode_w, W0); dh = dw // 2
-                dec = subprocess.Popen(['ffmpeg', '-v', 'error', '-ss', f"{sg['clip_start_s']:.3f}", '-i', p, '-t', f"{n / FPS + 0.2:.3f}", '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', str(FPS), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            for i in range(n):
-                if dec is not None:
-                    buf = dec.stdout.read(dw * dh * 3)
-                    if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3)
-                if fr is None or dec is None: img = card(w, h, f'{clip[-9:]}: proxy not made yet')
-                else:
-                    V.set_fov(P['fov'][i], P['dist'][i], P['disc'][i] if P['use_disc'] else None); vdir = cam.direction(P['yaw'][i], P['pitch'][i])
-                    img = V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))          # the same steps as flat.main: body paths are rotated into the world by the stabilisation
-                enc.stdin.write(img.tobytes()); done += 1
-                if time.time() - last > 1.0: last = time.time(); status('rendering', done); progress and progress(done, total)
-            if dec is not None: dec.stdout.close(); dec.terminate(); dec.wait()
-        enc.stdin.close(); enc.wait(); status('done', total, finished=time.time())
+        done = compose(segs, src, FPS, emit); enc.stdin.close(); enc.wait(); status('done', total, finished=time.time())
     except BaseException as e:
         try: enc.kill()
         except OSError: pass
-        status('error', done, error=f'{type(e).__name__}: {e}'); raise
+        status('error', src.done, error=f'{type(e).__name__}: {e}'); raise
     return d
 
 

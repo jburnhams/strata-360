@@ -41,7 +41,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
           <label>Tempo (bpm)<input type="number" min={60} max={200} value={bpm} onChange={e => setBpm(Number(e.target.value))} className={`${input} ml-2`} /></label>
           <button disabled={busy} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50" onClick={() => run(() => api.propose(folder, { length_s: length, bpm, keep: true }))}>{plan ? 'Re-plan' : 'Propose a film'}</button>
           {plan && <button disabled={busy} className="rounded-lg border border-stone-300 px-3 py-2 disabled:opacity-50 dark:border-stone-700" title="a different arrangement of techniques (same moments)" onClick={() => run(() => api.propose(folder, { seed: s.seed + 1, keep: false }))}>Another version</button>}
-          {(Object.keys(ov.tech_force).length + ov.locked.length + ov.bans_cands.length + ov.bans_techs.length + Object.keys(ov.clip_weight).length) > 0 &&
+          {(Object.keys(ov.tech_force).length + Object.keys(ov.transitions ?? {}).length + ov.locked.length + ov.bans_cands.length + ov.bans_techs.length + Object.keys(ov.clip_weight).length) > 0 &&
             <button disabled={busy} className="text-xs underline" onClick={() => run(() => api.override(folder, { action: 'reset' }))}>clear my changes</button>}
           {busy && <span className="text-stone-500">planning…</span>}
         </div>
@@ -63,7 +63,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
           </div>
           <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
             <table className="w-full text-sm">
-              <thead className="text-left text-xs text-stone-500"><tr><th className="p-2">film</th><th className="p-2">clip</th><th className="p-2">window</th><th className="p-2">technique</th><th className="p-2">lock</th><th className="p-2">more / less</th><th className="p-2">script</th></tr></thead>
+              <thead className="text-left text-xs text-stone-500"><tr><th className="p-2">film</th><th className="p-2">clip</th><th className="p-2">window</th><th className="p-2">technique</th><th className="p-2">into it</th><th className="p-2">lock</th><th className="p-2">more / less</th><th className="p-2">script</th></tr></thead>
               <tbody>
                 {plan.segments.map(g => {
                   const c = info[g.clip], line = d.script[g.id], w = ov.clip_weight[g.clip] ?? 1, forced = !!ov.tech_force[g.id]
@@ -79,6 +79,9 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
                           className={`rounded border bg-transparent px-1 py-0.5 text-xs ${forced ? 'border-emerald-600' : 'border-stone-300 dark:border-stone-700'}`} title={forced ? 'set by you' : 'chosen by the planner'}>
                           {g.options.map(o => <option key={o.tech} value={o.tech}>{o.tech.replace(/_/g, ' ')}</option>)}</select>
                         {forced && <button className="ml-1 text-xs underline" onClick={() => run(() => api.override(folder, { action: 'technique', wid: g.id, technique: null }))}>auto</button>}</td>
+                      <td className="p-2 text-xs"><select disabled={busy || g.index === 0} value={g.transition?.type ?? 'cut'} onChange={e => run(() => api.override(folder, { action: 'transition', wid: g.id, transition: e.target.value }))}
+                          className="rounded border border-stone-300 bg-transparent px-1 py-0.5 text-xs dark:border-stone-700" title={g.transition?.why}>{['cut', 'dissolve', 'dip', 'whip'].map(x => <option key={x}>{x}</option>)}</select>
+                        {ov.transitions?.[g.id] && <button className="ml-1 underline" onClick={() => run(() => api.override(folder, { action: 'transition', wid: g.id, transition: null }))}>auto</button>}</td>
                       <td className="p-2"><input type="checkbox" checked={g.locked} disabled={busy} title="keep exactly this window and technique when re-planning" onChange={e => run(() => api.override(folder, { action: 'lock', wid: g.id, locked: e.target.checked }))} /></td>
                       <td className="p-2 whitespace-nowrap text-xs">
                         <button disabled={busy} className="rounded border border-stone-300 px-1.5 dark:border-stone-700" title="less of this clip" onClick={() => run(() => api.override(folder, { action: 'weight', clip: g.clip, factor: w / 1.5 }))}>−</button>
