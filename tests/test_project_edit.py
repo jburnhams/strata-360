@@ -60,6 +60,14 @@ def test_infeasible_request_is_reported_and_orphaned_overrides_are_named():
     e = P.propose(f, dict(length_s=40), keep=False); assert isinstance(e['plan']['orphaned_overrides'], list)
 
 
+def test_transitions_are_chosen_and_can_be_forced_per_window():
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1))['plan']['segments']
+    assert a[0]['transition']['type'] == 'cut' and all(g['transition']['type'] in ('cut', 'dissolve', 'dip', 'whip') for g in a)
+    g = next(x for x in a[1:] if x['transition']['type'] == 'cut'); b = P.set_transition(f, g['id'], 'dissolve')['plan']['segments']
+    x = next(y for y in b if y['id'] == g['id']); assert x['transition']['type'] == 'dissolve' and x['transition']['dur_s'] > 0 and [y['id'] for y in b] == [y['id'] for y in a]      # only the effect changed
+    c = P.set_transition(f, g['id'], None)['plan']['segments']; assert next(y for y in c if y['id'] == g['id'])['transition']['type'] == 'cut'
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

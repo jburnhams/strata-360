@@ -72,6 +72,34 @@ def test_a_clip_with_no_usable_moment_still_contributes_its_best_unusable_stretc
     m = music(); p = C.plan(clips, LIB, m, C.Settings(seed=1)); assert C.violations(p, LIB, m, clips) == [] and any(s.forced for s in p if s.cand.clip == 'C01')
 
 
+def overlapping_clips():
+    """Every clip: one long span with overlapping alternatives (best part, a person in view, you speaking): the same footage seen in several ways."""
+    clips = make_clips([60, 60, 60, 60]); base = dict(features=None)
+    for c in clips:
+        whole = c['candidates'][0]; f = dict(whole['features']); f['speech'] = 0.0
+        c['candidates'] = [dict(id=f"{c['id']}#00", clip=c['id'], kind='span', view='ahead', start_s=0.0, end_s=50.0, quality=0.6, energy=0.5, min_dur=1.0, max_dur=50.0, features=dict(f)),
+                           dict(id=f"{c['id']}#01", clip=c['id'], kind='best', view='ahead', start_s=10.0, end_s=30.0, quality=0.85, energy=0.5, min_dur=1.0, max_dur=20.0, features=dict(f)),
+                           dict(id=f"{c['id']}#02", clip=c['id'], kind='person', view='person', start_s=14.0, end_s=26.0, quality=0.8, energy=0.5, min_dur=1.0, max_dur=12.0, features=dict(f)),
+                           dict(id=f"{c['id']}#03", clip=c['id'], kind='speech', view='speaker', start_s=40.0, end_s=48.0, quality=0.7, energy=0.4, min_dur=3.0, max_dur=8.0, features={**f, 'speech': 1.0, 'steady': 0.9})]
+    return clips
+
+
+def test_overlapping_candidates_never_give_overlapping_windows_and_speech_is_dialogue():
+    clips = overlapping_clips(); m = music(seconds=90); p = C.plan(clips, LIB, m, C.Settings(seed=2)); assert C.violations(p, LIB, m, clips) == []
+    for cid in {s.cand.clip for s in p}:
+        ws = sorted([(s.clip_start_s, s.clip_start_s + s.beats * m.beat_s) for s in p if s.cand.clip == cid]); assert all(b[0] >= a[1] - 1e-6 for a, b in zip(ws, ws[1:])), ws
+    kinds = {getattr(s.cand, 'kind', None) for s in p}; assert len(kinds) >= 2, kinds                      # more than one way of seeing the footage gets used
+    for s in p:                                                                                          # anything cut from where you speak (40-48 s) is dialogue, whichever candidate it came from
+        a, b = s.clip_start_s, s.clip_start_s + s.beats * m.beat_s
+        if min(b, 48) - max(a, 40) >= 0.25 * (b - a): assert s.parts['speech'] and s.tech.dialogue_ok, (s.tech.id, a, b)
+
+
+def test_skipping_a_window_blocks_that_footage_in_every_candidate():
+    clips = overlapping_clips(); m = music(seconds=90); p = C.plan(clips, LIB, m, C.Settings(seed=2)); g = next(s for s in p if s.cand.clip == 'C01')
+    a, b = g.clip_start_s, g.clip_start_s + g.beats * m.beat_s; q = C.plan(clips, LIB, m, C.Settings(seed=2, bans_cands=frozenset({f'win:C01@{a}@{b}'})))
+    assert C.violations(q, LIB, m, clips) == [] and all(s.clip_start_s + s.beats * m.beat_s <= a + 1e-6 or s.clip_start_s >= b - 1e-6 for s in q if s.cand.clip == 'C01')
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

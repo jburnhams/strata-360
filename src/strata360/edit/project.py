@@ -8,6 +8,7 @@ The plan is a pure function of (candidates, settings, overrides, seed): `propose
                   bans_cands   stretches (candidate ids) never to use
                   bans_techs   techniques never to use
                   clip_weight  {clip id: factor}: more (>1) or less (<1) of a clip
+                  transitions  {wid of the incoming window: cut | dissolve | dip | whip}: the transition into that window (otherwise chosen by rule, edit/transitions.py)
   edit.plan       the ordered segments (with the techniques that fit each, for the GUI), totals and warnings
 
 A window's id (`wid`) is "<clip id>@<start in the clip, seconds, 2 decimals>"; overrides whose window no longer exists are reported as orphaned, not silently applied."""
@@ -16,7 +17,7 @@ from strata360.pipeline import config
 from strata360.edit import techniques as TQ, chrono as CH, optimise as O
 
 DEFAULT_SETTINGS = dict(length_s=90.0, bpm=120.0, bar_beats=4, seed=1, wpm=145.0, style='')
-EMPTY_OVERRIDES = dict(locked=[], tech_force={}, bans_cands=[], bans_techs=[], clip_weight={})
+EMPTY_OVERRIDES = dict(locked=[], tech_force={}, bans_cands=[], bans_techs=[], clip_weight={}, transitions={})
 
 
 def _path(folder): return os.path.join(config.race_dir(folder), 'project.json')
@@ -65,7 +66,7 @@ def serialise(segs, clips, music, lib, locked_wids=()):
         c = info[sg.cand.clip]; t0 = dt.datetime.fromisoformat(c['start_utc'].replace('Z', '+00:00')) + dt.timedelta(seconds=sg.clip_start_s); dur = sg.beats * music.beat_s
         out.append(dict(id=sg.parts['wid'], index=i, clip=sg.cand.clip, cand_id=sg.cand.id, cand_start_s=sg.cand.start_s, cand_end_s=sg.cand.end_s, film_start_s=round(sg.start * music.beat_s, 3), start_beat=sg.start, beats=sg.beats,
                         dur_s=round(dur, 3), clip_start_s=sg.clip_start_s, in_s=sg.in_s, utc_start=t0.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z', utc_end=(t0 + dt.timedelta(seconds=dur)).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
-                        technique=sg.tech.id, family=sg.tech.family, hero=sg.tech.hero, variant_seed=sg.variant_seed, forced=sg.forced, speech=bool(sg.cand.speech), locked=sg.parts['wid'] in locked_wids,
+                        energy=round(float(sg.cand.energy), 3), technique=sg.tech.id, family=sg.tech.family, hero=sg.tech.hero, variant_seed=sg.variant_seed, forced=sg.forced, speech=bool(sg.parts.get('speech', sg.cand.speech)), kind=getattr(sg.cand, 'kind', 'span'), view=getattr(sg.cand, 'view', 'ahead'), locked=sg.parts['wid'] in locked_wids,
                         options=sg.parts['options']))
     return out
 
@@ -82,6 +83,9 @@ def propose(folder, settings=None, overrides=None, keep=True):
     segs = CH.plan(clips, lib, music, st); bad = CH.violations(segs, lib, music, clips)
     if bad: raise O.Infeasible('the plan broke its own rules: ' + '; '.join(bad[:4]))
     locked_w = {g['wid'] for g in edit['overrides']['locked']}; ser = serialise(segs, clips, music, lib, locked_w); wids = {g['id'] for g in ser}
+    from strata360.edit import transitions as TR
+    for g in ser: g['energy_hi'] = g['energy'] >= 0.6
+    TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in edit['overrides'].get('transitions', {}).items() if v in TR.TYPES})
     orphaned = sorted((set(edit['overrides']['tech_force']) | locked_w) - wids)
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
@@ -105,6 +109,17 @@ def set_technique(folder, wid, technique):
         g = _segment(edit, wid)
         if technique not in [o['tech'] for o in g['options']]: raise ValueError(f"{technique} does not fit this window (it fits: {', '.join(o['tech'] for o in g['options'])})")
         edit['overrides']['tech_force'][wid] = technique
+    save(folder, edit); return propose(folder)
+
+
+def set_transition(folder, wid, kind):
+    """Force the transition into window `wid` (None = back to the rule). Only the effects change: the windows and techniques stay as they are."""
+    from strata360.edit import transitions as TR
+    edit = load(folder)
+    if kind is None: edit['overrides'].setdefault('transitions', {}).pop(wid, None)
+    else:
+        if kind not in TR.TYPES: raise ValueError(f"transition: one of {', '.join(TR.TYPES)}")
+        _segment(edit, wid); edit['overrides'].setdefault('transitions', {})[wid] = kind
     save(folder, edit); return propose(folder)
 
 

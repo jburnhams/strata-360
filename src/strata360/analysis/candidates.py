@@ -9,8 +9,9 @@ Splitting rules: a stretch ends where the picture becomes unusable (very shaky, 
 dialogue is framed steadily and cut on pauses), and where the scene changes (setting or crowd level). Stretches shorter than 1.5 s are dropped."""
 import json, os
 import numpy as np
+from scipy.ndimage import uniform_filter1d
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MIN_LEN = 1.5
 MAX_STRETCH = 45.0
 
@@ -62,57 +63,95 @@ def timeline(d):
                 setting=setting, missing=missing, clip=clip, tr=tr, al=al, sc=sc, mo=mo)
 
 
-def build(d, thr=0.32):
+KIND_TEXT = {'span': ('the footage becomes usable', 'the footage stops being usable'), 'best': ('the best-looking part of the stretch begins', 'the best-looking part ends'),
+             'speech': ('you start speaking', 'you stop speaking'), 'person': ('another person comes into view', 'the person leaves the view'), 'you': ('you come into view', 'you leave the view'),
+             'scene': ('the scene changes', 'the scene changes again')}
+KIND_VIEW = {'span': 'ahead', 'best': 'ahead', 'speech': 'speaker', 'person': 'person', 'you': 'you', 'scene': 'ahead'}
+
+
+def _runs(mask, gap=0):
+    """(start, end) second ranges where the boolean mask is true; holes of at most `gap` seconds are bridged."""
+    idx = np.flatnonzero(mask); out = []
+    for k in idx:
+        if out and k - out[-1][1] <= gap: out[-1][1] = int(k) + 1
+        else: out.append([int(k), int(k) + 1])
+    return [(a, b) for a, b in out]
+
+
+def _inside(runs, spans, min_len):
+    """The parts of `runs` that lie inside a usable span (a run crossing two spans is cut), at least min_len seconds: [(a, b, span index)]."""
+    out = []
+    for a, b in runs:
+        for k, (s0, s1) in enumerate(spans):
+            x, y = max(a, s0), min(b, s1)
+            if y - x >= min_len: out.append((x, y, k))
+    return out
+
+
+def build(d, thr=None):
+    """Usable footage and the ways to see it.
+
+    Unusable means a real problem and nothing else: camera shake too violent, the lens blocked or fogged, or the picture badly exposed. Everything else is usable, and what to use of it is the
+    optimiser's choice. So a clip has a few usable SPANS (the stretches between problems), and on top of each span overlapping candidates that are different ways to see the same footage:
+      span    the whole usable stretch (framed ahead)             best    its steadiest, best-looking parts
+      speech  you talking (dialogue: steady framing, cut on pauses)   person  others in view (framed on them)     you   you in view    scene   one setting of a stretch with several
+    Candidates overlap freely; the planner never uses two overlapping stretches of one clip at once. `priority` ranks a clip's candidates by quality (1 = best)."""
     T = timeline(d); n = T['n']; clip = T['clip']
-    q = np.clip(0.5 * T['steady'] + 0.2 * T['expo'] + 0.2 * T['scenic'] + 0.1 * (1 - T['blocked']), 0, 1) * (1 - 0.7 * T['blocked'])                           # per-second usefulness
-    good = (q >= thr) & (T['steady'] >= 0.1); speech = T['speech'] > 0.5; chat = T['chatter'] > 0.5
-    reasons = []                                                                                                                                       # why each second is not good (empty when it is)
-    for i in range(n):
-        if good[i]: reasons.append(None); continue
-        if T['steady'][i] < 0.1: reasons.append(f"too shaky ({T['shake'][i]:.0f} deg/s of camera shake; the limit is about 57)")
-        elif T['blocked'][i] > 0.5: reasons.append('lens blocked or fogged')
-        elif T['expo'][i] < 0.4: reasons.append('badly exposed (blown out or crushed)')
-        else: reasons.append(f"low overall score ({q[i]:.2f} < {thr}): steadiness {T['steady'][i] * 100:.0f}%, scenic {T['scenic'][i]:.1f}")
-    key = np.zeros(n, int); k = 0; starts = ['start of the clip']                                                                                         # a new stretch starts when any of the reasons changes
-    for i in range(1, n):
-        why = None
-        if good[i] != good[i - 1]: why = 'the picture became usable' if good[i] else 'the picture became unusable'
-        elif speech[i] != speech[i - 1]: why = 'you started speaking' if speech[i] else 'you stopped speaking'
-        elif chat[i] != chat[i - 1]: why = 'other voices started' if chat[i] else 'other voices stopped'
-        elif T['setting'][i] != T['setting'][i - 1] and T['setting'][i] and T['setting'][i - 1]: why = f"the scene changed: {T['setting'][i - 1]} to {T['setting'][i]}"
-        elif abs(T['people'][i] - T['people'][i - 1]) > 6: why = 'the crowd size changed'
-        if why: k += 1; starts.append(why)
-        key[i] = k
-    out, moments = [], []
-    for kk in np.unique(key):
-        idx = np.flatnonzero(key == kk); i0, i1 = int(idx[0]), int(idx[-1]) + 1; sl = slice(i0, i1); start_why = starts[int(kk)]
-        stats = dict(steadiness=round(float(T['steady'][sl].mean()), 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2), scenic=round(float(T['scenic'][sl].mean()), 2),
-                     lens_blocked=round(float(T['blocked'][sl].mean()), 2), people=round(float(T['people'][sl].mean()), 1), setting=next((x for x in T['setting'][i0:i1] if x), None), score=round(float(q[sl].mean()), 2))
-        if not good[i0] or (i1 - i0) < MIN_LEN:
-            rs = [r for r in reasons[i0:i1] if r]; top = sorted({r.split(' (')[0].split(':')[0] for r in rs}, key=lambda x: -sum(1 for r in rs if r.startswith(x)))
-            moments.append(dict(start_s=float(i0), end_s=float(i1), usable=False, reasons=(top or [f'too short ({i1 - i0} s; the minimum is {MIN_LEN} s)']), detail=rs[0] if rs else None, starts_because=start_why, stats=stats)); continue
-        while i1 - i0 > MAX_STRETCH:                                                                                                                  # very long stretches are split so alternatives exist
-            j = i0 + int(MAX_STRETCH); out.append((i0, j, bool(speech[i0]), start_why)); i0 = j; start_why = f'split: a stretch is at most {MAX_STRETCH:.0f} s'
-        out.append((i0, i1, bool(speech[i0]), start_why))
-    cands = []
-    for c, (i0, i1, sp, start_why) in enumerate(out):
-        sl = slice(i0, i1); qq = float(q[sl].mean()); s_ = float(T['steady'][sl].mean()); nad = float(np.clip(1.0 - T['blocked'][sl].max() * 0.8, 0, 1))
+    q = np.clip(0.5 * T['steady'] + 0.2 * T['expo'] + 0.2 * T['scenic'] + 0.1 * (1 - T['blocked']), 0, 1) * (1 - 0.7 * T['blocked'])                           # per-second usefulness (a ranking, never a reason to drop footage)
+    shaky = T['steady'] < 0.1; blocked = T['blocked'] > 0.5; badexp = T['expo'] < 0.4; bad = shaky | blocked | badexp
+    why_bad = ['too shaky' if shaky[i] else 'lens blocked or fogged' if blocked[i] else 'badly exposed' if badexp[i] else None for i in range(n)]
+    detail = lambda i: f"too shaky ({T['shake'][i]:.0f} deg/s of camera shake; the limit is about 57)" if shaky[i] else 'lens blocked or fogged' if blocked[i] else 'badly exposed (blown out or crushed)'
+    stats = lambda sl: dict(steadiness=round(float(T['steady'][sl].mean()), 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2), scenic=round(float(T['scenic'][sl].mean()), 2),
+                            lens_blocked=round(float(T['blocked'][sl].mean()), 2), people=round(float(T['people'][sl].mean()), 1), setting=next((x for x in T['setting'][sl] if x), None), score=round(float(q[sl].mean()), 2))
+    good_runs = _runs(~bad); spans = [(a, b) for a, b in good_runs if b - a >= MIN_LEN]; moments = []
+    for a, b in _runs(bad):                                                                                        # problems: runs of bad seconds, with the reasons that apply
+        rs = [why_bad[i] for i in range(a, b)]; top = sorted(set(rs), key=lambda x: -rs.count(x))
+        moments.append(dict(start_s=float(a), end_s=float(b), usable=False, reasons=top, detail=detail(a + rs.index(top[0])), stats=stats(slice(a, b)), starts_because=('start of the clip' if a == 0 else f'{top[0]} begins'), ends_because=('end of the clip' if b >= n else 'the problem ends')))
+    for a, b in good_runs:                                                                                         # good footage squeezed between problems, too short to cut
+        if b - a < MIN_LEN: moments.append(dict(start_s=float(a), end_s=float(b), usable=False, reasons=[f'too short ({b - a} s) between problems; the minimum is {MIN_LEN} s'], detail=None, stats=stats(slice(a, b)), starts_because='the problem before it ends', ends_because='the next problem begins'))
+    moments.sort(key=lambda m: m['start_s'])
+    speech = T['speech'] > 0.5; me = T['me'] >= 0.5; found = []                                                   # (a, b, kind, span index)
+    for k, (a, b) in enumerate(spans): found.append((a, b, 'span', k))
+    for a, b, k in _inside(_runs(uniform_filter1d(q, 3, mode='nearest') >= 0.7, gap=1), spans, 2.5):
+        if (b - a) < 0.85 * (spans[k][1] - spans[k][0]): found.append((a, b, 'best', k))
+    for a, b, k in _inside(_runs(speech, gap=1), spans, MIN_LEN): found.append((a, b, 'speech', k))
+    for a, b, k in _inside(_runs(me, gap=1), spans, 2.0): found.append((a, b, 'you', k))
+    try:
+        from strata360.analysis import views
+        ps = views.person_samples(str(d), (clip.get('source_files') or {}).get('osv')) if os.path.exists(os.path.join(d, 'identity.json')) else []
+    except Exception: ps = []
+    if ps:
+        pm = np.zeros(n, bool)
+        for s in ps: pm[max(int(s['t'] - 0.5), 0):min(int(s['t'] + 1.5), n)] = True
+        for a, b, k in _inside(_runs(pm, gap=1), spans, 2.0): found.append((a, b, 'person', k))
+    st = T['setting']
+    for k, (s0, s1) in enumerate(spans):
+        if len({x for x in st[s0:s1] if x}) >= 2:
+            cur = s0
+            for j in range(s0 + 1, s1 + 1):
+                if j == s1 or st[j] != st[cur]:
+                    if st[cur] and j - cur >= 2.5 and (j - cur) < 0.85 * (s1 - s0): found.append((cur, j, 'scene', k))
+                    cur = j
+    order = {'span': 0, 'best': 1, 'speech': 2, 'you': 3, 'person': 4, 'scene': 5}; found.sort(key=lambda x: (x[0], order[x[2]], x[1])); cands = []
+    for c, (i0, i1, kind, k) in enumerate(found):
+        sl = slice(i0, i1); qq = float(q[sl].mean()); s_ = float(T['steady'][sl].mean()); nad = float(np.clip(1.0 - T['blocked'][sl].max() * 0.8, 0, 1)); sp = kind == 'speech'
         feats = dict(steady=round(s_, 3), clear_nadir=round(nad, 3), open_ground=round(float(T['open_ground'][sl].mean()), 3), canopy=round(float(T['canopy'][sl].mean()), 3),
                      subject=round(float(np.clip(T['me'][sl].mean() * 0.7 + min(T['people'][sl].mean(), 3) / 3 * 0.5, 0, 1)), 3), speech=1.0 if sp else 0.0, protagonist=round(float(T['me'][sl].mean()), 3),
                      low_obstruction=round(float(1 - T['blocked'][sl].mean()), 3), chatter=round(float(T['chatter'][sl].mean()), 3), resolution=round(float(np.clip(0.55 + 0.45 * T['expo'][sl].mean(), 0, 1)), 3))
-        cand = dict(id=f"{clip['clip_id']}#{c:02d}", clip=clip['clip_id'], start_s=float(i0), end_s=float(i1), start_utc=_iso_add(clip['time']['start_utc'], i0), end_utc=_iso_add(clip['time']['start_utc'], i1),
-                    quality=round(qq, 3), energy=round(float(T['energy'][sl].mean()), 3), min_dur=3.0 if sp else 1.0, max_dur=float(i1 - i0), features=feats,
-                    settings=sorted({x for x in T['setting'][i0:i1] if x}), people=round(float(T['people'][sl].mean()), 1))
-        cand['why'] = dict(starts_because=start_why, steadiness=round(float(T['steady'][sl].mean()), 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2),
-                           scenic=round(float(T['scenic'][sl].mean()), 2), lens_blocked=round(float(T['blocked'][sl].mean()), 2), score=round(qq, 2), speech=bool(sp), chatter=round(float(T['chatter'][sl].mean()), 2))
+        s0, s1 = spans[k]; before = why_bad[s0 - 1] if s0 > 0 else None; after = why_bad[s1] if s1 < n else None
+        if kind == 'span': sb = f'usable again after a problem ({before})' if before else 'start of the clip'; eb = f'a problem begins ({after})' if after else 'end of the clip'
+        else: sb, eb = KIND_TEXT[kind]
+        cand = dict(id=f"{clip['clip_id']}#{c:02d}", clip=clip['clip_id'], kind=kind, view=KIND_VIEW[kind], span=k, start_s=float(i0), end_s=float(i1), start_utc=_iso_add(clip['time']['start_utc'], i0), end_utc=_iso_add(clip['time']['start_utc'], i1),
+                    quality=round(qq, 3), energy=round(float(T['energy'][sl].mean()), 3), min_dur=3.0 if sp else 1.0, max_dur=float(i1 - i0), features=feats, settings=sorted({x for x in T['setting'][i0:i1] if x}), people=round(float(T['people'][sl].mean()), 1))
+        cand['why'] = dict(starts_because=sb, ends_because=eb, steadiness=round(s_, 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2), scenic=round(float(T['scenic'][sl].mean()), 2),
+                           lens_blocked=round(float(T['blocked'][sl].mean()), 2), score=round(qq, 2), speech=sp, chatter=round(float(T['chatter'][sl].mean()), 2))
         if sp and T['tr']:
             segs = [s for s in T['tr']['segments'] if s['t1'] > i0 and s['t0'] < i1 and s.get('text', '').strip() and not s.get('flags')]
             cand['transcript'] = [dict(t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en')) for s in segs]
             cand['cuts'] = [dict(t=c_['t'], pause_s=c_['pause_s']) for a in ((T['al'] or {}).get('segments') or []) if a for c_ in (a.get('cuts') or []) if c_ and c_.get('safe') and i0 <= c_['t'] <= i1]
         cands.append(cand)
-    allm = sorted([dict(c=c, s=c['start_s']) for c in cands] + [dict(c=m, s=m['start_s']) for m in moments], key=lambda x: x['s'])
-    for x, nxt in zip(allm, allm[1:] + [None]):
-        if 'why' in x['c']: x['c']['why']['ends_because'] = nxt['c']['why']['starts_because'] if nxt and 'why' in nxt['c'] else (nxt['c']['starts_because'] if nxt else 'end of the clip')
-        else: x['c']['ends_because'] = nxt['c']['why']['starts_because'] if nxt and 'why' in nxt['c'] else (nxt['c']['starts_because'] if nxt else 'end of the clip')
-    return dict(schema=SCHEMA_VERSION, thresholds=dict(usable_score=thr, min_len_s=MIN_LEN, max_stretch_s=MAX_STRETCH), missing=T['missing'], candidates=cands, unusable=moments,
-                summary=dict(unusable_s=round(sum(m['end_s'] - m['start_s'] for m in moments), 1), n=len(cands), total_s=round(sum(c['end_s'] - c['start_s'] for c in cands), 1), speech=sum(1 for c in cands if c['features']['speech']), clip_s=round(T['dur'], 1)))
+    for r, c in enumerate(sorted(cands, key=lambda c: (-c['quality'], -(c['end_s'] - c['start_s']))), 1): c['priority'] = r
+    return dict(schema=SCHEMA_VERSION, thresholds=dict(usable_score=0.0, min_len_s=MIN_LEN, max_stretch_s=MAX_STRETCH), missing=T['missing'], candidates=cands, unusable=moments,
+                spans=[dict(start_s=float(a), end_s=float(b)) for a, b in spans],
+                summary=dict(unusable_s=round(sum(m['end_s'] - m['start_s'] for m in moments), 1), usable_s=round(sum(b - a for a, b in spans), 1), n=len(cands), spans=len(spans), total_s=round(sum(b - a for a, b in spans), 1),
+                             speech=sum(1 for c in cands if c['kind'] == 'speech'), clip_s=round(T['dur'], 1)))

@@ -4,6 +4,8 @@ Rules
   * the film is in **time order**: clips in the order they were shot, and inside a clip its segments in time order;
   * **every clip contributes**: each source clip gets at least one segment (a clip with no usable moment contributes its best unusable stretch, flagged), and a long clip may contribute
     several segments, as many as its share of the film justifies;
+  * a clip's candidates OVERLAP (they are different ways to see the same footage: the whole stretch, its best parts, you talking, other people in view ...); segments of one clip never overlap, so
+    the planner keeps an occupancy map of each clip and a window may only use footage nobody else has taken;
   * segments of one clip **never overlap**; several adjacent selections from one clip are welcome (they allow a different view, technique or cut for each);
   * the optimiser still chooses how much of the film each clip gets, which moments, the segment lengths, and the technique of every segment, with the same variety rules as before
     (repeats, hero effects, cooldowns, shares), beat-aligned to the music and filling it exactly.
@@ -64,7 +66,7 @@ class Seg:
 @dataclass
 class Window:
     clip_index: int; cand: object; in_s: float; beats: int; q: float; forced: bool = False
-    fixed: bool = False; tech_id: str = None     # a locked window: its technique is fixed too
+    fixed: bool = False; tech_id: str = None; speech: bool = False     # a locked window: its technique is fixed too
 
     @property
     def abs_start(self): return self.cand.start_s + self.in_s
@@ -73,23 +75,26 @@ class Window:
 def wid_of(clip, start_s): return f'{clip}@{start_s:.2f}'
 
 
-def clip_candidates(clip, bans=frozenset()):
+def clip_candidates(clip):
     """O.Candidate list for one clip dict {id, candidates: [...], unusable: [...]}; a clip with none gets its best unusable stretch (forced)."""
     out = []
     for c in clip.get('candidates') or []:
-        if c['id'] in bans: continue
         out.append(O.Candidate(id=c['id'], clip=c['clip'], quality=c['quality'], energy=c['energy'], min_dur=c['min_dur'], max_dur=c['max_dur'], features=dict(c['features']), group=None))
-        out[-1].start_s = c['start_s']; out[-1].end_s = c['end_s']; out[-1].forced = False
+        out[-1].start_s = c['start_s']; out[-1].end_s = c['end_s']; out[-1].forced = False; out[-1].kind = c.get('kind', 'span'); out[-1].view = c.get('view', 'ahead')
     if out: return out
     un = sorted(clip.get('unusable') or [], key=lambda u: -((u['end_s'] - u['start_s']) * (0.2 + float((u.get('stats') or {}).get('score') or 0))))
     for k, u in enumerate(un[:1]):
         f = dict(steady=0.2, clear_nadir=0.5, open_ground=0.3, canopy=0.3, subject=0.2, speech=0.0, protagonist=0.0, low_obstruction=0.5, resolution=0.5)
         c = O.Candidate(id=f"{clip['id']}#forced", clip=clip['id'], quality=0.25, energy=0.5, min_dur=1.0, max_dur=u['end_s'] - u['start_s'], features=f)
-        c.start_s = u['start_s']; c.end_s = u['end_s']; c.forced = True; out.append(c)
+        c.start_s = u['start_s']; c.end_s = u['end_s']; c.forced = True; c.kind = 'forced'; c.view = 'ahead'; out.append(c)
     return out
 
 
-def subtract(cs, blocked, min_len):
+def snap(x, grid, up):
+    return (math.ceil(x / grid - 1e-9) if up else math.floor(x / grid + 1e-9)) * grid
+
+
+def subtract(cs, blocked, min_len, grid=None):
     """Stretches with the locked windows cut out: a list of derived stretches (same id and features; `orig` points to the real stretch) of at least `min_len` seconds."""
     out = []
     for c in cs:
@@ -102,10 +107,32 @@ def subtract(cs, blocked, min_len):
                 if b < y: nxt.append((b, y))
             pieces = nxt
         for x, y in pieces:
+            if grid: x, y = snap(x, grid, True), snap(y, grid, False)                                  # stay on the beat grid, so no fraction of a beat is ever stranded
             if y - x >= min_len - 1e-9:
                 d = O.Candidate(id=c.id, clip=c.clip, quality=c.quality, energy=c.energy, min_dur=c.min_dur, max_dur=y - x, features=c.features, group=None)
-                d.start_s, d.end_s, d.forced, d.orig = x, y, getattr(c, 'forced', False), c; out.append(d)
+                d.start_s, d.end_s, d.forced, d.orig = x, y, getattr(c, 'forced', False), getattr(c, 'orig', None) or c; d.kind = getattr(c, 'kind', 'span'); d.view = getattr(c, 'view', 'ahead'); out.append(d)
     return out
+
+
+def coverage(cs, step=0.25):
+    """(seconds of footage the candidates cover together, mean of the best quality available at each covered moment): overlapping candidates are one piece of footage, counted once."""
+    if not cs: return 0.0, 0.0
+    t0 = min(c.start_s for c in cs); t1 = max(c.end_s for c in cs); g = np.arange(t0 + step / 2, t1, step); best = np.full(len(g), -1.0)
+    for c in cs: m = (g >= c.start_s) & (g < c.end_s); best[m] = np.maximum(best[m], c.quality)
+    cov = best >= 0; return float(cov.sum() * step), float(best[cov].mean()) if cov.any() else 0.0
+
+
+def free_parts(c, occ):
+    """The parts of candidate c not taken by the (absolute-seconds) intervals in occ: [(start, end)]."""
+    pieces = [(c.start_s, c.end_s)]
+    for a, b in occ:
+        nxt = []
+        for x, y in pieces:
+            if b <= x or a >= y: nxt.append((x, y)); continue
+            if a > x: nxt.append((x, a))
+            if b < y: nxt.append((b, y))
+        pieces = nxt
+    return pieces
 
 
 # --------------------------------------------------------------------------------------------------------------------------------------------- 1. split the beats between clips
@@ -113,7 +140,7 @@ def allocate(clips_c, B, beat_s, st, clip_ids=None, has_lock=()):
     """Beats per clip: at least one minimum window each, at most what its usable stretches hold and its share cap; the rest by concave value (good and long clips get more, with diminishing returns)."""
     n = len(clips_c); bmin_seg = math.ceil(st.min_seg_s / beat_s - 1e-9); U = []; q = []
     for cs in clips_c:
-        L = sum(c.end_s - c.start_s for c in cs); U.append(L); q.append(sum((c.end_s - c.start_s) * c.quality for c in cs) / max(L, 1e-9))
+        L, qm = coverage(cs); U.append(L); q.append(qm)
     bmax = [max(int(math.floor(U[i] / beat_s + 1e-9)), 0) for i in range(n)]; cap = int(math.ceil(st.max_clip_share * B))
     bmin = [min(bmin_seg, bmax[i]) if bmax[i] > 0 else 0 for i in range(n)]
     bmin = [0 if (i in has_lock) else b for i, b in enumerate(bmin)]                                 # a clip with a locked window already contributes
@@ -141,21 +168,24 @@ def cut_windows(clip_index, cs, b, beat_s, music, st, rng):
     en = float(np.mean([c.energy for c in cs])); tl = O.target_len(en) / beat_s
     n = int(np.clip(round(b / max(tl, bmin)), 1, max(b // bmin, 1))); sizes = [len(x) for x in np.array_split(np.arange(b), n)]
     sizes = sorted([s for s in sizes if s > 0], reverse=True)
-    cap = {c.id: int(math.floor((c.end_s - c.start_s) / beat_s + 1e-9)) for c in cs}; used = {c.id: 0 for c in cs}; placed = {c.id: [] for c in cs}; by_id = {c.id: c for c in cs}
-    order = sorted(cs, key=lambda c: -(c.quality * 1.0 + 0.02 * (c.end_s - c.start_s)))
+    order = sorted(cs, key=lambda c: -(c.quality + 0.002 * (c.end_s - c.start_s))); occ = []; wins = []          # quality decides; length only breaks ties; wins = []
     for s in sizes:
-        pick = next((c for c in order if cap[c.id] - used[c.id] >= s), None)
-        if pick is None:                                                                          # nothing is big enough: shrink the part to the biggest free space
-            pick = max(order, key=lambda c: cap[c.id] - used[c.id]); s = cap[pick.id] - used[pick.id]
-            if s <= 0: continue
-        placed[pick.id].append(s); used[pick.id] += s
-    wins = []
-    for cid, parts in placed.items():
-        if not parts: continue
-        c = by_id[cid]; total = sum(parts) * beat_s; off = max((c.end_s - c.start_s - total) / 2.0, 0.0); t = off
-        for s in parts:                                                                           # adjacent windows, long ones split so each can have its own look
-            pieces = [s] if s <= bmax else [len(x) for x in np.array_split(np.arange(s), int(math.ceil(s / bmax)))]
-            for p in pieces: wins.append(Window(clip_index, c, t, p, c.quality, getattr(c, 'forced', False))); t += p * beat_s
+        need = s * beat_s; pick = None
+        for c in order:                                                                           # the best candidate with a free stretch long enough; overlapping alternatives share one occupancy map
+            opts = [(x, y) for x, y in free_parts(c, occ) if y - x >= need - 1e-9]
+            if opts: pick = (c, opts); break
+        if pick is None:                                                                          # nothing is big enough: shrink the part to the biggest free space anywhere
+            best = max(((y - x, c, x, y) for c in order for x, y in free_parts(c, occ)), key=lambda z: z[0], default=None)
+            if best is None or int(math.floor(best[0] / beat_s + 1e-9)) <= 0: continue
+            s = int(math.floor(best[0] / beat_s + 1e-9)); need = s * beat_s; pick = (best[1], [(best[2], best[3])])
+        c, opts = pick
+        touch_l = [(x, y) for x, y in opts if any(abs(x - b) < 1e-6 for a, b in occ)]; touch_r = [(x, y) for x, y in opts if any(abs(y - a) < 1e-6 for a, b in occ)]      # next to a window already placed: adjacent selections
+        if touch_l: x, y = touch_l[0]; start = x
+        elif touch_r: x, y = touch_r[0]; start = y - need
+        else: x, y = opts[0]; start = x + ((int(math.floor((y - x) / beat_s + 1e-9)) - s) // 2) * beat_s                 # a fresh stretch: the window in the middle of it (the edges of a stretch are the weakest part)
+        occ.append((start, start + need)); tt = start - c.start_s
+        pieces = [s] if s <= bmax else [len(z) for z in np.array_split(np.arange(s), int(math.ceil(s / bmax)))]
+        for pc in pieces: wins.append(Window(clip_index, c, tt, pc, c.quality, getattr(c, 'forced', False))); tt += pc * beat_s
     wins.sort(key=lambda w: w.cand.start_s + w.in_s)
     return wins
 
@@ -164,7 +194,7 @@ def rebalance(windows, B, beat_s, st):
     """Make the windows add up to exactly B beats: grow a window into free room in its stretch (good ones first), or shrink one above the minimum."""
     bmin = math.ceil(st.min_seg_s / beat_s - 1e-9); bmax = int(MAX_SEG_S / beat_s + 1e-9)
     def room(w):                                                                                  # free beats after the window inside its stretch, up to the next window of the same stretch
-        end = w.in_s + w.beats * beat_s; nxt = min([x.in_s for x in windows if x.cand is w.cand and x.in_s >= end - 1e-9 and x is not w] + [w.cand.end_s - w.cand.start_s])
+        end = w.abs_start + w.beats * beat_s; nxt = min([x.abs_start for x in windows if x.clip_index == w.clip_index and x is not w and x.abs_start >= end - 1e-9] + [w.cand.end_s])
         return int(math.floor((nxt - end) / beat_s + 1e-9))
     tot = sum(w.beats for w in windows); guard = 0
     while tot < B and guard < 10000:
@@ -183,22 +213,39 @@ def plan(clips, lib, music, st=None):
     """clips: [{id, start_utc, duration_s, candidates: [...], unusable: [...]}] in any order. Returns the ordered list of Seg (each with `parts['options']`: the techniques that fit that window, best
     first, for the GUI). Overrides in `st` (locked windows, forced techniques, bans, clip weights) are honoured. Raises O.Infeasible with the binding constraint."""
     st = st or Settings(); rng = np.random.default_rng(st.seed); beat_s = music.beat_s; B = music.beats; warnings = []
-    clips = sorted(clips, key=lambda c: c['start_utc']); clip_ids = [c['id'] for c in clips]; clips_c = [clip_candidates(c, st.bans_cands) for c in clips]
+    clips = sorted(clips, key=lambda c: c['start_utc']); clip_ids = [c['id'] for c in clips]; clips_c = [clip_candidates(c) for c in clips]
+    for cs in clips_c:                                                                                # every stretch starts and ends on a beat of the clip's own time grid
+        for c in cs: c.start_s, c.end_s = snap(c.start_s, beat_s, True), snap(c.end_s, beat_s, False)
+    clips_c = [[c for c in cs if c.end_s - c.start_s >= beat_s - 1e-9] for cs in clips_c]
     for c, cs in zip(clips, clips_c):
         if not cs: raise O.Infeasible(f"clip {c['id']} has no usable or unusable stretch to include")
     by_clip = {cid: i for i, cid in enumerate(clip_ids)}; fixed = []; blocked = {i: [] for i in range(len(clips))}
+    for key in st.bans_cands:                                                                         # a skipped moment blocks that footage whichever candidate shows it: "win:<clip>@<start>@<end>" or a candidate id
+        if key.startswith('win:'):
+            cid, a, b = key[4:].rsplit('@', 2) if key.count('@') >= 2 else (None, 0, 0)
+            if cid in by_clip: blocked[by_clip[cid]].append((float(a), float(b)))
+        else:
+            for i, cs in enumerate(clips_c):
+                for c in cs:
+                    if c.id == key: blocked[i].append((c.start_s, c.end_s))
     for L in st.locked:
         i = by_clip.get(L['clip'])
         orig = next((c for c in clips_c[i] if c.id == L['cand_id']), None) if i is not None else None
         if orig is None: warnings.append(f"locked window {L['wid']} no longer exists (its stretch changed); it was dropped"); continue
-        w = Window(i, orig, L['start_s'] - orig.start_s, int(L['beats']), orig.quality, getattr(orig, 'forced', False), fixed=True, tech_id=L['tech']); fixed.append(w); blocked[i].append((L['start_s'], L['start_s'] + L['beats'] * beat_s))
-    free_c = [subtract(cs, blocked[i], st.min_seg_s) for i, cs in enumerate(clips_c)]; locked_beats = sum(w.beats for w in fixed)
+        w = Window(i, orig, max(L['start_s'] - orig.start_s, 0.0), int(L['beats']), orig.quality, getattr(orig, 'forced', False), fixed=True, tech_id=L['tech']); fixed.append(w); blocked[i].append((L['start_s'], L['start_s'] + L['beats'] * beat_s))
+    speech_blk = {i: [(c.start_s, c.end_s) for c in cs if getattr(c, 'kind', '') == 'speech'] for i, cs in enumerate(clips_c)}
+    free_c = [subtract([c for c in cs if getattr(c, 'kind', '') != 'speech'], blocked[i] + speech_blk[i], st.min_seg_s, beat_s) + subtract([c for c in cs if getattr(c, 'kind', '') == 'speech'], blocked[i], st.min_seg_s, beat_s)
+              for i, cs in enumerate(clips_c)]                                                        # footage where you talk is used as dialogue (its own candidate) or not at all: nothing else is cut over your voice
+    locked_beats = sum(w.beats for w in fixed)
     has_lock = {w.clip_index for w in fixed}
     alloc = allocate([fc if fc else [] for fc in free_c], B - locked_beats, beat_s, st, clip_ids, has_lock) if any(free_c) else [0] * len(clips)
     windows = list(fixed)
     for i, (cs, b) in enumerate(zip(free_c, alloc)):
         if cs and b > 0: windows += cut_windows(i, cs, b, beat_s, music, st, rng)
     windows.sort(key=lambda w: (w.clip_index, w.abs_start))
+    speech_iv = {i: [(c.start_s, c.end_s) for c in cs if getattr(c, 'kind', '') == 'speech'] for i, cs in enumerate(clips_c)}
+    for w in windows:                                                                                     # a window on the wearer talking is dialogue, whichever candidate it was cut from
+        a, b = w.abs_start, w.abs_start + w.beats * beat_s; w.speech = bool(w.cand.speech) or sum(max(0.0, min(b, y) - max(a, x)) for x, y in speech_iv[w.clip_index]) >= 0.25 * (b - a)
     if rebalance(windows, B, beat_s, st) != B: raise O.Infeasible('could not fit the windows into the film length: too little usable footage in some clips')
     ids = [t for t in lib if t not in st.bans_techs]; beams = [dict(score=0.0, true=0.0, seq=[], uses={}, secs={}, hero=0.0)]
     starts = []; pos = 0
@@ -208,8 +255,8 @@ def plan(clips, lib, music, st=None):
         d = w.beats * beat_s; c = getattr(w.cand, 'orig', None) or w.cand; en = music.energy_at(starts[k]); opts = []
         for tid in ids:
             t = lib[tid]
-            if c.speech and not t.dialogue_ok: continue
-            if t.id == 'dialogue_hold' and not c.speech: continue
+            if w.speech and not t.dialogue_ok: continue
+            if t.id == 'dialogue_hold' and not w.speech: continue
             if not (t.dmin - 1e-9 <= d <= t.dmax + 1e-9): continue
             if t.beats == 'bar' and w.beats % music.bar_beats: continue
             f = O.fit(c, t)
@@ -226,24 +273,26 @@ def plan(clips, lib, music, st=None):
             else: warnings.append(f'{wids[k]}: {want} does not fit this window any more; it was ignored')
         if not opts: raise O.Infeasible(f"no technique fits a {d:.1f} s window of {c.id} (a {w.beats}-beat window); widen the technique ranges or change the tempo")
         nxt = []
-        for b in beams:
-            for tid, base in opts:
-                t = lib[tid]; seq = b['seq']; forced_now = bool(want)
-                if not forced_now:
-                    if t.cooldown and tid in seq[-t.cooldown:] and t.hero: continue
-                    if t.cooldown and not t.hero and seq and seq[-1] == tid and sum(1 for x in seq[-t.max_consecutive:] if x == tid) >= t.max_consecutive: continue
-                    if b['uses'].get(tid, 0) >= t.max_uses: continue
-                    if t.hero and (b['hero'] + d) / (B * beat_s) > st.hero_share + 1e-9: continue
-                pen = 0.0
-                for j, prev in enumerate(reversed(seq[-6:])):
-                    if prev == tid: pen += st.pen_recent * (st.recent_decay ** j) * (1.5 if t.hero else 1.0)
-                if seq:
-                    pt = lib[seq[-1]]; pen += (st.pen_family if pt.family == t.family else 0.0) + (st.pen_scale if pt.scale == t.scale else 0.0)
-                share = (b['secs'].get(tid, 0.0) + d) / (B * beat_s); cap = st.share_caps.get(tid, t.max_share) * 0.7
-                pen += st.pen_share * max(0.0, share - cap) ** 2 * d ** st.dur_power
-                first = st.w_first if tid not in b['uses'] else 0.0; keep = st.w_keep if st.prefer.get(wids[k]) == tid else 0.0
-                sc = b['true'] + base - pen + first + keep
-                nxt.append((sc + st.temperature * rng.gumbel(), sc, b, tid, d))
+        for relaxed in (False, True):                                                                 # a dead end (every technique at a limit) is relaxed once: repeats rather than no film
+          for b in beams:
+              for tid, base in opts:
+                  t = lib[tid]; seq = b['seq']; forced_now = bool(want)
+                  if not forced_now and not relaxed:
+                      if t.cooldown and tid in seq[-t.cooldown:] and t.hero: continue
+                      if t.cooldown and not t.hero and seq and seq[-1] == tid and sum(1 for x in seq[-t.max_consecutive:] if x == tid) >= t.max_consecutive: continue
+                      if b['uses'].get(tid, 0) >= t.max_uses: continue
+                      if t.hero and (b['hero'] + d) / (B * beat_s) > st.hero_share + 1e-9: continue
+                  pen = 0.0
+                  for j, prev in enumerate(reversed(seq[-6:])):
+                      if prev == tid: pen += st.pen_recent * (st.recent_decay ** j) * (1.5 if t.hero else 1.0)
+                  if seq:
+                      pt = lib[seq[-1]]; pen += (st.pen_family if pt.family == t.family else 0.0) + (st.pen_scale if pt.scale == t.scale else 0.0)
+                  share = (b['secs'].get(tid, 0.0) + d) / (B * beat_s); cap = st.share_caps.get(tid, t.max_share) * 0.7
+                  pen += st.pen_share * max(0.0, share - cap) ** 2 * d ** st.dur_power
+                  first = st.w_first if tid not in b['uses'] else 0.0; keep = st.w_keep if st.prefer.get(wids[k]) == tid else 0.0
+                  sc = b['true'] + base - pen + first + keep
+                  nxt.append((sc + st.temperature * rng.gumbel(), sc, b, tid, d))
+          if nxt: break
         if not nxt: raise O.Infeasible('every technique hit a limit (cooldown, caps): loosen the caps or add clips')
         nxt.sort(key=lambda x: -x[0]); new = []
         for noisy, sc, b, tid, d_ in nxt[:st.beam * 3]:
@@ -253,7 +302,7 @@ def plan(clips, lib, music, st=None):
     for k, (w, tid) in enumerate(zip(windows, best['seq'])):
         orig = getattr(w.cand, 'orig', None) or w.cand; cs = round(w.abs_start, 3)
         sg = Seg(start=starts[k], beats=w.beats, cand=orig, tech=lib[tid], in_s=round(cs - orig.start_s, 3), clip_index=w.clip_index, clip_start_s=cs, variant_seed=int(rng.integers(0, 2 ** 31 - 1)), forced=w.forced)
-        sg._beat_s = beat_s; sg.parts = dict(wid=wids[k], options=[dict(tech=o[0], score=round(o[1], 3)) for o in options[k]], fixed=w.fixed, warnings=warnings if k == 0 else []); out.append(sg)
+        sg._beat_s = beat_s; sg.parts = dict(wid=wids[k], speech=bool(getattr(w, 'speech', False)), options=[dict(tech=o[0], score=round(o[1], 3)) for o in options[k]], fixed=w.fixed, warnings=warnings if k == 0 else []); out.append(sg)
     return out
 
 
@@ -277,7 +326,7 @@ def violations(segs, lib, music, clips):
         d = s.beats * beat_s
         if not (s.tech.dmin - 1e-9 <= d <= s.tech.dmax + 1e-9): v.append(f'{s.tech.id} lasts {d:.2f} s, outside {s.tech.dmin}-{s.tech.dmax}')
         if s.tech.beats == 'bar' and s.beats % music.bar_beats: v.append(f'{s.tech.id} is not a whole number of bars')
-        if s.cand.speech and not s.tech.dialogue_ok: v.append(f'{s.tech.id} on speech in {s.cand.id}')
+        if (s.parts.get('speech') if 'speech' in s.parts else s.cand.speech) and not s.tech.dialogue_ok: v.append(f'{s.tech.id} on speech in {s.cand.id}')
         if s.in_s < -1e-6 or s.in_s + d > (s.cand.end_s - s.cand.start_s) + 1e-6: v.append(f'window outside its stretch {s.cand.id}')
     uses = {}
     for s in segs: uses[s.tech.id] = uses.get(s.tech.id, 0) + 1

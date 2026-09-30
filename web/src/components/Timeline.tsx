@@ -84,7 +84,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
                         <button disabled={busy} className="rounded border border-stone-300 px-1.5 dark:border-stone-700" title="less of this clip" onClick={() => run(() => api.override(folder, { action: 'weight', clip: g.clip, factor: w / 1.5 }))}>−</button>
                         <span className="mx-1 text-stone-500">{w === 1 ? '' : `×${w.toFixed(1)}`}</span>
                         <button disabled={busy} className="rounded border border-stone-300 px-1.5 dark:border-stone-700" title="more of this clip" onClick={() => run(() => api.override(folder, { action: 'weight', clip: g.clip, factor: w * 1.5 }))}>+</button>
-                        <button disabled={busy} className="ml-2 text-stone-500 underline" title="never use this moment" onClick={() => run(() => api.override(folder, { action: 'ban', kind: 'moment', key: g.cand_id, on: true }))}>skip moment</button></td>
+                        <button disabled={busy} className="ml-2 text-stone-500 underline" title="never use this footage (whichever way of seeing it)" onClick={() => run(() => api.override(folder, { action: 'ban', kind: 'moment', key: `win:${g.clip}@${g.clip_start_s}@${+(g.clip_start_s + g.dur_s).toFixed(3)}`, on: true }))}>skip moment</button></td>
                       <td className="p-2 text-xs">{line?.text ? <span>{line.text}</span> : line?.says?.length ? <span className="italic text-sky-700 dark:text-sky-300">💬 “{line.says.join(' … ')}”</span> : <span className="text-stone-400">—</span>}</td>
                     </tr>
                   )

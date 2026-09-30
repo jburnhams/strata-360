@@ -163,8 +163,8 @@ def speakers(ctx):
     ctx.write('speakers.json', ctx.stamped(doc)); np.save(ctx.path('speakers.npy'), emb)
 
 
-@stage('candidates', 2, outputs=('candidates.json',), deps=('motion', 'exposure', 'audio', 'transcribe', 'align', 'speakers', 'identity', 'scenes'),
-       note='the usable moments of the clip with features, quality, energy and speech cut points: what the optimiser and the GUI choose from (no video decoding)')
+@stage('candidates', 3, outputs=('candidates.json',), deps=('motion', 'exposure', 'audio', 'transcribe', 'align', 'speakers', 'identity', 'scenes'),
+       note='the usable spans of the clip (only shake, a blocked lens or bad exposure make footage unusable) and overlapping candidates on them: different ways to see the same footage, in priority order (no video decoding)')
 def candidates(ctx):
     from strata360.analysis.candidates import build
     ctx.write('candidates.json', ctx.stamped(build(str(ctx.dir))))

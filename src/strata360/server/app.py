@@ -406,12 +406,13 @@ def create_app(roots, token=None):
         except O.Infeasible as e: raise HTTPException(400, str(e))
 
     @api.post('/api/edit/override', dependencies=[Depends(auth)])
-    def post_override(body: dict):                                                       # {folder, action: technique|lock|weight|ban|reset, ...}
+    def post_override(body: dict):                                                       # {folder, action: technique|lock|weight|ban|transition|reset, ...}
         from strata360.edit import project as PJ, optimise as O
         f = folder_of(body.get('folder')); act = body.get('action')
         try:
             if act == 'technique': e = PJ.set_technique(f, body['wid'], body.get('technique'))
             elif act == 'lock': e = PJ.set_lock(f, body['wid'], bool(body.get('locked', True)))
+            elif act == 'transition': e = PJ.set_transition(f, body['wid'], body.get('transition'))
             elif act == 'weight': e = PJ.set_clip_weight(f, body['clip'], body.get('factor'))
             elif act == 'ban': e = PJ.ban(f, body['kind'], body['key'], bool(body.get('on', True)))
             elif act == 'reset': e = PJ.reset_overrides(f)

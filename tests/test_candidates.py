@@ -25,10 +25,24 @@ def test_shaky_parts_are_dropped_and_speech_is_its_own_candidate():
     assert 'scenes' in r['missing'] and cs[0]['start_utc'].startswith('2026-02-19T17:00:0')
 
 
-def test_chatter_is_not_dialogue():
-    d = make(lambda x: 5.0, speech=[(5, 11), (20, 27)], labels=['other', 'wearer']); cs = C.build(d)['candidates']
-    sp = [c for c in cs if c['features']['speech']]; ch = [c for c in cs if c['features']['chatter'] > 0.5]
-    assert len(sp) == 1 and 19 <= sp[0]['start_s'] <= 21 and len(ch) == 1 and 4 <= ch[0]['start_s'] <= 6 and ch[0]['features']['speech'] == 0.0
+def test_chatter_is_not_dialogue_and_never_splits_good_footage():
+    d = make(lambda x: 5.0, speech=[(5, 11), (20, 27)], labels=['other', 'wearer']); r = C.build(d); cs = r['candidates']
+    sp = [c for c in cs if c['kind'] == 'speech']; assert len(sp) == 1 and 19 <= sp[0]['start_s'] <= 21 and sp[0]['features']['speech'] == 1.0
+    assert len(r['spans']) == 1 and r['unusable'] == [] and [c for c in cs if c['kind'] == 'span'][0]['end_s'] - [c for c in cs if c['kind'] == 'span'][0]['start_s'] >= 39      # one span, the voices do not cut it
+
+
+def test_flickering_voices_make_no_slivers_and_only_real_problems_are_unusable():
+    flick = [(a, a + 1) for a in range(10, 30, 2)]                                     # other voices on for 1 s, off for 1 s, for 20 s: used to cut the clip into 1 s pieces
+    d = make(lambda x: 100.0 if 35 <= x < 37 else 5.0, speech=flick, labels=['other'] * len(flick)); r = C.build(d)
+    assert [(s['start_s'], s['end_s']) for s in r['spans']] == [(0.0, 35.0), (37.0, 40.0)], r['spans']                # only the shaky 35-37 s cuts the footage
+    assert [(m['start_s'], m['end_s']) for m in r['unusable']] == [(35.0, 37.0)] and 'too shaky' in r['unusable'][0]['reasons'] and r['unusable'][0]['starts_because']
+    assert not any('too short' in x for m in r['unusable'] for x in m['reasons'])
+
+
+def test_candidates_overlap_as_alternative_views_of_the_same_footage():
+    d = make(lambda x: 5.0 if x < 20 else 35.0, speech=[(24, 34)], labels=['wearer']); r = C.build(d); cs = r['candidates']; kinds = {c['kind'] for c in cs}
+    assert 'span' in kinds and 'speech' in kinds and len(cs) >= 3 and sorted(c['priority'] for c in cs) == list(range(1, len(cs) + 1))
+    sp = next(c for c in cs if c['kind'] == 'speech'); span = next(c for c in cs if c['kind'] == 'span' and c['start_s'] <= sp['start_s'] < c['end_s']); assert span['start_s'] <= sp['start_s'] and sp['end_s'] <= span['end_s']     # inside it, overlapping
 
 
 if __name__ == '__main__':

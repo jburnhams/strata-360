@@ -44,7 +44,7 @@ export interface PlacePoint { label: string; lat: number; lon: number; address: 
 export interface Places { covered: boolean; note?: string; points: PlacePoint[]; summary?: { places: string[]; road?: string; county?: string; country?: string; text: string } }
 export interface Line { t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface Why { starts_because: string; ends_because?: string; steadiness: number; shake_dps: number; exposure_ok: number; scenic: number; lens_blocked: number; score: number; speech: boolean; chatter: number }
-export interface Candidate { id: string; start_s: number; end_s: number; start_utc: string; quality: number; energy: number; features: Record<string, number>; settings: string[]; people: number; why?: Why }
+export interface Candidate { id: string; kind?: 'span' | 'best' | 'speech' | 'person' | 'you' | 'scene'; view?: string; priority?: number; span?: number; start_s: number; end_s: number; start_utc: string; quality: number; energy: number; features: Record<string, number>; settings: string[]; people: number; why?: Why }
 export interface Unusable { start_s: number; end_s: number; usable: false; reasons: string[]; detail: string | null; starts_because: string; ends_because?: string; stats: Record<string, number | string | null> }
 export interface ClipDetail {
   id: string; note: string; time: Record<string, string | number | boolean | null>; video: Record<string, any>; camera?: Record<string, string>
