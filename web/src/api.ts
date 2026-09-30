@@ -1,6 +1,6 @@
 // Typed client for the FastAPI server (src/strata360/server/app.py). Same-origin; the token (if any) travels as a cookie.
 export interface BrowseEntry { name: string; path: string; kind: 'dir'; is_project: boolean }
-export interface Browse { path: string; parent: string | null; footage_here: number; is_project: boolean; entries: BrowseEntry[] }
+export interface Browse { path: string; parent: string | null; footage_here: number; is_project: boolean; can_create: boolean; entries: BrowseEntry[] }
 export interface Stage { name: string; done: number; total: number; seconds_per_clip: number | null; eta_s: number | null; note: string }
 export type ProjectState = 'new' | 'processing' | 'needs_input' | 'complete'
 export interface Progress {
@@ -38,6 +38,7 @@ async function call<T>(path: string, body?: unknown): Promise<T> {
 const q = (o: Record<string, string>) => new URLSearchParams(o).toString()
 
 export const api = {
+  last: () => call<{ folder: string | null }>('/api/last'),
   roots: () => call<{ roots: string[] }>('/api/roots'),
   browse: (path?: string) => call<Browse>('/api/browse' + (path ? '?' + q({ path }) : '')),
   progress: (folder: string) => call<Progress>('/api/progress?' + q({ folder })),

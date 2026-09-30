@@ -42,8 +42,9 @@ def browse(roots, path):
     real = safe_path(roots, path); items = []; n_footage = 0
     try: names = sorted(os.listdir(real), key=str.lower)
     except OSError as e: raise Forbidden(str(e))
-    for n in names:
-        if n.startswith('.') : continue
+    is_proj = os.path.exists(os.path.join(real, config.PROJECT_SUBFOLDER, 'race.json'))
+    for n in ([] if is_proj else names):                                                                  # a project folder is opened as a whole: its sub-folders are not offered
+        if n.startswith('.') or n == config.PROJECT_SUBFOLDER: continue
         full = os.path.join(real, n)
         if os.path.isdir(full):
             try: real_child = safe_path(roots, full)
@@ -51,17 +52,38 @@ def browse(roots, path):
             items.append(dict(name=n, path=real_child, kind='dir', is_project=os.path.exists(os.path.join(real_child, config.PROJECT_SUBFOLDER, 'race.json'))))
         elif os.path.splitext(n)[1].lower() in clipmod.SUPPORTED: n_footage += 1
     parent = os.path.dirname(real); parent = parent if any(parent == r or parent.startswith(r + os.sep) for r in roots) else None
-    return dict(path=real, parent=parent, footage_here=n_footage, is_project=os.path.exists(os.path.join(real, config.PROJECT_SUBFOLDER, 'race.json')), entries=items)
+    return dict(path=real, parent=parent, footage_here=n_footage, is_project=is_proj, can_create=(not is_proj and real not in roots and (n_footage > 0 or has_footage(real))), entries=items)
 
 
 def has_footage(folder, depth=3):
     """True if a supported camera file exists in `folder` or up to `depth` levels below (stops at the first hit; never descends into our own results folder)."""
     base = folder.rstrip(os.sep).count(os.sep)
+    seen = 0
     for root, dirs, files in os.walk(folder):
+        seen += 1
+        if seen > 300: return False                                                                       # a huge tree is not scanned for ever (an external drive can be slow)
         dirs[:] = [d for d in dirs if d != config.PROJECT_SUBFOLDER and not d.startswith('.')]
         if root.count(os.sep) - base >= depth: dirs[:] = []
         if any(os.path.splitext(n)[1].lower() in clipmod.SUPPORTED for n in files): return True
     return False
+
+
+STATE = os.path.expanduser('~/.strata360/state.json')
+
+
+def remember(folder):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    try: d = json.load(open(STATE))
+    except (OSError, ValueError): d = {}
+    d['last_project'] = folder; json.dump(d, open(STATE, 'w'))
+
+
+def last_project(roots):
+    try: f = json.load(open(STATE)).get('last_project')
+    except (OSError, ValueError): return None
+    try: f = safe_path(roots, f)
+    except Forbidden: return None
+    return f if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else None
 
 
 def start_job(folder, args=('open',)):
@@ -111,6 +133,9 @@ def create_app(roots, token=None):
     if os.path.isdir(os.path.join(STATIC, 'assets')):                                    # the built React app (web/): hashed JS/CSS
         from fastapi.staticfiles import StaticFiles
         api.mount('/assets', StaticFiles(directory=os.path.join(STATIC, 'assets')), name='assets')
+
+    @api.get('/api/last', dependencies=[Depends(auth)])
+    def get_last(): return dict(folder=last_project(roots))                                 # the project opened last time, if it still exists inside an allowed root
 
     @api.get('/api/roots', dependencies=[Depends(auth)])
     def get_roots(): return dict(roots=roots)
@@ -231,7 +256,7 @@ def create_app(roots, token=None):
         if not os.path.exists(os.path.join(config.race_dir(f), 'race.json')) and not has_footage(f): raise HTTPException(400, 'no camera files (.OSV) found in that folder or its sub-folders (down to 3 levels)')
         if body.get('languages'): args += ['--languages', str(body['languages'])]
         if body.get('gps'): args += ['--gps', folder_of(body['gps'])]
-        return dict(started=start_job(f, tuple(args)))
+        remember(f); return dict(started=start_job(f, tuple(args)))
 
     @api.post('/api/run', dependencies=[Depends(auth)])
     def post_run(body: dict): return dict(started=start_job(folder_of(body.get('folder'))))

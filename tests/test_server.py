@@ -39,6 +39,14 @@ def test_has_footage_and_roots_are_not_projects():
     os.makedirs(os.path.join(out, 'a', 'b', 'c', 'd')); open(os.path.join(out, 'a', 'b', 'c', 'd', 'X.OSV'), 'wb').write(b'x'); assert not app.has_footage(out, depth=3)
 
 
+def test_project_folders_are_opened_whole():
+    root, _ = make(); f = os.path.join(root, 'race1'); os.makedirs(os.path.join(f, 'sub')); os.makedirs(os.path.join(f, 'strata360')); open(os.path.join(f, 'strata360', 'race.json'), 'w').write('{}')
+    b = app.browse([root], f); assert b['is_project'] and b['entries'] == [] and not b['can_create']              # no sub-folder choice inside a project
+    r = app.browse([root], root); assert [e['name'] for e in r['entries']] == ['race1'] and r['entries'][0]['is_project'] and not r['can_create']   # a root is never a project to create
+    os.makedirs(os.path.join(root, 'new')); open(os.path.join(root, 'new', 'CAM_20260101000000_0002_D.OSV'), 'wb').write(b'x')
+    n = app.browse([root], os.path.join(root, 'new')); assert n['can_create'] and not n['is_project']
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

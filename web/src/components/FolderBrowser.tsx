@@ -1,25 +1,30 @@
 import { useEffect, useState } from 'react'
 import { api, type Browse } from '../api'
 
-export default function FolderBrowser({ onChoose }: { onChoose: (folder: string) => void }) {
+// Pick a project: browse the server's allowed folders. A folder that already is a project opens straight away (its sub-folders are never offered);
+// a folder with camera files can become a new project; anything else is just a place to look further.
+export default function FolderBrowser({ onChoose, onCancel }: { onChoose: (folder: string) => void; onCancel?: () => void }) {
   const [b, setB] = useState<Browse>()
   const [err, setErr] = useState<string>()
-  const go = (path?: string) => api.browse(path).then(x => { setB(x); setErr(undefined) }).catch(e => setErr(e.message))
+  const go = (path?: string) => api.browse(path).then(x => {
+    setErr(undefined)
+    if (x.is_project) onChoose(x.path)
+    else setB(x)
+  }).catch(e => setErr(e.message))
   useEffect(() => { go() }, [])
   if (err) return <p className="text-stone-500">{err}</p>
   if (!b) return <p className="text-stone-500">Loading…</p>
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-2 break-all font-mono text-xs text-stone-500">{b.path}</div>
+      <div className="mb-2 flex items-center justify-between"><span className="break-all font-mono text-xs text-stone-500">{b.path}</span>{onCancel && <button className="text-sm text-emerald-700 underline dark:text-emerald-400" onClick={onCancel}>cancel</button>}</div>
       <ul className="divide-y divide-stone-200 dark:divide-stone-800">
         {b.parent && <Row name=".." onClick={() => go(b.parent!)} />}
         {b.entries.map(e => <Row key={e.path} name={e.name} project={e.is_project} onClick={() => go(e.path)} />)}
       </ul>
       <div className="mt-3 flex items-center gap-3">
-        <button className="rounded-lg bg-emerald-700 px-4 py-2 text-white hover:bg-emerald-600" onClick={() => onChoose(b.path)}>Use this folder</button>
+        <button disabled={!b.can_create} className="rounded-lg bg-emerald-700 px-4 py-2 text-white hover:bg-emerald-600 disabled:opacity-40" onClick={() => onChoose(b.path)}>Create project here</button>
         <span className="text-sm text-stone-500">
-          {b.footage_here ? `${b.footage_here} camera file(s) here` : 'no camera files directly in this folder (subfolders are searched too)'}
-          {b.is_project ? ' · already a project' : ''}
+          {b.can_create ? (b.footage_here ? `${b.footage_here} camera file(s) here` : 'camera files found in the sub-folders') : 'open a folder that holds camera files (or an existing project)'}
         </span>
       </div>
     </div>

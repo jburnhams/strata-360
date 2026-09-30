@@ -20,7 +20,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         <ul className="space-y-1">{clips.map(c => <Row key={c.id} folder={folder} c={c} active={sel === c.id} onClick={() => setSel(c.id)} />)}</ul>
       </aside>
       <div className="min-w-0">
-        <div className="mb-3 flex items-center gap-3 text-sm"><span className="break-all font-mono text-stone-500">{folder}</span><button className="text-emerald-700 underline dark:text-emerald-400" onClick={onChange}>change</button></div>
+        <div className="mb-3 flex items-center gap-3 text-sm"><span className="break-all font-mono text-stone-500">{folder}</span><button className="text-emerald-700 underline dark:text-emerald-400" onClick={onChange}>open another / new project</button></div>
         {sel === null ? (
           <div className="space-y-4">
             <FilmDetails folder={folder} />
