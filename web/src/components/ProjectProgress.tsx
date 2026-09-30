@@ -4,7 +4,7 @@ import { useState } from 'react'
 import RedoDialog from './RedoDialog'
 import { PanelSkeleton } from './Skeleton'
 
-const NEEDS: Record<string, string> = { wearer_profile: 'choose which face is you', camera_clock: 'confirm the camera clock' }
+const NEEDS: Record<string, string> = { wearer_profile: 'choose which face is you', camera_clock: 'confirm the camera clock', race_track: 'add the race track (a Garmin .fit or a .gpx): the places stage is paused until then' }
 const LABEL: Record<string, string> = { new: 'New', processing: 'Processing…', needs_input: 'Waiting for you', complete: 'Complete' }
 
 const Bar = ({ pct }: { pct: number }) => (
@@ -24,7 +24,7 @@ export default function ProjectProgress({ folder }: { folder: string }) {
       {(p.stages ?? []).map(s => (
         <div key={s.name} className="my-1.5 text-sm">
           <div className="grid grid-cols-[110px_1fr_130px] items-center gap-3">
-            <span title={s.note}>{s.name}</span><Bar pct={(100 * s.done) / Math.max(s.total, 1)} />
+            <span title={s.note}>{s.name}{s.waiting && <span className="ml-1 text-xs text-amber-600" title={`paused: waiting for ${s.waiting}`}>⏸</span>}</span><Bar pct={(100 * s.done) / Math.max(s.total, 1)} />
             <span className="text-stone-500">{s.done}/{s.total}{mins(s.eta_s)} <button className="ml-1 underline" onClick={() => setRedo(s.name)}>redo</button></span>
           </div>
           {!!s.running?.length && (

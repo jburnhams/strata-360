@@ -1,7 +1,7 @@
 // Typed client for the FastAPI server (src/strata360/server/app.py). Same-origin; the token (if any) travels as a cookie.
 export interface BrowseEntry { name: string; path: string; kind: 'dir'; is_project: boolean }
 export interface Browse { path: string; parent: string | null; footage_here: number; is_project: boolean; can_create: boolean; entries: BrowseEntry[] }
-export interface Stage { running?: { clip: string; pid: number }[]; name: string; done: number; total: number; seconds_per_clip: number | null; eta_s: number | null; note: string }
+export interface Stage { waiting?: string | null; running?: { clip: string; pid: number }[]; name: string; done: number; total: number; seconds_per_clip: number | null; eta_s: number | null; note: string }
 export type ProjectState = 'new' | 'processing' | 'needs_input' | 'complete'
 export interface Progress {
   state: ProjectState; folder: string; project: string; clips?: number; footage_gb?: number; percent?: number; eta_s?: number
@@ -22,13 +22,16 @@ export interface Meta {
 }
 export interface Seg { clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
+export interface Near { name: string; kind: string; distance_m: number }
+export interface PlacePoint { label: string; lat: number; lon: number; address: { display_name?: string; road?: string; county?: string; country?: string } | null; nearby: Near[] | null }
+export interface Places { covered: boolean; note?: string; points: PlacePoint[]; summary?: { places: string[]; road?: string; county?: string; country?: string; text: string } }
 export interface Line { t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface Candidate { id: string; start_s: number; end_s: number; start_utc: string; quality: number; energy: number; features: Record<string, number>; settings: string[]; people: number }
 export interface ClipDetail {
   id: string; note: string; time: Record<string, string | number | boolean | null>; video: Record<string, any>; camera?: Record<string, string>
   motion: Record<string, number | null> | null; audio: { summary: any; segments: { label: string; t0_s: number; t1_s: number }[] } | null
   transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null
-  exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string } | null; track?: Record<string, any>; track_text?: string
+  places?: Places | null; exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string } | null; track?: Record<string, any>; track_text?: string
 }
 export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string> }
 

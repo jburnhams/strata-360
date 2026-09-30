@@ -18,8 +18,9 @@ DEFAULTS = {
     'people_every_frames': 50,
     'profile': 'me',
     'scenes_every_s': 5.0,
+    'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
     'proxy': {'size': '3840x1920', 'every_frames': 4, 'bitrate': '80M'},
-    'stages': ['ingest', 'motion', 'thumb', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
+    'stages': ['ingest', 'motion', 'thumb', 'places', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
 }
 
 

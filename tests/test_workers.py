@@ -42,6 +42,18 @@ def test_dependents_and_clear_items():
     assert set(runner.load_state(f, 'CAM_a_0001_D')) == {'audio'}
 
 
+def test_track_stages_pause_without_a_track_and_reset_when_it_or_the_clock_changes():
+    from strata360.pipeline import clips as clipmod
+    f = project(); cfg = dict(config.DEFAULTS); cfg['stages'] = ['ingest', 'places']; cfg['camera_clock'] = dict(utc_offset_hours=0.0, offset_seconds=370.0, verified=True); st = runner.STAGES['places']
+    c = clipmod.Clip(id='CAM_a_0001_D', osv='x.OSV', fingerprint='abc'); state = dict(ingest=dict(status='ok', key='k'))
+    done, key, blocked = runner._cached(f, st, c, cfg, state, '/nonexistent'); assert not done and 'race_track' in blocked            # no track: paused (not failed)
+    open(os.path.join(f, 'strata360', 'track.fit'), 'wb').write(b'a' * 5000)
+    done, k1, blocked = runner._cached(f, st, c, cfg, state, '/nonexistent'); assert not blocked and k1                              # a track: runnable
+    open(os.path.join(f, 'strata360', 'track.fit'), 'wb').write(b'b' * 5000); _, k2, _ = runner._cached(f, st, c, cfg, state, '/nonexistent'); assert k2 != k1   # a different track: new key, so it is redone
+    cfg['camera_clock']['offset_seconds'] = 380.0; _, k3, _ = runner._cached(f, st, c, cfg, state, '/nonexistent'); assert k3 != k2                                # the clip-to-track alignment moved: redone
+    cfg['camera_clock']['offset_seconds'] = 370.0; _, k4, _ = runner._cached(f, st, c, cfg, state, '/nonexistent'); assert k4 == k2                                # back to the same alignment: same key
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

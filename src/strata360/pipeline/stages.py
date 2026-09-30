@@ -19,11 +19,12 @@ class Stage:
     outputs: tuple = ()
     default: bool = True      # part of the default `run`
     note: str = ''
+    needs_track: bool = False  # uses the race GPS track: waits until one is set, and is redone when the track or the clip-to-track time alignment changes
 
 
-def stage(name, version, keys=(), deps=(), outputs=(), default=True, note=''):
+def stage(name, version, keys=(), deps=(), outputs=(), default=True, note='', needs_track=False):
     def deco(fn):
-        STAGES[name] = Stage(name, version, fn, tuple(keys), tuple(deps), tuple(outputs), default, note); ORDER.append(name); return fn
+        STAGES[name] = Stage(name, version, fn, tuple(keys), tuple(deps), tuple(outputs), default, note, needs_track); ORDER.append(name); return fn
     return deco
 
 
@@ -99,6 +100,17 @@ def motion(ctx):
 def thumb(ctx):
     from strata360.analysis.thumbs import quick
     quick(ctx.clip.osv, str(ctx.dir))
+
+
+@stage('places', 1, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
+       note='where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)')
+def places(ctx):
+    import os
+    from strata360.analysis.places import analyse
+    from strata360.gps import track
+    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = next((os.path.join(root, n) for n in ('track.fit', 'track.gpx') if os.path.exists(os.path.join(root, n))), None) or ctx.cfg.get('gps')
+    if not tp or not os.path.exists(tp): raise RuntimeError('no race track (track.fit / track.gpx in the project folder): add it in the app, then redo this stage')
+    ctx.write('places.json', ctx.stamped(analyse(ctx.read('clip.json'), track.load(tp), os.path.join(root, 'cache', 'places'), ctx.cfg)))
 
 
 @stage('people', 2, keys=('people_every_frames',), outputs=('people.json', 'faces.npy', 'faces_thumbs.npy'), deps=('ingest',), default=False,

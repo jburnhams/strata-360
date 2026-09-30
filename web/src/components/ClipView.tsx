@@ -40,6 +40,22 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
           <Kv k="Settings" v={sc ? Object.keys(sc.settings ?? {}).join(', ') : null} /><Kv k="Tags" v={sc?.tags?.slice(0, 8).join(', ')} /><Kv k="Lighting" v={sc ? Object.keys(sc.lighting ?? {}).join(', ') : null} />
           {!sc && <p className="text-sm text-stone-500">Scene tagging has not run for this clip yet.</p>}
         </Card>
+        <Card title="Where (OpenStreetMap)">
+          {!c.places ? <p className="text-sm text-stone-500">The places lookup has not run for this clip yet.</p>
+            : !c.places.covered ? <p className="text-sm text-stone-500">{c.places.note}</p>
+            : (() => {
+              const pts = c.places.points, first = pts[0], last = pts[pts.length - 1]
+              const near = new Map<string, { name: string; kind: string; d: number }>()
+              pts.forEach(p => (p.nearby ?? []).forEach(n => { const o = near.get(n.name); if (!o || n.distance_m < o.d) near.set(n.name, { name: n.name, kind: n.kind, d: n.distance_m }) }))
+              const list = [...near.values()].sort((a, b) => a.d - b.d).slice(0, 8)
+              return (<>
+                <div className="text-sm font-medium">{c.places.summary?.text}</div>
+                <div className="text-xs text-stone-500">{first.address?.road ?? first.address?.display_name}{last.address?.road && last.address.road !== first.address?.road ? ` → ${last.address.road}` : ''}</div>
+                <ul className="mt-2 space-y-0.5 text-sm">{list.map(n => <li key={n.name} className="flex justify-between gap-2"><span>{n.name} <span className="text-xs text-stone-500">{n.kind.split('=')[1]}</span></span><span className="text-xs text-stone-500">{n.d} m</span></li>)}</ul>
+                <a className="mt-2 inline-block text-xs text-emerald-700 underline dark:text-emerald-400" target="_blank" rel="noreferrer" href={`https://www.openstreetmap.org/?mlat=${first.lat}&mlon=${first.lon}#map=16/${first.lat}/${first.lon}`}>open in OpenStreetMap</a>
+              </>)
+            })()}
+        </Card>
         <Card title="Usable moments">
           {c.candidates ? c.candidates.map(x => (
             <div key={x.id} className="flex items-center gap-2 py-0.5 text-sm">

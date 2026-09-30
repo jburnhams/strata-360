@@ -212,7 +212,7 @@ def create_app(roots, token=None):
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
-        th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th
+        th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th; out['places'] = _j(d, 'places.json')
         p = config.track_path(f, config.load(f))
         if p:
             import datetime as dt

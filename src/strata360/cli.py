@@ -52,7 +52,8 @@ def _state_symbol(race, cfg, clip, name, state):
     deps = {d: state.get(d, {}).get('key') for d in st.deps}
     if name == 'ingest':                                             # its key is frozen (a clock change re-times, it does not invalidate): stale only when the clock changed since it ran
         return 'ok' if s.get('clock') == runner._sha(cfg.get('camera_clock')) and s.get('fp', clip.fingerprint) == clip.fingerprint else 'stale'
-    return 'ok' if s.get('key') == runner.stage_key(st, clip, cfg, deps) else 'stale'
+    done, _, _ = runner._cached(race, st, clip, cfg, state, runner.clip_dir(race, clip.id))
+    return 'ok' if done else 'stale'
 
 
 def cmd_status(a):
@@ -223,12 +224,14 @@ def project_progress(name):
             st = runner.load_state(name, c.id); sym = _state_symbol(name, cfg, c, n, st); done += sym == 'ok'
             if sym == 'ok' and st.get(n, {}).get('seconds'): secs.append(st[n]['seconds'])
         per = float(np.mean(secs)) if secs else None; left = (len(cl) - done) * per if per else None; eta += left or 0.0
-        stages.append(dict(name=n, running=[dict(clip=c_, pid=p_) for c_, s_, p_ in runner.active_items(name_) if s_ == n], done=int(done), total=len(cl), seconds_per_clip=None if per is None else round(per, 1), eta_s=None if left is None else round(left), note=STAGES[n].note)); done_all += done; total_all += len(cl)
+        stages.append(dict(name=n, running=[dict(clip=c_, pid=p_) for c_, s_, p_ in runner.active_items(name_) if s_ == n], waiting=('the race track' if (STAGES[n].needs_track and config.track_path(name_, cfg) is None) else None), done=int(done), total=len(cl), seconds_per_clip=None if per is None else round(per, 1), eta_s=None if left is None else round(left), note=STAGES[n].note)); done_all += done; total_all += len(cl)
     needs = []
+    tr_missing = config.track_path(name, cfg) is None and any(STAGES[n].needs_track for n in names)
+    if tr_missing: needs.append('race_track')
     if 'identity' in names and not os.path.exists(os.path.join('profiles', cfg.get('profile', 'me') + '.npz')): needs.append('wearer_profile')
     if not cfg.get('camera_clock', {}).get('verified'): needs.append('camera_clock')
     wk = runner.workers(name); lock = bool(wk); act = runner.active_items(name); by_pid = {p_: (c_, s_) for c_, s_, p_ in act}
-    blocked = {'identity'} if 'wearer_profile' in needs else set()                                                 # stages that cannot run until the user has chosen who they are
+    blocked = ({'identity'} if 'wearer_profile' in needs else set()) | ({n for n in names if STAGES[n].needs_track} if tr_missing else set())                                                # stages that cannot run until the user has chosen who they are
     pending = any(s_['done'] < s_['total'] for s_ in stages if s_['name'] not in blocked)
     state = 'processing' if (lock or pending) else ('needs_input' if (needs or any(s_['done'] < s_['total'] for s_ in stages)) else 'complete')
     return dict(state=state, folder=cfg['library'], project=rd, clips=len(cl), footage_gb=round(sum(c.size for c in cl) / 1e9, 1), unsupported=len(other), running=lock, workers=len(wk), worker_list=[dict(pid=p_, clip=(by_pid.get(p_) or (None, None))[0], stage=(by_pid.get(p_) or (None, None))[1]) for p_ in wk], runnable=runner.runnable_count(name), active=[dict(clip=c, stage=s) for c, s, _ in act],

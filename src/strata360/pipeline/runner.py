@@ -19,9 +19,9 @@ def clip_dir(race, clip_id):
 def _sha(obj): return hashlib.sha1(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
-def stage_key(stage, clip, cfg, dep_keys):
+def stage_key(stage, clip, cfg, dep_keys, extra=None):
     """Changes when the code version, the clip content, the relevant config, or an upstream result changes."""
-    return _sha([stage.name, stage.version, clip.fingerprint, {k: cfg.get(k) for k in stage.keys}, dep_keys])
+    return _sha([stage.name, stage.version, clip.fingerprint, {k: cfg.get(k) for k in stage.keys}, dep_keys] + ([extra] if extra is not None else []))      # `extra` only joins the key when a stage uses it, so existing keys stay valid
 
 
 # ---- state (one json per clip, updated under a file lock) ------------------------------------------------------------------------------------------------------------
@@ -65,18 +65,23 @@ def _workers(race): return os.path.join(config.race_dir(race), '.workers')
 
 
 def claim(race, clip_id, stage):
-    """Atomically claim (clip, stage) for this process; a claim left by a dead process is taken over."""
-    os.makedirs(_claims(race), exist_ok=True); p = os.path.join(_claims(race), f'{clip_id}__{stage}')
-    for _ in range(2):
-        try:
-            fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, f'{os.getpid()} {time.time():.0f}'.encode()); os.close(fd); return True
-        except FileExistsError:
-            try: pid = open(p).read().split()[0]
-            except (OSError, IndexError): pid = None
-            if pid and _alive(pid): return False
-            try: os.remove(p)
-            except OSError: pass
-    return False
+    """Atomically claim (clip, stage) for this process. The claim file is written completely under a private name and then hard-linked into place (link fails if the name exists), so no
+    other process can ever see it half-written; a claim left by a dead process is taken over."""
+    os.makedirs(_claims(race), exist_ok=True); p = os.path.join(_claims(race), f'{clip_id}__{stage}'); tmp = f'{p}.{os.getpid()}.tmp'
+    open(tmp, 'w').write(f'{os.getpid()} {time.time():.0f}')
+    try:
+        for _ in range(2):
+            try: os.link(tmp, p); return True
+            except FileExistsError:
+                try: pid = open(p).read().split()[0]
+                except (OSError, IndexError): return False                                             # unreadable for a moment: someone is claiming it right now
+                if _alive(pid): return False
+                try: os.remove(p)
+                except OSError: pass
+        return False
+    finally:
+        try: os.remove(tmp)
+        except OSError: pass
 
 
 def release(race, clip_id, stage):
@@ -101,6 +106,7 @@ def active_items(race):
     out = []; d = _claims(race)
     if os.path.isdir(d):
         for n in os.listdir(d):
+            if n.endswith('.tmp'): continue
             try: pid = open(os.path.join(d, n)).read().split()[0]
             except (OSError, IndexError): continue
             if _alive(pid) and '__' in n: c, s = n.rsplit('__', 1); out.append((c, s, int(pid)))
@@ -124,7 +130,7 @@ def runnable_count(race):
         st = STAGES[name]
         for c in cl:
             if (c.id, name) in taken: continue
-            done, _, blocked = _cached(st, c, cfg, load_state(race, c.id), clip_dir(race, c.id))
+            done, _, blocked = _cached(race, st, c, cfg, load_state(race, c.id), clip_dir(race, c.id))
             if not done and not blocked: n += 1
     return n
 
@@ -163,7 +169,7 @@ def item_states(race):
     for c in cl:
         state = load_state(race, c.id); row = {}
         for n in names:
-            e = state.get(n); done, _, blocked = _cached(STAGES[n], c, cfg, state, clip_dir(race, c.id))
+            e = state.get(n); done, _, blocked = _cached(race, STAGES[n], c, cfg, state, clip_dir(race, c.id))
             row[n] = 'active' if (c.id, n) in act else None if e is None else 'failed' if e.get('status') == 'failed' else 'ok' if done else 'stale'
         out[c.id] = row
     return dict(stages=names, clips=out, dependents={n: dependents(n) for n in names})
@@ -173,11 +179,26 @@ def discover(race, cfg):
     return clipmod.discover(cfg['library'])
 
 
-def _cached(st, c, cfg, state, ctx_dir):
+def track_signature(race, cfg):
+    """Identity of everything the clip-to-track match depends on: the track file's content and the camera clock (offset, drift): None when there is no track. A change of either makes every
+    stage that uses the track out of date, so it is redone."""
+    p = config.track_path(race, cfg)
+    if not p: return None
+    h = hashlib.sha1(); size = os.path.getsize(p); h.update(str(size).encode())
+    with open(p, 'rb') as f:
+        h.update(f.read(1 << 20)); f.seek(max(size - (1 << 20), 0)); h.update(f.read(1 << 20))
+    return _sha([h.hexdigest(), cfg.get('camera_clock', {}).get('utc_offset_hours'), cfg.get('camera_clock', {}).get('offset_seconds'), cfg.get('camera_clock', {}).get('drift_s_per_day'), cfg.get('camera_clock', {}).get('drift_ref_camera_time')])
+
+
+def _cached(race, st, c, cfg, state, ctx_dir):
     """(is_done, key, blocked_by) for one item given the clip's state."""
     deps = {d: state.get(d, {}) for d in st.deps}; bad = [d for d, v in deps.items() if v.get('status') != 'ok']
+    extra = None
+    if st.needs_track:
+        extra = track_signature(race, cfg)
+        if extra is None: bad = bad + ['race_track']                                               # paused until a track is set
     if bad: return False, None, bad
-    key = stage_key(st, c, cfg, {d: v.get('key') for d, v in deps.items()}); cur = state.get(st.name, {}); clock_sig = _sha(cfg.get('camera_clock'))
+    key = stage_key(st, c, cfg, {d: v.get('key') for d, v in deps.items()}, extra); cur = state.get(st.name, {}); clock_sig = _sha(cfg.get('camera_clock'))
     if st.name == 'ingest' and cur.get('key') and cur.get('version') == st.version and cur.get('fp', c.fingerprint) == c.fingerprint: key = cur['key']    # frozen identity: a clock change re-times, it does not invalidate clip-relative stages
     done = cur.get('status') == 'ok' and cur.get('key') == key and all(os.path.exists(os.path.join(ctx_dir, o)) for o in st.outputs) and (st.name != 'ingest' or cur.get('clock') == clock_sig)
     return done, key, []
@@ -204,10 +225,10 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
             st = STAGES[name]
             for n, c in enumerate(cl, 1):
                 if (c.id, name) in tried: continue
-                state = load_state(race, c.id); done, key, blocked = _cached(st, c, cfg, state, clip_dir(race, c.id))
+                state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id))
                 if done or blocked: continue
                 if not claim(race, c.id, name): continue
-                state = load_state(race, c.id); done, key, blocked = _cached(st, c, cfg, state, clip_dir(race, c.id))      # someone may have finished it between the look and the claim
+                state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id))      # someone may have finished it between the look and the claim
                 if done or blocked: release(race, c.id, name); continue
                 picked = (n, c, st, key); break
             if picked: break

@@ -29,6 +29,10 @@ def segment_facts(seg, cand, cdir, track, notes, tz='Europe/Brussels'):
     f = dict(index=seg['index'], film_start_s=round(seg['start_s'], 1), seconds=round(seg['dur_s'], 1), clip=cand['clip'], technique=seg.get('technique'))
     t0 = dt.datetime.fromisoformat(cand['start_utc'].replace('Z', '+00:00')).timestamp() + seg.get('in_s', 0.0); t1 = t0 + seg['dur_s']
     if track is not None: f['track'] = X.describe(X.context_at(track, t0, t1, tz))
+    pl = os.path.join(cdir, cand['clip'], 'places.json') if cdir else None
+    if pl and os.path.exists(pl):
+        pj = json.load(open(pl))
+        if pj.get('covered') and pj.get('summary'): f['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '') + '; nearby: ' + ', '.join(sorted({n['name'] for p in pj['points'] for n in (p.get('nearby') or [])[:4]})[:6])
     f['clip_note'] = (notes.get('clips', {}).get(cand['clip']) or '').strip()
     sp = cand.get('transcript') or []
     f['wearer_says'] = [s.get('text_en') or s['text'] for s in sp if s['t1'] > seg.get('in_s', 0) + cand['start_s'] and s['t0'] < seg.get('in_s', 0) + cand['start_s'] + seg['dur_s']] if cand['features'].get('speech') else []
@@ -55,6 +59,7 @@ def build_messages(folder_note, facts, target_s, wpm=DEFAULT_WPM, style='', race
         b = budget_words(f['seconds'], wpm); talk = bool(f.get('wearer_says'))
         lines.append(f"[{f['index']}] {f['seconds']} s, word budget {0 if talk else b}" + (' (the runner speaks here: do not narrate)' if talk else ''))
         if f.get('track'): lines.append(f"    track: {f['track']}")
+        if f.get('place'): lines.append(f"    place (OpenStreetMap): {f['place']}")
         if f.get('sees'): lines.append(f"    camera sees: {f['sees']}" + (f" (tags: {', '.join(f['tags'])})" if f.get('tags') else '') + (f"; weather {', '.join(f['weather'])}" if f.get('weather') else ''))
         if f.get('clip_note'): lines.append(f"    runner's note for this clip: {f['clip_note']}")
         if talk: lines.append('    the runner says: ' + ' / '.join(f['wearer_says'])[:300])
