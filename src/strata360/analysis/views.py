@@ -184,3 +184,30 @@ def render_thumb_proxy(proxy_path, osv, t, yaw=0.0, pitch=0.0, hfov=100.0, w=960
     if heading is None: heading, _ = heading_track(osv)
     k = side['frames'][j]['source_frame']; hd = heading[min(k, len(heading) - 1)]
     img = _equirect_view(eq, _rect_rays(yaw, hd, w, h, hfov, pitch), w, h); ok, buf = cv2.imencode('.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality]); return buf.tobytes()
+
+
+def focus_samples(clip_dir, osv):
+    """Where the main person is, once a second, for the player's "follow person" mode (cached in focus.json; derived from identity.json and speakers.json, nothing is recomputed).
+    Each sample: t_s, world yaw and pitch in degrees (the direction in the upright world frame the preview is in), who ('you' or 'other') and whether that person is speaking.
+    Rule: while another voice is speaking and someone else is in view, the biggest other person; otherwise the wearer when their face was found; otherwise the biggest person; else no sample."""
+    cache = os.path.join(clip_dir, 'focus.json'); src = [os.path.join(clip_dir, n) for n in ('identity.json', 'speakers.json')]
+    if os.path.exists(cache) and all(not os.path.exists(p) or os.path.getmtime(p) <= os.path.getmtime(cache) for p in src):
+        try: return json.load(open(cache))['samples']
+        except ValueError: pass
+    idp = os.path.join(clip_dir, 'identity.json')
+    if not os.path.exists(idp): return []
+    idn = json.load(open(idp)); sp = os.path.join(clip_dir, 'speakers.json'); segs = json.load(open(sp))['segments'] if os.path.exists(sp) else []
+    heading, _ = heading_track(osv); out = []
+    def speaker(t):
+        for s in segs:
+            if s['t0'] - 0.2 <= t <= s['t1'] + 0.2 and s.get('label'): return s['label']
+        return None
+    for r in idn['samples']:
+        t = r['t_s']; who_speaks = speaker(t); others = [o for o in r.get('others', []) if o.get('height_deg')]; big = max(others, key=lambda o: o['height_deg']) if others else None; me = r.get('me')
+        if who_speaks == 'other' and big: tgt, who = big, 'other'
+        elif me: tgt, who = me, 'you'
+        elif big: tgt, who = big, 'other'
+        else: continue
+        hd = float(np.degrees(heading[min(r['frame'], len(heading) - 1)]))
+        out.append(dict(t=t, yaw=round((hd + tgt['yaw']) % 360.0, 1), pitch=round(tgt['pitch'], 1), who=who, speaking=(who_speaks == 'wearer' and who == 'you') or (who_speaks == 'other' and who == 'other')))
+    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=1, samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out

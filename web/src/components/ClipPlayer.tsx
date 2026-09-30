@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 
 // Player for a clip's 360 preview (upright equirect video). The thumbnail is shown first; play loads the video. The picture is a flat window into the sphere that you can pan by dragging
-// (touch too) and zoom with the wheel or the slider. "Follow heading" keeps the window pointing where the runner is going (from the motion data) with your pan added on top.
+// (touch too) and zoom with the wheel or the slider. Three ways to aim: Free (stays where you put it), Heading (points where the runner is going, from the motion data) and Person (turns to
+// the main person: the other speaker while someone else talks, otherwise you). In the two automatic modes your pan is added on top and eases back when you switch.
 const VS = `#version 300 es
 in vec2 p; out vec2 uv; void main(){ uv = p; gl_Position = vec4(p, 0., 1.); }`
 const FS = `#version 300 es
@@ -17,16 +18,21 @@ void main(){
 }`
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-export default function ClipPlayer({ folder, clip, thumbKind, heading, hasPreview, duration }: {
-  folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; hasPreview: boolean; duration: number
+type Focus = { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }
+type Aim = 'free' | 'heading' | 'person'
+const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
+
+export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, hasPreview, duration }: {
+  folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; focus?: Focus[] | null; hasPreview: boolean; duration: number
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
-  const st = useRef({ yaw: 0, pitch: 0, fov: 100, follow: true, gl: null as null | { draw: () => void }, raf: 0 })
+  const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, gl: null as null | { draw: () => void }, raf: 0 })
   const [started, setStarted] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [t, setT] = useState(0)
-  const [follow, setFollow] = useState(true)
+  const [aim, setAim] = useState<Aim>('heading')
+  const [shown, setShown] = useState<string>('')
   const [fov, setFov] = useState(100)
   const [muted, setMuted] = useState(false)
   const [rate, setRate] = useState(1)
@@ -39,6 +45,16 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, hasPrevie
     const a = ts[lo], b = ts[hi], w = b > a ? Math.min(Math.max((time - a) / (b - a), 0), 1) : 0
     return ((deg[lo] + (deg[hi] - deg[lo]) * w) * Math.PI) / 180
   }, [heading])
+
+  // The person to look at: interpolate the once-a-second samples (angles unwrapped); no sample within 2 s means nobody to follow, and the view falls back to the heading.
+  const focusAt = useCallback((time: number) => {
+    if (!focus || !focus.length) return null
+    let lo = -1; for (let i = 0; i < focus.length; i++) if (focus[i].t <= time) lo = i
+    const a = focus[Math.max(lo, 0)], b = focus[Math.min(lo + 1, focus.length - 1)]
+    if (Math.abs(a.t - time) > 2 && Math.abs(b.t - time) > 2) return null
+    const w = b.t > a.t ? Math.min(Math.max((time - a.t) / (b.t - a.t), 0), 1) : 0, ay = (a.yaw * Math.PI) / 180, by = (b.yaw * Math.PI) / 180
+    return { yaw: ay + wrap(by - ay) * w, pitch: (((a.pitch + (b.pitch - a.pitch) * w) * Math.PI) / 180), who: (w < 0.5 ? a : b).who, speaking: (w < 0.5 ? a : b).speaking }
+  }, [focus])
 
   // WebGL: one full-screen triangle pair; the video frame is the texture, the shader turns each pixel into a ray into the sphere.
   useEffect(() => {
@@ -57,17 +73,31 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, hasPrevie
       if (cv.width !== Math.round(w) || cv.height !== Math.round(h)) { cv.width = Math.round(w); cv.height = Math.round(h) }
       gl.viewport(0, 0, cv.width, cv.height)
       if (v.readyState >= 2) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v) }
-      const s = st.current, yaw = s.yaw + (s.follow ? headingAt(v.currentTime) : 0)
-      gl.uniform1f(U('yaw'), yaw); gl.uniform1f(U('pitch'), s.pitch); gl.uniform1f(U('tanx'), Math.tan((s.fov * Math.PI) / 360)); gl.uniform1f(U('aspect'), cv.width / cv.height)
+      const s = st.current, now = v.currentTime, hd = headingAt(now)
+      let baseYaw = 0, basePitch = 0
+      if (s.aim === 'heading') baseYaw = hd
+      else if (s.aim === 'person') { const f = focusAt(now); if (f) { baseYaw = f.yaw; basePitch = f.pitch; s.tyaw = f.yaw; s.tpitch = f.pitch } else baseYaw = hd }
+      if (s.aim !== 'free') {                                                                        // ease towards the target instead of jumping between samples
+        const d = wrap(baseYaw - s.cur); s.cur = s.cur + d * 0.12; baseYaw = s.cur
+        if (s.decay > 0) { s.yaw *= 0.9; s.pitch *= 0.9; s.decay -= 1 }                               // after a mode switch the manual offset eases back to the automatic aim
+      } else s.cur = baseYaw
+      const yaw = s.yaw + baseYaw, pitch = Math.max(-1.45, Math.min(1.45, s.pitch + (s.aim === 'person' ? basePitch * 0.6 : 0)))
+      gl.uniform1f(U('yaw'), yaw); gl.uniform1f(U('pitch'), pitch); gl.uniform1f(U('tanx'), Math.tan((s.fov * Math.PI) / 360)); gl.uniform1f(U('aspect'), cv.width / cv.height)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
     }
     st.current.gl = { draw }
     const loop = () => { draw(); st.current.raf = requestAnimationFrame(loop) }
     loop()
     return () => { cancelAnimationFrame(st.current.raf); st.current.gl = null }
-  }, [started, headingAt])
+  }, [started, headingAt, focusAt])
 
-  useEffect(() => { st.current.follow = follow }, [follow])
+  // Switching mode keeps the picture where it is: the current aim becomes the manual offset, which then eases back for the automatic modes (Free keeps it).
+  const changeAim = (next: Aim) => {
+    const s = st.current, v = video.current, now = v?.currentTime ?? 0; const cur = s.yaw + (s.aim === 'free' ? 0 : s.cur)
+    const base = next === 'free' ? 0 : next === 'heading' ? headingAt(now) : (focusAt(now)?.yaw ?? headingAt(now))
+    s.yaw = wrap(cur - (next === 'free' ? 0 : base)); s.cur = base; s.aim = next; s.decay = next === 'free' ? 0 : 45; setAim(next)
+  }
+  useEffect(() => { const id = setInterval(() => { const f = st.current.aim === 'person' ? focusAt(video.current?.currentTime ?? 0) : null; setShown(st.current.aim === 'person' ? (f ? (f.who === 'you' ? (f.speaking ? 'you (speaking)' : 'you') : f.speaking ? 'someone else (speaking)' : 'someone else') : 'nobody found: following the heading') : '') }, 500); return () => clearInterval(id) }, [focusAt])
   useEffect(() => { st.current.fov = fov }, [fov])
   useEffect(() => { setStarted(false); setPlaying(false); setT(0); setErr(undefined); st.current.yaw = 0; st.current.pitch = 0 }, [clip])
 
@@ -79,7 +109,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, hasPrevie
     st.current.yaw -= (e.clientX - drag.current.x) * k; st.current.pitch = Math.max(-1.45, Math.min(1.45, st.current.pitch + (e.clientY - drag.current.y) * k)); drag.current = { x: e.clientX, y: e.clientY }
   }
   const onWheel = (e: React.WheelEvent) => setFov(f => Math.max(40, Math.min(120, f + e.deltaY * 0.05)))
-  const reset = () => { st.current.yaw = 0; st.current.pitch = 0; setFov(100) }
+  const reset = () => { st.current.yaw = 0; st.current.pitch = 0; st.current.decay = 0; setFov(100) }
 
   const play = async () => {
     const v = video.current; if (!v) return
@@ -112,7 +142,11 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, hasPrevie
         <button className="text-xs" disabled={!started} onClick={() => setMuted(m => !m)} title="sound">{muted ? '🔇' : '🔊'}</button>
         <select value={rate} disabled={!started} onChange={e => { const r = Number(e.target.value); setRate(r); if (video.current) video.current.playbackRate = r }} className="rounded border border-stone-300 bg-transparent px-1 text-xs dark:border-stone-700">
           {[0.5, 1, 1.5, 2].map(r => <option key={r} value={r}>{r}×</option>)}</select>
-        <label className="flex items-center gap-1 text-xs" title="Keep the view pointing where the runner is heading"><input type="checkbox" checked={follow} onChange={e => setFollow(e.target.checked)} />follow heading</label>
+        <span className="inline-flex overflow-hidden rounded border border-stone-300 text-xs dark:border-stone-700" role="group" aria-label="Where the view points">
+          {([['free', 'Free', 'stays where you put it'], ['heading', 'Heading', 'points where the runner is going'], ['person', 'Person', 'turns to the main person: the other speaker while someone else talks, otherwise you']] as const).map(([k, label, tip]) => (
+            <button key={k} title={tip} disabled={k === 'person' && !focus?.length} onClick={() => changeAim(k)} className={`px-2 py-0.5 disabled:opacity-40 ${aim === k ? 'bg-emerald-700 text-white' : ''}`}>{label}</button>))}
+        </span>
+        {shown && <span className="text-xs text-stone-500">showing {shown}</span>}
         <label className="flex items-center gap-1 text-xs" title="Field of view (or use the mouse wheel)">view<input type="range" min={40} max={120} value={fov} onChange={e => setFov(Number(e.target.value))} className="w-20" />{Math.round(fov)}°</label>
         <button className="text-xs underline" onClick={reset} title="Reset the view (or double-click the picture)">reset view</button>
       </div>
