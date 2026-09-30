@@ -91,7 +91,11 @@ class CameraPath:
 
     @classmethod
     def from_json(cls, path):
-        d = json.load(open(path)); p = cls(d['keyframes'], d.get('ref', 'world'), d.get('heading'), d.get('smooth_s', 0.0)); p.bg = d.get('bg', 'blur'); p.bg_opts = {k[3:]: d[k] for k in ('bg_band', 'bg_spread', 'bg_smooth', 'bg_pick', 'bg_inset') if k in d}; return p
+        return cls.from_dict(json.load(open(path)))
+
+    @classmethod
+    def from_dict(cls, d):
+        p = cls(d['keyframes'], d.get('ref', 'world'), d.get('heading'), d.get('smooth_s', 0.0)); p.bg = d.get('bg', 'blur'); p.bg_opts = {k[3:]: d[k] for k in ('bg_band', 'bg_spread', 'bg_smooth', 'bg_pick', 'bg_inset') if k in d}; return p
 
     @classmethod
     def static(cls, ref, yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, heading=None, dist=0.0):

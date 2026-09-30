@@ -29,9 +29,12 @@ def test_speaker_and_fallbacks():
 
 
 def test_projection_centre_and_planet():
-    g = PV.Grid(64, 36); mx, my = PV.view_maps(g, 400, 200, np.radians(90), 0.0, 0.0, 90.0)
-    assert abs(mx[18, 32] - (0.75 * 400 - 0.5)) < 4 and abs(my[18, 32] - 99.5) < 2                      # looking right (yaw 90): the centre pixel is lon +90 at the horizon
-    mx, my = PV.view_maps(g, 400, 200, 0.0, -np.pi / 2, 0.0, 260.0); assert my[18, 32] > 190 and np.isfinite(mx).all() and np.isfinite(my).all()      # straight down: the nadir row; planet fov is valid everywhere
+    v = PV.EquirectView(64, 36); ez = np.array([0.0, 0.0, 1.0]); v.set_fov(90.0)
+    mx, my = v.maps(np.array([1.0, 0.0, 0.0]), ez, 0.0, 400, 200)                                          # looking along +X (yaw 90): the centre pixel is lon +90 at the horizon
+    assert abs(mx[18, 32] - (0.75 * 400 - 0.5)) < 4 and abs(my[18, 32] - 99.5) < 2
+    v.set_fov(260.0, 1.0); mx, my = v.maps(np.array([0.0, 0.0, -1.0]), ez, 0.0, 400, 200); assert my[18, 32] > 190 and np.isfinite(mx).all() and np.isfinite(my).all()     # straight down: the nadir row
+    v.set_fov(90.0, 0.0, 0.46); eq = (np.random.default_rng(1).random((200, 400, 3)) * 255).astype(np.uint8); v.set_background([0.1, 0.2, 0.3])
+    out = v.render(eq, np.array([0.0, 0.0, -1.0]), ez, 0.0); assert out.shape == (36, 64, 3) and out.dtype == np.uint8 and tuple(out[0, 0]) == (25, 51, 76)      # the globe: a disc, the colour outside it
 
 
 if __name__ == '__main__':

@@ -6,12 +6,14 @@ rest is made.
   <project>/preview/film-<key>/status.json                    {state, frames_done, frames_total, placeholders: [clip ids without a proxy yet], started, finished}
   <project>/preview/film-<key>/audio.wav                      the mixed sound
 
-Projection: rectilinear for ordinary fields of view, blending to stereographic (little planet) above 100 degrees, so planet / tunnel techniques look right; the globe technique is approximated by a
-planet. `heading` and `body` references follow the runner's heading (motion.json). A clip without a proxy yet is a dark card with its name."""
+The picture is made by the real renderer's own code (render/flat.py: projection, view rays, the globe with its backgrounds; render/camera.py: the path evaluation, including heading-follow and body
+references from the stabilisation), with the clip's proxy (upright equirect) as the picture source instead of the two lenses: what differs from the final render is only the resolution. A clip without
+a proxy yet is a dark card with its name."""
 import hashlib, json, os, shutil, subprocess, sys, time
 import cv2, numpy as np
 from strata360.pipeline import config
-from strata360.render.camera import CameraPath
+from strata360.render import camera as cam
+from strata360.render.flat import Globe, projection, view_rays
 
 FPS = 25.0
 
@@ -24,30 +26,44 @@ def plan_key(folder, plan):
     h = hashlib.sha1(json.dumps(plan['segments'], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode()); return h.hexdigest()[:10]
 
 
-class Grid:
-    """Output pixel geometry: r (distance from the centre in half-widths) and the unit direction in the image plane."""
-    def __init__(self, w, h):
-        x = ((np.arange(w) + 0.5) / w * 2 - 1).astype(np.float32)[None, :].repeat(h, 0); y = ((1 - (np.arange(h) + 0.5) / h * 2) * h / w).astype(np.float32)[:, None].repeat(w, 1)
-        self.w, self.h = w, h; self.r = np.hypot(x, y); s = np.maximum(self.r, 1e-6); self.cx = x / s; self.cy = y / s
+class EquirectView(Globe):
+    """The real renderer's projection (flat.projection / view_rays) and globe look (flat.Globe), with the picture taken from an equirect frame (the clip's proxy, upright world frame) instead of
+    the two lenses. Like the real renderer the maps are computed on a coarse grid; the view rays are upsampled (not the angles, which wrap) and turned into equirect coordinates per pixel."""
+    def __init__(self, W, H, grid=4):
+        self.W, self.H, self.grid = W, H, grid; gw, gh = W // grid + 1, H // grid + 1
+        X, Y = np.meshgrid(np.linspace(0, W, gw), np.linspace(0, H, gh)); self.xn = ((X - W / 2) / (W / 2)).astype(np.float64); self.yn = ((H / 2 - Y) / (W / 2)).astype(np.float64)
+        self.gw, self.gh = gw, gh; self.init_globe(); self.set_fov(90.0)
+
+    def set_fov(self, hfov, dist=0.0, disc=None):
+        self.disc = None if disc is None else float(disc); self.theta, self.cphi, self.sphi = projection(self.xn, self.yn, hfov, dist, self.disc)
+
+    def maps(self, fwd, up, roll, eqW, eqH):
+        """cv2.remap maps (full output size) into an eqW x eqH equirect frame for the view direction `fwd` (world frame) with `up`."""
+        d = view_rays(self.theta, self.cphi, self.sphi, fwd, up, roll).reshape(self.gh, self.gw, 3).astype(np.float32)
+        D = [cv2.resize(np.ascontiguousarray(d[..., k]), (self.W, self.H), interpolation=cv2.INTER_LINEAR) for k in range(3)]
+        n = np.sqrt(D[0] ** 2 + D[1] ** 2 + D[2] ** 2) + 1e-9; lon = np.arctan2(D[0], D[1]); lat = np.arcsin(np.clip(D[2] / n, -1, 1))
+        return ((lon / (2 * np.pi) + 0.5) * eqW - 0.5).astype(np.float32), ((0.5 - lat / np.pi) * eqH - 0.5).astype(np.float32)
+
+    def _render_scene(self, eq, fwd, up, roll=0.0):
+        mx, my = self.maps(fwd, up, roll, eq.shape[1], eq.shape[0]); return cv2.remap(eq, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+
+    def _small_planet(self, eq, fwd, up, roll):                                     # uint16 code values, as the globe compositing expects
+        if self._bgR is None or self._bgR.W != self.W // 8:
+            self._bgR = EquirectView(self.W // 8, self.H // 8, grid=2); self._bgR.set_fov(260.0, 1.0)
+        return self._bgR._render_scene(eq, fwd, up, roll).astype(np.uint16) * 257
+
+    def render(self, eq, fwd, up, roll=0.0):
+        out = self._render_scene(eq, fwd, up, roll)
+        if self.disc is None: return out
+        return (self._apply_globe(out.astype(np.uint16) * 257, eq, fwd, up, roll) >> 8).astype(np.uint8)
 
 
-def view_maps(g, eqW, eqH, yaw, pitch, roll, fov):
-    """cv2.remap maps for one frame (all angles in radians, fov in degrees)."""
-    m = float(np.clip((fov - 100.0) / 100.0, 0.0, 1.0)); fr = min(fov, 170.0)
-    th = (1 - m) * np.arctan(g.r * np.tan(np.radians(fr) / 2)) + m * 2 * np.arctan(g.r * np.tan(np.radians(min(fov, 340.0)) / 4))
-    cr, sr = np.cos(roll), np.sin(roll); cx = g.cx * cr - g.cy * sr; cy = g.cx * sr + g.cy * cr
-    f = np.array([np.sin(yaw) * np.cos(pitch), np.cos(yaw) * np.cos(pitch), np.sin(pitch)]); R = np.array([np.cos(yaw), -np.sin(yaw), 0.0]); U = np.cross(R, f)
-    ct, st = np.cos(th), np.sin(th); a = st * cx; b = st * cy
-    X = ct * f[0] + a * R[0] + b * U[0]; Y = ct * f[1] + a * R[1] + b * U[1]; Z = ct * f[2] + a * R[2] + b * U[2]
-    lon = np.arctan2(X, Y); lat = np.arcsin(np.clip(Z, -1, 1))
-    return ((lon / (2 * np.pi) + 0.5) * eqW - 0.5).astype(np.float32), ((0.5 - lat / np.pi) * eqH - 0.5).astype(np.float32)
-
-
-def frame_camera(path, t_rel, heading_deg):
-    """(yaw, pitch, roll, fov) in radians/degrees for one frame of a framing path dict."""
-    cp = CameraPath(path['keyframes'], 'world'); ev = cp.evaluate(np.asarray(t_rel, float))
-    yaw = ev['yaw'] + (np.radians(heading_deg) if path.get('ref') in ('heading', 'body') else 0.0); fov = np.full_like(ev['fov'], 260.0) if ev['use_disc'] else ev['fov']
-    return yaw, ev['pitch'], ev['roll'], fov
+def stab_matrices(osv):
+    """Per source frame: d_body = M d_world (the real renderer's Renderer.stab_matrix), for paths that follow the heading or sit on the body."""
+    from strata360.osv.calib import quat_to_R, imu_offsets
+    from strata360.osv.telemetry import read_frames
+    P, B = imu_offsets(); T = read_frames(osv)
+    return lambda k: B.T @ quat_to_R(np.asarray(T['quat'][min(k, len(T['quat']) - 1)])).T @ P.T
 
 
 def encoder_args():
@@ -96,15 +112,21 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
     enc = subprocess.Popen(['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', str(FPS), '-i', '-', '-i', os.path.join(d, 'audio.wav'), '-map', '0:v', '-map', '1:a', *encoder_args(),
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
                             '-hls_segment_filename', os.path.join(d, 'seg%05d.ts'), os.path.join(d, 'index.m3u8')], stdin=subprocess.PIPE)
-    g = Grid(w, h); done = 0; last = 0.0; heads = {}; clipdirs = {}
+    V = EquirectView(w, h); done = 0; last = 0.0; clipinfo = {}; ez = np.array([0.0, 0.0, 1.0])
     try:
         for gi, sg in enumerate(segs):
-            n = bounds[gi] - starts[gi]; clip = sg['clip']; p = proxy_of(folder, clip); fr = None
-            if clip not in heads: cd = os.path.join(config.race_dir(folder), 'clips', clip); heads[clip] = views.heading_fn(cd, json.load(open(os.path.join(cd, 'clip.json')))['source_files']['osv'])
-            ts = np.arange(n) / FPS; yaw, pitch, roll, fov = frame_camera(framing[sg['id']], ts, [heads[clip](sg['clip_start_s'] + t) for t in ts])
-            dec = None
+            n = bounds[gi] - starts[gi]; clip = sg['clip']; p = proxy_of(folder, clip); fr = None; path = cam.CameraPath.from_dict(framing[sg['id']]); V.set_background(path.bg, **path.bg_opts)
+            side = json.load(open(os.path.splitext(p)[0] + '.json')) if p else None
+            if p and clip not in clipinfo: clipinfo[clip] = (np.array([f['t_s'] for f in side['frames']]), stab_matrices(json.load(open(os.path.join(config.race_dir(folder), 'clips', clip, 'clip.json')))['source_files']['osv']) if path.ref != 'world' else None)
+            Ms = None
             if p:
-                side = json.load(open(os.path.splitext(p)[0] + '.json')); W, H = side['size']; dw = min(decode_w, W); dh = dw // 2
+                ts_p, sm = clipinfo[clip]; j0 = int(np.argmin(np.abs(ts_p - sg['clip_start_s'])))
+                if path.ref != 'world':
+                    if sm is None: sm = clipinfo[clip] = (ts_p, stab_matrices(json.load(open(os.path.join(config.race_dir(folder), 'clips', clip, 'clip.json')))['source_files']['osv'])); sm = sm[1]
+                    Ms = [sm(side['frames'][min(j0 + i, len(side['frames']) - 1)]['source_frame']) for i in range(n)]
+            P = path.evaluate(np.arange(n) / FPS, Ms, FPS) if p else None; dec = None
+            if p:
+                W0, H0 = side['size']; dw = min(decode_w, W0); dh = dw // 2
                 dec = subprocess.Popen(['ffmpeg', '-v', 'error', '-ss', f"{sg['clip_start_s']:.3f}", '-i', p, '-t', f"{n / FPS + 0.2:.3f}", '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', str(FPS), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             for i in range(n):
                 if dec is not None:
@@ -112,7 +134,8 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
                     if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3)
                 if fr is None or dec is None: img = card(w, h, f'{clip[-9:]}: proxy not made yet')
                 else:
-                    mx, my = view_maps(g, dw, dh, float(yaw[i]), float(pitch[i]), float(roll[i]), float(fov[i])); img = cv2.remap(fr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+                    V.set_fov(P['fov'][i], P['dist'][i], P['disc'][i] if P['use_disc'] else None); vdir = cam.direction(P['yaw'][i], P['pitch'][i])
+                    img = V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))          # the same steps as flat.main: body paths are rotated into the world by the stabilisation
                 enc.stdin.write(img.tobytes()); done += 1
                 if time.time() - last > 1.0: last = time.time(); status('rendering', done); progress and progress(done, total)
             if dec is not None: dec.stdout.close(); dec.terminate(); dec.wait()

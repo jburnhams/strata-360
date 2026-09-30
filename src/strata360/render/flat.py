@@ -44,74 +44,34 @@ def view_basis(fwd_b, up_b, roll=0.0):
     return r, f, u
 
 
-class Renderer:
-    def __init__(self, osv, W=3840, H=2160, hfov=90.0, interp='cubic', grid=8):
-        self.W, self.H, self.grid = W, H, grid
-        sl = read_slots(osv)
-        self.master, self.slave = Lens(sl[2]), Lens(sl[1])  # stream 1 = master (front), stream 0 = slave (rear)
-        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y']); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'])
-        self.rtm = ph.THETA_MAX_DEG - ph.RENDER_INSET_DEG          # render-only blend inset (PhotoSeam.h), 94.99 deg
-        self.gain_m = np.ones(3); self.gain_s = np.ones(3); self._lut = None
-        self.osv = osv; self.bg_spread = 1.5; self.bg_pick = 'vivid'; self.bg_inset = 6.0; self.bg_band = 40.0; self.bg_smooth = 8.0; self.disc = None; self.bg = [0.03, 0.03, 0.05]; self._rr = None; self._bgR = None; self._bgcol = None   # globe state
-        P, B = imu_offsets()
-        self.P, self.B = P, B
-        self.interp = {'cubic': cv2.INTER_CUBIC, 'linear': cv2.INTER_LINEAR, 'lanczos': cv2.INTER_LANCZOS4}[interp]
-        # coarse pixel grid (output pixel centres), with the last row/col reaching the image edge
-        gw, gh = W // grid + 1, H // grid + 1
-        xs = np.linspace(0, W, gw); ys = np.linspace(0, H, gh)
-        X, Y = np.meshgrid(xs, ys)
-        self.xn = ((X - W / 2) / (W / 2)).astype(np.float64)    # normalised: -1..1 across the width
-        self.yn = ((H / 2 - Y) / (W / 2)).astype(np.float64)    # same scale, so pixels stay square
-        self.gw, self.gh = gw, gh
-        self.set_fov(hfov)
+def projection(xn, yn, hfov, dist=0.0, disc=None):
+    """Angle from the view axis (theta) and the direction in the image plane (cos/sin phi) for every pixel of a normalised grid (xn: -1..1 across the width, yn the same scale, up positive).
+    Shared by the real renderer and the film preview, so both project exactly the same way. `disc` (radius in half-widths) selects the globe: azimuthal equidistant, the whole sphere in a disc;
+    otherwise rectilinear to stereographic by `dist` (see Renderer.set_fov)."""
+    rn = np.hypot(xn, yn)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        cphi = np.where(rn > 0, xn / np.maximum(rn, 1e-12), 1.0); sphi = np.where(rn > 0, yn / np.maximum(rn, 1e-12), 0.0)
+    if disc is not None: return np.pi * np.minimum(rn / disc, 1.0), cphi, sphi
+    d = float(np.clip(dist, 0.0, 1.0))
+    hmax = 2 * np.degrees(np.arccos(-d)) - 1.0 if d > 0 else 179.0
+    half = np.radians(min(hfov, hmax)) / 2
+    k_edge = np.sin(half) / (d + np.cos(half))                       # k = r / (f (1+d)) at the horizontal edge of the frame
+    k = rn * k_edge
+    return np.arctan(k) + np.arcsin(np.clip(k * d / np.sqrt(1 + k * k), -1, 1)), cphi, sphi
 
-    def set_fov(self, hfov, dist=0.0, disc=None):
-        """Horizontal field of view in degrees and projection `dist` (0 to 1); both can change every frame.
 
-        dist = 0 is the ordinary rectilinear (pinhole) view. Larger values bend the projection toward stereographic (dist = 1), the
-        'eye-offset' family used by OpenOSV: r/f = (1+d) sin(theta) / (d + cos(theta)). With dist = 1 the field of view can reach 360 degrees;
-        pointed straight down with about 250-300 degrees it is the 'little planet', pointed straight up the 'tunnel'. The field of view is
-        limited to just under 2*acos(-d) so the mapping stays invertible. Animating (fov, dist) from (250, 1) to (90, 0) is the classic
-        little-planet zoom-in."""
-        self.disc = None if disc is None else float(disc)
-        if self.disc is not None:                                        # GLOBE: azimuthal equidistant, the whole sphere inside a disc of radius `disc` (half-widths)
-            rn = np.hypot(self.xn, self.yn); self.theta = np.pi * np.minimum(rn / self.disc, 1.0)
-            with np.errstate(invalid='ignore', divide='ignore'):
-                self.cphi = np.where(rn > 0, self.xn / np.maximum(rn, 1e-12), 1.0); self.sphi = np.where(rn > 0, self.yn / np.maximum(rn, 1e-12), 0.0)
-            return
-        d = float(np.clip(dist, 0.0, 1.0))
-        hmax = 2 * np.degrees(np.arccos(-d)) - 1.0 if d > 0 else 179.0
-        half = np.radians(min(hfov, hmax)) / 2
-        k_edge = np.sin(half) / (d + np.cos(half))                       # k = r / (f (1+d)) at the horizontal edge of the frame
-        rn = np.hypot(self.xn, self.yn)                                  # 1.0 at the horizontal edge
-        k = rn * k_edge
-        self.theta = np.arctan(k) + np.arcsin(np.clip(k * d / np.sqrt(1 + k * k), -1, 1))
-        with np.errstate(invalid='ignore', divide='ignore'):
-            self.cphi = np.where(rn > 0, self.xn / np.maximum(rn, 1e-12), 1.0); self.sphi = np.where(rn > 0, self.yn / np.maximum(rn, 1e-12), 0.0)
+def view_rays(theta, cphi, sphi, fwd, up, roll=0.0):
+    """Unit view rays (N, 3) for projection() output and a view direction `fwd` with its `up` (any frame), rolled by `roll`."""
+    r, f, u = view_basis(fwd, up, roll)
+    ct, st = np.cos(theta)[..., None], np.sin(theta)[..., None]
+    return unit(ct * f + st * (cphi[..., None] * r + sphi[..., None] * u)).reshape(-1, 3)
 
-    def stab_matrix(self, q):
-        """body <- upright-world direction matrix: d_body = M d_E (stored quaternion fields = w,x,y,z)."""
-        return self.B.T @ quat_to_R(np.asarray(q)).T @ self.P.T
 
-    def maps(self, fwd_b, up_b, roll=0.0):
-        r, f, u = view_basis(fwd_b, up_b, roll)
-        ct, st = np.cos(self.theta)[..., None], np.sin(self.theta)[..., None]
-        d = ct * f + st * (self.cphi[..., None] * r + self.sphi[..., None] * u)   # (gh,gw,3) body-frame rays (unit length by construction)
-        d = unit(d).reshape(-1, 3)
-        out = []
-        for L in (self.master, self.slave):
-            uu, vv, th = L.project(d)
-            out.append((uu.reshape(self.gh, self.gw), vv.reshape(self.gh, self.gw), np.degrees(th).reshape(self.gh, self.gw)))
-        return out
-
-    def set_gains(self, g_master, g_slave):
-        self.gain_m, self.gain_s = np.asarray(g_master, float), np.asarray(g_slave, float)
-        self._lut = None if (np.allclose(self.gain_m, 1) and np.allclose(self.gain_s, 1)) else (ph.gain_lut(self.gain_m), ph.gain_lut(self.gain_s))
-
-    def render(self, L_master, L_slave, fwd_b, up_b, roll=0.0):
-        """Scene render; when a globe is active (`disc`), the area outside the disc is filled with the background (solid colour or blurred fill planet)."""
-        out = self._render_scene(L_master, L_slave, fwd_b, up_b, roll)
-        return out if self.disc is None else self._apply_globe(out, L_master, L_slave, fwd_b, up_b, roll)
+class Globe:
+    """The globe look shared by every renderer that has a `disc`: the sphere inside a disc, and what fills the rest of the frame (a blurred copy of the little planet, a solid colour, or colours
+    taken from the globe's own rim). Needs W, H, disc, and `_small_planet(src, fwd, up, roll)` (a small 260-degree planet picture, uint16 code values) from the subclass. Pictures are uint16."""
+    def init_globe(self):
+        self.bg_spread = 1.5; self.bg_pick = 'vivid'; self.bg_inset = 6.0; self.bg_band = 40.0; self.bg_smooth = 8.0; self.disc = None; self.bg = [0.03, 0.03, 0.05]; self._rr = None; self._bgR = None; self._bgcol = None
 
     def set_background(self, bg, band=None, spread=None, smooth=None, pick=None, inset=None):
         """Globe background: [r, g, b] in 0..1 (BT.709 code values) or 'blur' (a blurred, darkened copy of the fill planet)."""
@@ -128,12 +88,10 @@ class Renderer:
             self._rr = np.hypot(x[None, :], y[:, None]).astype(np.float32)
         return self._rr
 
-    def _background(self, L_master, L_slave, fwd_b, up_b, roll):
+    def _background(self, src, fwd_b, up_b, roll):
         H, W = self.H, self.W
         if isinstance(self.bg, str) and self.bg == 'blur':
-            if self._bgR is None or self._bgR.W != W // 8:
-                self._bgR = Renderer(self.osv, W // 8, H // 8, 260.0, 'linear', grid=4); self._bgR.set_fov(260.0, 1.0)
-            small = self._bgR._render_scene(L_master, L_slave, fwd_b, up_b, roll)
+            small = self._small_planet(src, fwd_b, up_b, roll)
             small = cv2.GaussianBlur(small, (0, 0), 5.0)
             big = cv2.resize(small, (W, H), interpolation=cv2.INTER_LINEAR)
             return (big.astype(np.float32) * 0.55).astype(np.uint16)
@@ -171,17 +129,77 @@ class Renderer:
         col = lerp(sharp) * (1 - t2) + lerp(soft) * t2
         return (col * (1 - t) + mean * t).astype(np.uint16)
 
-    def _apply_globe(self, out, L_master, L_slave, fwd_b, up_b, roll):
+    def _apply_globe(self, out, src, fwd_b, up_b, roll):
         rr = self._radius_grid()
         alpha = np.clip((self.disc - rr) * (self.W / 2) + 0.5, 0.0, 1.0)         # distance to the rim in pixels, anti-aliased over one pixel
         if alpha.min() >= 1.0: return out
-        bg = self._rim_background(out, rr) if isinstance(self.bg, str) and self.bg in ('rim', 'gradient') else self._background(L_master, L_slave, fwd_b, up_b, roll)
+        bg = self._rim_background(out, rr) if isinstance(self.bg, str) and self.bg in ('rim', 'gradient') else self._background(src, fwd_b, up_b, roll)
         out = out.copy(); cv2.copyTo(bg, (alpha <= 0).view(np.uint8), out)          # fully outside: the background
         idx = np.flatnonzero((alpha > 0) & (alpha < 1))                              # the one-pixel rim: blend
         if idx.size:
             a = alpha.reshape(-1)[idx][:, None]; o = out.reshape(-1, 3)[idx].astype(np.float32); b = bg.reshape(-1, 3)[idx].astype(np.float32)
             out.reshape(-1, 3)[idx] = (a * o + (1 - a) * b).astype(np.uint16)
         return out
+
+
+
+class Renderer(Globe):
+    def __init__(self, osv, W=3840, H=2160, hfov=90.0, interp='cubic', grid=8):
+        self.W, self.H, self.grid = W, H, grid
+        sl = read_slots(osv)
+        self.master, self.slave = Lens(sl[2]), Lens(sl[1])  # stream 1 = master (front), stream 0 = slave (rear)
+        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y']); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'])
+        self.rtm = ph.THETA_MAX_DEG - ph.RENDER_INSET_DEG          # render-only blend inset (PhotoSeam.h), 94.99 deg
+        self.gain_m = np.ones(3); self.gain_s = np.ones(3); self._lut = None
+        self.osv = osv; self.init_globe()
+        P, B = imu_offsets()
+        self.P, self.B = P, B
+        self.interp = {'cubic': cv2.INTER_CUBIC, 'linear': cv2.INTER_LINEAR, 'lanczos': cv2.INTER_LANCZOS4}[interp]
+        # coarse pixel grid (output pixel centres), with the last row/col reaching the image edge
+        gw, gh = W // grid + 1, H // grid + 1
+        xs = np.linspace(0, W, gw); ys = np.linspace(0, H, gh)
+        X, Y = np.meshgrid(xs, ys)
+        self.xn = ((X - W / 2) / (W / 2)).astype(np.float64)    # normalised: -1..1 across the width
+        self.yn = ((H / 2 - Y) / (W / 2)).astype(np.float64)    # same scale, so pixels stay square
+        self.gw, self.gh = gw, gh
+        self.set_fov(hfov)
+
+    def set_fov(self, hfov, dist=0.0, disc=None):
+        """Horizontal field of view in degrees and projection `dist` (0 to 1); both can change every frame.
+
+        dist = 0 is the ordinary rectilinear (pinhole) view. Larger values bend the projection toward stereographic (dist = 1), the
+        'eye-offset' family used by OpenOSV: r/f = (1+d) sin(theta) / (d + cos(theta)). With dist = 1 the field of view can reach 360 degrees;
+        pointed straight down with about 250-300 degrees it is the 'little planet', pointed straight up the 'tunnel'. The field of view is
+        limited to just under 2*acos(-d) so the mapping stays invertible. Animating (fov, dist) from (250, 1) to (90, 0) is the classic
+        little-planet zoom-in."""
+        self.disc = None if disc is None else float(disc)
+        self.theta, self.cphi, self.sphi = projection(self.xn, self.yn, hfov, dist, self.disc)
+
+    def stab_matrix(self, q):
+        """body <- upright-world direction matrix: d_body = M d_E (stored quaternion fields = w,x,y,z)."""
+        return self.B.T @ quat_to_R(np.asarray(q)).T @ self.P.T
+
+    def maps(self, fwd_b, up_b, roll=0.0):
+        d = view_rays(self.theta, self.cphi, self.sphi, fwd_b, up_b, roll)
+        out = []
+        for L in (self.master, self.slave):
+            uu, vv, th = L.project(d)
+            out.append((uu.reshape(self.gh, self.gw), vv.reshape(self.gh, self.gw), np.degrees(th).reshape(self.gh, self.gw)))
+        return out
+
+    def set_gains(self, g_master, g_slave):
+        self.gain_m, self.gain_s = np.asarray(g_master, float), np.asarray(g_slave, float)
+        self._lut = None if (np.allclose(self.gain_m, 1) and np.allclose(self.gain_s, 1)) else (ph.gain_lut(self.gain_m), ph.gain_lut(self.gain_s))
+
+    def render(self, L_master, L_slave, fwd_b, up_b, roll=0.0):
+        """Scene render; when a globe is active (`disc`), the area outside the disc is filled with the background (solid colour or blurred fill planet)."""
+        out = self._render_scene(L_master, L_slave, fwd_b, up_b, roll)
+        return out if self.disc is None else self._apply_globe(out, (L_master, L_slave), fwd_b, up_b, roll)
+
+    def _small_planet(self, src, fwd_b, up_b, roll):
+        if self._bgR is None or self._bgR.W != self.W // 8:
+            self._bgR = Renderer(self.osv, self.W // 8, self.H // 8, 260.0, 'linear', grid=4); self._bgR.set_fov(260.0, 1.0)
+        return self._bgR._render_scene(src[0], src[1], fwd_b, up_b, roll)
 
     def _render_scene(self, L_master, L_slave, fwd_b, up_b, roll=0.0):
         """L_* are (3840,3840,3) uint16 code values. Blend in linear light with OpenOSV's lens weights (FOV feather x occlusion)."""
