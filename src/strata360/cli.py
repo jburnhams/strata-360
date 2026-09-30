@@ -305,6 +305,8 @@ def cmd_script(a):
     race_line = ''
     if tr is not None:
         race_line = f"The race: {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours."
+    from strata360.pipeline import meta as MT
+    race_line = (MT.describe(a.name) + ' ' + race_line).strip()
     print(f'planned {len(plan)} segments for {a.length:.0f} s; writing the script with the local LLM (about a minute)...')
     doc = SC.write_script(facts, notes['folder'], a.length, wpm=a.wpm, style=a.style or '', race_line=race_line, work_dir=rd)
     os.makedirs(os.path.join(rd, 'scripts'), exist_ok=True); p = os.path.join(rd, 'scripts', 'script-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S') + '.json'); json.dump(dict(doc, facts=facts), open(p, 'w'), indent=1)

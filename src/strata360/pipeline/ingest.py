@@ -45,8 +45,8 @@ def ingest_clip(clip, cfg):
     elif fname is not None: start, source = fname - offset, 'filename'; notes.append('container has no creation_time; used the file name')
     else: start, source = None, 'none'; notes.append('no time source found')
     disagreement = abs((creation - fname).total_seconds()) if (creation and fname) else None
-    status = 'definitive' if (start is not None and clock.get('verified') and (disagreement is None or disagreement <= 1.0)) else 'provisional'
-    if disagreement is not None and disagreement > 1.0: notes.append(f'container time and file name disagree by {disagreement:.0f} s')
+    status = 'definitive' if (start is not None and clock.get('verified') and (disagreement is None or disagreement <= 3.0)) else 'provisional'
+    if disagreement is not None and disagreement > 3.0: notes.append(f'container time and file name disagree by {disagreement:.0f} s')
     if not clock.get('verified'): notes.append('camera clock not verified against the GPX or a known event (race.json camera_clock.verified)')
     end = start + dt.timedelta(seconds=duration) if start else None
     ts = lambda d: None if d is None else d.isoformat().replace('+00:00', 'Z')

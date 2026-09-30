@@ -34,6 +34,11 @@ def test_project_folder_convention():
     cl, _ = clips.discover(f); assert len(cl) == 1                                            # our own results folder is not footage
 
 
+def test_has_footage_and_roots_are_not_projects():
+    root, out = make(); assert app.has_footage(os.path.join(root, 'race1')) and app.has_footage(root) and not app.has_footage(out)
+    os.makedirs(os.path.join(out, 'a', 'b', 'c', 'd')); open(os.path.join(out, 'a', 'b', 'c', 'd', 'X.OSV'), 'wb').write(b'x'); assert not app.has_footage(out, depth=3)
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

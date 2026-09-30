@@ -107,3 +107,30 @@ def write_stab_views(osv, out_dir, every=25, first=None, quality=93, yaws=STAB_Y
         ks.append(int(k))
         if first and len(ks) >= first: break
     return ks
+
+
+def _rect_rays(yaw_deg, heading_rad, w, h, hfov, pitch_deg=0.0):
+    psi = heading_rad + np.radians(yaw_deg); p = np.radians(pitch_deg)
+    f = np.array([np.sin(psi) * np.cos(p), np.cos(psi) * np.cos(p), np.sin(p)]); r = np.array([np.cos(psi), -np.sin(psi), 0.0]); u = np.cross(r, f)
+    tx = np.tan(np.radians(hfov) / 2); ty = tx * h / w; X, Y = np.meshgrid(((np.arange(w) + 0.5) / w * 2 - 1) * tx, -((np.arange(h) + 0.5) / h * 2 - 1) * ty)
+    d = f[None, None] + X[..., None] * r[None, None] + Y[..., None] * u[None, None]
+    return (d / np.linalg.norm(d, axis=-1, keepdims=True)).reshape(-1, 3)
+
+
+def grab_frame(osv, stream, t, size=LENS_PX):
+    """One decoded frame (RGB uint8, size x size) of a lens stream at time t seconds."""
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{max(t, 0):.3f}', '-i', osv, '-map', f'0:v:{stream}', '-frames:v', '1', '-vf', f'scale={size}:{size}:flags=area', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'],
+                         stdout=subprocess.PIPE, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(size, size, 3)
+
+
+def render_thumb(osv, t, yaw=0.0, pitch=0.0, hfov=95.0, w=960, h=540, stab=None, quality=90):
+    """A flat, upright 16:9 view of the clip at time `t` (seconds), `yaw` degrees from the runner's heading (0 = ahead, 180 = behind). Returns JPEG bytes."""
+    from strata360.osv.mp4 import video_sample_times
+    stab = stab or StabViews(osv, yaws=(0,)); pts = video_sample_times(osv); k = int(np.clip(np.searchsorted(pts, pts[0] + t), 0, len(pts) - 1))
+    fm, fs = grab_frame(osv, 1, pts[k]), grab_frame(osv, 0, pts[k]); M = stab.Ms[min(k, len(stab.Ms) - 1)]; hd = stab.heading[min(k, len(stab.heading) - 1)]
+    dE = _rect_rays(yaw, hd, w, h, hfov, pitch); d = np.einsum('nj,ij->ni', dE, M); sc = LENS_PX / 3840.0
+    um, vm, _ = stab.master.project(d, sc); us, vs, _ = stab.slave.project(d, sc); f = lambda a: a.astype(np.float32).reshape(h, w)
+    wt = np.clip(0.5 + d[:, 1] / np.sin(np.radians(6.0)), 0, 1).reshape(h, w, 1).astype(np.float32)
+    a = cv2.remap(fm, f(um), f(vm), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT); b = cv2.remap(fs, f(us), f(vs), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+    img = (a * wt + b * (1 - wt)).astype(np.uint8); ok, buf = cv2.imencode('.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality]); return buf.tobytes()

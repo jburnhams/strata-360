@@ -54,6 +54,16 @@ def browse(roots, path):
     return dict(path=real, parent=parent, footage_here=n_footage, is_project=os.path.exists(os.path.join(real, config.PROJECT_SUBFOLDER, 'race.json')), entries=items)
 
 
+def has_footage(folder, depth=3):
+    """True if a supported camera file exists in `folder` or up to `depth` levels below (stops at the first hit; never descends into our own results folder)."""
+    base = folder.rstrip(os.sep).count(os.sep)
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != config.PROJECT_SUBFOLDER and not d.startswith('.')]
+        if root.count(os.sep) - base >= depth: dirs[:] = []
+        if any(os.path.splitext(n)[1].lower() in clipmod.SUPPORTED for n in files): return True
+    return False
+
+
 def start_job(folder, args=('open',)):
     with LOCK:
         j = JOBS.get(folder)
@@ -118,15 +128,66 @@ def create_app(roots, token=None):
         p = os.path.join(config.race_dir(folder_of(folder)), 'run.log')
         return dict(lines=open(p).read().splitlines()[-40:] if os.path.exists(p) else [])
 
+    def _cd(f, clip):
+        d = os.path.join(config.race_dir(f), 'clips', os.path.basename(clip))                         # basename: a clip id can never climb out of the project
+        if not os.path.isdir(d): raise HTTPException(404, 'no such clip')
+        return d
+
+    def _j(d, name):
+        p = os.path.join(d, name)
+        try: return json.load(open(p)) if os.path.exists(p) else None
+        except ValueError: return None
+
     @api.get('/api/clips', dependencies=[Depends(auth)])
-    def get_clips(folder: str):                                                          # the clips of a project with the facts the notes panel shows next to each
+    def get_clips(folder: str):                                                          # the clip list: id, time, length, a note flag, whether a thumbnail exists and a few facts
         from strata360.pipeline import notes as N
         f = folder_of(folder); rd = config.race_dir(f); out = []; nt = N.load(f)
         for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
-            try: c = json.load(open(d + 'clip.json'))
-            except OSError: continue
-            out.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=round(c['video']['source_frames'] / c['video']['nominal_fps'], 1), has_note=bool(nt['clips'].get(c['clip_id']))))
+            c = _j(d, 'clip.json')
+            if not c: continue
+            mo = _j(d, 'motion.json'); cd = _j(d, 'candidates.json'); thumb = 'best' if os.path.exists(d + 'thumb.jpg') else 'quick' if os.path.exists(d + 'thumb_quick.jpg') else None
+            out.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=round(c['video']['source_frames'] / c['video']['nominal_fps'], 1), has_note=bool(nt['clips'].get(c['clip_id'])),
+                            thumb=thumb, steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
+
+    @api.get('/api/thumb')
+    def get_thumb(request: Request, folder: str, clip: str):                              # the image itself: an <img> tag cannot send headers, so the cookie/query token is what authenticates it
+        auth(request); f = folder_of(folder); d = _cd(f, clip)
+        for n in ('thumb.jpg', 'thumb_quick.jpg'):
+            if os.path.exists(os.path.join(d, n)): return FileResponse(os.path.join(d, n), media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
+        raise HTTPException(404, 'no thumbnail yet')
+
+    @api.get('/api/clip', dependencies=[Depends(auth)])
+    def get_clip(folder: str, clip: str):                                                # everything known about one clip, for its detail view
+        from strata360.pipeline import notes as N
+        f = folder_of(folder); d = _cd(f, clip); c = _j(d, 'clip.json'); out = dict(id=c['clip_id'], time=c['time'], video=c['video'], camera=c.get('camera'), audio_info=c.get('audio'), note=N.load(f)['clips'].get(c['clip_id'], ''))
+        mo = _j(d, 'motion.json'); out['motion'] = None if not mo else mo['summary']
+        au = _j(d, 'audio.json'); out['audio'] = None if not au else dict(summary=au.get('summary'), segments=au.get('segments', [])[:40])
+        tr = _j(d, 'transcript.json'); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
+        out['transcript'] = [dict(t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en'), flagged=bool(s.get('flags')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))) for s in (tr or {}).get('segments', [])]
+        sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
+        idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
+        cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
+        ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
+        th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th
+        p = config.track_path(f, config.load(f))
+        if p:
+            import datetime as dt
+            from strata360.gps import track, context as X
+            t0 = dt.datetime.fromisoformat(c['time']['start_utc'].replace('Z', '+00:00')).timestamp(); t1 = dt.datetime.fromisoformat(c['time']['end_utc'].replace('Z', '+00:00')).timestamp()
+            ctx = X.context_at(track.load(p), t0, t1); out['track'] = ctx; out['track_text'] = X.describe(ctx)
+        return out
+
+    @api.get('/api/meta', dependencies=[Depends(auth)])
+    def get_meta(folder: str):
+        from strata360.pipeline import meta as M
+        return M.load(folder_of(folder))
+
+    @api.post('/api/meta', dependencies=[Depends(auth)])
+    def post_meta(body: dict):                                                           # {folder, title?, date?, results?: {starters, finishers, finished, position}}
+        from strata360.pipeline import meta as M
+        try: return M.save(folder_of(body.get('folder')), {k: v for k, v in body.items() if k != 'folder'})
+        except (ValueError, TypeError) as e: raise HTTPException(400, str(e))
 
     @api.get('/api/notes', dependencies=[Depends(auth)])
     def get_notes(folder: str):
@@ -166,6 +227,8 @@ def create_app(roots, token=None):
     @api.post('/api/open', dependencies=[Depends(auth)])
     def post_open(body: dict):                                                             # create the project if new, then continue whatever is unfinished
         f = folder_of(body.get('folder')); args = ['open']
+        if f in roots: raise HTTPException(400, 'that is an allowed root, not a footage folder: choose the folder that holds the camera files')
+        if not os.path.exists(os.path.join(config.race_dir(f), 'race.json')) and not has_footage(f): raise HTTPException(400, 'no camera files (.OSV) found in that folder or its sub-folders (down to 3 levels)')
         if body.get('languages'): args += ['--languages', str(body['languages'])]
         if body.get('gps'): args += ['--gps', folder_of(body['gps'])]
         return dict(started=start_job(f, tuple(args)))

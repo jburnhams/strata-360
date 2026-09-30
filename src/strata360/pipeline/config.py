@@ -19,7 +19,7 @@ DEFAULTS = {
     'profile': 'me',
     'scenes_every_s': 5.0,
     'proxy': {'size': '3840x1920', 'every_frames': 4, 'bitrate': '80M'},
-    'stages': ['ingest', 'audio', 'transcribe', 'align', 'exposure', 'motion', 'people', 'identity', 'scenes', 'speakers', 'candidates'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
+    'stages': ['ingest', 'motion', 'thumb', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
 }
 
 

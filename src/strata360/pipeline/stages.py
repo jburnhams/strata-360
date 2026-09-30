@@ -95,6 +95,12 @@ def motion(ctx):
     ctx.write('motion.json', ctx.stamped(analyse(ctx.clip.osv)))
 
 
+@stage('thumb', 1, outputs=('thumb_quick.jpg',), deps=('motion',), note='a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early')
+def thumb(ctx):
+    from strata360.analysis.thumbs import quick
+    quick(ctx.clip.osv, str(ctx.dir))
+
+
 @stage('people', 2, keys=('people_every_frames',), outputs=('people.json', 'faces.npy', 'faces_thumbs.npy'), deps=('ingest',), default=False,
        note='persons and faces on body-frame views (YOLO11 pose + InsightFace), deduplicated across views (slow: minutes per clip; needs .venv-vision and models/)')
 def people(ctx):
@@ -139,6 +145,12 @@ def speakers(ctx):
 def candidates(ctx):
     from strata360.analysis.candidates import build
     ctx.write('candidates.json', ctx.stamped(build(str(ctx.dir))))
+
+
+@stage('thumb_best', 1, outputs=('thumb.jpg',), deps=('candidates', 'identity', 'scenes'), note='the better thumbnail: best candidate, most attractive moment, the wearer when clearly in view')
+def thumb_best(ctx):
+    from strata360.analysis.thumbs import best
+    best(ctx.clip.osv, str(ctx.dir))
 
 
 @stage('proxy', 1, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',), default=False,
