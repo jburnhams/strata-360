@@ -284,7 +284,10 @@ def create_app(roots, token=None):
         f = folder_of(folder); rd = config.race_dir(f); j = SCRIPT_JOBS.get(f); running = bool(j and j.poll() is None)
         files = sorted(glob.glob(os.path.join(rd, 'scripts', 'script-*.json'))); latest = None
         if files:
-            try: latest = json.load(open(files[-1])); latest.pop('facts', None); latest['file'] = os.path.basename(files[-1])
+            try:
+                latest = json.load(open(files[-1])); said = {f['index']: f.get('wearer_says') or [] for f in latest.get('facts', [])}
+                for l in latest.get('lines', []): l.setdefault('says', said.get(l['seg'], []))                 # scripts written before the field existed: take it from the saved facts
+                latest.pop('facts', None); latest['file'] = os.path.basename(files[-1])
             except ValueError: latest = None
         log = ''
         try: log = open(os.path.join(rd, 'script_job.log')).read()[-600:]

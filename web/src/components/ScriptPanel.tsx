@@ -51,7 +51,7 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
               <li key={l.seg} className="flex gap-3 py-1.5">
                 <span className="w-16 shrink-0 font-mono text-xs text-stone-500">{Math.floor(l.film_start_s / 60)}:{String(Math.floor(l.film_start_s % 60)).padStart(2, '0')}<br />{l.seconds}s</span>
                 <button className="w-20 shrink-0 text-left font-mono text-xs text-emerald-700 underline dark:text-emerald-400" onClick={() => onOpen(l.clip)}>{short(l.clip)}</button>
-                <span className={l.text ? '' : 'text-stone-400'}>{l.text || (l.budget_words === 0 ? '(you speak here)' : '—')}</span>
+                <span className={l.text ? '' : 'text-stone-400'}>{l.text || (l.says?.length ? <span className="italic text-sky-700 dark:text-sky-300" title="you speak here">💬 “{l.says.join(' … ')}”</span> : l.budget_words === 0 ? '(you speak here)' : '—')}</span>
                 {l.text && <span className={`ml-auto shrink-0 text-xs ${l.words > l.budget_words ? 'text-red-600' : 'text-stone-500'}`}>{l.words}/{l.budget_words}</span>}
               </li>
             ))}

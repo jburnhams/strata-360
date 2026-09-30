@@ -115,7 +115,7 @@ def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_l
             parts = re.split(r'(?<=[.!?])\s+', t); t = ''
             for p in parts:
                 if words((t + ' ' + p).strip()) <= b: t = (t + ' ' + p).strip()
-        out.append(dict(seg=f['index'], film_start_s=f['film_start_s'], seconds=f['seconds'], clip=f['clip'], text=t, words=words(t), est_speak_s=round(words(t) * 60.0 / wpm, 1), budget_words=b))
+        out.append(dict(seg=f['index'], film_start_s=f['film_start_s'], seconds=f['seconds'], clip=f['clip'], text=t, says=f.get('wearer_says') or [], words=words(t), est_speak_s=round(words(t) * 60.0 / wpm, 1), budget_words=b))
     dbg = dict(finish=r.get('finish'), tokens=r.get('tokens'), text_head=(r.get('text') or '')[:600]) if (not s or bad) else None
     return dict(schema=1, provider=provider, model=r.get('model') or model, llm_debug=dbg, title=s.get('title'), target_s=target_s, wpm=wpm, style=style, seconds_llm=round(time.time() - t0, 1), remaining_problems=[dict(seg=i, problem=m) for i, m in bad], lines=out,
                 total_words=sum(l['words'] for l in out), total_speak_s=round(sum(l['est_speak_s'] for l in out), 1))

@@ -10,10 +10,10 @@ Rules (all applied by every worker, whoever started it):
 The numbers can be changed in race.json under `resources`."""
 import ctypes, ctypes.util, os, re, subprocess, time
 
-DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=3.0, busy_load_fraction=0.6, threads=2)
+DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
-STAGE_MEM_GB = dict(proxy=3.0, people=4.0, scenes=6.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
+STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=6.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
                     places=0.3, identity=0.5, candidates=0.5)
 STAGE_MAX_CONCURRENT = dict(proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
 

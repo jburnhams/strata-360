@@ -21,7 +21,7 @@ export interface Meta {
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
 export interface Seg { clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
-export interface ScriptLine { seg: number; film_start_s: number; seconds: number; clip: string; text: string; words: number; est_speak_s: number; budget_words: number }
+export interface ScriptLine { says?: string[]; seg: number; film_start_s: number; seconds: number; clip: string; text: string; words: number; est_speak_s: number; budget_words: number }
 export interface ScriptDoc { file: string; title: string | null; provider?: string; model?: string; target_s: number; wpm: number; style?: string; lines: ScriptLine[]; total_words: number; total_speak_s: number; remaining_problems: { seg: number; problem: string }[]; seconds_llm?: number }
 export interface ScriptState { key_configured: boolean; providers: Record<string, { models: string[]; default: string; configured: boolean }>; models: string[]; llm: { provider: string; model: string }; running: boolean; last_exit: number | null; log: string; latest: ScriptDoc | null; scripts: number }
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
