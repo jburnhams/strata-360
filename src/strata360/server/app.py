@@ -15,6 +15,7 @@ STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
+VO_JOBS = {}; VO_ERRORS = {}     # folder -> the running voice-over thread / its last error
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
 
@@ -260,6 +261,62 @@ def create_app(roots, token=None):
         from strata360.gps.overview import overview
         try: return overview(p)
         except Exception as e: return dict(present=True, error=f'{type(e).__name__}: {e}')
+
+    @api.get('/api/voiceover', dependencies=[Depends(auth)])
+    def get_voiceover(folder: str):                                                      # engines and voices on this machine, the saved choice, and the timings of the last build
+        from strata360.edit import voiceover as VO
+        f = folder_of(folder); st = VO.load_state(folder_of(folder)); av = VO.available_engines(); script, lines = VO.script_lines(f)
+        try: eng, voice = VO.pick(st)
+        except RuntimeError: eng = voice = None
+        return dict(engines=av, state=dict(engine=eng, voice=voice, rate=st['rate'], use=st['use']), timings=VO.load_timings(f), script=script, lines=len(lines), building=f in VO_JOBS and VO_JOBS[f].is_alive(), error=VO_ERRORS.get(f))
+
+    @api.post('/api/voiceover/build', dependencies=[Depends(auth)])
+    def post_voiceover(body: dict):                                                      # {folder, engine?, voice?, rate?}: speak the script and mix the track (in the background; unchanged lines are reused)
+        from strata360.edit import voiceover as VO
+        f = folder_of(body.get('folder')); j = VO_JOBS.get(f)
+        if j and j.is_alive(): return dict(started=False)
+        VO_ERRORS.pop(f, None)
+        def run():
+            try: VO.build(f, engine=body.get('engine'), voice=body.get('voice'), rate=body.get('rate'))
+            except Exception as e: VO_ERRORS[f] = f'{type(e).__name__}: {e}'
+        VO_JOBS[f] = threading.Thread(target=run, daemon=True); VO_JOBS[f].start(); return dict(started=True)
+
+    @api.post('/api/voiceover/use', dependencies=[Depends(auth)])
+    def post_voiceover_use(body: dict):                                                  # {folder, seg, use: 'synth'|'recorded'}
+        from strata360.edit import voiceover as VO
+        f = folder_of(body.get('folder')); st = VO.load_state(f)
+        if body.get('use') not in ('synth', 'recorded'): raise HTTPException(400, 'use: synth or recorded')
+        st['use'][str(int(body['seg']))] = body['use']; VO.save_state(f, st); return dict(ok=True)
+
+    @api.post('/api/voiceover/record', dependencies=[Depends(auth)])
+    async def post_voiceover_record(request: Request, folder: str, seg: int):            # your recording of one line: the raw audio file as the request body (any format ffmpeg reads)
+        import tempfile
+        from strata360.edit import voiceover as VO
+        f = folder_of(folder); data = await request.body()
+        if len(data) < 500 or len(data) > 100 * 1024 * 1024: raise HTTPException(400, 'the recording is empty or too large')
+        with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as tf: tf.write(data)
+        try: VO.save_recording(f, seg, tf.name)
+        except RuntimeError as e: raise HTTPException(400, 'could not read that audio: ' + str(e)[-200:])
+        finally: os.remove(tf.name)
+        return dict(ok=True)
+
+    @api.delete('/api/voiceover/record', dependencies=[Depends(auth)])
+    def delete_voiceover_record(folder: str, seg: int):
+        from strata360.edit import voiceover as VO
+        VO.delete_recording(folder_of(folder), seg); return dict(ok=True)
+
+    @api.get('/api/voiceover/audio')
+    def get_voiceover_audio(request: Request, folder: str, seg: int | None = None, source: str = 'track'):   # one line (source synth|recorded) or the whole mixed track; <audio> cannot send headers, so the cookie/query token authenticates
+        auth(request); from strata360.edit import voiceover as VO
+        f = folder_of(folder); b = VO.base(f)
+        if seg is None: p = os.path.join(b, 'voiceover.wav')
+        elif source == 'recorded': p = VO.recorded_path(f, seg)
+        else:
+            tm = VO.load_timings(f) or {}; o = next((o for o in tm.get('lines', []) if o['seg'] == seg), None); p = os.path.join(b, o['path']) if o and o['source'] == 'synth' else ''
+            if not p or not os.path.exists(p):
+                import glob as g; c = sorted(g.glob(os.path.join(b, 'synth', f'{seg:03d}-*.wav')), key=os.path.getmtime); p = c[-1] if c else ''
+        if not p or not os.path.exists(p): raise HTTPException(404, 'not made yet')
+        return FileResponse(p, media_type='audio/wav', headers={'Cache-Control': 'no-cache'})
 
     @api.post('/api/track', dependencies=[Depends(auth)])
     async def post_track(request: Request, folder: str, filename: str = 'track.fit'):    # the file is the raw request body; saved under the known name track.fit / track.gpx

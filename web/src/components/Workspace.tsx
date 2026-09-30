@@ -8,6 +8,7 @@ import ClipView from './ClipView'
 import { Skeleton } from './Skeleton'
 import TranscriptPanel from './TranscriptPanel'
 import ScriptPanel from './ScriptPanel'
+import VoiceoverPanel from './VoiceoverPanel'
 import Timeline from './Timeline'
 import FilmDetails from './FilmDetails'
 
@@ -38,6 +39,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <TrackPanel folder={folder} />
             <NoteBox folder={folder} title="Notes for the whole folder" placeholder="What was this? Who was there? What is the story of the day, in your own words…" />
             <ScriptPanel folder={folder} onOpen={c => { setFocus(undefined); setSel(c) }} />
+            <VoiceoverPanel folder={folder} />
             <TranscriptPanel folder={folder} clips={clips ?? []} tz={meta?.timezone ?? 'Europe/Brussels'} onOpen={(c, t) => { setFocus(t); setSel(c) }} />
           </div>
         ) : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />

@@ -291,6 +291,16 @@ def cmd_voice(a):
     else: print(f'confirm with: ./strata360 voice {a.name} --me {sug["cluster"]}')
 
 
+def cmd_voiceover(a):
+    from strata360.edit import voiceover as VO
+    f = a.name
+    if a.list:
+        for e in VO.available_engines(): print(e['id'], '-', e['label']); [print('   ', v['name'], v['lang']) for v in e['voices']]
+        return
+    d = VO.build(f, engine=a.engine, voice=a.voice, rate=a.rate, progress=lambda i, n: print(f'\rspeaking {i}/{n}', end='', flush=True)); print()
+    print(f"{d['engine']} / {d['voice']}: {len(d['lines'])} lines, measured {d['measured_wpm']} words/min; sped up: {d['sped']}; too long: {d['over']}\n-> {os.path.join(VO.base(f), 'voiceover.wav')}")
+
+
 def cmd_script(a):
     """Propose a voice-over script: plan a film of the target length from the candidates, then a local LLM writes narration per segment from the notes, transcript and track data."""
     import datetime as dt
@@ -373,6 +383,7 @@ def main():
     p = sub.add_parser('progress', help='project state and per-stage progress (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_progress)
     p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.set_defaults(fn=cmd_serve)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
+    p = sub.add_parser('voiceover', help='speak the script with a local voice and mix the voice-over track (recordings replace lines)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--engine'); p.add_argument('--voice'); p.add_argument('--rate', type=int); p.add_argument('--list', action='store_true', help='list engines and voices'); p.set_defaults(fn=cmd_voiceover)
     p = sub.add_parser('script', help='propose a voice-over script for a film of the target length (notes + transcript + track data -> local LLM)'); p.add_argument('name', metavar='FOLDER_OR_RACE')
     p.add_argument('--length', type=float, default=None, help='film length in seconds (default: the saved plan\'s)'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=None); p.add_argument('--reseed', action='store_true', help='re-plan with the given seed'); p.add_argument('--provider', choices=['vertex', 'gemini', 'anthropic', 'local']); p.add_argument('--model'); p.set_defaults(fn=cmd_script)
     p = sub.add_parser('clear', help='forget the status of a stage so it is processed again (with the stages that depend on it)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('stage')

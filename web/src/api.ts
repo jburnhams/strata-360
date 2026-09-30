@@ -34,6 +34,8 @@ export interface EditState {
   overrides: { locked: { wid: string }[]; tech_force: Record<string, string>; bans_cands: string[]; bans_techs: string[]; clip_weight: Record<string, number> }
   plan: null | { generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[] }
 }
+export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
+export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; lines: number; building: boolean; error?: string }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
@@ -81,6 +83,15 @@ export const api = {
   script: (folder: string) => call<ScriptState>('/api/script?' + q({ folder })),
   setKey: (key: string, provider = 'vertex') => call<{ configured: boolean }>('/api/llm/key', { key, provider }),
   generateScript: (folder: string, o: { length: number; wpm?: number; style?: string; model?: string; provider?: string }) => call<{ started: boolean }>('/api/script/generate', { folder, ...o }),
+  voiceover: (folder: string) => call<VoiceoverState>('/api/voiceover?' + q({ folder })),
+  buildVoiceover: (folder: string, o: { engine?: string; voice?: string; rate?: number } = {}) => call<{ started: boolean }>('/api/voiceover/build', { folder, ...o }),
+  voiceoverUse: (folder: string, seg: number, use: 'synth' | 'recorded') => call<{ ok: boolean }>('/api/voiceover/use', { folder, seg, use }),
+  voiceoverAudio: (folder: string, seg?: number, source?: string) => '/api/voiceover/audio?' + q(seg === undefined ? { folder } : { folder, seg: String(seg), source: source ?? 'synth' }),
+  async recordVoiceover(folder: string, seg: number, file: Blob) {
+    const r = await fetch('/api/voiceover/record?' + q({ folder, seg: String(seg) }), { method: 'POST', body: file }); const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
+  },
+  deleteRecording: (folder: string, seg: number) => fetch('/api/voiceover/record?' + q({ folder, seg: String(seg) }), { method: 'DELETE' }),
   editGet: (folder: string) => call<EditResponse>('/api/edit?' + q({ folder })),
   propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; keep?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
   override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState }>('/api/edit/override', { folder, ...body }),
