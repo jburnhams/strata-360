@@ -200,6 +200,12 @@ def create_app(roots, token=None):
             if os.path.exists(os.path.join(d, n)): return FileResponse(os.path.join(d, n), media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
         raise HTTPException(404, 'no thumbnail yet')
 
+    @api.get('/api/preview')
+    def get_preview(request: Request, folder: str, clip: str):                           # the preview video (Range requests are handled, so seeking works); <video> cannot send headers, so the cookie/query token authenticates
+        auth(request); f = folder_of(folder); p = os.path.join(_cd(f, clip), 'preview.mp4')
+        if not os.path.exists(p): raise HTTPException(404, 'the preview has not been made yet')
+        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
+
     @api.get('/api/clip', dependencies=[Depends(auth)])
     def get_clip(folder: str, clip: str):                                                # everything known about one clip, for its detail view
         from strata360.pipeline import notes as N
@@ -211,6 +217,7 @@ def create_app(roots, token=None):
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
+        mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'preview.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
         th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th; out['places'] = _j(d, 'places.json')

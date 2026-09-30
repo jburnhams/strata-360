@@ -93,3 +93,28 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+def make_preview(osv, out, size='2048x1024', bitrate='6M', progress=None, frames_limit=0):
+    """Browser preview for the GUI player: the same upright, world-locked equirect as the proxy but at 25 fps (every 2nd source frame), H.264 8-bit (plays in every browser, seeks well)
+    with the clip's audio (AAC). The GUI viewer projects it on a sphere (drag to pan, wheel to zoom) and can follow the runner's heading. Sidecar `<name>.json` has the per-frame source times."""
+    W, H = map(int, size.split('x')); t0 = time.time(); every = 2
+    R = EquirectRenderer(osv, W, H); tel = read_frames(osv); pts = video_pts(osv, 0); idx = list(range(0, len(pts), every))
+    if frames_limit: idx = idx[:frames_limit]
+    dm, ds = decoder(osv, 1, every), decoder(osv, 0, every); tmp = out + '.video.mp4'
+    enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', '25', '-i', '-',
+                            '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p', '-c:v', 'h264_videotoolbox', '-b:v', bitrate,
+                            '-profile:v', 'high', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', '-movflags', '+faststart', tmp], stdin=subprocess.PIPE)
+    frames = []
+    for j, k in enumerate(idx):
+        cm = r4.read_frame(dm); cs = r4.read_frame(ds)
+        if cm is None or cs is None: break
+        enc.stdin.write(np.ascontiguousarray(R.render(cm, cs, R.stab_matrix(tel['quat'][k]), None)).tobytes()); frames.append(round(float(pts[k] - pts[0]), 3))
+        if progress and j % 50 == 0: progress(j, len(idx))
+    enc.stdin.close(); enc.wait(); dm.kill(); ds.kill()
+    dur = len(frames) / 25.0
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', tmp, '-ss', '0', '-t', f'{dur:.3f}', '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', out], check=True)
+    os.remove(tmp)
+    side = dict(schema_version=1, projection='equirectangular', layout='centre column = world +Y (heading datum), lon increases right', size=[W, H], fps=25, frame_times_s=frames, seconds=round(time.time() - t0, 1),
+                note='upright and world-locked; the viewer adds the runner heading (motion.json) to follow their direction; frame_times_s are source clip times (the mp4 is nominal 25 fps)')
+    json.dump(side, open(os.path.splitext(out)[0] + '.json', 'w')); return side

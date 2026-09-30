@@ -102,6 +102,13 @@ def thumb(ctx):
     quick(ctx.clip.osv, str(ctx.dir))
 
 
+@stage('preview', 1, outputs=('preview.mp4', 'preview.json'), deps=('ingest',),
+       note='browser preview for the player: upright equirect 2048x1024, 25 fps, H.264 with audio (slow: several times real time)')
+def preview(ctx):
+    from strata360.render.proxy import make_preview
+    make_preview(ctx.clip.osv, ctx.path('preview.mp4'))
+
+
 @stage('places', 2, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
        note='where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)')
 def places(ctx):

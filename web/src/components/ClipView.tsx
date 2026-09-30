@@ -4,6 +4,7 @@ import NoteBox from './NoteBox'
 import RedoDialog from './RedoDialog'
 import Phrase, { type Mode } from './Phrase'
 import Moments from './Moments'
+import ClipPlayer from './ClipPlayer'
 import { PanelSkeleton, Skeleton } from './Skeleton'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -24,10 +25,8 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
   const utc = String(c.time.start_utc ?? ''), m = c.motion, sc = c.scenes?.summary, id = c.identity
   return (
     <div className="space-y-4">
-      <div className="overflow-hidden rounded-xl border border-stone-200 dark:border-stone-800">
-        {c.thumb ? <img key={c.thumb.kind} src={api.thumbUrl(folder, clip, c.thumb.kind)} alt="" className="aspect-video w-full object-cover" /> : <div className="grid aspect-video place-items-center bg-stone-200 text-stone-500 dark:bg-stone-800">the thumbnail stage has not run for this clip yet</div>}
-        <div className="flex items-center justify-between bg-white px-4 py-2 text-xs text-stone-500 dark:bg-stone-900"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : ''}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
-      </div>
+      <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} />
+      <div className="-mt-2 flex items-center justify-between px-1 text-xs text-stone-500"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : 'no thumbnail yet'}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="When and where">
           <Kv k="Start (UTC)" v={utc.replace('T', ' ').replace('Z', '')} /><Kv k="Length" v={fmt(c.video.source_frames / c.video.nominal_fps)} /><Kv k="Time status" v={String(c.time.utc_status)} />
