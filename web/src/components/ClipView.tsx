@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type ClipDetail } from '../api'
 import NoteBox from './NoteBox'
 import RedoDialog from './RedoDialog'
+import Phrase, { type Mode } from './Phrase'
 import { PanelSkeleton, Skeleton } from './Skeleton'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -14,6 +15,7 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
   const [c, setC] = useState<ClipDetail>()
   const [err, setErr] = useState<string>()
   const [redo, setRedo] = useState(false)
+  const [mode, setMode] = useState<Mode>('translated')
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
   useEffect(() => { if (c && focus != null) document.getElementById(`seg-${Math.round(focus * 100)}`)?.scrollIntoView({ block: 'center' }) }, [c, focus])
   if (err) return <p className="text-stone-500">{err}</p>
@@ -67,13 +69,14 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
         </Card>
       </div>
       <Card title="Transcript">
+        <div className="mb-2 flex items-center gap-2 text-xs text-stone-500">other languages shown as
+          <select value={mode} onChange={e => setMode(e.target.value as Mode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="translated">translated</option><option value="original">original</option><option value="both">both</option></select></div>
         {c.transcript.length === 0 && <p className="text-sm text-stone-500">No speech recognised.</p>}
         {c.transcript.map((l, i) => (
           <div key={i} id={`seg-${Math.round(l.t0 * 100)}`} className={`py-1 text-sm ${l.flagged ? 'opacity-50' : ''} ${focus != null && Math.abs(l.t0 - focus) < 0.05 ? 'rounded bg-emerald-100 px-1 dark:bg-emerald-950' : ''}`}>
             <span className="mr-2 font-mono text-xs text-stone-500">{fmt(l.t0)}</span>
             {l.who && <span className={`mr-2 rounded-full px-2 text-xs ${l.who === 'wearer' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{l.who === 'wearer' ? 'you' : 'other'}</span>}
-            {l.lang !== 'en' && <span className="mr-2 rounded-full border border-stone-300 px-2 text-xs dark:border-stone-700">{l.lang}</span>}
-            <span>{l.text}</span>{l.text_en && l.text_en !== l.text && <div className="ml-10 text-stone-500">→ {l.text_en}</div>}
+            <Phrase text={l.text} en={l.text_en} lang={l.lang} mode={mode} />
           </div>
         ))}
       </Card>

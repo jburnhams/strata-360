@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { api, type ClipInfo, type Meta, type Seg } from '../api'
 import { usePoll } from '../usePoll'
 import { PanelSkeleton } from './Skeleton'
+import Phrase, { type Mode } from './Phrase'
 
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -10,6 +11,7 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).
 export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder: string; clips: ClipInfo[]; tz: string; onOpen: (clip: string, t: number) => void }) {
   const data = usePoll(() => api.transcript(folder), 30000, [folder])
   const [filter, setFilter] = useState<'all' | 'you'>('all')
+  const [mode, setMode] = useState<Mode>('translated')
   const [tip, setTip] = useState<{ seg: Seg; x: number; y: number }>()
   const info = useMemo(() => Object.fromEntries(clips.map(c => [c.id, c])), [clips])
   const groups = useMemo(() => {
@@ -28,6 +30,8 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
       <div className="mb-3 flex items-center justify-between text-sm">
         <b>Transcript of everything</b>
         <span className="flex items-center gap-3 text-stone-500">{data.segments.length} phrases
+          <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown" className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
+            <option value="translated">translated</option><option value="original">original language</option><option value="both">both</option></select>
           <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'you')} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
             <option value="all">everyone</option><option value="you">only you</option></select></span>
       </div>
@@ -38,9 +42,9 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
             <button className="mb-0.5 font-mono text-xs text-stone-500 hover:underline" onClick={() => onOpen(g.clip, g.segs[0].t0)}>{short(g.clip)}{info[g.clip] ? ` · ${Math.round(info[g.clip].duration_s)} s` : ''}</button>
             <p>
               {g.segs.map((s, i) => (
-                <span key={i} onClick={() => onOpen(s.clip, s.t0)} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}
-                  className={`mr-1 cursor-pointer rounded px-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-950 ${s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500'} ${s.flagged ? 'italic opacity-50' : ''}`}>
-                  {s.text}{s.lang !== 'en' && s.text_en && s.text_en !== s.text ? <span className="text-stone-400"> [{s.text_en}]</span> : null}
+                <span key={i} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}
+                  className={`mr-1 rounded px-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-950 ${s.who === 'wearer' ? 'font-medium' : ''} ${s.flagged ? 'italic opacity-50' : ''}`}>
+                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`cursor-pointer ${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} onText={() => onOpen(s.clip, s.t0)} />
                 </span>
               ))}
             </p>
@@ -55,7 +59,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
             <div>{local(t)} <span className="text-stone-500">({t ? t.toISOString().slice(11, 19) : ''} UTC)</span></div>
             <div className="text-stone-500">at {mmss(tip.seg.t0)} of {c ? mmss(c.duration_s) : '?'} · {tip.seg.who === 'wearer' ? 'you' : tip.seg.who === 'other' ? 'someone else' : 'voice not labelled yet'} · {tip.seg.lang}</div>
             {c?.steady != null && <div className="text-stone-500">steadiness {Math.round(c.steady * 100)}%{c.candidates != null ? ` · ${c.candidates} usable moments` : ''}</div>}
-            {tip.seg.text_en && tip.seg.text_en !== tip.seg.text && <div>→ {tip.seg.text_en}</div>}
+            {tip.seg.lang !== 'en' && tip.seg.text_en && tip.seg.text_en !== tip.seg.text && <div><span className="text-amber-700 dark:text-amber-300">{tip.seg.text}</span><br /><span className="text-sky-700 dark:text-sky-300">→ {tip.seg.text_en}</span></div>}
             <div className="text-emerald-700 dark:text-emerald-400">click to open this clip</div>
           </div>
         </div>) })()}
