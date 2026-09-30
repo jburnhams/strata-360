@@ -15,7 +15,7 @@ STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
-VO_JOBS = {}; VO_ERRORS = {}     # folder -> the running voice-over thread / its last error
+FILM_JOBS = {}; VO_JOBS = {}; VO_ERRORS = {}     # folder -> the running voice-over thread / its last error
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
 
@@ -317,6 +317,57 @@ def create_app(roots, token=None):
                 import glob as g; c = sorted(g.glob(os.path.join(b, 'synth', f'{seg:03d}-*.wav')), key=os.path.getmtime); p = c[-1] if c else ''
         if not p or not os.path.exists(p): raise HTTPException(404, 'not made yet')
         return FileResponse(p, media_type='audio/wav', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/film', dependencies=[Depends(auth)])
+    def get_film(folder: str):                                                           # state of the preview of the CURRENT plan: none | rendering | done | error, with progress
+        from strata360.edit import project as PJ
+        from strata360.render import preview as PV
+        f = folder_of(folder); plan = PJ.load(f).get('plan'); j = FILM_JOBS.get(f); running = bool(j and j.poll() is None)
+        if not plan: return dict(state='noplan', running=False)
+        key = PV.plan_key(f, plan); st = None
+        try: st = json.load(open(os.path.join(PV.film_dir(f, key), 'status.json')))
+        except (OSError, ValueError): pass
+        state = st['state'] if st else ('starting' if running else 'none')
+        if st and st['state'] in ('rendering', 'audio') and not running: state = 'error'; st['error'] = 'the preview was stopped'
+        return dict(state=state, running=running, key=key, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), placeholders=(st or {}).get('placeholders', []), error=(st or {}).get('error'), length_s=plan['film']['length_s'])
+
+    @api.post('/api/film/start', dependencies=[Depends(auth)])
+    def post_film_start(body: dict):                                                     # {folder}: render the preview of the saved plan (lowest priority, one at a time)
+        f = folder_of(body.get('folder')); j = FILM_JOBS.get(f)
+        if j and j.poll() is None: return dict(started=False)
+        rd = config.race_dir(f); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'film_job.log'), 'wb')
+        FILM_JOBS[f] = subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'film', f] + (['--force'] if body.get('force') else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.post('/api/film/stop', dependencies=[Depends(auth)])
+    def post_film_stop(body: dict):
+        import signal
+        from strata360.pipeline import runner
+        j = FILM_JOBS.get(folder_of(body.get('folder')))
+        if j and j.poll() is None: runner.kill_tree(j.pid, signal.SIGTERM)
+        return dict(ok=True)
+
+    @api.get('/api/film/index.m3u8')
+    def get_film_playlist(request: Request, folder: str):                                # the playlist with segment names made absolute (the query token / cookie authenticates the player's requests)
+        auth(request); from urllib.parse import quote
+        from strata360.edit import project as PJ
+        from strata360.render import preview as PV
+        f = folder_of(folder); plan = PJ.load(f).get('plan')
+        if not plan: raise HTTPException(404, 'no plan')
+        p = os.path.join(PV.film_dir(f, PV.plan_key(f, plan)), 'index.m3u8')
+        if not os.path.exists(p): raise HTTPException(404, 'not started yet')
+        txt = ''.join((f'/api/film/seg?folder={quote(folder)}&name={ln.strip()}\n' if ln.strip().endswith('.ts') else ln) for ln in open(p).readlines())
+        return Response(txt, media_type='application/vnd.apple.mpegurl', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/film/seg')
+    def get_film_seg(request: Request, folder: str, name: str):
+        auth(request)
+        from strata360.edit import project as PJ
+        from strata360.render import preview as PV
+        f = folder_of(folder); plan = PJ.load(f).get('plan')
+        if not plan or not name.startswith('seg') or not name.endswith('.ts') or '/' in name: raise HTTPException(404)
+        p = os.path.join(PV.film_dir(f, PV.plan_key(f, plan)), name)
+        if not os.path.exists(p): raise HTTPException(404)
+        return FileResponse(p, media_type='video/mp2t', headers={'Cache-Control': 'max-age=3600'})
 
     @api.post('/api/track', dependencies=[Depends(auth)])
     async def post_track(request: Request, folder: str, filename: str = 'track.fit'):    # the file is the raw request body; saved under the known name track.fit / track.gpx

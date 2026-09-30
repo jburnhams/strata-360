@@ -1,3 +1,4 @@
+import FilmPreview from './FilmPreview'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type ClipInfo, type EditResponse, type PlanSegment } from '../api'
 import { PanelSkeleton } from './Skeleton'
@@ -32,6 +33,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
   const input = 'w-20 rounded-lg border border-stone-300 bg-stone-50 px-2 py-1 text-sm dark:border-stone-700 dark:bg-stone-950'
   return (
     <div className="space-y-4">
+      <FilmPreview folder={folder} />
       <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <h3 className="mb-2 text-sm font-semibold">Plan</h3>
         <div className="flex flex-wrap items-end gap-3 text-sm">
