@@ -273,7 +273,7 @@ def cmd_open(a):
 
 def cmd_serve(a):
     from strata360.server import app
-    app.main(sum([['--root', r] for r in (a.root or [])], []) + ['--host', a.host, '--port', str(a.port)] + (['--token', a.token] if a.token else []))
+    app.main(sum([['--root', r] for r in (a.root or [])], []) + ['--host', a.host, '--port', str(a.port)] + (['--token', a.token] if a.token else []) + (['--reload'] if a.reload else []))
 
 
 def cmd_voice(a):
@@ -393,7 +393,7 @@ def main():
     p = sub.add_parser('progress', help='project state and per-stage progress (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_progress)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
-    p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.set_defaults(fn=cmd_serve)
+    p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.add_argument('--reload', action='store_true', help='restart on code changes'); p.set_defaults(fn=cmd_serve)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
     p = sub.add_parser('voiceover', help='speak the script with a local voice and mix the voice-over track (recordings replace lines)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--engine'); p.add_argument('--voice'); p.add_argument('--rate', type=int); p.add_argument('--list', action='store_true', help='list engines and voices'); p.set_defaults(fn=cmd_voiceover)
     p = sub.add_parser('script', help='propose a voice-over script for a film of the target length (notes + transcript + track data -> local LLM)'); p.add_argument('name', metavar='FOLDER_OR_RACE')

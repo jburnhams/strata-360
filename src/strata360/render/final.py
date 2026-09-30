@@ -83,7 +83,7 @@ def render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='10
     """Render (or continue) the final film; returns the path of the film. `limit_pieces` renders only the first pieces and does not assemble (for trying things out)."""
     key = final_key(plan, list(size), fps, bitrate, folder); d = final_dir(folder, key); os.makedirs(d, exist_ok=True); segs = plan['segments']; ps = pieces(segs, fps); W, H = size
     total = sum(p['frames'] for p in ps); t0 = time.time(); done_frames = 0
-    def status(state, **kw): json.dump(dict(state=state, key=key, frames_done=done_frames, frames_total=total, pieces_done=sum(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
+    def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=done_frames, frames_total=total, pieces_done=sum(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
     src = FinalSource(folder, segs, framing, W, H, fps); status('rendering')
     for n, p in enumerate(ps):
         if limit_pieces is not None and n >= limit_pieces: break

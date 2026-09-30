@@ -89,6 +89,12 @@ def last_project(roots):
     return f if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else None
 
 
+def alive(pid):
+    """Is that process still running (jobs outlive a restart of the server, so their own pid is recorded in their status)."""
+    try: os.kill(int(pid), 0); return True
+    except (OSError, TypeError, ValueError): return False
+
+
 def start_job(folder, args=('open',)):
     """Start one more worker on the project (returns False when the maximum are already running). Each worker loops until nothing is left; extra workers pick up unfinished, unclaimed items."""
     from strata360.pipeline import runner
@@ -327,14 +333,37 @@ def create_app(roots, token=None):
         key = PV.plan_key(f, plan); st = None
         try: st = json.load(open(os.path.join(PV.film_dir(f, key), 'status.json')))
         except (OSError, ValueError): pass
+        running = running or bool(st and st['state'] in ('rendering', 'audio') and alive(st.get('pid')))
         state = st['state'] if st else ('starting' if running else 'none')
         if st and st['state'] in ('rendering', 'audio') and not running: state = 'error'; st['error'] = 'the preview was stopped'
         return dict(state=state, running=running, key=key, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), placeholders=(st or {}).get('placeholders', []), error=(st or {}).get('error'), length_s=plan['film']['length_s'])
 
+    def job_pid(f, jobs, status_path_fn):
+        """pid of the running job for folder f: our own child, or (after a restart of the server) the pid its status file names."""
+        j = jobs.get(f)
+        if j and j.poll() is None: return j.pid
+        try:
+            st = json.load(open(status_path_fn(f)))
+            if st.get('state') in ('rendering', 'audio', 'assembling') and alive(st.get('pid')): return int(st['pid'])
+        except (OSError, ValueError, KeyError, TypeError): pass
+        return None
+
+    def film_status_path(f):
+        from strata360.edit import project as PJ
+        from strata360.render import preview as PV
+        plan = PJ.load(f).get('plan'); return os.path.join(PV.film_dir(f, PV.plan_key(f, plan)), 'status.json') if plan else ''
+
+    def final_status_path(f):
+        from strata360.edit import project as PJ
+        from strata360.render import final as FN
+        plan = PJ.load(f).get('plan'); s = final_settings(f)
+        if not plan: return ''
+        w, h = map(int, s['size'].split('x')); return os.path.join(FN.final_dir(f, FN.final_key(plan, [w, h], s['fps'], s['bitrate'], f)), 'status.json')
+
     @api.post('/api/film/start', dependencies=[Depends(auth)])
     def post_film_start(body: dict):                                                     # {folder}: render the preview of the saved plan (lowest priority, one at a time)
-        f = folder_of(body.get('folder')); j = FILM_JOBS.get(f)
-        if j and j.poll() is None: return dict(started=False)
+        f = folder_of(body.get('folder'))
+        if job_pid(f, FILM_JOBS, film_status_path): return dict(started=False)
         rd = config.race_dir(f); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'film_job.log'), 'wb')
         FILM_JOBS[f] = subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'film', f] + (['--force'] if body.get('force') else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
@@ -342,8 +371,8 @@ def create_app(roots, token=None):
     def post_film_stop(body: dict):
         import signal
         from strata360.pipeline import runner
-        j = FILM_JOBS.get(folder_of(body.get('folder')))
-        if j and j.poll() is None: runner.kill_tree(j.pid, signal.SIGTERM)
+        pid = job_pid(folder_of(body.get('folder')), FILM_JOBS, film_status_path)
+        if pid: runner.kill_tree(pid, signal.SIGTERM)
         return dict(ok=True)
 
     @api.get('/api/film/index.m3u8')
@@ -384,6 +413,7 @@ def create_app(roots, token=None):
         w, h = map(int, s['size'].split('x')); key = FN.final_key(plan, [w, h], s['fps'], s['bitrate'], f); st = None
         try: st = json.load(open(os.path.join(FN.final_dir(f, key), 'status.json')))
         except (OSError, ValueError): pass
+        running = running or bool(st and st['state'] in ('rendering', 'assembling') and alive(st.get('pid')))
         state = st['state'] if st else ('starting' if running else 'none')
         if st and st['state'] in ('rendering', 'assembling') and not running: state = 'stopped'
         return dict(state=state, running=running, settings=s, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), pieces_done=(st or {}).get('pieces_done', 0), pieces_total=(st or {}).get('pieces_total', 0),
@@ -391,8 +421,8 @@ def create_app(roots, token=None):
 
     @api.post('/api/final/start', dependencies=[Depends(auth)])
     def post_final_start(body: dict):                                                    # {folder, size?, fps?, bitrate?}: start or continue the final render (lowest priority; finished pieces are kept)
-        f = folder_of(body.get('folder')); j = FINAL_JOBS.get(f)
-        if j and j.poll() is None: return dict(started=False)
+        f = folder_of(body.get('folder'))
+        if job_pid(f, FINAL_JOBS, final_status_path): return dict(started=False)
         s = final_settings(f)
         if body.get('size') in ('1920x1080', '2560x1440', '3840x2160'): s['size'] = body['size']
         if body.get('fps') in (25, 25.0, 30, 30.0, 50, 50.0): s['fps'] = float(body['fps'])
@@ -404,8 +434,8 @@ def create_app(roots, token=None):
     def post_final_stop(body: dict):
         import signal
         from strata360.pipeline import runner
-        j = FINAL_JOBS.get(folder_of(body.get('folder')))
-        if j and j.poll() is None: runner.kill_tree(j.pid, signal.SIGTERM)
+        pid = job_pid(folder_of(body.get('folder')), FINAL_JOBS, final_status_path)
+        if pid: runner.kill_tree(pid, signal.SIGTERM)
         return dict(ok=True)
 
     @api.get('/api/final/file')
@@ -628,14 +658,22 @@ def create_app(roots, token=None):
     return api
 
 
+def app_from_env():
+    return create_app([r for r in os.environ.get('STRATA360_SERVER_ROOTS', '').split(os.pathsep) if r], os.environ.get('STRATA360_SERVER_TOKEN') or None)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='strata360 serve'); ap.add_argument('--root', action='append', help='folder the browser may look inside (repeatable)'); ap.add_argument('--host', default='127.0.0.1')
-    ap.add_argument('--port', type=int, default=8360); ap.add_argument('--token', help='shared secret (required when --host is not 127.0.0.1; generated if omitted)'); a = ap.parse_args(argv)
+    ap.add_argument('--port', type=int, default=8360); ap.add_argument('--token', help='shared secret (required when --host is not 127.0.0.1; generated if omitted)'); ap.add_argument('--reload', action='store_true', help='restart the server when the code changes (workers and renders keep running: they are separate processes)'); a = ap.parse_args(argv)
     roots = load_roots(a.root)
     if not roots: sys.exit('no allowed folders: give --root PATH (repeatable) or list them in ~/.strata360/server.json {"roots": [...]}')
     token = a.token if a.token else (secrets.token_urlsafe(16) if a.host not in ('127.0.0.1', 'localhost') else None)
     print(f'strata360 server on http://{a.host}:{a.port}/' + (f'?token={token}' if token else '')); print('allowed folders:', ', '.join(roots))
-    import uvicorn; uvicorn.run(create_app(roots, token), host=a.host, port=a.port, log_level='warning')
+    import uvicorn
+    if a.reload:                                                                          # the app is rebuilt from the environment after each restart
+        os.environ['STRATA360_SERVER_ROOTS'] = os.pathsep.join(roots); os.environ['STRATA360_SERVER_TOKEN'] = token or ''
+        uvicorn.run('strata360.server.app:app_from_env', factory=True, host=a.host, port=a.port, log_level='warning', reload=True, reload_dirs=[os.path.dirname(os.path.dirname(os.path.abspath(__file__)))], reload_includes=['*.py'])
+    else: uvicorn.run(create_app(roots, token), host=a.host, port=a.port, log_level='warning')
 
 
 if __name__ == '__main__':
