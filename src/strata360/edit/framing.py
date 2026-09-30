@@ -2,6 +2,7 @@
 
 The plan says which part of which clip and which technique (hold, push in, pan ...). This adds the subject: who or what the technique is aimed at, from the analysis of the clip.
 
+  the candidate's view   a stretch chosen for other people in view is framed on them, one chosen for you on you
   speech in the window   the speaker: another person while another voice talks, you (the wearer) while you talk
   tight techniques       (push in, dialogue hold): another person if one is in view, else you
   everything else        straight ahead (the runner's heading), unless another person is in view most of the time
@@ -58,6 +59,9 @@ def choose_subject(g, tech, data):
     if tech.id in NO_SUBJECT: return 'none', 'this technique has its own framing'
     cp, cy = _coverage(data['person'], t0, t1), _coverage(data['you'], t0, t1); who = _speaker(data['speakers'], t0, t1)
     if tech.id == 'selfie_hold': return ('you', 'you, the wearer') if cy >= 0.3 else ('none', 'you are not found in this window: behind the runner')
+    kind = g.get('kind')                                                                 # the candidate the window was cut from says how it is meant to be seen
+    if kind == 'person' and cp >= 0.3: return 'person', 'this stretch was chosen for the people in view'
+    if kind == 'you' and cy >= 0.3: return 'you', 'this stretch was chosen for you in view'
     if who == 'other' and cp >= 0.3: return 'person', 'another person is speaking'
     if who == 'wearer' and cy >= 0.3: return 'you', 'you are speaking'
     if tech.id in TIGHT:

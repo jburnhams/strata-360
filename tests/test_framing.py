@@ -28,6 +28,12 @@ def test_speaker_and_fallbacks():
     assert FR.resolve_segment(seg('planet_fill'), lib, data(person=samples(100, 0)))['subject'] == 'none'
 
 
+def test_the_candidates_own_view_decides_the_subject():
+    lib = TQ.load(); both = data(person=samples(100, 0), you=samples(200, 0, who='you'))
+    assert FR.resolve_segment(dict(seg('hold_wide'), kind='you'), lib, both)['subject'] == 'you' and FR.resolve_segment(dict(seg('hold_wide'), kind='person'), lib, both)['subject'] == 'person'
+    assert FR.resolve_segment(dict(seg('hold_wide'), kind='person'), lib, data())['subject'] == 'heading'                      # nobody in view: straight ahead
+
+
 def test_projection_centre_and_planet():
     v = PV.EquirectView(64, 36); ez = np.array([0.0, 0.0, 1.0]); v.set_fov(90.0)
     mx, my = v.maps(np.array([1.0, 0.0, 0.0]), ez, 0.0, 400, 200)                                          # looking along +X (yaw 90): the centre pixel is lon +90 at the horizon
