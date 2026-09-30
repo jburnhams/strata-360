@@ -4,7 +4,7 @@ Six 100-degree views around the camera's horizon (body frame: +Y is the front le
 the fisheye frames with maps computed once per clip, so a sample costs a decode plus six remaps. They are NOT stabilised: detectors do not need it, and
 keeping them body-fixed means the wearer (on the selfie stick) is always in the same view. Views are numbered by the yaw of their centre from the front
 lens: 0 front, 60, 120, 180 = straight at the wearer (rear lens), 240, 300."""
-import os, subprocess, numpy as np, cv2
+import json, os, subprocess, numpy as np, cv2
 from strata360.osv.calib import read_slots, Lens
 
 VIEW_YAWS = (0, 60, 120, 180, 240, 300)
@@ -134,3 +134,53 @@ def render_thumb(osv, t, yaw=0.0, pitch=0.0, hfov=95.0, w=960, h=540, stab=None,
     wt = np.clip(0.5 + d[:, 1] / np.sin(np.radians(6.0)), 0, 1).reshape(h, w, 1).astype(np.float32)
     a = cv2.remap(fm, f(um), f(vm), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT); b = cv2.remap(fs, f(us), f(vs), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
     img = (a * wt + b * (1 - wt)).astype(np.uint8); ok, buf = cv2.imencode('.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality]); return buf.tobytes()
+
+
+# ---- views cut from the clip's proxy (one early render that the other stages share) ------------------------------------------------------------------------------------------
+# The `proxy` stage renders the clip once as an upright, world-locked equirect (3840x1920, 25 fps, HEVC). Detectors, the scene model and thumbnails then cut their flat views from that
+# file: no repeated decoding of the two huge lens streams. The equirect is world-locked, so a heading-relative view is just a rotation of the sampling rays (same heading track as StabViews).
+
+def heading_track(osv):
+    """(heading radians per source frame, source fps): the same smoothed heading StabViews uses, so results from the two paths agree."""
+    from strata360.osv.calib import quat_to_R, imu_offsets
+    from strata360.osv.telemetry import read_frames
+    from strata360.render.camera import heading_series
+    P, B = imu_offsets(); T = read_frames(osv); fps = (len(T['ts_us']) - 1) / max((T['ts_us'][-1] - T['ts_us'][0]) / 1e6, 1e-6)
+    Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); return heading_series(Ms, tau_s=2.0, fps=fps), fps
+
+
+def proxy_available(proxy_path):
+    return bool(proxy_path) and os.path.exists(proxy_path) and os.path.getsize(proxy_path) > 0 and os.path.exists(os.path.splitext(proxy_path)[0] + '.json')
+
+
+def _equirect_view(eq, dE, w, h):
+    """Sample an equirect frame (H, W, 3) along world rays dE (N, 3): returns an (h, w, 3) picture."""
+    H, W = eq.shape[:2]; lon = np.arctan2(dE[:, 0], dE[:, 1]); lat = np.arcsin(np.clip(dE[:, 2], -1, 1))
+    mx = ((lon / (2 * np.pi) + 0.5) * W - 0.5).astype(np.float32).reshape(h, w); my = ((0.5 - lat / np.pi) * H - 0.5).astype(np.float32).reshape(h, w)
+    return cv2.remap(eq, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+
+
+def write_stab_views_proxy(proxy_path, osv, out_dir, every=25, yaws=STAB_YAWS, px=VIEW_PX, fov=VIEW_FOV, quality=93):
+    """Like write_stab_views, but decoded from the clip's proxy (every `every` SOURCE frames; the proxy keeps every 2nd or 4th). Files s{source_frame:05d}_v{yaw:03d}.jpg."""
+    side = json.load(open(os.path.splitext(proxy_path)[0] + '.json')); frames = side['frames']; heading, _ = heading_track(osv); os.makedirs(out_dir, exist_ok=True)
+    step = max(int(round(every / side['every_n_source_frames'])), 1); W, H = side['size']
+    cmd = ['ffmpeg', '-v', 'error', '-i', proxy_path, '-fps_mode', 'passthrough', '-vf', f"select='not(mod(n\\,{step}))'", '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=W * H * 3 * 2); n = W * H * 3; j = 0; ks = []
+    while True:
+        buf = p.stdout.read(n)
+        if len(buf) < n: break
+        eq = np.frombuffer(buf, np.uint8).reshape(H, W, 3); k = frames[min(j * step, len(frames) - 1)]['source_frame']; h = heading[min(k, len(heading) - 1)]
+        for y in yaws:
+            img = _equirect_view(eq, stab_view_rays(y, h, px, fov), px, px); cv2.imwrite(f'{out_dir}/s{k:05d}_v{y:03d}.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality])
+        ks.append(int(k)); j += 1
+    p.wait(); return ks
+
+
+def render_thumb_proxy(proxy_path, osv, t, yaw=0.0, pitch=0.0, hfov=100.0, w=960, h=540, quality=90, heading=None):
+    """A flat, upright 16:9 view at clip time `t` cut from the proxy; JPEG bytes. Same conventions as render_thumb (yaw from the runner's heading, 0 = ahead, 180 = behind)."""
+    side = json.load(open(os.path.splitext(proxy_path)[0] + '.json')); W, H = side['size']; times = np.array([f['t_s'] for f in side['frames']]); j = int(np.argmin(np.abs(times - t)))
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{times[j]:.3f}', '-i', proxy_path, '-frames:v', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, check=True).stdout
+    eq = np.frombuffer(raw, np.uint8).reshape(H, W, 3)
+    if heading is None: heading, _ = heading_track(osv)
+    k = side['frames'][j]['source_frame']; hd = heading[min(k, len(heading) - 1)]
+    img = _equirect_view(eq, _rect_rays(yaw, hd, w, h, hfov, pitch), w, h); ok, buf = cv2.imencode('.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality]); return buf.tobytes()

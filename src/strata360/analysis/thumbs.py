@@ -32,13 +32,21 @@ def _load(d, n):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+def _thumb(osv, d, t, yaw, pitch, hfov):
+    """JPEG bytes of the view: cut from the clip's proxy when it exists (seconds), else rendered from the lens streams (slow)."""
+    from strata360.analysis import views as V
+    proxy = os.path.join(d, 'proxy.mp4')
+    if V.proxy_available(proxy): return V.render_thumb_proxy(proxy, osv, t, yaw=yaw, pitch=pitch, hfov=hfov)
+    return V.render_thumb(osv, t, yaw=yaw, pitch=pitch, hfov=hfov)
+
+
 def quick(osv, d):
     from strata360.analysis import views as V
     mo = _load(d, 'motion.json'); clip = _load(d, 'clip.json'); dur = clip['video']['source_frames'] / clip['video']['nominal_fps']; t = 0.5 * dur
     if mo:
         ts = np.array(mo['series']['t']); steady = np.exp(-np.array(mo['series']['shake_dps']) / 25.0); score = steady - 0.6 * np.abs(ts - 0.5 * dur) / max(dur, 1.0); m = (ts > 0.1 * dur) & (ts < 0.9 * dur)
         if m.any(): t = float(ts[m][np.argmax(score[m])])
-    open(os.path.join(d, 'thumb_quick.jpg'), 'wb').write(V.render_thumb(osv, t, yaw=0.0, hfov=AHEAD_HFOV))
+    open(os.path.join(d, 'thumb_quick.jpg'), 'wb').write(_thumb(osv, d, t, 0.0, 0.0, AHEAD_HFOV))
     info = dict(kind='quick', t_s=round(t, 2), yaw=0.0, fov=AHEAD_HFOV, corner_stretch=round(corner_stretch(AHEAD_HFOV), 2), why='steadiest moment near the middle, looking ahead, wide view'); json.dump(info, open(os.path.join(d, 'thumb_quick.json'), 'w')); return info
 
 
@@ -65,10 +73,10 @@ def best(osv, d):
     if r:
         yaw, pitch = float(r['me']['yaw']), float(r['me']['pitch']); ph = float(r['me'].get('height_deg') or 60.0); hfov, fwhy = fov_for_person(ph)
         if hfov >= MAX_HFOV and ph / 0.85 > 2 * math.degrees(math.atan(math.tan(math.radians(hfov) / 2) / ASPECT)): pitch += 0.12 * ph      # the body does not fit: keep the head in by aiming a little higher
-        open(os.path.join(d, 'thumb.jpg'), 'wb').write(V.render_thumb(osv, t, yaw=yaw, pitch=pitch, hfov=hfov))
+        open(os.path.join(d, 'thumb.jpg'), 'wb').write(_thumb(osv, d, t, yaw, pitch, hfov))
         info = dict(kind='best', t_s=round(t, 2), yaw=round(yaw, 1), pitch=round(pitch, 1), fov=round(hfov, 1), corner_stretch=round(corner_stretch(hfov), 2), candidate=c['id'],
                     why=f"best candidate ({c['id'].split('#')[-1]}), looking at you (face recognised, similarity {r['me']['sim']:.2f}); {fwhy}")
     else:
-        open(os.path.join(d, 'thumb.jpg'), 'wb').write(V.render_thumb(osv, t, yaw=0.0, pitch=0.0, hfov=AHEAD_HFOV))
+        open(os.path.join(d, 'thumb.jpg'), 'wb').write(_thumb(osv, d, t, 0.0, 0.0, AHEAD_HFOV))
         info = dict(kind='best', t_s=round(t, 2), yaw=0.0, pitch=0.0, fov=AHEAD_HFOV, corner_stretch=round(corner_stretch(AHEAD_HFOV), 2), candidate=c['id'], why=f"best candidate ({c['id'].split('#')[-1]}), most attractive second, looking ahead, wide view")
     json.dump(info, open(os.path.join(d, 'thumb.json'), 'w')); return info

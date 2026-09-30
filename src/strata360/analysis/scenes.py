@@ -13,7 +13,9 @@ SCHEMA_VERSION = 1
 def analyse(osv, work_dir, every_s=5.0, models=None, px=768):
     pts = video_pts(osv, 0); fps = (len(pts) - 1) / max(pts[-1] - pts[0], 1e-6); every = max(int(round(every_s * fps)), 1); tmp = tempfile.mkdtemp(prefix='s360scn_', dir=work_dir)
     try:
-        V.write_stab_views(osv, tmp, every=every, yaws=(0, 180), px=px)
+        proxy = os.path.join(work_dir, 'proxy.mp4')
+        if V.proxy_available(proxy): V.write_stab_views_proxy(proxy, osv, tmp, every=every, yaws=(0, 180), px=px)
+        else: V.write_stab_views(osv, tmp, every=every, yaws=(0, 180), px=px)
         py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..'); out = os.path.join(tmp, 'vlm.json')
         subprocess.run([py, '-m', 'strata360.analysis.scenes_vlm', tmp, out] + (['--model', models] if models else []), check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
         raw = json.load(open(out))

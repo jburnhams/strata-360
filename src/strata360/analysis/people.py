@@ -36,7 +36,9 @@ def analyse(osv, work_dir, every=50, models=None):
     pts = video_pts(osv, 0); t = lambda k: round(float(pts[min(k, len(pts) - 1)] - pts[0]), 3)
     tmp = tempfile.mkdtemp(prefix='s360views_', dir=work_dir)
     try:
-        V.write_stab_views(osv, tmp, every=every)
+        proxy = os.path.join(work_dir, 'proxy.mp4')
+        if V.proxy_available(proxy): V.write_stab_views_proxy(proxy, osv, tmp, every=every)              # the shared early render: no decoding of the lens streams
+        else: V.write_stab_views(osv, tmp, every=every)
         py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..')
         jf, nf = os.path.join(tmp, 'det.json'), os.path.join(tmp, 'emb.npy')
         cmd = [py, '-m', 'strata360.analysis.people_detect', tmp, jf, nf] + (['--models', models] if models else [])

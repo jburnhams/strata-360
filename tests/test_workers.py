@@ -54,6 +54,18 @@ def test_track_stages_pause_without_a_track_and_reset_when_it_or_the_clock_chang
     cfg['camera_clock']['offset_seconds'] = 370.0; _, k4, _ = runner._cached(f, st, c, cfg, state, '/nonexistent'); assert k4 == k2                                # back to the same alignment: same key
 
 
+def test_soft_dependency_holds_back_new_work_but_never_invalidates_finished_work():
+    from strata360.pipeline import clips as clipmod
+    f = project(); cfg = dict(config.DEFAULTS); cfg['stages'] = ['ingest', 'proxy', 'people']; st = runner.STAGES['people']; assert 'proxy' in st.soft_deps and 'proxy' not in st.deps
+    c = clipmod.Clip(id='CAM_a_0001_D', osv='x.OSV', fingerprint='abc'); d = os.path.join(f, 'strata360', 'clips', 'CAM_a_0001_D')
+    state = dict(ingest=dict(status='ok', key='k'))
+    done, key, blocked = runner._cached(f, st, c, cfg, state, d); assert not done and blocked == ['proxy']                    # a new item waits for the proxy
+    state['people'] = dict(status='ok', key=key)
+    for o in st.outputs: open(os.path.join(d, o), 'w').write('x')
+    done2, key2, blocked2 = runner._cached(f, st, c, cfg, state, d); assert done2 and key2 == key and not blocked2               # the same item, finished before the proxy existed: still valid, key unchanged
+    state['proxy'] = dict(status='ok', key='p'); done3, key3, blocked3 = runner._cached(f, st, c, cfg, state, d); assert done3 and key3 == key
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

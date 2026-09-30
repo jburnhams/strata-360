@@ -118,3 +118,14 @@ def make_preview(osv, out, size='2048x1024', bitrate='6M', progress=None, frames
     side = dict(schema_version=1, projection='equirectangular', layout='centre column = world +Y (heading datum), lon increases right', size=[W, H], fps=25, frame_times_s=frames, seconds=round(time.time() - t0, 1),
                 note='upright and world-locked; the viewer adds the runner heading (motion.json) to follow their direction; frame_times_s are source clip times (the mp4 is nominal 25 fps)')
     json.dump(side, open(os.path.splitext(out)[0] + '.json', 'w')); return side
+
+
+def make_preview_from_proxy(proxy_path, osv, out, size='2048x1024', bitrate='6M'):
+    """The browser preview derived from the clip's proxy: rescale to 2048x1024, H.264 (plays in every browser), the clip's audio as AAC. Takes seconds, not a second render."""
+    t0 = time.time(); side = json.load(open(os.path.splitext(proxy_path)[0] + '.json')); W, H = size.split('x')
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', proxy_path, '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-vf', f'scale={W}:{H}:flags=area,format=yuv420p', '-c:v', 'h264_videotoolbox', '-b:v', bitrate,
+                    '-profile:v', 'high', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', out], check=True)
+    fps = 50.0 / side['every_n_source_frames']
+    info = dict(schema_version=1, projection='equirectangular', layout='centre column = world +Y (heading datum), lon increases right', size=[int(W), int(H)], fps=fps, from_proxy=os.path.basename(proxy_path),
+                frame_times_s=[f['t_s'] for f in side['frames']], seconds=round(time.time() - t0, 1), note='upright and world-locked; the viewer adds the runner heading (motion.json) to follow their direction')
+    json.dump(info, open(os.path.splitext(out)[0] + '.json', 'w')); return info

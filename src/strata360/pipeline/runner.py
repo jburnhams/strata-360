@@ -201,6 +201,9 @@ def _cached(race, st, c, cfg, state, ctx_dir):
     key = stage_key(st, c, cfg, {d: v.get('key') for d, v in deps.items()}, extra); cur = state.get(st.name, {}); clock_sig = _sha(cfg.get('camera_clock'))
     if st.name == 'ingest' and cur.get('key') and cur.get('version') == st.version and cur.get('fp', c.fingerprint) == c.fingerprint: key = cur['key']    # frozen identity: a clock change re-times, it does not invalidate clip-relative stages
     done = cur.get('status') == 'ok' and cur.get('key') == key and all(os.path.exists(os.path.join(ctx_dir, o)) for o in st.outputs) and (st.name != 'ingest' or cur.get('clock') == clock_sig)
+    if not done and st.soft_deps:                                                                       # a NEW item waits for its soft dependencies (they are not in the key, so finished work stays valid)
+        wait = [d for d in st.soft_deps if d in cfg.get('stages', []) and state.get(d, {}).get('status') != 'ok']
+        if wait: return False, key, wait
     return done, key, []
 
 

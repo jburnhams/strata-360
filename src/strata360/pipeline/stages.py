@@ -19,12 +19,13 @@ class Stage:
     outputs: tuple = ()
     default: bool = True      # part of the default `run`
     note: str = ''
+    soft_deps: tuple = ()      # stages whose output is used when present and waited for before a NEW item starts (they do not enter the key: finished results stay valid)
     needs_track: bool = False  # uses the race GPS track: waits until one is set, and is redone when the track or the clip-to-track time alignment changes
 
 
-def stage(name, version, keys=(), deps=(), outputs=(), default=True, note='', needs_track=False):
+def stage(name, version, keys=(), deps=(), outputs=(), default=True, note='', needs_track=False, soft_deps=()):
     def deco(fn):
-        STAGES[name] = Stage(name, version, fn, tuple(keys), tuple(deps), tuple(outputs), default, note, needs_track); ORDER.append(name); return fn
+        STAGES[name] = Stage(name, version, fn, tuple(keys), tuple(deps), tuple(outputs), default, note, tuple(soft_deps), needs_track); ORDER.append(name); return fn
     return deco
 
 
@@ -96,17 +97,25 @@ def motion(ctx):
     ctx.write('motion.json', ctx.stamped(analyse(ctx.clip.osv)))
 
 
-@stage('thumb', 1, outputs=('thumb_quick.jpg',), deps=('motion',), note='a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early')
+@stage('proxy', 2, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
+       note='the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, HEVC): the detectors, the scene model, thumbnails and the player all read this instead of the lens files (slow: about 10x real time)')
+def proxy(ctx):
+    from strata360.render.proxy import make_proxy
+    p = ctx.cfg['proxy']
+    make_proxy(ctx.clip.osv, ctx.path('proxy.mp4'), p['size'], p['every_frames'], p['bitrate'])
+
+
+@stage('thumb', 1, outputs=('thumb_quick.jpg',), deps=('motion',), soft_deps=('proxy',), note='a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early')
 def thumb(ctx):
     from strata360.analysis.thumbs import quick
     quick(ctx.clip.osv, str(ctx.dir))
 
 
-@stage('preview', 1, outputs=('preview.mp4', 'preview.json'), deps=('ingest',),
-       note='browser preview for the player: upright equirect 2048x1024, 25 fps, H.264 with audio (slow: several times real time)')
+@stage('preview', 2, outputs=('preview.mp4', 'preview.json'), deps=('proxy',),
+       note='the browser preview for the player: the proxy rescaled to 2048x1024 H.264 with the clip audio (seconds per clip)')
 def preview(ctx):
-    from strata360.render.proxy import make_preview
-    make_preview(ctx.clip.osv, ctx.path('preview.mp4'))
+    from strata360.render.proxy import make_preview_from_proxy
+    make_preview_from_proxy(ctx.path('proxy.mp4'), ctx.clip.osv, ctx.path('preview.mp4'))
 
 
 @stage('places', 2, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
@@ -122,7 +131,7 @@ def places(ctx):
     rebuild_locations(root)                                                        # the race-wide locations.json in the project folder
 
 
-@stage('people', 2, keys=('people_every_frames',), outputs=('people.json', 'faces.npy', 'faces_thumbs.npy'), deps=('ingest',), default=False,
+@stage('people', 2, keys=('people_every_frames',), outputs=('people.json', 'faces.npy', 'faces_thumbs.npy'), deps=('ingest',), soft_deps=('proxy',), default=False,
        note='persons and faces on body-frame views (YOLO11 pose + InsightFace), deduplicated across views (slow: minutes per clip; needs .venv-vision and models/)')
 def people(ctx):
     import numpy as np
@@ -141,7 +150,7 @@ def identity(ctx):
     ctx.write('identity.json', ctx.stamped(I.analyse_clip(ctx.read('people.json'), np.load(ctx.path('faces.npy')), I.load_profile(path))))
 
 
-@stage('scenes', 2, keys=('scenes_every_s',), outputs=('scenes.json',), deps=('ingest',), default=False,
+@stage('scenes', 2, keys=('scenes_every_s',), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy',), default=False,
        note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags) from a local VLM on front and rear views every few seconds (slow: minutes per clip)')
 def scenes(ctx):
     from strata360.analysis.scenes import analyse
@@ -168,15 +177,10 @@ def candidates(ctx):
     ctx.write('candidates.json', ctx.stamped(build(str(ctx.dir))))
 
 
-@stage('thumb_best', 1, outputs=('thumb.jpg',), deps=('candidates', 'identity', 'scenes'), note='the better thumbnail: best candidate, most attractive moment, the wearer when clearly in view')
+@stage('thumb_best', 1, outputs=('thumb.jpg',), deps=('candidates', 'identity', 'scenes'), soft_deps=('proxy',), note='the better thumbnail: best candidate, most attractive moment, the wearer when clearly in view')
 def thumb_best(ctx):
     from strata360.analysis.thumbs import best
     best(ctx.clip.osv, str(ctx.dir))
 
 
-@stage('proxy', 1, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',), default=False,
-       note='the canonical upright equirect analysis proxy (slow: about 3.5x real time; large): opt-in')
-def proxy(ctx):
-    from strata360.render.proxy import make_proxy
-    p = ctx.cfg['proxy']
-    make_proxy(ctx.clip.osv, ctx.path('proxy.mp4'), p['size'], p['every_frames'], p['bitrate'])
+
