@@ -10,11 +10,12 @@ const Card = ({ title, children }: { title: string; children: React.ReactNode })
 )
 const Kv = ({ k, v }: { k: string; v: React.ReactNode }) => v == null || v === '' ? null : <div className="flex justify-between gap-3 py-0.5 text-sm"><span className="text-stone-500">{k}</span><span className="text-right">{v}</span></div>
 
-export default function ClipView({ folder, clip }: { folder: string; clip: string }) {
+export default function ClipView({ folder, clip, focus }: { folder: string; clip: string; focus?: number }) {
   const [c, setC] = useState<ClipDetail>()
   const [err, setErr] = useState<string>()
   const [redo, setRedo] = useState(false)
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
+  useEffect(() => { if (c && focus != null) document.getElementById(`seg-${Math.round(focus * 100)}`)?.scrollIntoView({ block: 'center' }) }, [c, focus])
   if (err) return <p className="text-stone-500">{err}</p>
   if (!c) return <div className="space-y-4"><Skeleton className="aspect-video w-full" /><div className="grid gap-4 md:grid-cols-2"><PanelSkeleton title="When and where" /><PanelSkeleton title="Motion and picture" /></div><PanelSkeleton title="Transcript" rows={4} /></div>
   const utc = String(c.time.start_utc ?? ''), m = c.motion, sc = c.scenes?.summary, id = c.identity
@@ -52,7 +53,7 @@ export default function ClipView({ folder, clip }: { folder: string; clip: strin
       <Card title="Transcript">
         {c.transcript.length === 0 && <p className="text-sm text-stone-500">No speech recognised.</p>}
         {c.transcript.map((l, i) => (
-          <div key={i} className={`py-1 text-sm ${l.flagged ? 'opacity-50' : ''}`}>
+          <div key={i} id={`seg-${Math.round(l.t0 * 100)}`} className={`py-1 text-sm ${l.flagged ? 'opacity-50' : ''} ${focus != null && Math.abs(l.t0 - focus) < 0.05 ? 'rounded bg-emerald-100 px-1 dark:bg-emerald-950' : ''}`}>
             <span className="mr-2 font-mono text-xs text-stone-500">{fmt(l.t0)}</span>
             {l.who && <span className={`mr-2 rounded-full px-2 text-xs ${l.who === 'wearer' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{l.who === 'wearer' ? 'you' : 'other'}</span>}
             {l.lang !== 'en' && <span className="mr-2 rounded-full border border-stone-300 px-2 text-xs dark:border-stone-700">{l.lang}</span>}

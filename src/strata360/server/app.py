@@ -176,6 +176,23 @@ def create_app(roots, token=None):
                             thumb=thumb, steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
+    @api.get('/api/transcript', dependencies=[Depends(auth)])
+    def get_transcript(folder: str):                                                     # every recognised phrase of every clip, in clip order: the overview's running transcript
+        f = folder_of(folder); rd = config.race_dir(f); out = []
+        for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
+            c = _j(d, 'clip.json'); tr = _j(d, 'transcript.json')
+            if not c or not tr: continue
+            sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
+            for s in tr['segments']:
+                if not s.get('text', '').strip(): continue
+                out.append(dict(clip=c['clip_id'], t0=round(s['t0'], 2), t1=round(s['t1'], 2), lang=s['lang'], text=s['text'].strip(), text_en=s.get('text_en'), flagged=bool(s.get('flags') or s.get('suspect')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))))
+        return dict(segments=out)
+
+    @api.get('/api/meta', dependencies=[Depends(auth)])
+    def get_meta_tz(folder: str):
+        from strata360.pipeline import meta as M
+        f = folder_of(folder); m = M.load(f); m['timezone'] = (config.load(f).get('timezone') if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else None) or 'Europe/Brussels'; return m
+
     @api.get('/api/thumb')
     def get_thumb(request: Request, folder: str, clip: str):                              # the image itself: an <img> tag cannot send headers, so the cookie/query token is what authenticates it
         auth(request); f = folder_of(folder); d = _cd(f, clip)
@@ -203,11 +220,6 @@ def create_app(roots, token=None):
             t0 = dt.datetime.fromisoformat(c['time']['start_utc'].replace('Z', '+00:00')).timestamp(); t1 = dt.datetime.fromisoformat(c['time']['end_utc'].replace('Z', '+00:00')).timestamp()
             ctx = X.context_at(track.load(p), t0, t1); out['track'] = ctx; out['track_text'] = X.describe(ctx)
         return out
-
-    @api.get('/api/meta', dependencies=[Depends(auth)])
-    def get_meta(folder: str):
-        from strata360.pipeline import meta as M
-        return M.load(folder_of(folder))
 
     @api.post('/api/meta', dependencies=[Depends(auth)])
     def post_meta(body: dict):                                                           # {folder, title?, date?, results?: {starters, finishers, finished, position}}

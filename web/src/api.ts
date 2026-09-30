@@ -17,9 +17,10 @@ export interface TrackOverview {
 }
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
-  title: string | null; date: string | null; results: Results
+  timezone?: string; title: string | null; date: string | null; results: Results
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
+export interface Seg { clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
 export interface Line { t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface Candidate { id: string; start_s: number; end_s: number; start_utc: string; quality: number; energy: number; features: Record<string, number>; settings: string[]; people: number }
@@ -56,6 +57,7 @@ export const api = {
   thumbUrl: (folder: string, clip: string, v: string) => '/api/thumb?' + q({ folder, clip, v }),
   meta: (folder: string) => call<Meta>('/api/meta?' + q({ folder })),
   saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
+  transcript: (folder: string) => call<{ segments: Seg[] }>('/api/transcript?' + q({ folder })),
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),
