@@ -20,6 +20,8 @@ def test_shaky_parts_are_dropped_and_speech_is_its_own_candidate():
     assert not any(a < 20 and b > 15 for a, b in spans), spans                            # nothing overlaps the shaky 15-20 s
     sp = [c for c in cs if c['features']['speech']]; assert len(sp) == 1 and 23 <= sp[0]['start_s'] <= 25 and sp[0]['min_dur'] >= 3.0 and sp[0]['transcript']
     assert all(c['end_s'] - c['start_s'] >= C.MIN_LEN for c in cs) and all(0 <= c['quality'] <= 1 for c in cs)
+    un = [m for m in r['unusable'] if 14 <= m['start_s'] <= 21]; assert un and any('too shaky' in x for m in un for x in m['reasons']) and all(m['starts_because'] for m in un), r['unusable']      # the shaky stretch is reported with its reason
+    assert all(c['why']['starts_because'] and c['why'].get('ends_because') for c in cs)
     assert 'scenes' in r['missing'] and cs[0]['start_utc'].startswith('2026-02-19T17:00:0')
 
 

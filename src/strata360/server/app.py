@@ -211,6 +211,7 @@ def create_app(roots, token=None):
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
+        out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
         th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th; out['places'] = _j(d, 'places.json')
         p = config.track_path(f, config.load(f))

@@ -384,3 +384,7 @@ By noise type (small, all SNRs): wind raw 0.14 → DeepFilterNet3 0.11 and MossF
 
 ## Transcript language display (30 Sep)
 - Phrases in other languages are marked: translations in blue with a chip "FR -> EN", originals in amber with a chip "FR"; clicking the chip flips that phrase between them (clicking the text still opens the clip in the overview). A selector above the transcript (overview and clip view) sets what everything shows first: translated (default), original language, or both. The hover card shows the original and the translation together. Clicking the "FR -> EN" chip on "The rubber staff." switched it to "Le personnel en caoutchoula." in the browser pane.
+
+## Moments with reasons; thumbnail field of view (30 Sep)
+- candidates v2 records the unusable stretches with reasons and explains each boundary; the clip view shows a timeline plus a list, with hover reasons and numbers. Clip 0005: usable 3-8 s (forest, score 0.61) and 8-20 s (trail, 0.57; split because the scene setting changed), unusable 1-3 s "too shaky (71 deg/s of camera shake; the limit is about 57)" and 0-1 s too short.
+- Thumbnail FOV: was two fixed constants (95 ahead, 80 on the wearer); now 100 ahead and, for the wearer, sized from their measured angular height (whole body with margin, between 80 and 105, corner stretch reported). Clip 0005 best thumbnail: 103 degrees across at 15 s, the whole body from head to legs visible. thumb.json stores fov, corner_stretch and the reason.

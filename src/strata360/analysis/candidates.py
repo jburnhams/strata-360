@@ -32,6 +32,7 @@ def timeline(d):
     missing = [k for k, v in (('motion', mo), ('speakers', sp_doc), ('exposure', ex), ('audio', au), ('transcript', tr), ('identity', idn), ('scenes', sc)) if v is None]
     def at(ts, vs, default): return np.interp(t, ts, vs) if len(ts) else np.full(n, default)
     steady = at(mo['series']['t'], np.exp(-np.array(mo['series']['shake_dps']) / 25.0), 0.5) if mo else np.full(n, 0.5)
+    shake = at(mo['series']['t'], np.array(mo['series']['shake_dps']), 0.0) if mo else np.zeros(n)
     energy = at(mo['series']['t'], np.clip(np.array(mo['series']['ang_speed_dps']) / 90.0 + np.array(mo['series']['acc_energy']) / 1.2, 0, 1), 0.4) if mo else np.full(n, 0.4)
     expo = np.ones(n)
     if ex:
@@ -57,7 +58,7 @@ def timeline(d):
             canopy = at(ts, [1.0 if i.get('setting') in ('forest',) else 0.3 if i.get('setting') == 'trail' else 0.0 for i in fr], 0.0)
             open_ground = at(ts, [1.0 if i.get('setting') in ('field', 'road', 'mountain', 'town') else 0.3 for i in fr], 0.5)
             near = [int(np.argmin(np.abs(np.array(ts) - x))) for x in t]; setting = [fr[j].get('setting') for j in near]
-    return dict(n=n, t=t, dur=dur, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, people=people, scenic=scenic, blocked=blocked, canopy=canopy, open_ground=open_ground,
+    return dict(n=n, t=t, dur=dur, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, people=people, scenic=scenic, blocked=blocked, canopy=canopy, open_ground=open_ground,
                 setting=setting, missing=missing, clip=clip, tr=tr, al=al, sc=sc, mo=mo)
 
 
@@ -65,19 +66,36 @@ def build(d, thr=0.32):
     T = timeline(d); n = T['n']; clip = T['clip']
     q = np.clip(0.5 * T['steady'] + 0.2 * T['expo'] + 0.2 * T['scenic'] + 0.1 * (1 - T['blocked']), 0, 1) * (1 - 0.7 * T['blocked'])                           # per-second usefulness
     good = (q >= thr) & (T['steady'] >= 0.1); speech = T['speech'] > 0.5; chat = T['chatter'] > 0.5
-    key = np.zeros(n, int); k = 0                                                                                                                       # a new stretch starts when any of the reasons changes
+    reasons = []                                                                                                                                       # why each second is not good (empty when it is)
+    for i in range(n):
+        if good[i]: reasons.append(None); continue
+        if T['steady'][i] < 0.1: reasons.append(f"too shaky ({T['shake'][i]:.0f} deg/s of camera shake; the limit is about 57)")
+        elif T['blocked'][i] > 0.5: reasons.append('lens blocked or fogged')
+        elif T['expo'][i] < 0.4: reasons.append('badly exposed (blown out or crushed)')
+        else: reasons.append(f"low overall score ({q[i]:.2f} < {thr}): steadiness {T['steady'][i] * 100:.0f}%, scenic {T['scenic'][i]:.1f}")
+    key = np.zeros(n, int); k = 0; starts = ['start of the clip']                                                                                         # a new stretch starts when any of the reasons changes
     for i in range(1, n):
-        if good[i] != good[i - 1] or speech[i] != speech[i - 1] or chat[i] != chat[i - 1] or (T['setting'][i] != T['setting'][i - 1] and T['setting'][i] and T['setting'][i - 1]) or abs(T['people'][i] - T['people'][i - 1]) > 6: k += 1
+        why = None
+        if good[i] != good[i - 1]: why = 'the picture became usable' if good[i] else 'the picture became unusable'
+        elif speech[i] != speech[i - 1]: why = 'you started speaking' if speech[i] else 'you stopped speaking'
+        elif chat[i] != chat[i - 1]: why = 'other voices started' if chat[i] else 'other voices stopped'
+        elif T['setting'][i] != T['setting'][i - 1] and T['setting'][i] and T['setting'][i - 1]: why = f"the scene changed: {T['setting'][i - 1]} to {T['setting'][i]}"
+        elif abs(T['people'][i] - T['people'][i - 1]) > 6: why = 'the crowd size changed'
+        if why: k += 1; starts.append(why)
         key[i] = k
-    out = []
+    out, moments = [], []
     for kk in np.unique(key):
-        idx = np.flatnonzero(key == kk); i0, i1 = int(idx[0]), int(idx[-1]) + 1
-        if not good[i0] or (i1 - i0) < MIN_LEN: continue
+        idx = np.flatnonzero(key == kk); i0, i1 = int(idx[0]), int(idx[-1]) + 1; sl = slice(i0, i1); start_why = starts[int(kk)]
+        stats = dict(steadiness=round(float(T['steady'][sl].mean()), 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2), scenic=round(float(T['scenic'][sl].mean()), 2),
+                     lens_blocked=round(float(T['blocked'][sl].mean()), 2), people=round(float(T['people'][sl].mean()), 1), setting=next((x for x in T['setting'][i0:i1] if x), None), score=round(float(q[sl].mean()), 2))
+        if not good[i0] or (i1 - i0) < MIN_LEN:
+            rs = [r for r in reasons[i0:i1] if r]; top = sorted({r.split(' (')[0].split(':')[0] for r in rs}, key=lambda x: -sum(1 for r in rs if r.startswith(x)))
+            moments.append(dict(start_s=float(i0), end_s=float(i1), usable=False, reasons=(top or [f'too short ({i1 - i0} s; the minimum is {MIN_LEN} s)']), detail=rs[0] if rs else None, starts_because=start_why, stats=stats)); continue
         while i1 - i0 > MAX_STRETCH:                                                                                                                  # very long stretches are split so alternatives exist
-            j = i0 + int(MAX_STRETCH); out.append((i0, j, bool(speech[i0]))); i0 = j
-        out.append((i0, i1, bool(speech[i0])))
+            j = i0 + int(MAX_STRETCH); out.append((i0, j, bool(speech[i0]), start_why)); i0 = j; start_why = f'split: a stretch is at most {MAX_STRETCH:.0f} s'
+        out.append((i0, i1, bool(speech[i0]), start_why))
     cands = []
-    for c, (i0, i1, sp) in enumerate(out):
+    for c, (i0, i1, sp, start_why) in enumerate(out):
         sl = slice(i0, i1); qq = float(q[sl].mean()); s_ = float(T['steady'][sl].mean()); nad = float(np.clip(1.0 - T['blocked'][sl].max() * 0.8, 0, 1))
         feats = dict(steady=round(s_, 3), clear_nadir=round(nad, 3), open_ground=round(float(T['open_ground'][sl].mean()), 3), canopy=round(float(T['canopy'][sl].mean()), 3),
                      subject=round(float(np.clip(T['me'][sl].mean() * 0.7 + min(T['people'][sl].mean(), 3) / 3 * 0.5, 0, 1)), 3), speech=1.0 if sp else 0.0, protagonist=round(float(T['me'][sl].mean()), 3),
@@ -85,10 +103,16 @@ def build(d, thr=0.32):
         cand = dict(id=f"{clip['clip_id']}#{c:02d}", clip=clip['clip_id'], start_s=float(i0), end_s=float(i1), start_utc=_iso_add(clip['time']['start_utc'], i0), end_utc=_iso_add(clip['time']['start_utc'], i1),
                     quality=round(qq, 3), energy=round(float(T['energy'][sl].mean()), 3), min_dur=3.0 if sp else 1.0, max_dur=float(i1 - i0), features=feats,
                     settings=sorted({x for x in T['setting'][i0:i1] if x}), people=round(float(T['people'][sl].mean()), 1))
+        cand['why'] = dict(starts_because=start_why, steadiness=round(float(T['steady'][sl].mean()), 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2),
+                           scenic=round(float(T['scenic'][sl].mean()), 2), lens_blocked=round(float(T['blocked'][sl].mean()), 2), score=round(qq, 2), speech=bool(sp), chatter=round(float(T['chatter'][sl].mean()), 2))
         if sp and T['tr']:
             segs = [s for s in T['tr']['segments'] if s['t1'] > i0 and s['t0'] < i1 and s.get('text', '').strip() and not s.get('flags')]
             cand['transcript'] = [dict(t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en')) for s in segs]
             cand['cuts'] = [dict(t=c_['t'], pause_s=c_['pause_s']) for a in ((T['al'] or {}).get('segments') or []) if a for c_ in (a.get('cuts') or []) if c_ and c_.get('safe') and i0 <= c_['t'] <= i1]
         cands.append(cand)
-    return dict(schema=SCHEMA_VERSION, thresholds=dict(usable_score=thr, min_len_s=MIN_LEN, max_stretch_s=MAX_STRETCH), missing=T['missing'], candidates=cands,
-                summary=dict(n=len(cands), total_s=round(sum(c['end_s'] - c['start_s'] for c in cands), 1), speech=sum(1 for c in cands if c['features']['speech']), clip_s=round(T['dur'], 1)))
+    allm = sorted([dict(c=c, s=c['start_s']) for c in cands] + [dict(c=m, s=m['start_s']) for m in moments], key=lambda x: x['s'])
+    for x, nxt in zip(allm, allm[1:] + [None]):
+        if 'why' in x['c']: x['c']['why']['ends_because'] = nxt['c']['why']['starts_because'] if nxt and 'why' in nxt['c'] else (nxt['c']['starts_because'] if nxt else 'end of the clip')
+        else: x['c']['ends_because'] = nxt['c']['why']['starts_because'] if nxt and 'why' in nxt['c'] else (nxt['c']['starts_because'] if nxt else 'end of the clip')
+    return dict(schema=SCHEMA_VERSION, thresholds=dict(usable_score=thr, min_len_s=MIN_LEN, max_stretch_s=MAX_STRETCH), missing=T['missing'], candidates=cands, unusable=moments,
+                summary=dict(unusable_s=round(sum(m['end_s'] - m['start_s'] for m in moments), 1), n=len(cands), total_s=round(sum(c['end_s'] - c['start_s'] for c in cands), 1), speech=sum(1 for c in cands if c['features']['speech']), clip_s=round(T['dur'], 1)))

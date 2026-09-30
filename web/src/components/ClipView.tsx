@@ -3,6 +3,7 @@ import { api, type ClipDetail } from '../api'
 import NoteBox from './NoteBox'
 import RedoDialog from './RedoDialog'
 import Phrase, { type Mode } from './Phrase'
+import Moments from './Moments'
 import { PanelSkeleton, Skeleton } from './Skeleton'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -58,14 +59,8 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
               </>)
             })()}
         </Card>
-        <Card title="Usable moments">
-          {c.candidates ? c.candidates.map(x => (
-            <div key={x.id} className="flex items-center gap-2 py-0.5 text-sm">
-              <span className="w-24 font-mono text-xs text-stone-500">{fmt(x.start_s)}–{fmt(x.end_s)}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800"><div className="h-full bg-emerald-600" style={{ width: `${x.quality * 100}%` }} /></div>
-              {x.features.speech > 0.5 && <span title="you speak">💬</span>}{x.features.chatter > 0.5 && <span title="other voices">🗣</span>}
-            </div>
-          )) : <p className="text-sm text-stone-500">Candidates are made once the other stages have finished.</p>}
+        <Card title="Usable and unusable moments">
+          <Moments duration={c.video.source_frames / c.video.nominal_fps} usable={c.candidates} unusable={c.unusable} thresholds={c.thresholds} />
         </Card>
       </div>
       <Card title="Transcript">
