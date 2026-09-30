@@ -22,8 +22,9 @@ type Focus = { t: number; yaw: number; pitch: number; who: 'you' | 'other'; spea
 type Aim = 'free' | 'heading' | 'person'
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
-export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, hasPreview, duration }: {
+export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, hasPreview, duration, window: win, autoStart }: {
   folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; focus?: Focus[] | null; hasPreview: boolean; duration: number
+  window?: { start: number; end: number }; autoStart?: boolean   // play only this part of the clip (the timeline's window); autoStart begins at once
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -114,8 +115,10 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, ha
   const play = async () => {
     const v = video.current; if (!v) return
     if (!started) { setStarted(true); await new Promise(r => setTimeout(r, 50)) }
+    if (win && (v.currentTime < win.start - 0.05 || v.currentTime >= win.end - 0.05)) v.currentTime = win.start
     if (v.paused) { try { await video.current!.play() } catch (e) { setErr((e as Error).message) } } else v.pause()
   }
+  useEffect(() => { if (autoStart && hasPreview && !started) play() }, [autoStart, hasPreview])   // eslint-disable-line react-hooks/exhaustive-deps
   const noPreview = !hasPreview
 
   return (
@@ -123,7 +126,8 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, ha
       <div className="relative aspect-video w-full bg-black">
         {thumbKind && !started && <img src={api.thumbUrl(folder, clip, thumbKind)} alt="" className="absolute inset-0 h-full w-full object-cover" />}
         <video ref={video} src={started ? api.previewUrl(folder, clip) : undefined} muted={muted} playsInline preload="auto" crossOrigin="anonymous" className="hidden"
-          onTimeUpdate={e => setT((e.target as HTMLVideoElement).currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setErr('could not load the preview video')} />
+          onLoadedMetadata={e => { if (win) (e.target as HTMLVideoElement).currentTime = win.start }}
+          onTimeUpdate={e => { const v = e.target as HTMLVideoElement; setT(v.currentTime); if (win && v.currentTime >= win.end) { v.pause(); v.currentTime = win.start } }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setErr('could not load the preview video')} />
         <canvas ref={canvas} className={`absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing ${started ? '' : 'hidden'}`}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={() => (drag.current = null)} onPointerCancel={() => (drag.current = null)} onWheel={onWheel} onDoubleClick={reset} />
         {!started && (

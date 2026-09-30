@@ -298,28 +298,23 @@ def cmd_script(a):
     from strata360.edit import techniques as TQ, optimise as O, script as SC
     from strata360.gps import track
     cfg = config.load(a.name); rd = config.race_dir(a.name); notes = N.load(a.name); tp = config.track_path(a.name, cfg); tr = track.load(tp) if tp else None
-    cdir = os.path.join(rd, 'clips'); cands = {}; clips = []
+    from strata360.edit import project as PJ
+    cdir = os.path.join(rd, 'clips'); cands = {}
+    try:                                                                                          # the saved plan (what the timeline shows); a new one only if there is none or another length was asked for
+        cur = PJ.load(a.name); plan_len = ((cur.get('plan') or {}).get('film') or {}).get('length_s')
+        if not cur.get('plan') or (a.length and abs(a.length - plan_len) > 0.6) or (a.seed is not None and a.seed != cur['settings']['seed'] and a.reseed):
+            PJ.propose(a.name, dict(length_s=a.length or cur['settings']['length_s'], seed=a.seed if a.seed is not None else cur['settings']['seed']))
+        edit = PJ.load(a.name)
+    except O.Infeasible as e: sys.exit(str(e))
+    plan_doc = edit['plan']; length = plan_doc['film']['length_s']; beat_s = 60.0 / plan_doc['film']['bpm']
     for f in sorted(glob.glob(os.path.join(cdir, '*', 'candidates.json'))):
-        cj = json.load(open(os.path.join(os.path.dirname(f), 'clip.json'))); cd = json.load(open(f))
-        for c in cd['candidates']: cands[c['id']] = c
-        clips.append(dict(id=cj['clip_id'], start_utc=cj['time']['start_utc'], duration_s=cj['video']['source_frames'] / cj['video']['nominal_fps'], candidates=cd['candidates'], unusable=cd.get('unusable') or []))
-    if not clips: sys.exit('no candidates yet: ./strata360 run RACE --stages candidates')
-    n_dirs = len(glob.glob(os.path.join(cdir, '*', 'clip.json')))
-    if len(clips) < n_dirs: print(f'WARNING: {n_dirs - len(clips)} clip(s) have no candidates yet (their stages are unfinished) and are not in this plan')
-    from strata360.edit import chrono as CH
-    lib = TQ.load(); music = O.Music(bpm=120.0, beats=int(round(a.length * 2)))
-    plan = CH.plan(clips, lib, music, CH.Settings(seed=a.seed)); bad = CH.violations(plan, lib, music, clips)
-    if bad: sys.exit('the plan broke its own rules: ' + '; '.join(bad[:5]))
-    start_of = {c['id']: c['start_utc'] for c in clips}
-    def cand_dict(sg):
-        c = cands.get(sg.cand.id)
-        if c: return c
-        import datetime as _dt
-        t0 = _dt.datetime.fromisoformat(start_of[sg.cand.clip].replace('Z', '+00:00')) + _dt.timedelta(seconds=sg.cand.start_s)
-        return dict(id=sg.cand.id, clip=sg.cand.clip, start_s=sg.cand.start_s, end_s=sg.cand.end_s, start_utc=t0.strftime('%Y-%m-%dT%H:%M:%SZ'), features=sg.cand.features, people=None)
+        for c in json.load(open(f))['candidates']: cands[c['id']] = c
+    if plan_doc.get('missing_clips'): print(f"WARNING: {len(plan_doc['missing_clips'])} clip(s) have no candidates yet (their stages are unfinished) and are not in this plan")
     facts = []
-    for i, sg in enumerate(plan):
-        facts.append(SC.segment_facts(dict(index=i, start_s=sg.start * music.beat_s, dur_s=sg.beats * music.beat_s, technique=sg.tech.id, in_s=sg.in_s), cand_dict(sg), cdir, tr, notes, cfg.get('timezone', 'Europe/Brussels')))
+    for g in plan_doc['segments']:
+        cd = cands.get(g['cand_id']) or dict(id=g['cand_id'], clip=g['clip'], start_s=g['cand_start_s'], end_s=g['cand_end_s'], start_utc=g['utc_start'], features={}, people=None)
+        facts.append(SC.segment_facts(dict(id=g['id'], index=g['index'], start_s=g['film_start_s'], dur_s=g['dur_s'], technique=g['technique'], in_s=g['in_s']), cd, cdir, tr, notes, cfg.get('timezone', 'Europe/Brussels')))
+    a.length = length
     race_line = ''
     if tr is not None:
         race_line = f"The race: {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours."
@@ -379,7 +374,7 @@ def main():
     p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.set_defaults(fn=cmd_serve)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
     p = sub.add_parser('script', help='propose a voice-over script for a film of the target length (notes + transcript + track data -> local LLM)'); p.add_argument('name', metavar='FOLDER_OR_RACE')
-    p.add_argument('--length', type=float, default=90.0, help='film length in seconds'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=1); p.add_argument('--provider', choices=['vertex', 'gemini', 'anthropic', 'local']); p.add_argument('--model'); p.set_defaults(fn=cmd_script)
+    p.add_argument('--length', type=float, default=None, help='film length in seconds (default: the saved plan\'s)'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=None); p.add_argument('--reseed', action='store_true', help='re-plan with the given seed'); p.add_argument('--provider', choices=['vertex', 'gemini', 'anthropic', 'local']); p.add_argument('--model'); p.set_defaults(fn=cmd_script)
     p = sub.add_parser('clear', help='forget the status of a stage so it is processed again (with the stages that depend on it)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('stage')
     p.add_argument('--clip', help='comma-separated full clip ids (default all)'); p.add_argument('--no-cascade', action='store_true'); p.set_defaults(fn=cmd_clear)
     p = sub.add_parser('set-key', help='store an API key for the voice-over script writer in secrets.env (gitignored)'); p.add_argument('--provider', choices=['vertex', 'gemini', 'anthropic'], default='vertex'); p.add_argument('--clear', action='store_true'); p.set_defaults(fn=cmd_set_key)

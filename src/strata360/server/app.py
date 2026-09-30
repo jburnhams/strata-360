@@ -278,6 +278,40 @@ def create_app(roots, token=None):
         except Exception as e:
             os.replace(dest, dest + '.bad'); raise HTTPException(400, f'could not read that file: {type(e).__name__}: {e}')
 
+    @api.get('/api/edit', dependencies=[Depends(auth)])
+    def get_edit(folder: str):                                                           # settings, overrides, the saved plan, the technique list and the newest script's lines by segment id
+        from strata360.edit import project as PJ, techniques as TQ
+        f = folder_of(folder); e = PJ.load(f); lib = TQ.load(); rd = config.race_dir(f)
+        files = sorted(glob.glob(os.path.join(rd, 'scripts', 'script-*.json'))); lines = {}
+        if files:
+            try:
+                for l in json.load(open(files[-1])).get('lines', []):
+                    if l.get('id'): lines[l['id']] = dict(text=l.get('text', ''), says=l.get('says') or [], words=l.get('words'), budget=l.get('budget_words'))
+            except ValueError: pass
+        return dict(edit=e, techniques=[dict(id=t.id, family=t.family, hero=t.hero, dur=list(t.dur), dialogue_ok=t.dialogue_ok) for t in lib.values()], script=lines)
+
+    @api.post('/api/edit/propose', dependencies=[Depends(auth)])
+    def post_propose(body: dict):                                                        # {folder, length_s?, bpm?, seed?, keep?}
+        from strata360.edit import project as PJ, optimise as O
+        f = folder_of(body.get('folder'))
+        try: return dict(edit=PJ.propose(f, {k: body.get(k) for k in ('length_s', 'bpm', 'seed')}, keep=bool(body.get('keep', True))))
+        except O.Infeasible as e: raise HTTPException(400, str(e))
+
+    @api.post('/api/edit/override', dependencies=[Depends(auth)])
+    def post_override(body: dict):                                                       # {folder, action: technique|lock|weight|ban|reset, ...}
+        from strata360.edit import project as PJ, optimise as O
+        f = folder_of(body.get('folder')); act = body.get('action')
+        try:
+            if act == 'technique': e = PJ.set_technique(f, body['wid'], body.get('technique'))
+            elif act == 'lock': e = PJ.set_lock(f, body['wid'], bool(body.get('locked', True)))
+            elif act == 'weight': e = PJ.set_clip_weight(f, body['clip'], body.get('factor'))
+            elif act == 'ban': e = PJ.ban(f, body['kind'], body['key'], bool(body.get('on', True)))
+            elif act == 'reset': e = PJ.reset_overrides(f)
+            else: raise HTTPException(400, 'unknown action')
+        except (KeyError, ValueError) as ex: raise HTTPException(400, str(ex))
+        except O.Infeasible as ex: raise HTTPException(400, str(ex))
+        return dict(edit=e)
+
     @api.get('/api/script', dependencies=[Depends(auth)])
     def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script
         from strata360.edit import llm_remote as LR

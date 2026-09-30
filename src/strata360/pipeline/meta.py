@@ -29,7 +29,7 @@ def default_title(folder):
 
 def load(folder):
     p = _path(folder); d = json.load(open(p)) if os.path.exists(p) else {}
-    out = json.loads(json.dumps(DEFAULTS)); out.update({k: v for k, v in d.items() if k != 'results'}); out['results'].update(d.get('results') or {})
+    out = json.loads(json.dumps(DEFAULTS)); out.update({k: v for k, v in d.items() if k not in ('results', 'edit')}); out['results'].update(d.get('results') or {})
     cap, iso = earliest_capture(folder); out['defaults'] = dict(title=default_title(folder), date=cap, earliest_capture_utc=iso)
     out['effective'] = dict(title=out['title'] or out['defaults']['title'], date=out['date'] or cap); return out
 

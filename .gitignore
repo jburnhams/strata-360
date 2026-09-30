@@ -9,7 +9,7 @@ models/
 profiles/
 .venv-overlay/
 .cache/
-gps/
+/gps/
 web/node_modules/
 src/strata360/server/static/
 checkpoints/

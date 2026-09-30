@@ -52,7 +52,7 @@ def segment_facts(seg, cand, cdir, track, notes, tz='Europe/Brussels'):
     """Everything worth telling the writer about one planned segment (a dict, later rendered as text)."""
     import datetime as dt
     from strata360.gps import context as X
-    f = dict(index=seg['index'], film_start_s=round(seg['start_s'], 1), seconds=round(seg['dur_s'], 1), clip=cand['clip'], technique=seg.get('technique'))
+    f = dict(id=seg.get('id'), index=seg['index'], film_start_s=round(seg['start_s'], 1), seconds=round(seg['dur_s'], 1), clip=cand['clip'], technique=seg.get('technique'))
     t0 = dt.datetime.fromisoformat(cand['start_utc'].replace('Z', '+00:00')).timestamp() + seg.get('in_s', 0.0); t1 = t0 + seg['dur_s']
     if track is not None: f['track'] = X.describe(X.context_at(track, t0, t1, tz))
     pl = os.path.join(cdir, cand['clip'], 'places.json') if cdir else None
@@ -142,7 +142,7 @@ def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_l
             parts = re.split(r'(?<=[.!?])\s+', t); t = ''
             for p in parts:
                 if words((t + ' ' + p).strip()) <= b: t = (t + ' ' + p).strip()
-        out.append(dict(seg=f['index'], film_start_s=f['film_start_s'], seconds=f['seconds'], clip=f['clip'], text=t, says=f.get('wearer_says') or [], words=words(t), est_speak_s=round(words(t) * 60.0 / wpm, 1), budget_words=b))
+        out.append(dict(seg=f['index'], id=f.get('id'), film_start_s=f['film_start_s'], seconds=f['seconds'], clip=f['clip'], text=t, says=f.get('wearer_says') or [], words=words(t), est_speak_s=round(words(t) * 60.0 / wpm, 1), budget_words=b))
     dbg = dict(finish=r.get('finish'), tokens=r.get('tokens'), text_head=(r.get('text') or '')[:600]) if (not s or bad) else None
     return dict(schema=1, provider=provider, model=r.get('model') or model, llm_debug=dbg, title=s.get('title'), target_s=target_s, wpm=wpm, style=style, seconds_llm=round(time.time() - t0, 1), remaining_problems=[dict(seg=i, problem=m) for i, m in bad], lines=out,
                 total_words=sum(l['words'] for l in out), total_speak_s=round(sum(l['est_speak_s'] for l in out), 1))
