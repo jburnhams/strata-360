@@ -311,8 +311,9 @@ def cmd_script(a):
         race_line = f"The race: {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours."
     from strata360.pipeline import meta as MT
     race_line = (MT.describe(a.name) + ' ' + race_line).strip()
-    print(f'planned {len(plan)} segments for {a.length:.0f} s; writing the script with the local LLM (about a minute)...')
-    doc = SC.write_script(facts, notes['folder'], a.length, wpm=a.wpm, style=a.style or '', race_line=race_line, work_dir=rd)
+    print(f'planned {len(plan)} segments for {a.length:.0f} s; writing the script ({(a.provider or (cfg.get("llm") or {}).get("provider", "anthropic"))})...')
+    llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider', 'anthropic'); model = a.model or llm.get('model')
+    doc = SC.write_script(facts, notes['folder'], a.length, wpm=a.wpm, style=a.style or '', race_line=race_line, work_dir=rd, model=model if prov == 'anthropic' else None, provider=prov)
     os.makedirs(os.path.join(rd, 'scripts'), exist_ok=True); p = os.path.join(rd, 'scripts', 'script-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S') + '.json'); json.dump(dict(doc, facts=facts), open(p, 'w'), indent=1)
     print(f"\n{doc.get('title') or '(untitled)'}   {doc['total_words']} words, about {doc['total_speak_s']} s of speech in {a.length:.0f} s   [{doc['seconds_llm']} s LLM]")
     for l in doc['lines']: print(f"  [{l['seg']:2d}] {l['film_start_s']:5.1f}s +{l['seconds']:4.1f}s {l['clip'][-6:]}  " + (l['text'] or '—'))
@@ -325,6 +326,14 @@ def cmd_clear(a):
     done = runner.clear(a.name, a.stage, a.clip and [c for c in a.clip.split(',')], cascade=not a.no_cascade)
     print(f'cleared {len(done)} item(s): ' + ', '.join(sorted({s for _, s in done})) + ('' if done else ' (nothing had a status)'))
     print(f'run ./strata360 run {a.name} (or start processing in the app) to redo them')
+
+
+def cmd_set_key(a):
+    """Store the Anthropic API key for the script writer (mode 600 in ~/.strata360; never in the project or the repo). Typed without echo; --clear removes it."""
+    import getpass
+    from strata360.edit import llm_remote as L
+    if a.clear: L.set_key(''); print('key removed'); return
+    k = getpass.getpass('Anthropic API key (input hidden): '); L.set_key(k); print('saved to', L.KEY_FILE)
 
 
 def cmd_render(a):
@@ -356,9 +365,10 @@ def main():
     p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.set_defaults(fn=cmd_serve)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
     p = sub.add_parser('script', help='propose a voice-over script for a film of the target length (notes + transcript + track data -> local LLM)'); p.add_argument('name', metavar='FOLDER_OR_RACE')
-    p.add_argument('--length', type=float, default=90.0, help='film length in seconds'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=1); p.set_defaults(fn=cmd_script)
+    p.add_argument('--length', type=float, default=90.0, help='film length in seconds'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=1); p.add_argument('--provider', choices=['anthropic', 'local']); p.add_argument('--model'); p.set_defaults(fn=cmd_script)
     p = sub.add_parser('clear', help='forget the status of a stage so it is processed again (with the stages that depend on it)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('stage')
     p.add_argument('--clip', help='comma-separated full clip ids (default all)'); p.add_argument('--no-cascade', action='store_true'); p.set_defaults(fn=cmd_clear)
+    p = sub.add_parser('set-key', help='store the Anthropic API key for the voice-over script writer'); p.add_argument('--clear', action='store_true'); p.set_defaults(fn=cmd_set_key)
     p = sub.add_parser('render', help='render a flat 4K view (arguments as for the renderer)'); p.add_argument('args', nargs=argparse.REMAINDER); p.set_defaults(fn=cmd_render)
     a = ap.parse_args(); a.fn(a)
 

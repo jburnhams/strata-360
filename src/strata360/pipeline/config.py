@@ -18,6 +18,7 @@ DEFAULTS = {
     'people_every_frames': 50,
     'profile': 'me',
     'scenes_every_s': 5.0,
+    'llm': {'provider': 'anthropic', 'model': 'claude-sonnet-5-5'},     # the voice-over script writer: the Claude API (key from ANTHROPIC_API_KEY or ~/.strata360/anthropic_key) or 'local' (mlx-lm)
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
     'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '30M'},
     'stages': ['ingest', 'motion', 'proxy', 'thumb', 'places', 'preview', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)

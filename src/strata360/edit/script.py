@@ -66,7 +66,20 @@ def build_messages(folder_note, facts, target_s, wpm=DEFAULT_WPM, style='', race
     return [dict(role='system', content=sys_msg), dict(role='user', content='\n'.join(lines))]
 
 
-def run_llm(messages, model=None, max_tokens=1600, temperature=0.7, work_dir=None):
+def _parse_json(text):
+    m = re.search(r'\{.*\}', text, re.S)
+    if not m: return None
+    for cand in (m.group(0), re.sub(r',\s*([}\]])', r'\1', m.group(0))):
+        try: return json.loads(cand)
+        except ValueError: pass
+    return None
+
+
+def run_llm(messages, model=None, max_tokens=1600, temperature=0.7, work_dir=None, provider='anthropic'):
+    """provider 'anthropic' (the Claude API; the default) or 'local' (mlx-lm in .venv-vision)."""
+    if provider == 'anthropic':
+        from strata360.edit import llm_remote
+        r = llm_remote.chat(messages, model or llm_remote.DEFAULT_MODEL, max(max_tokens, 3000), temperature); r['parsed'] = _parse_json(r['text']); return r
     tmp = tempfile.mkdtemp(prefix='s360llm_', dir=work_dir)
     rq, out = os.path.join(tmp, 'req.json'), os.path.join(tmp, 'out.json'); json.dump(dict(messages=messages, max_tokens=max_tokens, temperature=temperature, json=True), open(rq, 'w'))
     py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..')
@@ -87,12 +100,12 @@ def check(script, facts, wpm=DEFAULT_WPM):
     return bad
 
 
-def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_line='', model=None, work_dir=None, retries=1):
-    msgs = build_messages(folder_note, facts, target_s, wpm, style, race_line); t0 = time.time(); r = run_llm(msgs, model, work_dir=work_dir); s = r.get('parsed') or {}; bad = check(s, facts, wpm) if s else [(-1, 'not valid JSON')]
+def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_line='', model=None, work_dir=None, retries=1, provider='anthropic'):
+    msgs = build_messages(folder_note, facts, target_s, wpm, style, race_line); t0 = time.time(); r = run_llm(msgs, model, work_dir=work_dir, provider=provider); s = r.get('parsed') or {}; bad = check(s, facts, wpm) if s else [(-1, 'not valid JSON')]
     tries = 1
     while bad and tries <= retries:
         fix = '; '.join(f"segment {i}: {m}" for i, m in bad[:12]); msgs = msgs + [dict(role='assistant', content=r['text']), dict(role='user', content=f"Fix these problems and return the full JSON again: {fix}. Shorten the lines; never exceed a budget.")]
-        r = run_llm(msgs, model, work_dir=work_dir); s = r.get('parsed') or s; bad = check(s, facts, wpm); tries += 1
+        r = run_llm(msgs, model, work_dir=work_dir, provider=provider); s = r.get('parsed') or s; bad = check(s, facts, wpm); tries += 1
     by = {f['index']: f for f in facts}; out = []
     for f in facts:
         t = next((l.get('text', '').strip() for l in s.get('lines', []) if isinstance(l, dict) and int(l.get('seg', -1)) == f['index']), '')
@@ -102,5 +115,5 @@ def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_l
             for p in parts:
                 if words((t + ' ' + p).strip()) <= b: t = (t + ' ' + p).strip()
         out.append(dict(seg=f['index'], film_start_s=f['film_start_s'], seconds=f['seconds'], clip=f['clip'], text=t, words=words(t), est_speak_s=round(words(t) * 60.0 / wpm, 1), budget_words=b))
-    return dict(schema=1, title=s.get('title'), target_s=target_s, wpm=wpm, style=style, seconds_llm=round(time.time() - t0, 1), remaining_problems=[dict(seg=i, problem=m) for i, m in bad], lines=out,
+    return dict(schema=1, provider=provider, model=r.get('model') or model, title=s.get('title'), target_s=target_s, wpm=wpm, style=style, seconds_llm=round(time.time() - t0, 1), remaining_problems=[dict(seg=i, problem=m) for i, m in bad], lines=out,
                 total_words=sum(l['words'] for l in out), total_speak_s=round(sum(l['est_speak_s'] for l in out), 1))

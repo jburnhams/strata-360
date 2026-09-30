@@ -7,6 +7,7 @@ import NoteBox from './NoteBox'
 import ClipView from './ClipView'
 import { Skeleton } from './Skeleton'
 import TranscriptPanel from './TranscriptPanel'
+import ScriptPanel from './ScriptPanel'
 import FilmDetails from './FilmDetails'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -34,6 +35,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <ProjectProgress folder={folder} />
             <TrackPanel folder={folder} />
             <NoteBox folder={folder} title="Notes for the whole folder" placeholder="What was this? Who was there? What is the story of the day, in your own words…" />
+            <ScriptPanel folder={folder} onOpen={c => { setFocus(undefined); setSel(c) }} />
             <TranscriptPanel folder={folder} clips={clips ?? []} tz={meta?.timezone ?? 'Europe/Brussels'} onOpen={(c, t) => { setFocus(t); setSel(c) }} />
           </div>
         ) : <ClipView folder={folder} clip={sel} focus={focus} />}

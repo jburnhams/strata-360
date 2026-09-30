@@ -21,6 +21,9 @@ export interface Meta {
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
 export interface Seg { clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
+export interface ScriptLine { seg: number; film_start_s: number; seconds: number; clip: string; text: string; words: number; est_speak_s: number; budget_words: number }
+export interface ScriptDoc { file: string; title: string | null; provider?: string; model?: string; target_s: number; wpm: number; style?: string; lines: ScriptLine[]; total_words: number; total_speak_s: number; remaining_problems: { seg: number; problem: string }[]; seconds_llm?: number }
+export interface ScriptState { key_configured: boolean; models: string[]; llm: { provider: string; model: string }; running: boolean; last_exit: number | null; log: string; latest: ScriptDoc | null; scripts: number }
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
 export interface PlacePoint { label: string; lat: number; lon: number; address: { display_name?: string; road?: string; county?: string; country?: string } | null; nearby: Near[] | null }
@@ -64,6 +67,9 @@ export const api = {
   meta: (folder: string) => call<Meta>('/api/meta?' + q({ folder })),
   saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
   transcript: (folder: string) => call<{ segments: Seg[] }>('/api/transcript?' + q({ folder })),
+  script: (folder: string) => call<ScriptState>('/api/script?' + q({ folder })),
+  setKey: (key: string) => call<{ configured: boolean }>('/api/llm/key', { key }),
+  generateScript: (folder: string, o: { length: number; wpm?: number; style?: string; model?: string }) => call<{ started: boolean }>('/api/script/generate', { folder, ...o }),
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),

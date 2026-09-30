@@ -15,6 +15,7 @@ STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
+SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
 
 
@@ -273,6 +274,38 @@ def create_app(roots, token=None):
         try: return overview(dest)
         except Exception as e:
             os.replace(dest, dest + '.bad'); raise HTTPException(400, f'could not read that file: {type(e).__name__}: {e}')
+
+    @api.get('/api/script', dependencies=[Depends(auth)])
+    def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script
+        from strata360.edit import llm_remote as LR
+        f = folder_of(folder); rd = config.race_dir(f); j = SCRIPT_JOBS.get(f); running = bool(j and j.poll() is None)
+        files = sorted(glob.glob(os.path.join(rd, 'scripts', 'script-*.json'))); latest = None
+        if files:
+            try: latest = json.load(open(files[-1])); latest.pop('facts', None); latest['file'] = os.path.basename(files[-1])
+            except ValueError: latest = None
+        log = ''
+        try: log = open(os.path.join(rd, 'script_job.log')).read()[-600:]
+        except OSError: pass
+        cfg = config.load(f).get('llm', {}) if os.path.exists(os.path.join(rd, 'race.json')) else {}
+        return dict(key_configured=LR.key_configured(), models=LR.MODELS, llm=dict(provider=cfg.get('provider', 'anthropic'), model=cfg.get('model', LR.DEFAULT_MODEL)), running=running,
+                    last_exit=None if (j is None or running) else j.returncode, log=log, latest=latest, scripts=len(files))
+
+    @api.post('/api/llm/key', dependencies=[Depends(auth)])
+    def post_key(body: dict):                                                            # write-only: the key is stored server-side (mode 600) and never returned
+        from strata360.edit import llm_remote as LR
+        try: return dict(configured=LR.set_key(str(body.get('key') or '')))
+        except LR.LLMError as e: raise HTTPException(400, str(e))
+
+    @api.post('/api/script/generate', dependencies=[Depends(auth)])
+    def post_generate(body: dict):                                                       # {folder, length, wpm?, style?, model?}: runs `strata360 script` in the background
+        f = folder_of(body.get('folder')); j = SCRIPT_JOBS.get(f)
+        if j and j.poll() is None: return dict(started=False)
+        args = [os.path.join(ROOT_DIR, 'strata360'), 'script', f, '--length', str(float(body.get('length') or 90))]
+        if body.get('wpm'): args += ['--wpm', str(float(body['wpm']))]
+        if body.get('style'): args += ['--style', str(body['style'])[:400]]
+        if body.get('model') in ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'): args += ['--model', body['model']]
+        rd = config.race_dir(f); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'script_job.log'), 'wb')
+        SCRIPT_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.post('/api/open', dependencies=[Depends(auth)])
     def post_open(body: dict):                                                             # create the project if new, then continue whatever is unfinished
