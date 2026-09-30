@@ -75,11 +75,12 @@ def _parse_json(text):
     return None
 
 
-def run_llm(messages, model=None, max_tokens=1600, temperature=0.7, work_dir=None, provider='anthropic'):
+def run_llm(messages, model=None, max_tokens=1600, temperature=0.7, work_dir=None, provider='gemini'):
     """provider 'anthropic' (the Claude API; the default) or 'local' (mlx-lm in .venv-vision)."""
-    if provider == 'anthropic':
+    if provider in ('anthropic', 'gemini'):
         from strata360.edit import llm_remote
-        r = llm_remote.chat(messages, model or llm_remote.DEFAULT_MODEL, max(max_tokens, 3000), temperature); r['parsed'] = _parse_json(r['text']); return r
+        default = llm_remote.PROVIDERS[provider]['default']
+        r = llm_remote.chat(messages, model or default, max(max_tokens, 3000), temperature, provider=provider); r['parsed'] = _parse_json(r['text']); return r
     tmp = tempfile.mkdtemp(prefix='s360llm_', dir=work_dir)
     rq, out = os.path.join(tmp, 'req.json'), os.path.join(tmp, 'out.json'); json.dump(dict(messages=messages, max_tokens=max_tokens, temperature=temperature, json=True), open(rq, 'w'))
     py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..')
@@ -100,7 +101,7 @@ def check(script, facts, wpm=DEFAULT_WPM):
     return bad
 
 
-def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_line='', model=None, work_dir=None, retries=1, provider='anthropic'):
+def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_line='', model=None, work_dir=None, retries=1, provider='gemini'):
     msgs = build_messages(folder_note, facts, target_s, wpm, style, race_line); t0 = time.time(); r = run_llm(msgs, model, work_dir=work_dir, provider=provider); s = r.get('parsed') or {}; bad = check(s, facts, wpm) if s else [(-1, 'not valid JSON')]
     tries = 1
     while bad and tries <= retries:

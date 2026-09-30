@@ -230,11 +230,12 @@ def project_progress(name):
     if tr_missing: needs.append('race_track')
     if 'identity' in names and not os.path.exists(os.path.join('profiles', cfg.get('profile', 'me') + '.npz')): needs.append('wearer_profile')
     if not cfg.get('camera_clock', {}).get('verified'): needs.append('camera_clock')
-    wk = runner.workers(name); lock = bool(wk); act = runner.active_items(name); by_pid = {p_: (c_, s_) for c_, s_, p_ in act}
+    from strata360.pipeline import resources
+    wk = runner.workers(name); resources_ok = resources.may_start_extra_worker(len(wk), cfg); lock = bool(wk); act = runner.active_items(name); by_pid = {p_: (c_, s_) for c_, s_, p_ in act}
     blocked = ({'identity'} if 'wearer_profile' in needs else set()) | ({n for n in names if STAGES[n].needs_track} if tr_missing else set())                                                # stages that cannot run until the user has chosen who they are
     pending = any(s_['done'] < s_['total'] for s_ in stages if s_['name'] not in blocked)
     state = 'processing' if (lock or pending) else ('needs_input' if (needs or any(s_['done'] < s_['total'] for s_ in stages)) else 'complete')
-    return dict(state=state, folder=cfg['library'], project=rd, clips=len(cl), footage_gb=round(sum(c.size for c in cl) / 1e9, 1), unsupported=len(other), running=lock, workers=len(wk), worker_list=[dict(pid=p_, clip=(by_pid.get(p_) or (None, None))[0], stage=(by_pid.get(p_) or (None, None))[1]) for p_ in wk], runnable=runner.runnable_count(name), active=[dict(clip=c, stage=s) for c, s, _ in act],
+    return dict(state=state, folder=cfg['library'], project=rd, clips=len(cl), footage_gb=round(sum(c.size for c in cl) / 1e9, 1), unsupported=len(other), running=lock, can_add_worker=resources_ok[0], add_worker_reason=resources_ok[1], workers=len(wk), worker_list=[dict(pid=p_, clip=(by_pid.get(p_) or (None, None))[0], stage=(by_pid.get(p_) or (None, None))[1]) for p_ in wk], runnable=runner.runnable_count(name), active=[dict(clip=c, stage=s) for c, s, _ in act],
                 percent=round(100.0 * done_all / max(total_all, 1), 1), eta_s=round(eta), stages=stages, needs=needs, has_gps=bool(config.track_path(name, cfg)))
 
 
@@ -311,9 +312,9 @@ def cmd_script(a):
         race_line = f"The race: {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours."
     from strata360.pipeline import meta as MT
     race_line = (MT.describe(a.name) + ' ' + race_line).strip()
-    print(f'planned {len(plan)} segments for {a.length:.0f} s; writing the script ({(a.provider or (cfg.get("llm") or {}).get("provider", "anthropic"))})...')
-    llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider', 'anthropic'); model = a.model or llm.get('model')
-    doc = SC.write_script(facts, notes['folder'], a.length, wpm=a.wpm, style=a.style or '', race_line=race_line, work_dir=rd, model=model if prov == 'anthropic' else None, provider=prov)
+    print(f'planned {len(plan)} segments for {a.length:.0f} s; writing the script ({(a.provider or (cfg.get("llm") or {}).get("provider", "gemini"))})...')
+    llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider', 'gemini'); model = a.model or (llm.get('model') if llm.get('provider', 'gemini') == prov else None)
+    doc = SC.write_script(facts, notes['folder'], a.length, wpm=a.wpm, style=a.style or '', race_line=race_line, work_dir=rd, model=model if prov != 'local' else None, provider=prov)
     os.makedirs(os.path.join(rd, 'scripts'), exist_ok=True); p = os.path.join(rd, 'scripts', 'script-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S') + '.json'); json.dump(dict(doc, facts=facts), open(p, 'w'), indent=1)
     print(f"\n{doc.get('title') or '(untitled)'}   {doc['total_words']} words, about {doc['total_speak_s']} s of speech in {a.length:.0f} s   [{doc['seconds_llm']} s LLM]")
     for l in doc['lines']: print(f"  [{l['seg']:2d}] {l['film_start_s']:5.1f}s +{l['seconds']:4.1f}s {l['clip'][-6:]}  " + (l['text'] or '—'))
@@ -332,8 +333,8 @@ def cmd_set_key(a):
     """Store the Anthropic API key for the script writer (mode 600 in ~/.strata360; never in the project or the repo). Typed without echo; --clear removes it."""
     import getpass
     from strata360.edit import llm_remote as L
-    if a.clear: L.set_key(''); print('key removed'); return
-    k = getpass.getpass('Anthropic API key (input hidden): '); L.set_key(k); print('saved to', L.KEY_FILE)
+    if a.clear: L.set_key('', a.provider); print('key removed'); return
+    k = getpass.getpass(f'{a.provider} API key (input hidden): '); L.set_key(k, a.provider); print('saved to secrets.env (gitignored)')
 
 
 def cmd_render(a):
@@ -365,10 +366,10 @@ def main():
     p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.set_defaults(fn=cmd_serve)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
     p = sub.add_parser('script', help='propose a voice-over script for a film of the target length (notes + transcript + track data -> local LLM)'); p.add_argument('name', metavar='FOLDER_OR_RACE')
-    p.add_argument('--length', type=float, default=90.0, help='film length in seconds'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=1); p.add_argument('--provider', choices=['anthropic', 'local']); p.add_argument('--model'); p.set_defaults(fn=cmd_script)
+    p.add_argument('--length', type=float, default=90.0, help='film length in seconds'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=1); p.add_argument('--provider', choices=['gemini', 'anthropic', 'local']); p.add_argument('--model'); p.set_defaults(fn=cmd_script)
     p = sub.add_parser('clear', help='forget the status of a stage so it is processed again (with the stages that depend on it)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('stage')
     p.add_argument('--clip', help='comma-separated full clip ids (default all)'); p.add_argument('--no-cascade', action='store_true'); p.set_defaults(fn=cmd_clear)
-    p = sub.add_parser('set-key', help='store the Anthropic API key for the voice-over script writer'); p.add_argument('--clear', action='store_true'); p.set_defaults(fn=cmd_set_key)
+    p = sub.add_parser('set-key', help='store an API key for the voice-over script writer in secrets.env (gitignored)'); p.add_argument('--provider', choices=['gemini', 'anthropic'], default='gemini'); p.add_argument('--clear', action='store_true'); p.set_defaults(fn=cmd_set_key)
     p = sub.add_parser('render', help='render a flat 4K view (arguments as for the renderer)'); p.add_argument('args', nargs=argparse.REMAINDER); p.set_defaults(fn=cmd_render)
     a = ap.parse_args(); a.fn(a)
 

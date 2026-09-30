@@ -45,11 +45,11 @@ export default function ProjectProgress({ folder }: { folder: string }) {
         {p.state !== 'complete' && !p.workers && (p.runnable ?? 0) > 0 && <button className="rounded-lg bg-emerald-700 px-4 py-2 text-white" onClick={() => api.run(folder)}>Start processing</button>}
         {!!p.workers && (
           <span className="text-stone-500">
-            {p.workers} of {p.max_workers ?? 3} workers running
-            {(p.runnable ?? 0) === 0 ? ' · nothing else can start yet (waiting for the running stages)' : (p.workers ?? 0) >= (p.max_workers ?? 3) ? ' (the maximum: each model needs a few GB of memory)' : ''}
+            {p.workers} worker{p.workers === 1 ? '' : 's'} running at the lowest priority
+            {(p.runnable ?? 0) === 0 ? ' · nothing else can start yet (waiting for the running stages)' : !p.can_add_worker ? ` · no more for now: ${p.add_worker_reason}` : ''}
           </span>
         )}
-        {!!p.workers && (p.workers ?? 0) < (p.max_workers ?? 3) && (p.runnable ?? 0) > 0 && (
+        {!!p.workers && !!p.can_add_worker && (p.runnable ?? 0) > 0 && (
           <button className="rounded-lg border border-emerald-700 px-3 py-1.5 text-emerald-800 dark:text-emerald-300" onClick={() => api.run(folder)}>Add a worker ({p.runnable} items waiting)</button>
         )}
         {!!p.workers && <button className="rounded-lg border border-stone-300 px-3 py-1.5 dark:border-stone-700" onClick={() => api.stop(folder)}>Stop all</button>}

@@ -14,3 +14,4 @@ web/node_modules/
 src/strata360/server/static/
 checkpoints/
 .venv-vision/
+secrets.env

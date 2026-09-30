@@ -8,7 +8,7 @@ taken over. The per-clip state file (`stages.json`) is updated under a file lock
 `clear` removes the recorded status of a stage (and, by default, of every stage that depends on it) so it will be processed again."""
 import atexit, datetime as dt, fcntl, fnmatch, hashlib, json, os, time, traceback
 from contextlib import contextmanager
-from strata360.pipeline import config, clips as clipmod
+from strata360.pipeline import config, clips as clipmod, resources
 from strata360.pipeline.stages import STAGES, ORDER, Ctx
 
 
@@ -135,6 +135,22 @@ def runnable_count(race):
     return n
 
 
+def active_claims(race):
+    """[(clip, stage, pid, claimed_at)] for live claims."""
+    out = []; d = _claims(race)
+    if os.path.isdir(d):
+        for n in os.listdir(d):
+            if n.endswith('.tmp') or '__' not in n: continue
+            try: pid, ts = open(os.path.join(d, n)).read().split()[:2]
+            except (OSError, ValueError): continue
+            if _alive(pid): c, s = n.rsplit('__', 1); out.append((c, s, int(pid), float(ts)))
+    return out
+
+
+def _stage_count(race, stage):
+    return sum(1 for c, s, p, t in active_claims(race) if s == stage)
+
+
 def dependents(stage):
     """`stage` plus every stage that depends on it, directly or not (the stages that must be redone after it changes)."""
     out = {stage}; grew = True
@@ -214,6 +230,7 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
     if unknown: raise SystemExit(f'unknown stage(s): {sorted(unknown)}; available: {ORDER}')
     cl, other = discover(race, cfg)
     if clip_glob: cl = [c for c in cl if fnmatch.fnmatch(c.id, clip_glob) or clip_glob in c.id]
+    resources.low_priority(cfg)                                                                          # lowest CPU priority (and background class on macOS) for this worker and its children
     os.makedirs(_workers(race), exist_ok=True); reg = os.path.join(_workers(race), str(os.getpid())); open(reg, 'w').write(dt.datetime.now().isoformat(timespec='seconds'))
     atexit.register(lambda: os.path.exists(reg) and os.remove(reg))
     logf = open(os.path.join(rd, 'run.log'), 'a')
@@ -228,15 +245,22 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
             st = STAGES[name]
             for n, c in enumerate(cl, 1):
                 if (c.id, name) in tried: continue
+                cap = resources.STAGE_MAX_CONCURRENT.get(name)
+                if cap and _stage_count(race, name) >= cap: break                                               # a heavy stage runs once at a time: look at the next stage
                 state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id))
                 if done or blocked: continue
                 if not claim(race, c.id, name): continue
+                if cap:                                                                                         # two workers may have claimed at the same moment: the earlier claims win
+                    mine = sorted(active_claims(race), key=lambda x: (x[3], x[2])); mine = [x for x in mine if x[1] == name]
+                    if not any(x[0] == c.id and x[2] == os.getpid() for x in mine[:cap]): release(race, c.id, name); continue
                 state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id))      # someone may have finished it between the look and the claim
                 if done or blocked: release(race, c.id, name); continue
                 picked = (n, c, st, key); break
             if picked: break
         if not picked: break
-        n, c, st, key = picked; name = st.name; tried.add((c.id, name)); ctx = Ctx(c, cfg, clip_dir(race, c.id), L); os.makedirs(ctx.dir, exist_ok=True); clock_sig = _sha(cfg.get('camera_clock')); t0 = time.time()
+        n, c, st, key = picked; name = st.name; tried.add((c.id, name))
+        resources.wait_for_headroom(name, cfg, None, L)                                                            # enough free memory and an idle-enough machine for this stage
+        ctx = Ctx(c, cfg, clip_dir(race, c.id), L); os.makedirs(ctx.dir, exist_ok=True); clock_sig = _sha(cfg.get('camera_clock')); t0 = time.time()
         try:
             st.fn(ctx)
             if name == 'ingest':

@@ -14,28 +14,31 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
   const [length, setLength] = useState(90)
   const [style, setStyle] = useState('')
   const [model, setModel] = useState<string>()
+  const [prov, setProv] = useState<string>()
   if (!st) return <PanelSkeleton title="Voice-over script" rows={4} />
-  const save = async () => { try { await api.setKey(key); setKey(''); setErr(undefined) } catch (e) { setErr((e as Error).message) } }
-  const go = async () => { setErr(undefined); try { await api.generateScript(folder, { length, style: style || undefined, model: model ?? st.llm.model }) } catch (e) { setErr((e as Error).message) } }
+  const provider = prov ?? st.llm.provider, info = st.providers[provider], models = info?.models ?? st.models, configured = info?.configured ?? st.key_configured, label = provider === 'gemini' ? 'Google Gemini' : 'Claude'
+  const save = async () => { try { await api.setKey(key, provider); setKey(''); setErr(undefined) } catch (e) { setErr((e as Error).message) } }
+  const go = async () => { setErr(undefined); try { await api.generateScript(folder, { length, style: style || undefined, provider, model: (model && models.includes(model)) ? model : (provider === st.llm.provider ? st.llm.model : info?.default) }) } catch (e) { setErr((e as Error).message) } }
   const d = st.latest
   const input = 'rounded-lg border border-stone-300 bg-stone-50 px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950'
   return (
     <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
       <h3 className="mb-2 text-sm font-semibold">Voice-over script</h3>
-      {!st.key_configured ? (
+      {!configured ? (
         <div className="mb-3 rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/40">
-          <p className="mb-2">The script is written by the Claude API. Paste your Anthropic API key: it is stored on the server (in <code>~/.strata360</code>, readable only by you) and is never shown again.
+          <p className="mb-2">The script is written by {label}. Paste its API key: it is stored on the server in <code>secrets.env</code> (gitignored, readable only by you) and is never shown again.
             Only text is sent: your notes, what you say on camera, and race facts (pace, climb, time of day, places) for each segment. No video, audio or pictures.</p>
-          <div className="flex gap-2"><input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder="sk-ant-…" className={`${input} flex-1`} />
+          <div className="flex gap-2"><input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={provider === 'gemini' ? 'AIza…' : 'sk-ant-…'} className={`${input} flex-1`} />
             <button disabled={!key} onClick={save} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm text-white disabled:opacity-40">Save key</button></div>
         </div>
       ) : (
         <div className="mb-3 flex flex-wrap items-end gap-3 text-sm">
           <label>Film length (s)<input type="number" min={20} max={600} value={length} onChange={e => setLength(Number(e.target.value))} className={`${input} ml-2 w-20`} /></label>
           <label className="flex-1">Style<input value={style} onChange={e => setStyle(e.target.value)} placeholder="e.g. dry, understated, British" className={`${input} ml-2 w-full max-w-sm`} /></label>
-          <label>Model<select value={model ?? st.llm.model} onChange={e => setModel(e.target.value)} className={`${input} ml-2`}>{st.models.map(m => <option key={m}>{m}</option>)}</select></label>
+          <label>Writer<select value={provider} onChange={e => { setProv(e.target.value); setModel(undefined) }} className={`${input} ml-2`}>{Object.keys(st.providers).map(p => <option key={p} value={p}>{p === 'gemini' ? 'Gemini' : 'Claude'}</option>)}</select></label>
+          <label>Model<select value={(model && models.includes(model)) ? model : (provider === st.llm.provider ? st.llm.model : info?.default)} onChange={e => setModel(e.target.value)} className={`${input} ml-2`}>{models.map(m => <option key={m}>{m}</option>)}</select></label>
           <button disabled={st.running} onClick={go} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50">{st.running ? 'Writing…' : d ? 'Write another' : 'Write the script'}</button>
-          <button className="text-xs underline" onClick={() => api.setKey('')}>remove key</button>
+          <button className="text-xs underline" onClick={() => api.setKey('', provider)}>remove key</button>
         </div>
       )}
       {err && <p className="mb-2 text-sm text-red-600">{err}</p>}
@@ -56,7 +59,7 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
           {d.remaining_problems.length > 0 && <p className="mt-2 text-xs text-amber-700">Still to fix: {d.remaining_problems.map(p => `segment ${p.seg}: ${p.problem}`).join('; ')}</p>}
         </div>
       )}
-      {!d && st.key_configured && <p className="text-sm text-stone-500">No script yet. It plans a film of that length from your usable moments, then writes narration for each segment.</p>}
+      {!d && configured && <p className="text-sm text-stone-500">No script yet. It plans a film of that length from your usable moments, then writes narration for each segment.</p>}
     </section>
   )
 }

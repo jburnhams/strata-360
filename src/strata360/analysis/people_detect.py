@@ -32,7 +32,8 @@ def main():
     ap.add_argument('--conf', type=float, default=0.3); ap.add_argument('--imgsz', type=int, default=1024)
     a = ap.parse_args(); M = os.path.abspath(a.models)
     import torch; from ultralytics import YOLO; from insightface.app import FaceAnalysis
-    dev = 'mps' if torch.backends.mps.is_available() else 'cpu'
+    dev = 'mps' if (os.environ.get('STRATA_GPU') == '1' and torch.backends.mps.is_available()) else 'cpu'          # CPU by default: the GPU is what makes a desktop stutter
+    torch.set_num_threads(int(os.environ.get('OMP_NUM_THREADS', '2')))
     yolo = YOLO(f'{M}/yolo11s-pose.pt'); fa = FaceAnalysis(name='buffalo_l', root=f'{M}/insightface', allowed_modules=['detection', 'recognition'], providers=['CPUExecutionProvider'])
     fa.prepare(ctx_id=-1, det_size=(640, 640))
     files = sorted(glob.glob(os.path.join(a.views, 's*_v*.jpg'))); pat = re.compile(r's(\d+)_v(\d+)\.jpg'); dets, embs, thumbs = [], [], []; t0 = time.time()

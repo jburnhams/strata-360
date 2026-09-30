@@ -19,17 +19,36 @@ def fake(calls, replies):
 
 
 def test_request_shape_and_key_handling():
-    L.KEY_FILE = os.path.join(tempfile.mkdtemp(), 'k'); os.environ.pop('ANTHROPIC_API_KEY', None)
+    d = tempfile.mkdtemp(); L.KEY_FILE = os.path.join(d, 'k'); L.VARS_FILE = os.path.join(d, 'secrets.env'); os.environ.pop('ANTHROPIC_API_KEY', None)
     try: L.chat([dict(role='user', content='hi')]); assert False
     except L.LLMError as e: assert 'no Anthropic API key' in str(e)
     try: L.set_key('nope'); assert False
     except L.LLMError: pass
-    L.set_key('sk-ant-' + 'x' * 40); assert oct(os.stat(L.KEY_FILE).st_mode & 0o777) == '0o600' and L.key_configured()
+    L.set_key('sk-ant-' + 'x' * 40); assert oct(os.stat(L.VARS_FILE).st_mode & 0o777) == '0o600' and L.key_configured() and 'ANTHROPIC_API_KEY=sk-ant-' in open(L.VARS_FILE).read()
     calls = []; L.urllib.request.urlopen = fake(calls, [dict(content=[dict(type='text', text='{"a": 1}')], usage=dict(input_tokens=5, output_tokens=3), model='m')])
     r = L.chat([dict(role='system', content='be brief'), dict(role='user', content='hi')], model='claude-sonnet-5-5')
     c = calls[0]; assert c['url'].endswith('/v1/messages') and c['headers']['x-api-key'].startswith('sk-ant-') and c['headers']['anthropic-version'] == '2023-06-01'
     assert c['body']['system'] == 'be brief' and c['body']['messages'] == [dict(role='user', content='hi')] and r['text'] == '{"a": 1}' and r['tokens']['output'] == 3
     L.set_key(''); assert not L.key_configured()
+
+
+def test_gemini_keys_request_shape_and_errors():
+    d = tempfile.mkdtemp(); L.KEY_FILE = os.path.join(d, 'k'); L.VARS_FILE = os.path.join(d, 'secrets.env')
+    for e in ('GEMINI_API_KEY', 'GOOGLE_API_KEY'): os.environ.pop(e, None)
+    try: L.chat_gemini([dict(role='user', content='x')]); assert False
+    except L.LLMError as e: assert 'no Gemini API key' in str(e)
+    try: L.set_key('not-a-key', 'gemini'); assert False
+    except L.LLMError: pass
+    L.set_key('AIza' + 'z' * 35, 'gemini'); assert L.key_configured('gemini') and oct(os.stat(L.VARS_FILE).st_mode & 0o777) == '0o600'
+    calls = []; L.urllib.request.urlopen = fake(calls, [dict(candidates=[dict(content=dict(parts=[dict(text='{"a": 2}')]), finishReason='STOP')], usageMetadata=dict(promptTokenCount=4, candidatesTokenCount=2), modelVersion='g')])
+    r = L.chat([dict(role='system', content='sys'), dict(role='user', content='hi'), dict(role='assistant', content='yo'), dict(role='user', content='more')], model='gemini-flash-latest', provider='gemini')
+    c = calls[0]; assert 'gemini-flash-latest:generateContent' in c['url'] and 'key=' not in c['url'] and c['headers']['x-goog-api-key'].startswith('AIza')              # the key is in a header, not the URL
+    assert c['body']['systemInstruction']['parts'][0]['text'] == 'sys' and [m['role'] for m in c['body']['contents']] == ['user', 'model', 'user'] and r['text'] == '{"a": 2}'
+    assert c['body']['generationConfig']['responseMimeType'] == 'application/json'
+    L.time.sleep = lambda s: None; calls = []; L.urllib.request.urlopen = fake(calls, [(429, 'quota'), dict(candidates=[dict(content=dict(parts=[dict(text='ok')]))])]); assert L.chat_gemini([dict(role='user', content='x')])['text'] == 'ok'
+    calls = []; L.urllib.request.urlopen = fake(calls, [(400, 'API key not valid. Please pass a valid API key.')])
+    try: L.chat_gemini([dict(role='user', content='x')]); assert False
+    except L.LLMError as e: assert 'rejected' in str(e) and 'AIza' not in str(e)
 
 
 def test_errors_and_retries_never_leak_the_key():

@@ -93,14 +93,17 @@ def start_job(folder, args=('open',)):
     from strata360.pipeline import runner
     with LOCK:
         live = [p for p in JOBS.get(folder, []) if p.poll() is None]; JOBS[folder] = live
-        if len(runner.workers(folder)) >= MAX_WORKERS: return False
+        from strata360.pipeline import resources
+        cfg = config.load(folder) if os.path.exists(os.path.join(config.race_dir(folder), 'race.json')) else {}
+        ok, why = resources.may_start_extra_worker(len(runner.workers(folder)), cfg)
+        if not ok: return False
         rd = config.race_dir(folder); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'server_job.log'), 'ab')
         live.append(subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), args[0], folder, *args[1:]], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True)); return True
 
 
 def progress(folder):
     from strata360.cli import project_progress
-    p = project_progress(folder); p['job_running'] = bool(p.get('workers')); p['max_workers'] = MAX_WORKERS; return p
+    p = project_progress(folder); from strata360.pipeline import resources; p['job_running'] = bool(p.get('workers')); p['max_workers'] = resources.DEFAULTS['max_workers']; return p
 
 
 def create_app(roots, token=None):
@@ -287,13 +290,15 @@ def create_app(roots, token=None):
         try: log = open(os.path.join(rd, 'script_job.log')).read()[-600:]
         except OSError: pass
         cfg = config.load(f).get('llm', {}) if os.path.exists(os.path.join(rd, 'race.json')) else {}
-        return dict(key_configured=LR.key_configured(), models=LR.MODELS, llm=dict(provider=cfg.get('provider', 'anthropic'), model=cfg.get('model', LR.DEFAULT_MODEL)), running=running,
+        prov = cfg.get('provider', 'gemini'); providers = {k: dict(models=v['models'], default=v['default'], configured=LR.key_configured(k)) for k, v in LR.PROVIDERS.items()}
+        return dict(key_configured=providers.get(prov, {}).get('configured', False), providers=providers, models=LR.PROVIDERS.get(prov, LR.PROVIDERS['gemini'])['models'], llm=dict(provider=prov, model=cfg.get('model') or LR.PROVIDERS[prov]['default']), running=running,
                     last_exit=None if (j is None or running) else j.returncode, log=log, latest=latest, scripts=len(files))
 
     @api.post('/api/llm/key', dependencies=[Depends(auth)])
     def post_key(body: dict):                                                            # write-only: the key is stored server-side (mode 600) and never returned
         from strata360.edit import llm_remote as LR
-        try: return dict(configured=LR.set_key(str(body.get('key') or '')))
+        prov = body.get('provider') if body.get('provider') in LR.PROVIDERS else 'gemini'
+        try: return dict(configured=LR.set_key(str(body.get('key') or ''), prov))
         except LR.LLMError as e: raise HTTPException(400, str(e))
 
     @api.post('/api/script/generate', dependencies=[Depends(auth)])
@@ -303,7 +308,10 @@ def create_app(roots, token=None):
         args = [os.path.join(ROOT_DIR, 'strata360'), 'script', f, '--length', str(float(body.get('length') or 90))]
         if body.get('wpm'): args += ['--wpm', str(float(body['wpm']))]
         if body.get('style'): args += ['--style', str(body['style'])[:400]]
-        if body.get('model') in ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'): args += ['--model', body['model']]
+        from strata360.edit import llm_remote as LR
+        prov = body.get('provider') if body.get('provider') in LR.PROVIDERS else None
+        if prov: args += ['--provider', prov]
+        if body.get('model') in [m for v in LR.PROVIDERS.values() for m in v['models']]: args += ['--model', body['model']]
         rd = config.race_dir(f); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'script_job.log'), 'wb')
         SCRIPT_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
