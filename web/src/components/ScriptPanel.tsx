@@ -16,7 +16,7 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
   const [model, setModel] = useState<string>()
   const [prov, setProv] = useState<string>()
   if (!st) return <PanelSkeleton title="Voice-over script" rows={4} />
-  const provider = prov ?? st.llm.provider, info = st.providers[provider], models = info?.models ?? st.models, configured = info?.configured ?? st.key_configured, label = provider === 'gemini' ? 'Google Gemini' : 'Claude'
+  const provider = prov ?? st.llm.provider, info = st.providers[provider], models = info?.models ?? st.models, configured = info?.configured ?? st.key_configured, label = ({ vertex: 'Gemini (Google Cloud key)', gemini: 'Gemini (AI Studio key)', anthropic: 'Claude' } as Record<string, string>)[provider] ?? provider
   const save = async () => { try { await api.setKey(key, provider); setKey(''); setErr(undefined) } catch (e) { setErr((e as Error).message) } }
   const go = async () => { setErr(undefined); try { await api.generateScript(folder, { length, style: style || undefined, provider, model: (model && models.includes(model)) ? model : (provider === st.llm.provider ? st.llm.model : info?.default) }) } catch (e) { setErr((e as Error).message) } }
   const d = st.latest
@@ -28,14 +28,14 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
         <div className="mb-3 rounded-lg bg-amber-50 p-3 text-sm dark:bg-amber-950/40">
           <p className="mb-2">The script is written by {label}. Paste its API key: it is stored on the server in <code>secrets.env</code> (gitignored, readable only by you) and is never shown again.
             Only text is sent: your notes, what you say on camera, and race facts (pace, climb, time of day, places) for each segment. No video, audio or pictures.</p>
-          <div className="flex gap-2"><input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={provider === 'gemini' ? 'AIza…' : 'sk-ant-…'} className={`${input} flex-1`} />
+          <div className="flex gap-2"><input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={provider === 'vertex' ? 'AQ.…' : provider === 'gemini' ? 'AIza…' : 'sk-ant-…'} className={`${input} flex-1`} />
             <button disabled={!key} onClick={save} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm text-white disabled:opacity-40">Save key</button></div>
         </div>
       ) : (
         <div className="mb-3 flex flex-wrap items-end gap-3 text-sm">
           <label>Film length (s)<input type="number" min={20} max={600} value={length} onChange={e => setLength(Number(e.target.value))} className={`${input} ml-2 w-20`} /></label>
           <label className="flex-1">Style<input value={style} onChange={e => setStyle(e.target.value)} placeholder="e.g. dry, understated, British" className={`${input} ml-2 w-full max-w-sm`} /></label>
-          <label>Writer<select value={provider} onChange={e => { setProv(e.target.value); setModel(undefined) }} className={`${input} ml-2`}>{Object.keys(st.providers).map(p => <option key={p} value={p}>{p === 'gemini' ? 'Gemini' : 'Claude'}</option>)}</select></label>
+          <label>Writer<select value={provider} onChange={e => { setProv(e.target.value); setModel(undefined) }} className={`${input} ml-2`}>{Object.keys(st.providers).map(p => <option key={p} value={p}>{({ vertex: 'Gemini Pro (Cloud)', gemini: 'Gemini (AI Studio)', anthropic: 'Claude' } as Record<string, string>)[p] ?? p}</option>)}</select></label>
           <label>Model<select value={(model && models.includes(model)) ? model : (provider === st.llm.provider ? st.llm.model : info?.default)} onChange={e => setModel(e.target.value)} className={`${input} ml-2`}>{models.map(m => <option key={m}>{m}</option>)}</select></label>
           <button disabled={st.running} onClick={go} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50">{st.running ? 'Writing…' : d ? 'Write another' : 'Write the script'}</button>
           <button className="text-xs underline" onClick={() => api.setKey('', provider)}>remove key</button>

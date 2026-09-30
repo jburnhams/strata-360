@@ -75,12 +75,12 @@ def _parse_json(text):
     return None
 
 
-def run_llm(messages, model=None, max_tokens=1600, temperature=0.7, work_dir=None, provider='gemini'):
+def run_llm(messages, model=None, max_tokens=1600, temperature=0.7, work_dir=None, provider='vertex'):
     """provider 'anthropic' (the Claude API; the default) or 'local' (mlx-lm in .venv-vision)."""
-    if provider in ('anthropic', 'gemini'):
+    if provider in ('anthropic', 'gemini', 'vertex'):
         from strata360.edit import llm_remote
         default = llm_remote.PROVIDERS[provider]['default']
-        r = llm_remote.chat(messages, model or default, max(max_tokens, 3000), temperature, provider=provider); r['parsed'] = _parse_json(r['text']); return r
+        r = llm_remote.chat(messages, model or default, max(max_tokens, 16000), temperature, provider=provider); r['parsed'] = _parse_json(r['text']); return r      # generous: a reasoning model's hidden thinking counts against the limit
     tmp = tempfile.mkdtemp(prefix='s360llm_', dir=work_dir)
     rq, out = os.path.join(tmp, 'req.json'), os.path.join(tmp, 'out.json'); json.dump(dict(messages=messages, max_tokens=max_tokens, temperature=temperature, json=True), open(rq, 'w'))
     py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..')
@@ -101,7 +101,7 @@ def check(script, facts, wpm=DEFAULT_WPM):
     return bad
 
 
-def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_line='', model=None, work_dir=None, retries=1, provider='gemini'):
+def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_line='', model=None, work_dir=None, retries=1, provider='vertex'):
     msgs = build_messages(folder_note, facts, target_s, wpm, style, race_line); t0 = time.time(); r = run_llm(msgs, model, work_dir=work_dir, provider=provider); s = r.get('parsed') or {}; bad = check(s, facts, wpm) if s else [(-1, 'not valid JSON')]
     tries = 1
     while bad and tries <= retries:
@@ -116,5 +116,6 @@ def write_script(facts, folder_note, target_s, wpm=DEFAULT_WPM, style='', race_l
             for p in parts:
                 if words((t + ' ' + p).strip()) <= b: t = (t + ' ' + p).strip()
         out.append(dict(seg=f['index'], film_start_s=f['film_start_s'], seconds=f['seconds'], clip=f['clip'], text=t, words=words(t), est_speak_s=round(words(t) * 60.0 / wpm, 1), budget_words=b))
-    return dict(schema=1, provider=provider, model=r.get('model') or model, title=s.get('title'), target_s=target_s, wpm=wpm, style=style, seconds_llm=round(time.time() - t0, 1), remaining_problems=[dict(seg=i, problem=m) for i, m in bad], lines=out,
+    dbg = dict(finish=r.get('finish'), tokens=r.get('tokens'), text_head=(r.get('text') or '')[:600]) if (not s or bad) else None
+    return dict(schema=1, provider=provider, model=r.get('model') or model, llm_debug=dbg, title=s.get('title'), target_s=target_s, wpm=wpm, style=style, seconds_llm=round(time.time() - t0, 1), remaining_problems=[dict(seg=i, problem=m) for i, m in bad], lines=out,
                 total_words=sum(l['words'] for l in out), total_speak_s=round(sum(l['est_speak_s'] for l in out), 1))

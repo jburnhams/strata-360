@@ -51,6 +51,16 @@ def test_gemini_keys_request_shape_and_errors():
     except L.LLMError as e: assert 'rejected' in str(e) and 'AIza' not in str(e)
 
 
+def test_vertex_key_and_endpoint():
+    d = tempfile.mkdtemp(); L.KEY_FILE = os.path.join(d, 'k'); L.VARS_FILE = os.path.join(d, 'secrets.env')
+    for e in ('VERTEX_API_KEY', 'GOOGLE_CLOUD_API_KEY'): os.environ.pop(e, None)
+    try: L.set_key('AIza' + 'z' * 35, 'vertex'); assert False
+    except L.LLMError: pass
+    L.set_key('AQ.' + 'Z' * 40, 'vertex'); assert L.key_configured('vertex') and 'VERTEX_API_KEY=AQ.' in open(L.VARS_FILE).read()
+    calls = []; L.urllib.request.urlopen = fake(calls, [dict(candidates=[dict(content=dict(parts=[dict(text='{}')]))])]); L.chat([dict(role='user', content='x')], model='gemini-2.5-pro', provider='vertex')
+    assert calls[0]['url'].startswith('https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-pro:generateContent') and 'key=' not in calls[0]['url'] and calls[0]['headers']['x-goog-api-key'].startswith('AQ.')
+
+
 def test_errors_and_retries_never_leak_the_key():
     os.environ['ANTHROPIC_API_KEY'] = 'sk-ant-' + 'k' * 40; L.time.sleep = lambda s: None
     calls = []; L.urllib.request.urlopen = fake(calls, [(529, 'overloaded'), dict(content=[dict(type='text', text='ok')], usage={})]); assert L.chat([dict(role='user', content='x')])['text'] == 'ok' and len(calls) == 2

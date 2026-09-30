@@ -68,7 +68,7 @@ export const api = {
   saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
   transcript: (folder: string) => call<{ segments: Seg[] }>('/api/transcript?' + q({ folder })),
   script: (folder: string) => call<ScriptState>('/api/script?' + q({ folder })),
-  setKey: (key: string, provider = 'gemini') => call<{ configured: boolean }>('/api/llm/key', { key, provider }),
+  setKey: (key: string, provider = 'vertex') => call<{ configured: boolean }>('/api/llm/key', { key, provider }),
   generateScript: (folder: string, o: { length: number; wpm?: number; style?: string; model?: string; provider?: string }) => call<{ started: boolean }>('/api/script/generate', { folder, ...o }),
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),

@@ -14,7 +14,9 @@ MODELS = ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1']
 GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
 GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-pro-latest', 'gemini-2.5-pro']
 GEMINI_DEFAULT = 'gemini-flash-latest'          # the free tier has no quota for the pro models (limit 0); flash works. Switch when billing is enabled
-PROVIDERS = dict(gemini=dict(models=GEMINI_MODELS, default=GEMINI_DEFAULT, env=('GEMINI_API_KEY', 'GOOGLE_API_KEY')), anthropic=dict(models=MODELS, default=DEFAULT_MODEL, env=('ANTHROPIC_API_KEY',)))
+VERTEX_URL = 'https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent'      # Vertex AI express mode: keys that start with AQ.
+VERTEX_MODELS = ['gemini-2.5-pro', 'gemini-3.1-pro-preview', 'gemini-2.5-flash']
+PROVIDERS = dict(vertex=dict(models=VERTEX_MODELS, default='gemini-2.5-pro', env=('VERTEX_API_KEY', 'GOOGLE_CLOUD_API_KEY')), gemini=dict(models=GEMINI_MODELS, default=GEMINI_DEFAULT, env=('GEMINI_API_KEY', 'GOOGLE_API_KEY')), anthropic=dict(models=MODELS, default=DEFAULT_MODEL, env=('ANTHROPIC_API_KEY',)))
 
 
 class LLMError(Exception): pass
@@ -57,6 +59,7 @@ def key_configured(provider='anthropic'): return api_key(provider) is not None
 
 def _looks_valid(provider, key):
     if any(c.isspace() for c in key): return False
+    if provider == 'vertex': return key.startswith('AQ.') and len(key) >= 30
     return (key.startswith('sk-ant-') and len(key) >= 30) if provider == 'anthropic' else (key.startswith('AIza') and len(key) >= 30)
 
 
@@ -69,13 +72,14 @@ def set_key(key, provider='anthropic'):
         if os.path.exists(f): os.remove(f)
         return key_configured(provider)
     key = key.strip()
-    if not _looks_valid(provider, key): raise LLMError(f"that does not look like {'an Anthropic' if provider == 'anthropic' else 'a Google Gemini'} API key")
+    if not _looks_valid(provider, key): raise LLMError(f"that does not look like {'an Anthropic' if provider == 'anthropic' else 'a Google Cloud (Vertex AI)' if provider == 'vertex' else 'a Google Gemini'} API key")
     v[name] = key; _write_vars(v); return True
 
 
-def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7, timeout=300, url=GEMINI_URL, json_mode=True):
+def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7, timeout=300, url=None, json_mode=True, provider='gemini'):
     """One Gemini request (generateContent). Same message list and result shape as `chat`. The key goes in a header, never in the URL, so it cannot end up in logs or error messages."""
-    key = api_key('gemini')
+    url = url or (VERTEX_URL if provider == 'vertex' else GEMINI_URL); key = api_key(provider)
+    if provider == 'vertex' and not key: raise LLMError('no Google Cloud (Vertex) API key: put VERTEX_API_KEY in secrets.env, or run `strata360 set-key --provider vertex`, or paste it in the app (Script panel)')
     if not key: raise LLMError('no Gemini API key: put GEMINI_API_KEY in secrets.env, or run `strata360 set-key --provider gemini`, or paste it in the app (Script panel)')
     system = '\n\n'.join(m['content'] for m in messages if m['role'] == 'system')
     contents = [dict(role='model' if m['role'] == 'assistant' else 'user', parts=[dict(text=m['content'])]) for m in messages if m['role'] != 'system']
@@ -108,7 +112,7 @@ def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7
 
 def chat(messages, model=DEFAULT_MODEL, max_tokens=3000, temperature=0.7, timeout=240, url=URL, provider='anthropic'):
     """One request. `messages` in the OpenAI-style list (system / user / assistant); system turns are joined into the API's `system` field. Returns {text, seconds, tokens, model}."""
-    if provider == 'gemini': return chat_gemini(messages, model if model in GEMINI_MODELS or model.startswith('gemini') else GEMINI_DEFAULT, max_tokens, temperature, timeout)
+    if provider in ('gemini', 'vertex'): return chat_gemini(messages, model if (model or '').startswith('gemini') else PROVIDERS[provider]['default'], max_tokens, temperature, timeout, provider=provider)
     key = api_key('anthropic')
     if not key: raise LLMError('no Anthropic API key: set ANTHROPIC_API_KEY, or run `strata360 set-key`, or paste it in the app (Script panel)')
     system = '\n\n'.join(m['content'] for m in messages if m['role'] == 'system'); turns = [dict(role=m['role'], content=m['content']) for m in messages if m['role'] != 'system']
