@@ -40,6 +40,18 @@ def race_dir(name):
     return os.path.abspath(os.path.join(races_root(), name))
 
 
+TRACK_NAMES = ('track.fit', 'track.gpx')      # the race track lives at <project>/track.fit or track.gpx (uploaded in the GUI or copied there)
+
+
+def track_path(name, cfg=None):
+    """The race track file of a project: the known filename in the project folder, else the (older) `gps` setting, else None."""
+    for n in TRACK_NAMES:
+        p = os.path.join(race_dir(name), n)
+        if os.path.exists(p): return p
+    g = (cfg or {}).get('gps')
+    return g if g and os.path.exists(g) else None
+
+
 def load(name):
     p = os.path.join(race_dir(name), 'race.json')
     if not os.path.exists(p): raise FileNotFoundError(f'no race {name!r}: run `strata360 init {name} --library PATH` first ({p})')

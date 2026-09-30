@@ -182,8 +182,8 @@ def cmd_who(a):
 def cmd_clock(a):
     """Camera clock correction (README 6.1). Anchors tie a moment in a clip to a true time; the natural one is the moment the running starts."""
     from strata360.gps import anchors as A, track
-    cfg = config.load(a.name); rd = config.race_dir(a.name); tr = track.load(cfg['gps']) if cfg.get('gps') else None
-    if tr is None: sys.exit('race.json has no "gps" (path to the FIT/GPX)')
+    cfg = config.load(a.name); rd = config.race_dir(a.name); tp = config.track_path(a.name, cfg); tr = track.load(tp) if tp else None
+    if tr is None: sys.exit('no race track: put it at <project>/track.fit or track.gpx (the web app has an upload) or set "gps" in race.json')
     ck = cfg.setdefault('camera_clock', {}); cur = float(ck.get('offset_seconds', 0.0)) + 3600 * float(ck.get('utc_offset_hours', 0.0))
     if a.suggest or a.auto:
         res = A.suggest(rd, tr, prior_s=cur)
@@ -231,7 +231,7 @@ def project_progress(name):
     pending = any(s_['done'] < s_['total'] for s_ in stages if s_['name'] not in blocked)
     state = 'processing' if (lock or pending) else ('needs_input' if (needs or any(s_['done'] < s_['total'] for s_ in stages)) else 'complete')
     return dict(state=state, folder=cfg['library'], project=rd, clips=len(cl), footage_gb=round(sum(c.size for c in cl) / 1e9, 1), unsupported=len(other), running=lock,
-                percent=round(100.0 * done_all / max(total_all, 1), 1), eta_s=round(eta), stages=stages, needs=needs, has_gps=bool(cfg.get('gps')))
+                percent=round(100.0 * done_all / max(total_all, 1), 1), eta_s=round(eta), stages=stages, needs=needs, has_gps=bool(config.track_path(name, cfg)))
 
 
 def cmd_progress(a):
@@ -251,11 +251,14 @@ def cmd_open(a):
     if not os.path.exists(os.path.join(rd, 'race.json')):
         cfg = json.loads(json.dumps(config.DEFAULTS)); cfg['name'] = os.path.basename(folder); cfg['library'] = folder
         if a.languages: cfg['languages'] = a.languages.split(',')
-        if a.gps: cfg['gps'] = os.path.abspath(a.gps)
+        if a.gps: cfg['gps'] = os.path.abspath(a.gps)     # copied to the known filename below
         os.makedirs(rd, exist_ok=True); config.save(folder, cfg); cl, other = clipmod.discover(folder)
         print(f'new project {rd}: {len(cl)} clips ({sum(c.size for c in cl) / 1e9:.1f} GB)')
     elif a.gps:
         cfg = config.load(folder); cfg['gps'] = os.path.abspath(a.gps); config.save(folder, cfg)
+    if a.gps:                                                                        # the race track lives at the known filename in the project folder
+        import shutil; ext = os.path.splitext(a.gps)[1].lower()
+        if ext in ('.fit', '.gpx'): shutil.copyfile(a.gps, os.path.join(rd, 'track' + ext)); print('race track saved as', os.path.join(rd, 'track' + ext))
     p = project_progress(folder); print(f"state: {p['state']}, {p['percent']}% done" + (f", about {p['eta_s'] / 60:.0f} min left" if p['eta_s'] else ''))
     if p['state'] in ('processing',) and not p['running'] and not a.no_run:
         res = runner.run(folder, None, None, False); p = project_progress(folder)
@@ -289,7 +292,7 @@ def cmd_script(a):
     from strata360.pipeline import notes as N
     from strata360.edit import techniques as TQ, optimise as O, script as SC
     from strata360.gps import track
-    cfg = config.load(a.name); rd = config.race_dir(a.name); notes = N.load(a.name); tr = track.load(cfg['gps']) if cfg.get('gps') else None
+    cfg = config.load(a.name); rd = config.race_dir(a.name); notes = N.load(a.name); tp = config.track_path(a.name, cfg); tr = track.load(tp) if tp else None
     cdir = os.path.join(rd, 'clips'); cands = {}
     for f in sorted(glob.glob(os.path.join(cdir, '*', 'candidates.json'))):
         for c in json.load(open(f))['candidates']: cands[c['id']] = c

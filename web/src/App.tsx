@@ -3,6 +3,7 @@ import { api } from './api'
 import FolderBrowser from './components/FolderBrowser'
 import ProjectProgress from './components/ProjectProgress'
 import NotesPanel from './components/NotesPanel'
+import TrackPanel from './components/TrackPanel'
 
 // Start screen: choose a footage folder (server-side, inside the allowed roots) -> the project is created or continued -> progress -> results / export.
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
         <>
           <div className="flex items-center gap-3 text-sm"><span className="break-all font-mono text-stone-500">{folder}</span><button className="text-emerald-700 underline dark:text-emerald-400" onClick={() => setFolder(undefined)}>change</button></div>
           <ProjectProgress folder={folder} />
+          <TrackPanel folder={folder} />
           <h2 className="mt-8 text-lg font-semibold">Notes</h2>
           <NotesPanel folder={folder} />
         </>

@@ -138,6 +138,31 @@ def create_app(roots, token=None):
         from strata360.pipeline import notes as N
         return N.save(folder_of(body.get('folder')), body.get('text', ''), body.get('clip'))
 
+    @api.get('/api/track', dependencies=[Depends(auth)])
+    def get_track(folder: str):                                                          # overview map + main stats of the race track, or {present: false}
+        f = folder_of(folder); p = config.track_path(f, config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else None)
+        if not p: return dict(present=False)
+        from strata360.gps.overview import overview
+        try: return overview(p)
+        except Exception as e: return dict(present=True, error=f'{type(e).__name__}: {e}')
+
+    @api.post('/api/track', dependencies=[Depends(auth)])
+    async def post_track(request: Request, folder: str, filename: str = 'track.fit'):    # the file is the raw request body; saved under the known name track.fit / track.gpx
+        f = folder_of(folder); ext = os.path.splitext(filename)[1].lower()
+        if ext not in ('.fit', '.gpx'): raise HTTPException(400, 'a .fit or .gpx file, please')
+        data = await request.body()
+        if len(data) < 200 or len(data) > 200 * 1024 * 1024: raise HTTPException(400, 'the file is empty or too large')
+        rd = config.race_dir(f); os.makedirs(rd, exist_ok=True)
+        for n in config.TRACK_NAMES:
+            for suffix in ('', '.npz'):
+                q = os.path.join(rd, n + suffix)
+                if os.path.exists(q): os.replace(q, q + '.replaced')                       # keep the previous file next to it, never silently lose it
+        dest = os.path.join(rd, 'track' + ext); open(dest, 'wb').write(data)
+        from strata360.gps.overview import overview
+        try: return overview(dest)
+        except Exception as e:
+            os.replace(dest, dest + '.bad'); raise HTTPException(400, f'could not read that file: {type(e).__name__}: {e}')
+
     @api.post('/api/open', dependencies=[Depends(auth)])
     def post_open(body: dict):                                                             # create the project if new, then continue whatever is unfinished
         f = folder_of(body.get('folder')); args = ['open']

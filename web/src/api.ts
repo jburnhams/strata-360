@@ -8,6 +8,11 @@ export interface Progress {
   stages?: Stage[]; needs?: string[]; running?: boolean; job_running: boolean; has_gps?: boolean
 }
 
+export interface TrackOverview {
+  present: boolean; error?: string; file?: string; samples?: number; start_utc?: string; end_utc?: string; duration_h?: number; moving_h?: number; distance_km?: number | null
+  ascent_m?: number; descent_m?: number; avg_speed_kmh?: number | null; avg_pace_min_km?: number | null; max_altitude_m?: number | null; min_altitude_m?: number | null
+  avg_hr?: number | null; max_hr?: number | null; gaps_over_10s?: number; bbox?: [number, number, number, number]; line?: [number, number][]
+}
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean }
 export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string> }
 
@@ -24,6 +29,13 @@ export const api = {
   browse: (path?: string) => call<Browse>('/api/browse' + (path ? '?' + q({ path }) : '')),
   progress: (folder: string) => call<Progress>('/api/progress?' + q({ folder })),
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
+  track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
+  uploadTrack: async (folder: string, file: File) => {
+    const r = await fetch('/api/track?' + q({ folder, filename: file.name }), { method: 'POST', body: file })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
+    return j as TrackOverview
+  },
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),
