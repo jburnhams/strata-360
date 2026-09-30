@@ -19,11 +19,11 @@ The user preferred the Claude API to a local model for writing quality, so **the
 - **In the app:** the Script panel on the overview (key box until one is saved; then film length, style, model and "Write the script"; the result lists each segment with its time, clip (click to open), text and words used against the budget).
 
 ## How it is written and checked
-A local instruction-tuned LLM (Qwen2.5-7B-Instruct, 4-bit, mlx-lm, in `.venv-vision`; `models/qwen25-7b-instruct-4bit`) is told to write first-person narration in the runner's voice using only the supplied facts (no invented names, places or numbers), with an arc across the film and no repetition, and to return JSON, one line per segment. The result is checked (`script.check`): over-budget lines, narration over the wearer's speech, missing or unknown segments. One retry sends the exact violations back; anything still too long is cut at the last sentence that fits. The saved script (`<project>/scripts/script-*.json`) has, per segment, the text, its words, the estimated speaking seconds and the budget, the facts it was written from, and the totals.
+The language model (the Claude API by default; or the local Qwen2.5-7B-Instruct, 4-bit, mlx-lm, in `.venv-vision`) is told to write first-person narration in the runner's voice using only the supplied facts (no invented names, places or numbers), with an arc across the film and no repetition, and to return JSON, one line per segment. The result is checked (`script.check`): over-budget lines, narration over the wearer's speech, missing or unknown segments. One retry sends the exact violations back; anything still too long is cut at the last sentence that fits. The saved script (`<project>/scripts/script-*.json`) has, per segment, the text, its words, the estimated speaking seconds and the budget, the facts it was written from, and the totals.
 
 ## Commands
 ```
-./strata360 script FOLDER --length 90 [--wpm 145] [--style "dry and understated"] [--seed 1]
+./strata360 script FOLDER --length 90 [--wpm 145] [--style "dry and understated"] [--seed 1] [--provider anthropic|local] [--model claude-sonnet-5-5]
 ```
 plans a film of that length from the candidates (the optimiser), writes the script, prints it segment by segment and saves it. Later in the GUI: edit the text per segment, regenerate one segment or a range, pin a line, change the length (the plan and the script re-fit together), then record (README 17).
 
