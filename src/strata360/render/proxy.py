@@ -48,6 +48,7 @@ def decoder(osv, stream, every):
 
 
 def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt', crf=24, frames_limit=0, progress=None):
+    """encoder 'h264' (the pipeline default): H.264 from VideoToolbox with the clip's audio, one file for analysis AND the browser player; 'vt' HEVC / 'x265' for archival proxies."""
     """Render the canonical analysis proxy and its JSON sidecar (next to `out`, .json). Returns the sidecar dict."""
     W, H = map(int, size.split('x')); t0 = time.time()
     R = EquirectRenderer(osv, W, H)
@@ -56,11 +57,12 @@ def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt',
     if frames_limit: idx = idx[:frames_limit]
     nominal_fps = 50.0 / every
     dm, ds = decoder(osv, 1, every), decoder(osv, 0, every)
-    venc = (['-c:v', 'hevc_videotoolbox', '-profile:v', 'main', '-b:v', bitrate] if encoder == 'vt' else ['-c:v', 'libx265', '-preset', 'medium', '-x265-params', f'crf={crf}:log-level=error'])
+    venc = (['-c:v', 'h264_videotoolbox', '-profile:v', 'high', '-b:v', bitrate] if encoder == 'h264' else ['-c:v', 'hevc_videotoolbox', '-profile:v', 'main', '-b:v', bitrate] if encoder == 'vt' else ['-c:v', 'libx265', '-preset', 'medium', '-x265-params', f'crf={crf}:log-level=error'])
+    final = out; out = out + '.video.mp4' if encoder == 'h264' else out
     enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(nominal_fps), '-i', '-',
                             '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p'] + venc +
-                           ['-tag:v', 'hvc1', '-bsf:v', 'hevc_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0',
-                            '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', out], stdin=subprocess.PIPE)
+                           (['-movflags', '+faststart'] if encoder == 'h264' else ['-tag:v', 'hvc1', '-bsf:v', 'hevc_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0']) +
+                           ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', out], stdin=subprocess.PIPE)
     frames = []
     for j, k in enumerate(idx):
         cm = r4.read_frame(dm); cs = r4.read_frame(ds)
@@ -70,10 +72,13 @@ def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt',
         frames.append(dict(proxy_frame=j, source_frame=int(k), t_s=round(float(pts[k] - pts[0]), 4)))
         if progress and j % 25 == 0: progress(j, len(idx))
     enc.stdin.close(); enc.wait(); dm.kill(); ds.kill()
+    if encoder == 'h264':                                                                            # add the clip's audio (AAC) and finish: one file for the detectors and the player
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', out, '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', final], check=True)
+        os.remove(out); out = final
     side = dict(schema_version=1, tool='strata360.make_proxy', source_file=os.path.basename(osv), proxy_file=os.path.basename(out),
                 projection='equirectangular', layout='standard: centre column = world +Y (DJI upright yaw datum), lon increases right, lat up',
                 frame='upright / world-locked: rotation applied per frame = B^T R(q)^T P^T (see progress.md); quaternion = telemetry row of source_frame',
-                size=[W, H], nominal_fps=nominal_fps, every_n_source_frames=every, codec=('hevc_videotoolbox %s' % bitrate) if encoder == 'vt' else ('x265 crf %d' % crf),
+                size=[W, H], nominal_fps=nominal_fps, every_n_source_frames=every, codec=('h264_videotoolbox %s + aac' % bitrate) if encoder == 'h264' else ('hevc_videotoolbox %s' % bitrate) if encoder == 'vt' else ('x265 crf %d' % crf),
                 profile='main 8-bit hvc1, bt709 tv', seconds=round(time.time() - t0, 1),
                 time_note='t_s is clip-relative seconds from the source frame pts (authoritative; the mp4 timestamps are nominal and drift by up to '
                           '0.06 s around dropped source frames). UTC = clip.json start_utc + t_s.', frames=frames)

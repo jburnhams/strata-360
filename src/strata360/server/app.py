@@ -206,8 +206,8 @@ def create_app(roots, token=None):
 
     @api.get('/api/preview')
     def get_preview(request: Request, folder: str, clip: str):                           # the preview video (Range requests are handled, so seeking works); <video> cannot send headers, so the cookie/query token authenticates
-        auth(request); f = folder_of(folder); p = os.path.join(_cd(f, clip), 'preview.mp4')
-        if not os.path.exists(p): raise HTTPException(404, 'the preview has not been made yet')
+        auth(request); f = folder_of(folder); p = os.path.join(_cd(f, clip), 'proxy.mp4')
+        if not os.path.exists(p): raise HTTPException(404, 'the proxy video has not been made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/clip', dependencies=[Depends(auth)])
@@ -221,7 +221,7 @@ def create_app(roots, token=None):
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
-        mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'preview.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
+        mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
             from strata360.analysis.views import focus_samples
             out['focus'] = focus_samples(d, c['source_files']['osv'])

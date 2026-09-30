@@ -10,7 +10,7 @@ Inputs
 Rules the writer is held to (checked, and fixed with one retry): every line fits the seconds of its segment at the speaking rate; no narration over the wearer's own speech unless a
 segment is explicitly marked as commentary; no facts beyond those supplied (no invented names, places or numbers); the total fits the film. The output is a script with a word and
 seconds budget per segment, ready to be read, recorded and re-fitted (README 17)."""
-import json, os, re, subprocess, tempfile, time
+import json, math, os, re, subprocess, tempfile, time
 
 DEFAULT_WPM = 145.0          # comfortable reflective narration; a fast read is 170
 FILL = 0.85                  # share of a segment's seconds the narration may occupy (leaves breathing room)
@@ -20,6 +20,32 @@ def words(s): return len(re.findall(r"[\w'’-]+", s))
 
 
 def budget_words(dur_s, wpm=DEFAULT_WPM, fill=FILL): return max(int(dur_s * wpm / 60.0 * fill), 0)
+
+
+def words_in_window(cdir, clip, w0, w1):
+    """What the wearer says inside the window [w0, w1] (clip-relative seconds): only the words whose middle falls in the window, from the word timings (accurate alignment where it passed
+    its checks, else whisper's times, which run about 0.15 s early). Phrases in other languages give the matching share of the English translation (its words are not timed). A trailing or
+    leading ellipsis marks a sentence cut by the window. Returns a list with one string per phrase, or [] when the clip has no transcript."""
+    tp = os.path.join(cdir, clip, 'transcript.json')
+    if not cdir or not os.path.exists(tp): return []
+    tr = json.load(open(tp)); ap = os.path.join(cdir, clip, 'alignment.json'); al = {a['index']: a for a in (json.load(open(ap)).get('segments') or []) if a} if os.path.exists(ap) else {}
+    out = []
+    for si, seg in enumerate(tr['segments']):
+        if seg['t1'] <= w0 or seg['t0'] >= w1 or not seg.get('text', '').strip() or seg.get('flags'): continue
+        ws = seg.get('words') or []
+        if not ws: out.append((seg.get('text_en') or seg['text']).strip()); continue
+        aw = (al.get(si) or {}).get('words') or []; inside = []
+        for k, w in enumerate(ws):
+            a = aw[k] if k < len(aw) else None
+            t0, t1 = (a['a0'], a['a1']) if a and a.get('ok') else (w['t0'] + 0.15, w['t1'] + 0.15)
+            if w0 <= (t0 + t1) / 2 < w1: inside.append(k)
+        if not inside: continue
+        n = len(ws); foreign = seg.get('lang', 'en') != 'en' and seg.get('text_en') and seg['text_en'].strip() != seg['text'].strip()
+        if foreign:
+            tok = seg['text_en'].split(); lo = int(inside[0] / n * len(tok)); hi = max(int(math.ceil((inside[-1] + 1) / n * len(tok))), lo + 1); text = ' '.join(tok[lo:hi])
+        else: text = ' '.join(ws[k]['w'].strip() for k in inside)
+        out.append(('… ' if inside[0] > 0 else '') + text.strip() + (' …' if inside[-1] < n - 1 else ''))
+    return out
 
 
 def segment_facts(seg, cand, cdir, track, notes, tz='Europe/Brussels'):
@@ -35,7 +61,8 @@ def segment_facts(seg, cand, cdir, track, notes, tz='Europe/Brussels'):
         if pj.get('covered') and pj.get('summary'): f['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '') + '; nearby: ' + ', '.join(sorted({n['name'] for p in pj['points'] for n in (p.get('nearby') or [])[:4]})[:6])
     f['clip_note'] = (notes.get('clips', {}).get(cand['clip']) or '').strip()
     sp = cand.get('transcript') or []
-    f['wearer_says'] = [s.get('text_en') or s['text'] for s in sp if s['t1'] > seg.get('in_s', 0) + cand['start_s'] and s['t0'] < seg.get('in_s', 0) + cand['start_s'] + seg['dur_s']] if cand['features'].get('speech') else []
+    w0 = seg.get('in_s', 0.0) + cand['start_s']; w1 = w0 + seg['dur_s']
+    f['wearer_says'] = (words_in_window(cdir, cand['clip'], w0, w1) or [s_.get('text_en') or s_['text'] for s_ in sp if s_['t1'] > w0 and s_['t0'] < w1]) if cand['features'].get('speech') else []
     sc = None
     p = os.path.join(cdir, cand['clip'], 'scenes.json') if cdir else None
     if p and os.path.exists(p):

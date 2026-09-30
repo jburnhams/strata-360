@@ -20,8 +20,8 @@ DEFAULTS = {
     'scenes_every_s': 5.0,
     'llm': {'provider': 'vertex', 'model': 'gemini-3.1-pro-preview'},           # the voice-over script writer: Gemini Pro through a Google Cloud (Vertex AI) key in secrets.env; or 'gemini' (AI Studio key), 'anthropic', 'local' (mlx-lm)
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
-    'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '30M'},
-    'stages': ['ingest', 'motion', 'proxy', 'thumb', 'places', 'preview', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
+    'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '16M', 'encoder': 'h264'},
+    'stages': ['ingest', 'motion', 'proxy', 'thumb', 'places', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
 }
 
 

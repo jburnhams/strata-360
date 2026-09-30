@@ -97,25 +97,18 @@ def motion(ctx):
     ctx.write('motion.json', ctx.stamped(analyse(ctx.clip.osv)))
 
 
-@stage('proxy', 2, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
-       note='the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, HEVC): the detectors, the scene model, thumbnails and the player all read this instead of the lens files (slow: about 10x real time)')
+@stage('proxy', 3, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
+       note='the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, H.264 with audio, about 16 Mbps): the detectors, the scene model, thumbnails AND the browser player all use this one file instead of the lens files (slow: about 10x real time)')
 def proxy(ctx):
     from strata360.render.proxy import make_proxy
     p = ctx.cfg['proxy']
-    make_proxy(ctx.clip.osv, ctx.path('proxy.mp4'), p['size'], p['every_frames'], p['bitrate'])
+    make_proxy(ctx.clip.osv, ctx.path('proxy.mp4'), p['size'], p['every_frames'], p['bitrate'], p.get('encoder', 'h264'))
 
 
 @stage('thumb', 1, outputs=('thumb_quick.jpg',), deps=('motion',), soft_deps=('proxy',), note='a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early')
 def thumb(ctx):
     from strata360.analysis.thumbs import quick
     quick(ctx.clip.osv, str(ctx.dir))
-
-
-@stage('preview', 2, outputs=('preview.mp4', 'preview.json'), deps=('proxy',),
-       note='the browser preview for the player: the proxy rescaled to 2048x1024 H.264 with the clip audio (seconds per clip)')
-def preview(ctx):
-    from strata360.render.proxy import make_preview_from_proxy
-    make_preview_from_proxy(ctx.path('proxy.mp4'), ctx.clip.osv, ctx.path('preview.mp4'))
 
 
 @stage('places', 2, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
