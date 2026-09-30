@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { api, type Meta, type Results } from '../api'
+import { PanelSkeleton } from './Skeleton'
 
 // Title, date and race results. The date defaults to the earliest capture in the footage; results feed the voice-over script (a DNF has no finishing position).
 export default function FilmDetails({ folder }: { folder: string }) {
   const [m, setM] = useState<Meta>()
   const [err, setErr] = useState<string>()
   useEffect(() => { api.meta(folder).then(setM) }, [folder])
-  if (!m) return null
+  if (!m) return <PanelSkeleton title="Film details" rows={4} />
   const save = async (patch: Parameters<typeof api.saveMeta>[1]) => {
     try { setM(await api.saveMeta(folder, patch)); setErr(undefined) } catch (e) { setErr((e as Error).message) }
   }

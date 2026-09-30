@@ -5,19 +5,23 @@ import ProjectProgress from './ProjectProgress'
 import TrackPanel from './TrackPanel'
 import NoteBox from './NoteBox'
 import ClipView from './ClipView'
+import { Skeleton } from './Skeleton'
 import FilmDetails from './FilmDetails'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
 // folder); with one selected it is that clip's details and its own notes.
 export default function Workspace({ folder, onChange }: { folder: string; onChange: () => void }) {
   const [sel, setSel] = useState<string | null>(null)
-  const clips = usePoll(() => api.clips(folder).then(r => r.clips), 8000, [folder]) ?? []
+  const clips = usePoll(() => api.clips(folder).then(r => r.clips), 8000, [folder])
   useEffect(() => { setSel(null) }, [folder])
   return (
     <div className="grid gap-4 md:grid-cols-[260px_1fr]">
-      <aside className="md:sticky md:top-4 md:max-h-[calc(100vh-2rem)] md:overflow-auto">
-        <button onClick={() => setSel(null)} className={`mb-2 w-full rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === null ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Overview</button>
-        <ul className="space-y-1">{clips.map(c => <Row key={c.id} folder={folder} c={c} active={sel === c.id} onClick={() => setSel(c.id)} />)}</ul>
+      <aside className="flex flex-col md:sticky md:top-4 md:h-[calc(100vh-2rem)]">
+        <button onClick={() => setSel(null)} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === null ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Overview</button>
+        <ul className="min-h-0 flex-1 space-y-1 overflow-auto md:pr-1">
+          {clips === undefined ? Array.from({ length: 8 }, (_, i) => <li key={i} className="flex gap-2 p-1.5"><Skeleton className="h-11 w-20 shrink-0" /><div className="flex-1 space-y-1.5"><Skeleton className="h-3 w-full" /><Skeleton className="h-3 w-1/2" /></div></li>)
+            : clips.map(c => <Row key={c.id} folder={folder} c={c} active={sel === c.id} onClick={() => setSel(c.id)} />)}
+        </ul>
       </aside>
       <div className="min-w-0">
         <div className="mb-3 flex items-center gap-3 text-sm"><span className="break-all font-mono text-stone-500">{folder}</span><button className="text-emerald-700 underline dark:text-emerald-400" onClick={onChange}>open another / new project</button></div>

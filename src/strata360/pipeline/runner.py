@@ -107,6 +107,28 @@ def active_items(race):
     return out
 
 
+def kill_tree(pid, sig=15):
+    """Signal a worker and every process it started (a stage may have launched ffmpeg or a model process); errors are ignored."""
+    import subprocess
+    try: kids = subprocess.run(['pgrep', '-P', str(pid)], stdout=subprocess.PIPE, text=True).stdout.split()
+    except OSError: kids = []
+    for k in kids: kill_tree(int(k), sig)
+    try: os.kill(int(pid), sig)
+    except OSError: pass
+
+
+def runnable_count(race):
+    """How many items could be started right now: unfinished, dependencies done, not claimed. (What an additional worker could pick up.)"""
+    cfg = config.load(race); cl, _ = discover(race, cfg); names = [s for s in ORDER if s in cfg['stages']]; taken = {(c, s) for c, s, _ in active_items(race)}; n = 0
+    for name in names:
+        st = STAGES[name]
+        for c in cl:
+            if (c.id, name) in taken: continue
+            done, _, blocked = _cached(st, c, cfg, load_state(race, c.id), clip_dir(race, c.id))
+            if not done and not blocked: n += 1
+    return n
+
+
 def dependents(stage):
     """`stage` plus every stage that depends on it, directly or not (the stages that must be redone after it changes)."""
     out = {stage}; grew = True

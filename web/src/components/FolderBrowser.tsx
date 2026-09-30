@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Browse } from '../api'
+import { PanelSkeleton } from './Skeleton'
 
 // Pick a project: browse the server's allowed folders. A folder that already is a project opens straight away (its sub-folders are never offered);
 // a folder with camera files can become a new project; anything else is just a place to look further.
@@ -13,7 +14,7 @@ export default function FolderBrowser({ onChoose, onCancel }: { onChoose: (folde
   }).catch(e => setErr(e.message))
   useEffect(() => { go() }, [])
   if (err) return <p className="text-stone-500">{err}</p>
-  if (!b) return <p className="text-stone-500">Loading…</p>
+  if (!b) return <PanelSkeleton title="Folders" rows={6} />
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-2 flex items-center justify-between"><span className="break-all font-mono text-xs text-stone-500">{b.path}</span>{onCancel && <button className="text-sm text-emerald-700 underline dark:text-emerald-400" onClick={onCancel}>cancel</button>}</div>

@@ -1,11 +1,11 @@
 // Typed client for the FastAPI server (src/strata360/server/app.py). Same-origin; the token (if any) travels as a cookie.
 export interface BrowseEntry { name: string; path: string; kind: 'dir'; is_project: boolean }
 export interface Browse { path: string; parent: string | null; footage_here: number; is_project: boolean; can_create: boolean; entries: BrowseEntry[] }
-export interface Stage { name: string; done: number; total: number; seconds_per_clip: number | null; eta_s: number | null; note: string }
+export interface Stage { running?: { clip: string; pid: number }[]; name: string; done: number; total: number; seconds_per_clip: number | null; eta_s: number | null; note: string }
 export type ProjectState = 'new' | 'processing' | 'needs_input' | 'complete'
 export interface Progress {
   state: ProjectState; folder: string; project: string; clips?: number; footage_gb?: number; percent?: number; eta_s?: number
-  stages?: Stage[]; needs?: string[]; running?: boolean; job_running: boolean; has_gps?: boolean; workers?: number; max_workers?: number; active?: { clip: string; stage: string }[]
+  stages?: Stage[]; needs?: string[]; running?: boolean; job_running: boolean; has_gps?: boolean; workers?: number; max_workers?: number; runnable?: number; worker_list?: { pid: number; clip: string | null; stage: string | null }[]; active?: { clip: string; stage: string }[]
 }
 export type ItemStatus = 'ok' | 'failed' | 'active' | 'stale' | null
 export interface StateMatrix { stages: string[]; clips: Record<string, Record<string, ItemStatus>>; dependents: Record<string, string[]> }
@@ -63,5 +63,5 @@ export const api = {
   run: (folder: string) => call<{ started: boolean }>('/api/run', { folder }),
   state: (folder: string) => call<StateMatrix>('/api/state?' + q({ folder })),
   clear: (folder: string, items: { clip: string; stage: string }[]) => call<{ cleared: number }>('/api/clear', { folder, items }),
-  stop: (folder: string) => call<{ stopped: number }>('/api/stop', { folder }),
+  stop: (folder: string, pid?: number) => call<{ stopped: number }>('/api/stop', { folder, pid }),
 }

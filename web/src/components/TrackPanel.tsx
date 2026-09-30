@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type TrackOverview } from '../api'
+import { PanelSkeleton } from './Skeleton'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: an offline overview map and the main numbers, or an upload box; click to replace.
 export default function TrackPanel({ folder }: { folder: string }) {
@@ -16,7 +17,7 @@ export default function TrackPanel({ folder }: { folder: string }) {
   }
   const pick = <input ref={input} type="file" accept=".fit,.gpx" hidden onChange={e => upload(e.target.files?.[0])} />
 
-  if (!t) return null
+  if (!t) return err ? <p className="mt-4 text-sm text-red-600">{err}</p> : <PanelSkeleton title="Race track" rows={4} />
   if (!t.present || t.error) {
     return (
       <div className="mt-4 rounded-xl border border-dashed border-stone-300 p-6 text-center dark:border-stone-700"

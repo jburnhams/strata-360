@@ -94,7 +94,7 @@ def start_job(folder, args=('open',)):
         live = [p for p in JOBS.get(folder, []) if p.poll() is None]; JOBS[folder] = live
         if len(runner.workers(folder)) >= MAX_WORKERS: return False
         rd = config.race_dir(folder); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'server_job.log'), 'ab')
-        live.append(subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), args[0], folder, *args[1:]], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR)); return True
+        live.append(subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), args[0], folder, *args[1:]], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True)); return True
 
 
 def progress(folder):
@@ -267,9 +267,8 @@ def create_app(roots, token=None):
         import signal
         from strata360.pipeline import runner
         f = folder_of(body.get('folder')); pids = runner.workers(f)
-        for pid in pids:
-            try: os.kill(pid, signal.SIGTERM)
-            except OSError: pass
+        if body.get('pid') is not None: pids = [p for p in pids if p == int(body['pid'])]                  # one worker (only a registered worker of this project can be signalled)
+        for pid in pids: runner.kill_tree(pid, signal.SIGTERM)
         return dict(stopped=len(pids))
 
     @api.get('/api/state', dependencies=[Depends(auth)])

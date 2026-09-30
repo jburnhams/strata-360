@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type ClipDetail } from '../api'
 import NoteBox from './NoteBox'
 import RedoDialog from './RedoDialog'
+import { PanelSkeleton, Skeleton } from './Skeleton'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -15,7 +16,7 @@ export default function ClipView({ folder, clip }: { folder: string; clip: strin
   const [redo, setRedo] = useState(false)
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
   if (err) return <p className="text-stone-500">{err}</p>
-  if (!c) return <p className="text-stone-500">Loading…</p>
+  if (!c) return <div className="space-y-4"><Skeleton className="aspect-video w-full" /><div className="grid gap-4 md:grid-cols-2"><PanelSkeleton title="When and where" /><PanelSkeleton title="Motion and picture" /></div><PanelSkeleton title="Transcript" rows={4} /></div>
   const utc = String(c.time.start_utc ?? ''), m = c.motion, sc = c.scenes?.summary, id = c.identity
   return (
     <div className="space-y-4">
