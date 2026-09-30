@@ -1,0 +1,26 @@
+{
+ "ref": "world",
+ "bg": "gradient",
+ "comment": "Globe looking at the horizon: the rim is the scene behind the camera (sky above, trees and ground below), so the gradient background shows the colours merging.",
+ "keyframes": [
+  {
+   "t": 0.0,
+   "yaw": 0,
+   "pitch": 0,
+   "disc": 3.2
+  },
+  {
+   "t": 2.4,
+   "yaw": 60,
+   "pitch": 0,
+   "disc": 0.5
+  },
+  {
+   "t": 4.8,
+   "yaw": 120,
+   "pitch": 0,
+   "disc": 0.5
+  }
+ ],
+ "bg_pick": "vivid"
+}

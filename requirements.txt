@@ -1,0 +1,24 @@
+# strata360 main environment (Python 3.13, macOS Apple Silicon). Install with scripts/setup_env.sh, which also
+#   - replaces numpy with its OpenBLAS wheel (the default numpy on macOS 14+ uses Accelerate, which raised warnings and could return
+#     bad values from matmul on the M4 test machine), and
+#   - installs deepfilternet without its numpy<2 pin and patches its removed-torchaudio import (scripts/patch_deepfilternet.py).
+# numpy is installed by the script and deliberately not listed here.
+scipy==1.16.3
+opencv-python==4.12.0.88
+torch==2.9.1
+torchaudio==2.9.1
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+onnxruntime==1.23.2
+transformers==4.57.3
+tokenizers==0.22.1
+sentencepiece==0.2.2
+sacremoses==0.2.0
+huggingface-hub==0.36.0
+scikit-image==0.26.0
+pyyaml==6.0.3
+loguru==0.7.3
+appdirs==1.4.4
+packaging==23.2
+fastapi
+uvicorn

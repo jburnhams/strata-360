@@ -1,0 +1,24 @@
+{
+  "ref": "world",
+  "comment": "example keyframed path: a slow pan right with a push-in. All segments use the default 'spline' interpolation (continuous velocity). Mixing 'smooth' and 'spline' on neighbouring keys makes velocity jump at the key (the limits report warns). Times are clip-relative seconds; angles in degrees.",
+  "keyframes": [
+    {
+      "t": 0.0,
+      "yaw": -20,
+      "pitch": 5,
+      "fov": 100
+    },
+    {
+      "t": 2.0,
+      "yaw": 15,
+      "pitch": 2,
+      "fov": 80
+    },
+    {
+      "t": 4.8,
+      "yaw": 40,
+      "pitch": -4,
+      "fov": 60
+    }
+  ]
+}
