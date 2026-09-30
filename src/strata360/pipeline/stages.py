@@ -102,7 +102,7 @@ def thumb(ctx):
     quick(ctx.clip.osv, str(ctx.dir))
 
 
-@stage('places', 1, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
+@stage('places', 2, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
        note='where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)')
 def places(ctx):
     import os
@@ -111,6 +111,8 @@ def places(ctx):
     root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = next((os.path.join(root, n) for n in ('track.fit', 'track.gpx') if os.path.exists(os.path.join(root, n))), None) or ctx.cfg.get('gps')
     if not tp or not os.path.exists(tp): raise RuntimeError('no race track (track.fit / track.gpx in the project folder): add it in the app, then redo this stage')
     ctx.write('places.json', ctx.stamped(analyse(ctx.read('clip.json'), track.load(tp), os.path.join(root, 'cache', 'places'), ctx.cfg)))
+    from strata360.analysis.places import rebuild_locations
+    rebuild_locations(root)                                                        # the race-wide locations.json in the project folder
 
 
 @stage('people', 2, keys=('people_every_frames',), outputs=('people.json', 'faces.npy', 'faces_thumbs.npy'), deps=('ingest',), default=False,

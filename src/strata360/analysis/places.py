@@ -73,6 +73,18 @@ def nearby(lat, lon, cache_dir, url='https://overpass-api.de/api/interpreter', r
     return sorted(seen.values(), key=lambda x: x['distance_m'])[:limit]
 
 
+def select_points(fix, minsep=200.0):
+    """Which of the start, middle and end positions are worth looking up. The middle is the reference: the start is used only if it is more than `minsep` metres from the middle, likewise the end.
+    If both are within `minsep` of the middle but the start and end are themselves more than `minsep` apart, the start and end are used instead of the middle; if everything is close, only the middle.
+    `fix` maps 'start'/'middle'/'end' to (lat, lon); returns the labels in time order."""
+    d = lambda a, b: _dist(fix[a][0], fix[a][1], fix[b][0], fix[b][1])
+    far_s, far_e = d('start', 'middle') > minsep, d('end', 'middle') > minsep
+    if far_s and far_e: return ['start', 'middle', 'end']
+    if far_s: return ['start', 'middle']
+    if far_e: return ['middle', 'end']
+    return ['start', 'end'] if d('start', 'end') > minsep else ['middle']
+
+
 def analyse(clip_json, track, cache_dir, cfg=None):
     """places.json body for one clip: the start, middle and end of it (positions at those UTC instants from the race track), each with an address and named places nearby."""
     import numpy as np
@@ -81,15 +93,39 @@ def analyse(clip_json, track, cache_dir, cfg=None):
     t0 = dt.datetime.fromisoformat(clip_json['time']['start_utc'].replace('Z', '+00:00')).timestamp(); dur = clip_json['video']['source_frames'] / clip_json['video']['nominal_fps']
     T = track['t']; ok = np.isfinite(track['lat'])
     if t0 + dur < T[0] - 30 or t0 > T[-1] + 30: return dict(schema=SCHEMA_VERSION, covered=False, note='outside the race track (no position for this clip)', points=[], source='OpenStreetMap (Nominatim, Overpass)')
-    pts = []
+    fixes = {}
     for label, f in (('start', 0.0), ('middle', 0.5), ('end', 1.0)):
-        t = t0 + f * dur; lat = float(np.interp(t, T[ok], track['lat'][ok])); lon = float(np.interp(t, T[ok], track['lon'][ok]))
+        t = t0 + f * dur; fixes[label] = (f, float(np.interp(t, T[ok], track['lat'][ok])), float(np.interp(t, T[ok], track['lon'][ok])))
+    minsep = float(cfg.get('min_separation_m', 200.0)); chosen = select_points({k: (v[1], v[2]) for k, v in fixes.items()}, minsep); pts = []
+    for label in chosen:
+        f, lat, lon = fixes[label]
         pts.append(dict(label=label, t_s=round(f * dur, 1), lat=round(lat, 5), lon=round(lon, 5), address=reverse(lat, lon, cache_dir, nom), nearby=nearby(lat, lon, cache_dir, ovp, radius)))
     names = []
     for p in pts:
         a = p['address'] or {}; n = a.get('hamlet') or a.get('village') or a.get('suburb') or a.get('town') or a.get('city') or a.get('municipality')
         if n and n not in names: names.append(n)
     first = pts[0]['address'] or {}
-    return dict(schema=SCHEMA_VERSION, covered=True, source='OpenStreetMap (Nominatim, Overpass)', radius_m=radius, points=pts,
+    return dict(schema=SCHEMA_VERSION, covered=True, source='OpenStreetMap (Nominatim, Overpass)', radius_m=radius, min_separation_m=minsep, points=pts,
                 summary=dict(places=names, road=first.get('road'), county=first.get('county'), country=first.get('country'),
                              text=(', '.join(names) or first.get('display_name') or 'unknown') + (f" ({first['county']})" if first.get('county') else '')))
+
+
+def rebuild_locations(project_root):
+    """Write `<project>/locations.json`: the processed place results of every clip in one file (not the raw cache), in clip time order, plus a race-wide index of the named places seen (which clips they
+    appear in and how near they came) and the sequence of villages/towns along the way. Rebuilt whenever a clip's places finish; safe to call from parallel workers (atomic replace)."""
+    import glob
+    clips, index, route = [], {}, []
+    for d in sorted(glob.glob(os.path.join(project_root, 'clips', '*', ''))):
+        try: c = json.load(open(d + 'clip.json')); pl = json.load(open(d + 'places.json'))
+        except (OSError, ValueError): continue
+        clips.append(dict(clip=c['clip_id'], start_utc=c['time']['start_utc'], end_utc=c['time'].get('end_utc'), covered=pl.get('covered', False), note=pl.get('note'), summary=pl.get('summary'), points=pl.get('points', [])))
+        for n in (pl.get('summary') or {}).get('places', []):
+            if not route or route[-1]['name'] != n: route.append(dict(name=n, first_clip=c['clip_id'], first_utc=c['time']['start_utc']))
+        for p in pl.get('points', []):
+            for x in (p.get('nearby') or []):
+                e = index.setdefault(x['name'], dict(name=x['name'], kind=x['kind'], clips=[], nearest_m=x['distance_m']))
+                if c['clip_id'] not in e['clips']: e['clips'].append(c['clip_id'])
+                e['nearest_m'] = min(e['nearest_m'], x['distance_m'])
+    doc = dict(schema=1, generated=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), source='OpenStreetMap (Nominatim reverse geocoding, Overpass API)', clips=clips, route=route,
+               places=sorted(index.values(), key=lambda e: (e['clips'][0], e['nearest_m'])))
+    p = os.path.join(project_root, 'locations.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(doc, open(tmp, 'w'), indent=1, ensure_ascii=False); os.replace(tmp, p); return len(clips), len(index)
