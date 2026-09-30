@@ -1,5 +1,13 @@
-"""Run stages over a race's clips with caching, fail-soft error handling, an atomic state file per clip and a run lock."""
-import datetime as dt, fnmatch, hashlib, json, os, sys, time, traceback
+"""Run stages over a race's clips with caching, fail-soft error handling and **parallel workers**.
+
+Work is a set of items (clip, stage). Any number of workers (processes started from the GUI, the command line, or both) can run at the same time: a worker repeatedly scans the items in
+stage order, skips those that are done, blocked or claimed, *claims* one (an atomic file `.claims/<clip>__<stage>` holding its pid), runs it, releases it and scans again, until nothing
+is left. The first worker therefore loops through everything; a worker started later simply picks up whatever is unfinished and unclaimed. A claim whose process has died is stale and is
+taken over. The per-clip state file (`stages.json`) is updated under a file lock so workers finishing different stages of one clip never overwrite each other.
+
+`clear` removes the recorded status of a stage (and, by default, of every stage that depends on it) so it will be processed again."""
+import atexit, datetime as dt, fcntl, fnmatch, hashlib, json, os, time, traceback
+from contextlib import contextmanager
 from strata360.pipeline import config, clips as clipmod
 from strata360.pipeline.stages import STAGES, ORDER, Ctx
 
@@ -16,78 +24,200 @@ def stage_key(stage, clip, cfg, dep_keys):
     return _sha([stage.name, stage.version, clip.fingerprint, {k: cfg.get(k) for k in stage.keys}, dep_keys])
 
 
+# ---- state (one json per clip, updated under a file lock) ------------------------------------------------------------------------------------------------------------
 def load_state(race, clip_id):
     p = os.path.join(clip_dir(race, clip_id), 'stages.json')
-    return json.load(open(p)) if os.path.exists(p) else {}
+    try: return json.load(open(p)) if os.path.exists(p) else {}
+    except ValueError: return {}                                                                       # caught mid-write on a slow drive: treat as empty this time
 
 
 def save_state(race, clip_id, state):
     d = clip_dir(race, clip_id); os.makedirs(d, exist_ok=True)
-    tmp = os.path.join(d, 'stages.json.tmp'); json.dump(state, open(tmp, 'w'), indent=1); os.replace(tmp, os.path.join(d, 'stages.json'))
+    tmp = os.path.join(d, f'stages.json.{os.getpid()}.tmp'); json.dump(state, open(tmp, 'w'), indent=1); os.replace(tmp, os.path.join(d, 'stages.json'))
 
 
-class Lock:
-    def __init__(self, race): self.p = os.path.join(config.race_dir(race), '.lock')
-    def __enter__(self):
-        if os.path.exists(self.p):
-            pid = int(open(self.p).read().strip() or 0)
-            try: os.kill(pid, 0); raise RuntimeError(f'another run is active on this race (pid {pid}); remove {self.p} if that is stale')
-            except ProcessLookupError: pass
-        open(self.p, 'w').write(str(os.getpid())); return self
-    def __exit__(self, *a):
-        try: os.remove(self.p)
-        except OSError: pass
+@contextmanager
+def state_lock(race, clip_id):
+    d = clip_dir(race, clip_id); os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, '.state.lock'), 'w') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try: yield
+        finally: fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def update_state(race, clip_id, name, entry):
+    with state_lock(race, clip_id):
+        st = load_state(race, clip_id)
+        if entry is None: st.pop(name, None)
+        else: st[name] = entry
+        save_state(race, clip_id, st)
+
+
+# ---- claims and workers ------------------------------------------------------------------------------------------------------------------------------------------------
+def _alive(pid):
+    try: os.kill(int(pid), 0); return True
+    except (ProcessLookupError, ValueError): return False
+    except PermissionError: return True
+
+
+def _claims(race): return os.path.join(config.race_dir(race), '.claims')
+def _workers(race): return os.path.join(config.race_dir(race), '.workers')
+
+
+def claim(race, clip_id, stage):
+    """Atomically claim (clip, stage) for this process; a claim left by a dead process is taken over."""
+    os.makedirs(_claims(race), exist_ok=True); p = os.path.join(_claims(race), f'{clip_id}__{stage}')
+    for _ in range(2):
+        try:
+            fd = os.open(p, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, f'{os.getpid()} {time.time():.0f}'.encode()); os.close(fd); return True
+        except FileExistsError:
+            try: pid = open(p).read().split()[0]
+            except (OSError, IndexError): pid = None
+            if pid and _alive(pid): return False
+            try: os.remove(p)
+            except OSError: pass
+    return False
+
+
+def release(race, clip_id, stage):
+    try: os.remove(os.path.join(_claims(race), f'{clip_id}__{stage}'))
+    except OSError: pass
+
+
+def workers(race):
+    """Pids of live workers on this race (registered by `work`); stale registrations are removed."""
+    out = []; d = _workers(race)
+    if os.path.isdir(d):
+        for n in os.listdir(d):
+            if _alive(n): out.append(int(n))
+            else:
+                try: os.remove(os.path.join(d, n))
+                except OSError: pass
+    return sorted(out)
+
+
+def active_items(race):
+    """[(clip, stage, pid)] currently being processed."""
+    out = []; d = _claims(race)
+    if os.path.isdir(d):
+        for n in os.listdir(d):
+            try: pid = open(os.path.join(d, n)).read().split()[0]
+            except (OSError, IndexError): continue
+            if _alive(pid) and '__' in n: c, s = n.rsplit('__', 1); out.append((c, s, int(pid)))
+    return out
+
+
+def dependents(stage):
+    """`stage` plus every stage that depends on it, directly or not (the stages that must be redone after it changes)."""
+    out = {stage}; grew = True
+    while grew:
+        grew = False
+        for n, st in STAGES.items():
+            if n not in out and any(d in out for d in st.deps): out.add(n); grew = True
+    return [n for n in ORDER if n in out]
+
+
+def clear(race, stage, clips=None, cascade=True):
+    """Forget the recorded status of `stage` (and its dependents) for the given clip ids (default all) so it is processed again. Returns [(clip, stage)] cleared. Outputs stay on disk until replaced."""
+    if stage not in STAGES: raise ValueError(f'unknown stage {stage!r}; available: {ORDER}')
+    names = dependents(stage) if cascade else [stage]; cfg = config.load(race); cl, _ = clipmod.discover(cfg['library']); ids = [c.id for c in cl if clips is None or c.id in clips]; done = []
+    for cid in ids:
+        for n in names:
+            if load_state(race, cid).get(n) is not None: update_state(race, cid, n, None); done.append((cid, n))
+    return done
+
+
+def clear_items(race, items):
+    """Forget the status of exactly these (clip_id, stage) items. Returns how many had a status."""
+    n = 0
+    for cid, name in items:
+        if name in STAGES and load_state(race, cid).get(name) is not None: update_state(race, cid, name, None); n += 1
+    return n
+
+
+def item_states(race):
+    """The whole state matrix for the GUI: {clip_id: {stage: 'ok'|'failed'|'active'|'stale'|None}} for the configured stages (active = being processed right now)."""
+    cfg = config.load(race); cl, _ = discover(race, cfg); names = [s for s in ORDER if s in cfg['stages']]; act = {(c, s) for c, s, _ in active_items(race)}; out = {}
+    for c in cl:
+        state = load_state(race, c.id); row = {}
+        for n in names:
+            e = state.get(n); done, _, blocked = _cached(STAGES[n], c, cfg, state, clip_dir(race, c.id))
+            row[n] = 'active' if (c.id, n) in act else None if e is None else 'failed' if e.get('status') == 'failed' else 'ok' if done else 'stale'
+        out[c.id] = row
+    return dict(stages=names, clips=out, dependents={n: dependents(n) for n in names})
 
 
 def discover(race, cfg):
-    cl, other = clipmod.discover(cfg['library'])
-    return cl, other
+    return clipmod.discover(cfg['library'])
 
 
-def run(race, stages=None, clip_glob=None, force=False, log=print, fail_fast=False):
-    """Run `stages` (default: the race's configured set) over the selected clips. Returns {(clip, stage): status}."""
-    cfg = config.load(race); rd = config.race_dir(race)
-    names = [s for s in ORDER if s in (stages or cfg['stages'])]
+def _cached(st, c, cfg, state, ctx_dir):
+    """(is_done, key, blocked_by) for one item given the clip's state."""
+    deps = {d: state.get(d, {}) for d in st.deps}; bad = [d for d, v in deps.items() if v.get('status') != 'ok']
+    if bad: return False, None, bad
+    key = stage_key(st, c, cfg, {d: v.get('key') for d, v in deps.items()}); cur = state.get(st.name, {}); clock_sig = _sha(cfg.get('camera_clock'))
+    if st.name == 'ingest' and cur.get('key') and cur.get('version') == st.version and cur.get('fp', c.fingerprint) == c.fingerprint: key = cur['key']    # frozen identity: a clock change re-times, it does not invalidate clip-relative stages
+    done = cur.get('status') == 'ok' and cur.get('key') == key and all(os.path.exists(os.path.join(ctx_dir, o)) for o in st.outputs) and (st.name != 'ingest' or cur.get('clock') == clock_sig)
+    return done, key, []
+
+
+def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_items=None):
+    """One worker: process unfinished, unclaimed items until none is left. Safe to run several at once. Returns {(clip, stage): 'ok'|'failed'} for what this worker did."""
+    cfg = config.load(race); rd = config.race_dir(race); names = [s for s in ORDER if s in (stages or cfg['stages'])]
     unknown = set(stages or []) - set(STAGES)
     if unknown: raise SystemExit(f'unknown stage(s): {sorted(unknown)}; available: {ORDER}')
     cl, other = discover(race, cfg)
     if clip_glob: cl = [c for c in cl if fnmatch.fnmatch(c.id, clip_glob) or clip_glob in c.id]
+    os.makedirs(_workers(race), exist_ok=True); reg = os.path.join(_workers(race), str(os.getpid())); open(reg, 'w').write(dt.datetime.now().isoformat(timespec='seconds'))
+    atexit.register(lambda: os.path.exists(reg) and os.remove(reg))
     logf = open(os.path.join(rd, 'run.log'), 'a')
+
     def L(msg):
-        line = f"{dt.datetime.now().strftime('%H:%M:%S')} {msg}"; log(line); logf.write(line + '\n'); logf.flush()
-    result = {}
-    with Lock(race):
-        L(f'race {race}: {len(cl)} clips, stages {names}' + (' (force)' if force else ''))
+        line = f"{dt.datetime.now().strftime('%H:%M:%S')} [{os.getpid()}] {msg}"; log(line); logf.write(line + '\n'); logf.flush()
+
+    result = {}; tried = set(); L(f'worker started: {len(cl)} clips, stages {names}')
+    while max_items is None or len(result) < max_items:
+        picked = None
         for name in names:
             st = STAGES[name]
             for n, c in enumerate(cl, 1):
-                state = load_state(race, c.id); ctx = Ctx(c, cfg, clip_dir(race, c.id), L); os.makedirs(ctx.dir, exist_ok=True)
-                deps = {d: state.get(d, {}) for d in st.deps}
-                if any(v.get('status') != 'ok' for v in deps.values()):
-                    result[(c.id, name)] = 'blocked'; L(f'[{n}/{len(cl)}] {c.id} {name}: blocked (needs {[d for d, v in deps.items() if v.get("status") != "ok"]})'); continue
-                key = stage_key(st, c, cfg, {d: v.get('key') for d, v in deps.items()})
-                cur = state.get(name, {}); clock_sig = _sha(cfg.get('camera_clock'))
-                if name == 'ingest' and cur.get('key') and cur.get('version') == st.version and cur.get('fp', c.fingerprint) == c.fingerprint: key = cur['key']     # frozen identity: a camera-clock change re-times (below) but does not invalidate stages whose data is clip-relative
-                if not force and cur.get('status') == 'ok' and cur.get('key') == key and all(os.path.exists(ctx.path(o)) for o in st.outputs) and (name != 'ingest' or cur.get('clock') == clock_sig):
-                    result[(c.id, name)] = 'cached'; L(f'[{n}/{len(cl)}] {c.id} {name}: cached'); continue
-                t0 = time.time()
-                try:
-                    st.fn(ctx)
-                    if name == 'ingest':
-                        from strata360.pipeline.ingest import restamp; n_re = restamp(ctx.dir)
-                        if n_re: L(f'    re-stamped {n_re} artefacts with the new time')
-                    state[name] = dict(status='ok', key=key, version=st.version, clock=clock_sig, fp=c.fingerprint, seconds=round(time.time() - t0, 1), at=dt.datetime.now().isoformat(timespec='seconds')); result[(c.id, name)] = 'ok'
-                    L(f'[{n}/{len(cl)}] {c.id} {name}: ok ({time.time() - t0:.1f} s)')
-                except Exception as e:
-                    state[name] = dict(status='failed', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=''.join(traceback.format_exception_only(type(e), e)).strip(),
-                                       trace=traceback.format_exc()[-1500:]); result[(c.id, name)] = 'failed'
-                    L(f'[{n}/{len(cl)}] {c.id} {name}: FAILED {e!r}')
-                    if fail_fast: save_state(race, c.id, state); raise
-                save_state(race, c.id, state)
-        json.dump(dict(race=race, generated=dt.datetime.now().isoformat(timespec='seconds'), clips=[c.to_dict() for c in cl], unsupported=[dict(path=p, reason=r) for p, r in other]),
-                  open(os.path.join(rd, 'catalog.json'), 'w'), indent=1)
+                if (c.id, name) in tried: continue
+                state = load_state(race, c.id); done, key, blocked = _cached(st, c, cfg, state, clip_dir(race, c.id))
+                if done or blocked: continue
+                if not claim(race, c.id, name): continue
+                state = load_state(race, c.id); done, key, blocked = _cached(st, c, cfg, state, clip_dir(race, c.id))      # someone may have finished it between the look and the claim
+                if done or blocked: release(race, c.id, name); continue
+                picked = (n, c, st, key); break
+            if picked: break
+        if not picked: break
+        n, c, st, key = picked; name = st.name; tried.add((c.id, name)); ctx = Ctx(c, cfg, clip_dir(race, c.id), L); os.makedirs(ctx.dir, exist_ok=True); clock_sig = _sha(cfg.get('camera_clock')); t0 = time.time()
+        try:
+            st.fn(ctx)
+            if name == 'ingest':
+                from strata360.pipeline.ingest import restamp; n_re = restamp(ctx.dir)
+                if n_re: L(f'    re-stamped {n_re} artefacts with the new time')
+            update_state(race, c.id, name, dict(status='ok', key=key, version=st.version, clock=clock_sig, fp=c.fingerprint, seconds=round(time.time() - t0, 1), at=dt.datetime.now().isoformat(timespec='seconds')))
+            result[(c.id, name)] = 'ok'; L(f'[{n}/{len(cl)}] {c.id} {name}: ok ({time.time() - t0:.1f} s)')
+        except Exception as e:
+            update_state(race, c.id, name, dict(status='failed', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=''.join(traceback.format_exception_only(type(e), e)).strip(), trace=traceback.format_exc()[-1500:]))
+            result[(c.id, name)] = 'failed'; L(f'[{n}/{len(cl)}] {c.id} {name}: FAILED {e!r}')
+            if fail_fast: release(race, c.id, name); raise
+        finally:
+            release(race, c.id, name)
+    if not workers(race) or workers(race) == [os.getpid()]:
+        json.dump(dict(race=race, generated=dt.datetime.now().isoformat(timespec='seconds'), clips=[c.to_dict() for c in cl], unsupported=[dict(path=p, reason=r) for p, r in other]), open(os.path.join(rd, 'catalog.json'), 'w'), indent=1)
     counts = {}
     for v in result.values(): counts[v] = counts.get(v, 0) + 1
-    L(f'done: {counts}')
-    logf.close()
+    L(f'worker done: {counts or "nothing left to do"}'); logf.close()
+    try: os.remove(reg)
+    except OSError: pass
     return result
+
+
+def run(race, stages=None, clip_glob=None, force=False, log=print, fail_fast=False):
+    """Compatibility wrapper: `force` clears the selected stages (and dependents) for the selected clips first, then works like any worker."""
+    if force:
+        cfg = config.load(race); sel = [s for s in ORDER if s in (stages or cfg['stages'])]
+        cl, _ = discover(race, cfg); ids = [c.id for c in cl if not clip_glob or fnmatch.fnmatch(c.id, clip_glob) or clip_glob in c.id]
+        for s in sel: clear(race, s, ids, cascade=False)
+    return work(race, stages, clip_glob, log, fail_fast)

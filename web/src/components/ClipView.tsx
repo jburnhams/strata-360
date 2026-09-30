@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type ClipDetail } from '../api'
 import NoteBox from './NoteBox'
+import RedoDialog from './RedoDialog'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -11,6 +12,7 @@ const Kv = ({ k, v }: { k: string; v: React.ReactNode }) => v == null || v === '
 export default function ClipView({ folder, clip }: { folder: string; clip: string }) {
   const [c, setC] = useState<ClipDetail>()
   const [err, setErr] = useState<string>()
+  const [redo, setRedo] = useState(false)
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
   if (err) return <p className="text-stone-500">{err}</p>
   if (!c) return <p className="text-stone-500">Loading…</p>
@@ -18,8 +20,8 @@ export default function ClipView({ folder, clip }: { folder: string; clip: strin
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-xl border border-stone-200 dark:border-stone-800">
-        {c.thumb ? <img src={api.thumbUrl(folder, clip, c.thumb.kind)} alt="" className="aspect-video w-full object-cover" /> : <div className="grid aspect-video place-items-center bg-stone-200 text-stone-500 dark:bg-stone-800">no thumbnail yet</div>}
-        <div className="flex items-center justify-between bg-white px-4 py-2 text-xs text-stone-500 dark:bg-stone-900"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : ''}</span><span className="font-mono">{c.id}</span></div>
+        {c.thumb ? <img key={c.thumb.kind} src={api.thumbUrl(folder, clip, c.thumb.kind)} alt="" className="aspect-video w-full object-cover" /> : <div className="grid aspect-video place-items-center bg-stone-200 text-stone-500 dark:bg-stone-800">the thumbnail stage has not run for this clip yet</div>}
+        <div className="flex items-center justify-between bg-white px-4 py-2 text-xs text-stone-500 dark:bg-stone-900"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : ''}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="When and where">
@@ -57,6 +59,7 @@ export default function ClipView({ folder, clip }: { folder: string; clip: strin
           </div>
         ))}
       </Card>
+      {redo && <RedoDialog folder={folder} clip={clip} onClose={() => setRedo(false)} />}
       <NoteBox folder={folder} clip={clip} title="Notes for this clip" placeholder="What happened here? Names, places, how it felt, anything to mention or avoid…" />
     </div>
   )

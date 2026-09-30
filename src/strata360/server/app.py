@@ -13,7 +13,8 @@ from strata360.pipeline import config, clips as clipmod
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-JOBS = {}                     # folder -> Popen of a running `strata360 open`
+JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
+MAX_WORKERS = 3
 LOCK = threading.Lock()
 
 
@@ -87,18 +88,18 @@ def last_project(roots):
 
 
 def start_job(folder, args=('open',)):
+    """Start one more worker on the project (returns False when the maximum are already running). Each worker loops until nothing is left; extra workers pick up unfinished, unclaimed items."""
+    from strata360.pipeline import runner
     with LOCK:
-        j = JOBS.get(folder)
-        if j and j.poll() is None: return False
-        rd = config.race_dir(folder); os.makedirs(rd, exist_ok=True)
-        log = open(os.path.join(rd, 'server_job.log'), 'ab')
-        JOBS[folder] = subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), args[0], folder, *args[1:]], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR)
-        return True
+        live = [p for p in JOBS.get(folder, []) if p.poll() is None]; JOBS[folder] = live
+        if len(runner.workers(folder)) >= MAX_WORKERS: return False
+        rd = config.race_dir(folder); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'server_job.log'), 'ab')
+        live.append(subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), args[0], folder, *args[1:]], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR)); return True
 
 
 def progress(folder):
     from strata360.cli import project_progress
-    p = project_progress(folder); j = JOBS.get(folder); p['job_running'] = bool(j and j.poll() is None); return p
+    p = project_progress(folder); p['job_running'] = bool(p.get('workers')); p['max_workers'] = MAX_WORKERS; return p
 
 
 def create_app(roots, token=None):
@@ -262,10 +263,25 @@ def create_app(roots, token=None):
     def post_run(body: dict): return dict(started=start_job(folder_of(body.get('folder'))))
 
     @api.post('/api/stop', dependencies=[Depends(auth)])
-    def post_stop(body: dict):
-        j = JOBS.get(folder_of(body.get('folder')))
-        if j and j.poll() is None: j.terminate()
-        return dict(stopped=bool(j))
+    def post_stop(body: dict):                                                           # stop every worker on the project (their claimed items are released and picked up again later)
+        import signal
+        from strata360.pipeline import runner
+        f = folder_of(body.get('folder')); pids = runner.workers(f)
+        for pid in pids:
+            try: os.kill(pid, signal.SIGTERM)
+            except OSError: pass
+        return dict(stopped=len(pids))
+
+    @api.get('/api/state', dependencies=[Depends(auth)])
+    def get_state(folder: str):                                                          # the (clip x stage) status matrix, for the redo dialog and the clip stage badges
+        from strata360.pipeline import runner
+        return runner.item_states(folder_of(folder))
+
+    @api.post('/api/clear', dependencies=[Depends(auth)])
+    def post_clear(body: dict):                                                          # {folder, items: [{clip, stage}]}: forget those statuses so they are processed again
+        from strata360.pipeline import runner
+        f = folder_of(body.get('folder')); items = [(str(i['clip']), str(i['stage'])) for i in body.get('items', [])]
+        return dict(cleared=runner.clear_items(f, items))
 
     return api
 

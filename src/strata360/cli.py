@@ -226,11 +226,11 @@ def project_progress(name):
     needs = []
     if 'identity' in names and not os.path.exists(os.path.join('profiles', cfg.get('profile', 'me') + '.npz')): needs.append('wearer_profile')
     if not cfg.get('camera_clock', {}).get('verified'): needs.append('camera_clock')
-    lock = os.path.exists(os.path.join(rd, '.lock'))
+    wk = runner.workers(name); lock = bool(wk); act = runner.active_items(name)
     blocked = {'identity'} if 'wearer_profile' in needs else set()                                                 # stages that cannot run until the user has chosen who they are
     pending = any(s_['done'] < s_['total'] for s_ in stages if s_['name'] not in blocked)
     state = 'processing' if (lock or pending) else ('needs_input' if (needs or any(s_['done'] < s_['total'] for s_ in stages)) else 'complete')
-    return dict(state=state, folder=cfg['library'], project=rd, clips=len(cl), footage_gb=round(sum(c.size for c in cl) / 1e9, 1), unsupported=len(other), running=lock,
+    return dict(state=state, folder=cfg['library'], project=rd, clips=len(cl), footage_gb=round(sum(c.size for c in cl) / 1e9, 1), unsupported=len(other), running=lock, workers=len(wk), active=[dict(clip=c, stage=s) for c, s, _ in act],
                 percent=round(100.0 * done_all / max(total_all, 1), 1), eta_s=round(eta), stages=stages, needs=needs, has_gps=bool(config.track_path(name, cfg)))
 
 
@@ -260,7 +260,7 @@ def cmd_open(a):
         import shutil; ext = os.path.splitext(a.gps)[1].lower()
         if ext in ('.fit', '.gpx'): shutil.copyfile(a.gps, os.path.join(rd, 'track' + ext)); print('race track saved as', os.path.join(rd, 'track' + ext))
     p = project_progress(folder); print(f"state: {p['state']}, {p['percent']}% done" + (f", about {p['eta_s'] / 60:.0f} min left" if p['eta_s'] else ''))
-    if p['state'] in ('processing',) and not p['running'] and not a.no_run:
+    if p['state'] in ('processing',) and not a.no_run:                                # a worker: it loops until nothing is left; more can run at once (each picks unfinished, unclaimed items)
         res = runner.run(folder, None, None, False); p = project_progress(folder)
     if p['state'] == 'complete': print('everything is processed: next is the results / export stage')
     if p['needs']: print('waiting for you:', ', '.join(p['needs']), '(wearer_profile: ./strata360 who FOLDER --auto; camera_clock: ./strata360 clock FOLDER --suggest)')
@@ -316,6 +316,13 @@ def cmd_script(a):
     print('saved', p)
 
 
+def cmd_clear(a):
+    """Forget the status of a stage (and, unless --no-cascade, the stages that depend on it) so it is processed again."""
+    done = runner.clear(a.name, a.stage, a.clip and [c for c in a.clip.split(',')], cascade=not a.no_cascade)
+    print(f'cleared {len(done)} item(s): ' + ', '.join(sorted({s for _, s in done})) + ('' if done else ' (nothing had a status)'))
+    print(f'run ./strata360 run {a.name} (or start processing in the app) to redo them')
+
+
 def cmd_render(a):
     from strata360.render import flat
     sys.argv = ['render'] + a.args; flat.main()
@@ -346,6 +353,8 @@ def main():
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
     p = sub.add_parser('script', help='propose a voice-over script for a film of the target length (notes + transcript + track data -> local LLM)'); p.add_argument('name', metavar='FOLDER_OR_RACE')
     p.add_argument('--length', type=float, default=90.0, help='film length in seconds'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=1); p.set_defaults(fn=cmd_script)
+    p = sub.add_parser('clear', help='forget the status of a stage so it is processed again (with the stages that depend on it)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('stage')
+    p.add_argument('--clip', help='comma-separated full clip ids (default all)'); p.add_argument('--no-cascade', action='store_true'); p.set_defaults(fn=cmd_clear)
     p = sub.add_parser('render', help='render a flat 4K view (arguments as for the renderer)'); p.add_argument('args', nargs=argparse.REMAINDER); p.set_defaults(fn=cmd_render)
     a = ap.parse_args(); a.fn(a)
 

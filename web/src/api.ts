@@ -5,8 +5,10 @@ export interface Stage { name: string; done: number; total: number; seconds_per_
 export type ProjectState = 'new' | 'processing' | 'needs_input' | 'complete'
 export interface Progress {
   state: ProjectState; folder: string; project: string; clips?: number; footage_gb?: number; percent?: number; eta_s?: number
-  stages?: Stage[]; needs?: string[]; running?: boolean; job_running: boolean; has_gps?: boolean
+  stages?: Stage[]; needs?: string[]; running?: boolean; job_running: boolean; has_gps?: boolean; workers?: number; max_workers?: number; active?: { clip: string; stage: string }[]
 }
+export type ItemStatus = 'ok' | 'failed' | 'active' | 'stale' | null
+export interface StateMatrix { stages: string[]; clips: Record<string, Record<string, ItemStatus>>; dependents: Record<string, string[]> }
 
 export interface TrackOverview {
   present: boolean; error?: string; file?: string; samples?: number; start_utc?: string; end_utc?: string; duration_h?: number; moving_h?: number; distance_km?: number | null
@@ -59,5 +61,7 @@ export const api = {
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),
   open: (folder: string, extra: { languages?: string; gps?: string } = {}) => call<{ started: boolean }>('/api/open', { folder, ...extra }),
   run: (folder: string) => call<{ started: boolean }>('/api/run', { folder }),
-  stop: (folder: string) => call<{ stopped: boolean }>('/api/stop', { folder }),
+  state: (folder: string) => call<StateMatrix>('/api/state?' + q({ folder })),
+  clear: (folder: string, items: { clip: string; stage: string }[]) => call<{ cleared: number }>('/api/clear', { folder, items }),
+  stop: (folder: string) => call<{ stopped: number }>('/api/stop', { folder }),
 }
