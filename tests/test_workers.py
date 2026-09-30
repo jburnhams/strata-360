@@ -1,5 +1,5 @@
 """Parallel workers: claims, stale claims, state updates under a lock, clearing with dependents. Run: .venv/bin/python tests/test_workers.py"""
-import json, multiprocessing as mp, os, sys, tempfile
+import json, multiprocessing as mp, os, sys, tempfile, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src'))
 from strata360.pipeline import runner, config
 
@@ -9,7 +9,7 @@ def project():
 
 
 def _claimer(folder, out):
-    out.put(runner.claim(folder, 'CAM_a_0001_D', 'scenes'))
+    out.put(runner.claim(folder, 'CAM_a_0001_D', 'scenes')); time.sleep(1.5)                    # a real worker stays alive while it holds a claim (a claim of a dead process is stale by design)
 
 
 def test_only_one_process_gets_a_claim():
