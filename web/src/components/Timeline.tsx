@@ -1,4 +1,6 @@
 import FilmPreview from './FilmPreview'
+import FinalRender from './FinalRender'
+import MusicPanel from './MusicPanel'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type ClipInfo, type EditResponse, type PlanSegment } from '../api'
 import { PanelSkeleton } from './Skeleton'
@@ -34,6 +36,8 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
   return (
     <div className="space-y-4">
       <FilmPreview folder={folder} />
+      <FinalRender folder={folder} />
+      <MusicPanel folder={folder} onChanged={load} />
       <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
         <h3 className="mb-2 text-sm font-semibold">Plan</h3>
         <div className="flex flex-wrap items-end gap-3 text-sm">

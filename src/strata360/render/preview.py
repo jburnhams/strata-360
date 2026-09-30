@@ -135,8 +135,15 @@ def build_audio(folder, plan, out, total_s):
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
         n += 1
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); chain = ';'.join(chains) + ';' + ''.join(f'[s{i}]' for i in range(n)) + f'concat=n={n}:v=0:a=1[nat]'
-    if os.path.exists(vo): inputs += ['-i', vo]; chain += f';[{n}:a]aresample=48000,aformat=channel_layouts=mono[vo];[nat][vo]amix=inputs=2:normalize=0:duration=longest,apad=whole_dur={total_s:.3f},atrim=0:{total_s:.3f},alimiter=limit=0.95[m]'
-    else: chain += f';[nat]apad=whole_dur={total_s:.3f},atrim=0:{total_s:.3f}[m]'
+    mus = (plan.get('film') or {}).get('music'); mp = os.path.join(config.race_dir(folder), mus['file']) if mus else None; has_mu = bool(mp and os.path.exists(mp)); has_vo = os.path.exists(vo); k = n
+    tail = f'apad=whole_dur={total_s:.3f},atrim=0:{total_s:.3f},alimiter=limit=0.95[m]'
+    if has_vo: inputs += ['-i', vo]; chain += f";[{k}:a]aresample=48000,aformat=channel_layouts=mono,{'asplit=2[vo][vokey]' if has_mu else 'anull[vo]'}"; k += 1
+    if has_mu:                                                                                        # the music from its first downbeat, ducked under the voice-over, fading out at the end
+        inputs += ['-ss', f"{mus['offset_s']:.3f}", '-t', f'{total_s:.3f}', '-i', mp]
+        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono,volume=0.5,afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
+        chain += (';[mu][vokey]sidechaincompress=threshold=0.02:ratio=6:attack=30:release=500[mud]' if has_vo else ';[mu]anull[mud]')
+    mix = ['[nat]'] + (['[vo]'] if has_vo else []) + (['[mud]'] if has_mu else [])
+    chain += f";{''.join(mix)}amix=inputs={len(mix)}:normalize=0:duration=longest,{tail}"
     r = subprocess.run(['ffmpeg', '-y', '-v', 'error', *inputs, '-filter_complex', chain, '-map', '[m]', '-ar', '48000', '-ac', '1', out], capture_output=True, text=True)
     if r.returncode: raise RuntimeError('audio: ' + r.stderr[-300:])
 

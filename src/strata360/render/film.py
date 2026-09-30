@@ -38,19 +38,37 @@ def motion_blur(img, amount):
 WHIP_RAD = 1.6
 
 
-def compose(segs, source, fps, emit, progress=None):
-    """Emit every frame of the film, in order: emit(image). segs: plan segments (film_start_s, dur_s, transition); returns the number of frames."""
-    starts, n, half = layout(segs, fps); total = sum(n); done = 0
+def pieces(segs, fps):
+    """The film as independent pieces in order: plain stretches of one window and transition regions between two windows. Each is {id, kind, k, frames}; rendering pieces separately is what makes a long
+    render resumable (a finished piece is kept), and concatenating them gives the film."""
+    starts, n, half = layout(segs, fps); out = []
     for k in range(len(segs)):
         hin = half[k]; hout = half[k + 1] if k + 1 < len(segs) else 0
-        for img in source.frames(k, hin, n[k] - hout): emit(img); done += 1
-        if hout:
-            kind = segs[k + 1]['transition']['type']; s = 1.0 if (hash(segs[k + 1]['id']) % 2) else -1.0
-            if kind == 'whip':
-                ramp = (np.arange(1, hout + 1) / hout) ** 2
-                for i, img in enumerate(source.frames(k, n[k] - hout, n[k], yaw_extra=s * WHIP_RAD * ramp)): emit(motion_blur(img, ramp[i])); done += 1
-                for i, img in enumerate(source.frames(k + 1, 0, hout, yaw_extra=-s * WHIP_RAD * ramp[::-1])): emit(motion_blur(img, ramp[::-1][i])); done += 1
-            else:
-                for i, (a, b) in enumerate(zip(source.frames(k, n[k] - hout, n[k] + hout), source.frames(k + 1, -hout, hout))): emit(blend(kind, a, b, i, 2 * hout)); done += 1
+        if n[k] - hout - hin > 0: out.append(dict(id=f'p{len(out):04d}', kind='plain', k=k, a0=hin, a1=n[k] - hout, frames=n[k] - hout - hin))
+        if hout: out.append(dict(id=f'p{len(out):04d}', kind=segs[k + 1]['transition']['type'], k=k, hout=hout, n=n[k], frames=2 * hout))
+    assert sum(p['frames'] for p in out) == sum(n)
+    return out
+
+
+def render_piece(piece, segs, source, emit):
+    """Emit the frames of one piece."""
+    k = piece['k']
+    if piece['kind'] == 'plain':
+        for img in source.frames(k, piece['a0'], piece['a1']): emit(img)
+        return
+    hout = piece['hout']; n = piece['n']; kind = piece['kind']; s = 1.0 if (sum(map(ord, segs[k + 1]['id'])) % 2) else -1.0
+    if kind == 'whip':
+        ramp = (np.arange(1, hout + 1) / hout) ** 2
+        for i, img in enumerate(source.frames(k, n - hout, n, yaw_extra=s * WHIP_RAD * ramp)): emit(motion_blur(img, ramp[i]))
+        for i, img in enumerate(source.frames(k + 1, 0, hout, yaw_extra=-s * WHIP_RAD * ramp[::-1])): emit(motion_blur(img, ramp[::-1][i]))
+    else:
+        for i, (a, b) in enumerate(zip(source.frames(k, n - hout, n + hout), source.frames(k + 1, -hout, hout))): emit(blend(kind, a, b, i, 2 * hout))
+
+
+def compose(segs, source, fps, emit, progress=None):
+    """Emit every frame of the film, in order: emit(image). segs: plan segments (film_start_s, dur_s, transition); returns the number of frames."""
+    ps = pieces(segs, fps); total = sum(p['frames'] for p in ps); done = 0
+    for p in ps:
+        render_piece(p, segs, source, emit); done += p['frames']
         if progress: progress(done, total)
     return done

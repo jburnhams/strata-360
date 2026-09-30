@@ -16,7 +16,7 @@ import datetime as dt, glob, json, os
 from strata360.pipeline import config
 from strata360.edit import techniques as TQ, chrono as CH, optimise as O
 
-DEFAULT_SETTINGS = dict(length_s=90.0, bpm=120.0, bar_beats=4, seed=1, wpm=145.0, style='')
+DEFAULT_SETTINGS = dict(length_s=90.0, bpm=120.0, bar_beats=4, seed=1, wpm=145.0, style='', music=None)      # music: a file inside the project folder (music/track.*): tempo, bars and energy then come from it
 EMPTY_OVERRIDES = dict(locked=[], tech_force={}, bans_cands=[], bans_techs=[], clip_weight={}, transitions={})
 
 
@@ -51,9 +51,22 @@ def load_clips(folder):
     return clips, missing
 
 
-def _planner(edit, lib, prev_plan):
-    s = edit['settings']; o = edit['overrides']; beats = int(round(s['length_s'] * s['bpm'] / 60.0)); beats -= beats % int(s['bar_beats'])            # a whole number of bars
-    music = O.Music(bpm=float(s['bpm']), beats=beats, bar_beats=int(s['bar_beats']))
+def music_info(folder, settings):
+    """The analysis of the project's music track (edit/music.py), or None when there is none (or it cannot be read)."""
+    from strata360.edit import music as MU
+    f = settings.get('music')
+    if not f: return None
+    p = os.path.join(config.race_dir(folder), f)
+    if not os.path.exists(p): return None
+    try: return MU.cached(config.race_dir(folder), p)
+    except (RuntimeError, OSError): return None
+
+
+def _planner(edit, lib, prev_plan, mus=None):
+    s = edit['settings']; o = edit['overrides']; bpm = float(mus['bpm']) if mus else float(s['bpm']); bar = int(mus['bar_beats']) if mus else int(s['bar_beats'])
+    beats = int(round(s['length_s'] * bpm / 60.0)); beats -= beats % bar                              # a whole number of bars
+    if mus: beats = min(beats, int(mus['usable_beats']))                                               # never longer than the track
+    music = O.Music(bpm=bpm, beats=beats, bar_beats=bar, sections=[tuple(x) for x in mus['sections']] if mus else [(0, 10 ** 9, 0.5)])
     prefer = {g['id']: g['technique'] for g in (prev_plan or {}).get('segments', [])}
     st = CH.Settings(seed=int(s['seed']), locked=tuple(o['locked']), tech_force=dict(o['tech_force']), prefer=prefer, bans_cands=frozenset(o['bans_cands']), bans_techs=frozenset(o['bans_techs']),
                      clip_weight={k: float(v) for k, v in o['clip_weight'].items()})
@@ -79,7 +92,7 @@ def propose(folder, settings=None, overrides=None, keep=True):
     if overrides: edit['overrides'].update(overrides)
     clips, missing = load_clips(folder)
     if not clips: raise O.Infeasible('no candidates yet: the candidates stage has to finish for at least one clip')
-    lib = TQ.load(); music, st = _planner(edit, lib, prev)
+    lib = TQ.load(); mus = music_info(folder, edit['settings']); music, st = _planner(edit, lib, prev, mus)
     segs = CH.plan(clips, lib, music, st); bad = CH.violations(segs, lib, music, clips)
     if bad: raise O.Infeasible('the plan broke its own rules: ' + '; '.join(bad[:4]))
     locked_w = {g['wid'] for g in edit['overrides']['locked']}; ser = serialise(segs, clips, music, lib, locked_w); wids = {g['id'] for g in ser}
@@ -89,7 +102,7 @@ def propose(folder, settings=None, overrides=None, keep=True):
     orphaned = sorted((set(edit['overrides']['tech_force']) | locked_w) - wids)
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
-    edit['plan'] = dict(generated_at=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=music.bpm, bar_beats=music.bar_beats),
+    edit['plan'] = dict(generated_at=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=music.bpm, bar_beats=music.bar_beats, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
                         segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=orphaned, technique_seconds={k: round(v, 2) for k, v in used.items()},
                         warnings=(segs[0].parts.get('warnings') if segs else []) or [])
     return save(folder, edit)
@@ -110,6 +123,11 @@ def set_technique(folder, wid, technique):
         if technique not in [o['tech'] for o in g['options']]: raise ValueError(f"{technique} does not fit this window (it fits: {', '.join(o['tech'] for o in g['options'])})")
         edit['overrides']['tech_force'][wid] = technique
     save(folder, edit); return propose(folder)
+
+
+def set_music(folder, rel):
+    """Use the audio file `rel` (inside the project folder) as the film's music, or None for no music; re-plans around its tempo and energy."""
+    edit = load(folder); edit['settings']['music'] = rel; save(folder, edit); return propose(folder)
 
 
 def set_transition(folder, wid, kind):

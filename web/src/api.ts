@@ -38,6 +38,8 @@ export interface EditState {
 export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
 export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; lines: number; building: boolean; error?: string }
 export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | 'rendering' | 'done' | 'error'; running: boolean; key?: string; frames_done?: number; frames_total?: number; placeholders?: string[]; error?: string | null; length_s?: number }
+export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; bitrate: string }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean }
+export interface MusicState { file: string | null; analysis: { bpm: number; offset_s: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number } | null }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
 export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
@@ -98,6 +100,17 @@ export const api = {
   startFilm: (folder: string, force = false) => call<{ started: boolean }>('/api/film/start', { folder, force }),
   stopFilm: (folder: string) => call<{ ok: boolean }>('/api/film/stop', { folder }),
   filmUrl: (folder: string) => '/api/film/index.m3u8?' + q({ folder }),
+  final: (folder: string) => call<FinalState>('/api/final?' + q({ folder })),
+  startFinal: (folder: string, o: { size?: string; fps?: number } = {}) => call<{ started: boolean }>('/api/final/start', { folder, ...o }),
+  stopFinal: (folder: string) => call<{ ok: boolean }>('/api/final/stop', { folder }),
+  finalUrl: (folder: string) => '/api/final/file?' + q({ folder }),
+  music: (folder: string) => call<MusicState>('/api/music?' + q({ folder })),
+  async uploadMusic(folder: string, file: File) {
+    const r = await fetch('/api/music?' + q({ folder, filename: file.name }), { method: 'POST', body: file }); const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
+    return j as MusicState & { warning?: string }
+  },
+  removeMusic: (folder: string) => fetch('/api/music?' + q({ folder }), { method: 'DELETE' }),
   editGet: (folder: string) => call<EditResponse>('/api/edit?' + q({ folder })),
   propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; keep?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
   override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState }>('/api/edit/override', { folder, ...body }),

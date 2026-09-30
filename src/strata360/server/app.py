@@ -15,7 +15,7 @@ STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
-FILM_JOBS = {}; VO_JOBS = {}; VO_ERRORS = {}     # folder -> the running voice-over thread / its last error
+FINAL_JOBS = {}; FILM_JOBS = {}; VO_JOBS = {}; VO_ERRORS = {}     # folder -> the running voice-over thread / its last error
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
 
@@ -368,6 +368,87 @@ def create_app(roots, token=None):
         p = os.path.join(PV.film_dir(f, PV.plan_key(f, plan)), name)
         if not os.path.exists(p): raise HTTPException(404)
         return FileResponse(p, media_type='video/mp2t', headers={'Cache-Control': 'max-age=3600'})
+
+    def final_settings(f):
+        p = os.path.join(config.race_dir(f), 'final', 'settings.json')
+        try: s = json.load(open(p))
+        except (OSError, ValueError): s = {}
+        return dict(size=s.get('size', '3840x2160'), fps=float(s.get('fps', 50.0)), bitrate=s.get('bitrate', '100M'))
+
+    @api.get('/api/final', dependencies=[Depends(auth)])
+    def get_final(folder: str):                                                          # state of the final render of the CURRENT plan with the saved settings
+        from strata360.edit import project as PJ
+        from strata360.render import final as FN
+        f = folder_of(folder); plan = PJ.load(f).get('plan'); s = final_settings(f); j = FINAL_JOBS.get(f); running = bool(j and j.poll() is None)
+        if not plan: return dict(state='noplan', running=False, settings=s)
+        w, h = map(int, s['size'].split('x')); key = FN.final_key(plan, [w, h], s['fps'], s['bitrate'], f); st = None
+        try: st = json.load(open(os.path.join(FN.final_dir(f, key), 'status.json')))
+        except (OSError, ValueError): pass
+        state = st['state'] if st else ('starting' if running else 'none')
+        if st and st['state'] in ('rendering', 'assembling') and not running: state = 'stopped'
+        return dict(state=state, running=running, settings=s, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), pieces_done=(st or {}).get('pieces_done', 0), pieces_total=(st or {}).get('pieces_total', 0),
+                    started=(st or {}).get('started'), error=(st or {}).get('error'), has_file=bool(st and st['state'] == 'done' and os.path.exists(st.get('film', ''))))
+
+    @api.post('/api/final/start', dependencies=[Depends(auth)])
+    def post_final_start(body: dict):                                                    # {folder, size?, fps?, bitrate?}: start or continue the final render (lowest priority; finished pieces are kept)
+        f = folder_of(body.get('folder')); j = FINAL_JOBS.get(f)
+        if j and j.poll() is None: return dict(started=False)
+        s = final_settings(f)
+        if body.get('size') in ('1920x1080', '2560x1440', '3840x2160'): s['size'] = body['size']
+        if body.get('fps') in (25, 25.0, 30, 30.0, 50, 50.0): s['fps'] = float(body['fps'])
+        d = os.path.join(config.race_dir(f), 'final'); os.makedirs(d, exist_ok=True); json.dump(s, open(os.path.join(d, 'settings.json'), 'w'))
+        log = open(os.path.join(d, 'final_job.log'), 'wb')
+        FINAL_JOBS[f] = subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'final', f, '--size', s['size'], '--fps', str(s['fps']), '--bitrate', s['bitrate']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.post('/api/final/stop', dependencies=[Depends(auth)])
+    def post_final_stop(body: dict):
+        import signal
+        from strata360.pipeline import runner
+        j = FINAL_JOBS.get(folder_of(body.get('folder')))
+        if j and j.poll() is None: runner.kill_tree(j.pid, signal.SIGTERM)
+        return dict(ok=True)
+
+    @api.get('/api/final/file')
+    def get_final_file(request: Request, folder: str):                                   # the finished film (Range requests work, so it can be played or downloaded)
+        auth(request)
+        from strata360.edit import project as PJ
+        from strata360.render import final as FN
+        f = folder_of(folder); plan = PJ.load(f).get('plan'); s = final_settings(f)
+        if not plan: raise HTTPException(404)
+        w, h = map(int, s['size'].split('x')); d = FN.final_dir(f, FN.final_key(plan, [w, h], s['fps'], s['bitrate'], f))
+        try: film = json.load(open(os.path.join(d, 'status.json'))).get('film')
+        except (OSError, ValueError): film = None
+        if not film or not os.path.exists(film): raise HTTPException(404, 'not rendered yet')
+        return FileResponse(film, media_type='video/mp4', filename='film.mp4')
+
+    @api.get('/api/music', dependencies=[Depends(auth)])
+    def get_music(folder: str):                                                          # the music track of the project and what was found in it
+        from strata360.edit import project as PJ
+        f = folder_of(folder); s = PJ.load(f)['settings']; return dict(file=s.get('music'), analysis=PJ.music_info(f, s))
+
+    @api.post('/api/music', dependencies=[Depends(auth)])
+    async def post_music(request: Request, folder: str, filename: str = 'track.mp3'):    # the audio file is the raw request body; saved as music/track.<ext> and used for tempo, bars, energy and the film's sound
+        from strata360.edit import project as PJ, optimise as O
+        f = folder_of(folder); ext = os.path.splitext(filename)[1].lower()
+        if ext not in ('.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus'): raise HTTPException(400, 'an audio file: mp3, wav, m4a, aac, flac or ogg')
+        data = await request.body()
+        if len(data) < 5000 or len(data) > 300 * 1024 * 1024: raise HTTPException(400, 'the file is empty or too large')
+        d = os.path.join(config.race_dir(f), 'music'); os.makedirs(d, exist_ok=True)
+        for old in os.listdir(d):
+            if old.startswith('track.'): os.replace(os.path.join(d, old), os.path.join(d, old + '.replaced'))
+        open(os.path.join(d, 'track' + ext), 'wb').write(data)
+        try: PJ.set_music(f, 'music/track' + ext)
+        except O.Infeasible as e: return dict(file='music/track' + ext, analysis=PJ.music_info(f, PJ.load(f)['settings']), warning=str(e))
+        except RuntimeError as e: raise HTTPException(400, str(e))
+        return dict(file='music/track' + ext, analysis=PJ.music_info(f, PJ.load(f)['settings']))
+
+    @api.delete('/api/music', dependencies=[Depends(auth)])
+    def delete_music(folder: str):
+        from strata360.edit import project as PJ, optimise as O
+        f = folder_of(folder)
+        try: PJ.set_music(f, None)
+        except O.Infeasible: pass
+        return dict(file=None, analysis=None)
 
     @api.post('/api/track', dependencies=[Depends(auth)])
     async def post_track(request: Request, folder: str, filename: str = 'track.fit'):    # the file is the raw request body; saved under the known name track.fit / track.gpx
