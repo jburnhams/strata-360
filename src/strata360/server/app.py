@@ -224,9 +224,9 @@ def create_app(roots, token=None):
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
         mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
-            from strata360.analysis.views import focus_samples
-            out['focus'] = focus_samples(d, c['source_files']['osv'])
-        except Exception: out['focus'] = []
+            from strata360.analysis.views import focus_samples, person_samples
+            out['focus'] = focus_samples(d, c['source_files']['osv']); out['person'] = person_samples(d, c['source_files']['osv'])
+        except Exception: out['focus'] = []; out['person'] = []
         out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
         th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th; out['places'] = _j(d, 'places.json')

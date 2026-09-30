@@ -186,28 +186,73 @@ def render_thumb_proxy(proxy_path, osv, t, yaw=0.0, pitch=0.0, hfov=100.0, w=960
     img = _equirect_view(eq, _rect_rays(yaw, hd, w, h, hfov, pitch), w, h); ok, buf = cv2.imencode('.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality]); return buf.tobytes()
 
 
+def _sources_fresh(cache, clip_dir):
+    src = [os.path.join(clip_dir, n) for n in ('identity.json', 'speakers.json')]
+    return os.path.exists(cache) and all(not os.path.exists(p) or os.path.getmtime(p) <= os.path.getmtime(cache) for p in src)
+
+
+def heading_fn(clip_dir, osv=None):
+    """Function t (clip seconds) -> smoothed heading in degrees (upright world frame), from motion.json (5 Hz, cheap); the telemetry is read only when motion.json is missing."""
+    mp = os.path.join(clip_dir, 'motion.json')
+    try:
+        s = json.load(open(mp))['series']; ts = np.array(s['t'], float); hd = np.degrees(np.unwrap(np.radians(s['heading_deg'])))
+        return lambda t: float(np.interp(t, ts, hd))
+    except (OSError, ValueError, KeyError):
+        h, fps = heading_track(osv); return lambda t: float(np.degrees(h[min(int(round(t * fps)), len(h) - 1)]))
+
+
+def _speaker_at(segs, t):
+    for s in segs:
+        if s['t0'] - 0.2 <= t <= s['t1'] + 0.2 and s.get('label'): return s['label']
+    return None
+
+
 def focus_samples(clip_dir, osv):
-    """Where the main person is, once a second, for the player's "follow person" mode (cached in focus.json; derived from identity.json and speakers.json, nothing is recomputed).
-    Each sample: t_s, world yaw and pitch in degrees (the direction in the upright world frame the preview is in), who ('you' or 'other') and whether that person is speaking.
-    Rule: while another voice is speaking and someone else is in view, the biggest other person; otherwise the wearer when their face was found; otherwise the biggest person; else no sample."""
-    cache = os.path.join(clip_dir, 'focus.json'); src = [os.path.join(clip_dir, n) for n in ('identity.json', 'speakers.json')]
-    if os.path.exists(cache) and all(not os.path.exists(p) or os.path.getmtime(p) <= os.path.getmtime(cache) for p in src):
-        try: return json.load(open(cache))['samples']
+    """Where YOU (the wearer) are, once a second, for the player's "You" mode (cached in focus.json; derived from identity.json and speakers.json, nothing is recomputed).
+    Each sample: t, world yaw and pitch in degrees (the direction in the upright world frame the preview is in), who ('you') and whether you are speaking. Only seconds where your face was found."""
+    cache = os.path.join(clip_dir, 'focus.json')
+    if _sources_fresh(cache, clip_dir):
+        try:
+            d = json.load(open(cache))
+            if d.get('schema') == 2: return d['samples']
         except ValueError: pass
     idp = os.path.join(clip_dir, 'identity.json')
     if not os.path.exists(idp): return []
     idn = json.load(open(idp)); sp = os.path.join(clip_dir, 'speakers.json'); segs = json.load(open(sp))['segments'] if os.path.exists(sp) else []
-    heading, _ = heading_track(osv); out = []
-    def speaker(t):
-        for s in segs:
-            if s['t0'] - 0.2 <= t <= s['t1'] + 0.2 and s.get('label'): return s['label']
-        return None
+    hdf = heading_fn(clip_dir, osv); out = []
     for r in idn['samples']:
-        t = r['t_s']; who_speaks = speaker(t); others = [o for o in r.get('others', []) if o.get('height_deg')]; big = max(others, key=lambda o: o['height_deg']) if others else None; me = r.get('me')
-        if who_speaks == 'other' and big: tgt, who = big, 'other'
-        elif me: tgt, who = me, 'you'
-        elif big: tgt, who = big, 'other'
-        else: continue
-        hd = float(np.degrees(heading[min(r['frame'], len(heading) - 1)]))
-        out.append(dict(t=t, yaw=round((hd + tgt['yaw']) % 360.0, 1), pitch=round(tgt['pitch'], 1), who=who, speaking=(who_speaks == 'wearer' and who == 'you') or (who_speaks == 'other' and who == 'other')))
-    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=1, samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out
+        me = r.get('me')
+        if not me: continue
+        t = r['t_s']; hd = hdf(t)
+        out.append(dict(t=t, yaw=round((hd + me['yaw']) % 360.0, 1), pitch=round(me['pitch'], 1), who='you', speaking=_speaker_at(segs, t) == 'wearer'))
+    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=2, samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out
+
+
+def person_samples(clip_dir, osv):
+    """Another person to show, once a second, for the player's "Person" mode (cached in person.json): never you, somebody whenever anybody is in view, the same person for as long as possible
+    (analysis/follow.py). Each sample: t, world yaw, pitch, who ('other'), speaking (another voice is talking), person (a running number: it changes when the view has to jump to someone else)."""
+    from strata360.analysis import follow
+    cache = os.path.join(clip_dir, 'person.json')
+    if _sources_fresh(cache, clip_dir):
+        try:
+            d = json.load(open(cache))
+            if d.get('schema') == 1 and d.get('follow') == [follow.SWITCH, follow.TOL_DEG, follow.TOL_PER_S]: return d['samples']
+        except ValueError: pass
+    idp = os.path.join(clip_dir, 'identity.json')
+    if not os.path.exists(idp): return []
+    idn = json.load(open(idp)); sp = os.path.join(clip_dir, 'speakers.json'); segs = json.load(open(sp))['segments'] if os.path.exists(sp) else []
+    hdf = heading_fn(clip_dir, osv); frames = []; last_me = None
+    for r in idn['samples']:
+        t = r['t_s']; hd = hdf(t); me = r.get('me')
+        if me: last_me = (t, me['yaw'])
+        c = []
+        for o in r.get('others', []):
+            if not o.get('height_deg'): continue
+            near_me = (me and follow._dyaw(o['yaw'], me['yaw']) < 20 and abs(o['pitch'] - me['pitch']) < 25) or (not me and last_me and t - last_me[0] < 6 and follow._dyaw(o['yaw'], last_me[1]) < 20)   # the wearer seen as "someone else"
+            if not near_me: c.append(dict(yaw=(hd + o['yaw']) % 360.0, pitch=o['pitch'], height_deg=o['height_deg'], face=bool(o.get('face'))))
+        frames.append(dict(t=t, cands=c))
+    ch = follow.choose(frames); out = []
+    for f, (j, pid) in zip(frames, ch):
+        if j is None: continue
+        c = f['cands'][j]; out.append(dict(t=f['t'], yaw=round(c['yaw'], 1), pitch=round(c['pitch'], 1), who='other', speaking=_speaker_at(segs, f['t']) == 'other', person=pid))
+    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=1, follow=[follow.SWITCH, follow.TOL_DEG, follow.TOL_PER_S], samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out

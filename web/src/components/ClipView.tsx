@@ -25,7 +25,7 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
   const utc = String(c.time.start_utc ?? ''), m = c.motion, sc = c.scenes?.summary, id = c.identity
   return (
     <div className="space-y-4">
-      <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} />
+      <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} person={c.person} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} />
       <div className="-mt-2 flex items-center justify-between px-1 text-xs text-stone-500"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : 'no thumbnail yet'}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="When and where">
