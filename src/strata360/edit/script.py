@@ -28,7 +28,8 @@ def words_in_window(cdir, clip, w0, w1):
     leading ellipsis marks a sentence cut by the window. Returns a list with one string per phrase, or [] when the clip has no transcript."""
     tp = os.path.join(cdir, clip, 'transcript.json')
     if not cdir or not os.path.exists(tp): return []
-    tr = json.load(open(tp)); ap = os.path.join(cdir, clip, 'alignment.json'); al = {a['index']: a for a in (json.load(open(ap)).get('segments') or []) if a} if os.path.exists(ap) else {}
+    from strata360.analysis import transcript_edits as TE
+    tr = TE.load_effective(os.path.join(cdir, clip)); ap = os.path.join(cdir, clip, 'alignment.json'); al = {a['index']: a for a in (json.load(open(ap)).get('segments') or []) if a} if os.path.exists(ap) else {}
     out = []
     for si, seg in enumerate(tr['segments']):
         if seg['t1'] <= w0 or seg['t0'] >= w1 or not seg.get('text', '').strip() or seg.get('flags'): continue

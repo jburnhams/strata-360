@@ -19,6 +19,7 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
   const [redo, setRedo] = useState(false)
   const [mode, setMode] = useState<Mode>('translated')
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
+  const reload = () => api.clip(folder, clip).then(setC).catch(() => {})
   useEffect(() => { if (c && focus != null) document.getElementById(`seg-${Math.round(focus * 100)}`)?.scrollIntoView({ block: 'center' }) }, [c, focus])
   if (err) return <p className="text-stone-500">{err}</p>
   if (!c) return <div className="space-y-4"><Skeleton className="aspect-video w-full" /><div className="grid gap-4 md:grid-cols-2"><PanelSkeleton title="When and where" /><PanelSkeleton title="Motion and picture" /></div><PanelSkeleton title="Transcript" rows={4} /></div>
@@ -70,7 +71,7 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
           <div key={i} id={`seg-${Math.round(l.t0 * 100)}`} className={`py-1 text-sm ${l.flagged ? 'opacity-50' : ''} ${focus != null && Math.abs(l.t0 - focus) < 0.05 ? 'rounded bg-emerald-100 px-1 dark:bg-emerald-950' : ''}`}>
             <span className="mr-2 font-mono text-xs text-stone-500">{fmt(l.t0)}</span>
             {l.who && <span className={`mr-2 rounded-full px-2 text-xs ${l.who === 'wearer' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{l.who === 'wearer' ? 'you' : 'other'}</span>}
-            <Phrase text={l.text} en={l.text_en} lang={l.lang} mode={mode} />
+            <Phrase text={l.text} en={l.text_en} lang={l.lang} mode={mode} word={l.words?.length ? { folder, clip, si: l.si, words: l.words, onSaved: reload } : undefined} />
           </div>
         ))}
       </Card>

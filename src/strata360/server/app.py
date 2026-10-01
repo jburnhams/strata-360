@@ -10,6 +10,7 @@ API (JSON):  GET /api/roots, /api/browse?path=, /api/progress?folder=, /api/log?
 import argparse, glob, json, os, secrets, subprocess, sys, threading, time
 
 from strata360.pipeline import config, clips as clipmod
+from strata360.analysis import transcript_edits as TE
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -187,16 +188,49 @@ def create_app(roots, token=None):
                             thumb=thumb, steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
+    def word_view(s):                                                                    # the words of a phrase for the editable view: shown text, timing, and the correction (if any)
+        return [dict(w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {})) for w in (s.get('words') or [])]
+
+    @api.post('/api/transcript/edit', dependencies=[Depends(auth)])
+    def post_transcript_edit(body: dict):                                            # {folder, clip, seg, word, text}: your correction of one word; {action: 'clear'} drops it (the model's shows again)
+        f = folder_of(body.get('folder')); d = _cd(f, body.get('clip'))
+        try: si, wi = int(body['seg']), int(body['word'])
+        except (KeyError, TypeError, ValueError): raise HTTPException(400, 'seg and word: numbers')
+        try:
+            if body.get('action') == 'clear': TE.clear_user(d, si, wi)
+            elif isinstance(body.get('text'), str): TE.set_user(d, si, wi, body['text'])
+            else: raise HTTPException(400, 'text: a string')
+        except (IndexError, KeyError, OSError): raise HTTPException(404, 'no such word')
+        return dict(ok=True)
+
+    @api.post('/api/transcript/suggest', dependencies=[Depends(auth)])
+    def post_transcript_suggest(body: dict):                                         # {folder}: ask the language model for corrections (a background job; the words are sent to the model provider, like the script)
+        f = folder_of(body.get('folder')); sp = os.path.join(config.race_dir(f), 'transcript_fix.json')
+        try:
+            st = json.load(open(sp))
+            if st.get('state') == 'running' and alive(st.get('pid')): return dict(started=False)
+        except (OSError, ValueError): pass
+        rd = config.race_dir(f); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'transcript_fix.log'), 'ab')
+        subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'transcript-fix', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/transcript/suggest', dependencies=[Depends(auth)])
+    def get_transcript_suggest(folder: str):
+        f = folder_of(folder)
+        try: st = json.load(open(os.path.join(config.race_dir(f), 'transcript_fix.json')))
+        except (OSError, ValueError): return dict(state='none')
+        if st.get('state') == 'running' and not alive(st.get('pid')): st['state'] = 'error'; st['error'] = st.get('error') or 'stopped'
+        return st
+
     @api.get('/api/transcript', dependencies=[Depends(auth)])
     def get_transcript(folder: str):                                                     # every recognised phrase of every clip, in clip order: the overview's running transcript
         f = folder_of(folder); rd = config.race_dir(f); out = []
         for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
-            c = _j(d, 'clip.json'); tr = _j(d, 'transcript.json')
+            c = _j(d, 'clip.json'); tr = TE.load_effective(d)
             if not c or not tr: continue
             sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
-            for s in tr['segments']:
+            for si, s in enumerate(tr['segments']):
                 if not s.get('text', '').strip(): continue
-                out.append(dict(clip=c['clip_id'], t0=round(s['t0'], 2), t1=round(s['t1'], 2), lang=s['lang'], text=s['text'].strip(), text_en=s.get('text_en'), flagged=bool(s.get('flags') or s.get('suspect')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))))
+                out.append(dict(clip=c['clip_id'], si=si, words=word_view(s), t0=round(s['t0'], 2), t1=round(s['t1'], 2), lang=s['lang'], text=s['text'].strip(), text_en=s.get('text_en'), flagged=bool(s.get('flags') or s.get('suspect')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))))
         return dict(segments=out)
 
     @api.get('/api/meta', dependencies=[Depends(auth)])
@@ -223,8 +257,8 @@ def create_app(roots, token=None):
         f = folder_of(folder); d = _cd(f, clip); c = _j(d, 'clip.json'); out = dict(id=c['clip_id'], time=c['time'], video=c['video'], camera=c.get('camera'), audio_info=c.get('audio'), note=N.load(f)['clips'].get(c['clip_id'], ''))
         mo = _j(d, 'motion.json'); out['motion'] = None if not mo else mo['summary']
         au = _j(d, 'audio.json'); out['audio'] = None if not au else dict(summary=au.get('summary'), segments=au.get('segments', [])[:40])
-        tr = _j(d, 'transcript.json'); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
-        out['transcript'] = [dict(t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en'), flagged=bool(s.get('flags')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))) for s in (tr or {}).get('segments', [])]
+        tr = TE.load_effective(d); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
+        out['transcript'] = [dict(si=si, words=word_view(s), t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en'), flagged=bool(s.get('flags')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))) for s in (tr or {}).get('segments', [])]
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]

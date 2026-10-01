@@ -9,7 +9,11 @@ const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).
 
 // The whole race as one running transcript: phrases grouped by clip in time order. Hover a phrase for the clip's details (picture, real time, who spoke); click to open the clip at that moment.
 export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder: string; clips: ClipInfo[]; tz: string; onOpen: (clip: string, t: number) => void }) {
-  const data = usePoll(() => api.transcript(folder), 30000, [folder])
+  const [ver, setVer] = useState(0)
+  const data = usePoll(() => api.transcript(folder), 30000, [folder, ver])
+  const fix = usePoll(() => api.transcriptFix(folder), 3000, [folder, ver])
+  const [fixErr, setFixErr] = useState<string>()
+  const running = fix?.state === 'running'
   const [filter, setFilter] = useState<'all' | 'you'>('all')
   const [mode, setMode] = useState<Mode>('translated')
   const [tip, setTip] = useState<{ seg: Seg; x: number; y: number }>()
@@ -29,6 +33,11 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
     <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-3 flex items-center justify-between text-sm">
         <b>Transcript of everything</b>
+        <span className="flex items-center gap-2 text-xs text-stone-500">
+          <button disabled={running} title="sends the words (and your notes) to Gemini, which suggests substitutions for obvious recognition errors; they show highlighted and you can change any of them" className="rounded border border-stone-300 px-2 py-0.5 text-stone-700 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300"
+            onClick={async () => { setFixErr(undefined); try { await api.suggestTranscript(folder) } catch (e) { setFixErr((e as Error).message) } setVer(v => v + 1) }}>{running ? `asking Gemini… ${fix?.done ?? 0}/${fix?.total ?? '…'}` : 'suggest corrections (Gemini)'}</button>
+          {fix?.state === 'done' && <span>{fix.fixes} suggested</span>}{fix?.state === 'error' && <span className="text-red-600">{fix.error}</span>}{fixErr && <span className="text-red-600">{fixErr}</span>}
+          <span><span className="rounded bg-amber-200 px-1 dark:bg-amber-500/30">Gemini</span> <span className="rounded bg-sky-200 px-1 dark:bg-sky-500/30">you</span> hover for the original, click a word to edit</span></span>
         <span className="flex items-center gap-3 text-stone-500">{data.segments.length} phrases
           <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown" className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
             <option value="translated">translated</option><option value="original">original language</option><option value="both">both</option></select>
@@ -44,7 +53,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
               {g.segs.map((s, i) => (
                 <span key={i} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}
                   className={`mr-1 rounded px-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-950 ${s.who === 'wearer' ? 'font-medium' : ''} ${s.flagged ? 'italic opacity-50' : ''}`}>
-                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`cursor-pointer ${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} onText={() => onOpen(s.clip, s.t0)} />
+                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`cursor-pointer ${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} onText={() => onOpen(s.clip, s.t0)} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1) } : undefined} />
                 </span>
               ))}
             </p>
