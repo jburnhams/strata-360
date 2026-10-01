@@ -8,7 +8,7 @@ def fake_speak(voice, rate, text, out):                      # a tone as long as
     n = max(1, len(text.split())) * 0.1; subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', f'sine=frequency=300:duration={n}', out], check=True)
 
 
-V.ENGINES['fake'] = ('Fake', lambda: True, lambda: [dict(name='Test', lang='en_GB')], fake_speak)
+V.ENGINES['fake'] = ('Fake', lambda: True, lambda: [dict(name='Test', lang='en_GB'), dict(name='Other', lang='en_GB')], fake_speak)
 V.ENGINES = {'fake': V.ENGINES['fake']}
 
 
@@ -51,6 +51,15 @@ def test_an_edited_script_is_a_new_version_that_is_spoken_and_progress_is_record
     assert os.path.exists(os.path.join(V.config.race_dir(f), 'scripts', old))                                                                     # the old one is kept
     d2 = V.build(f); assert d2['script'] == name and {x['seg']: x for x in d2['lines']}[1]['text'] == 'four five six seven'
     a = {x['seg']: x for x in d['lines']}[0]['path']; assert {x['seg']: x for x in d2['lines']}[0]['path'] == a                                    # the unchanged line was not spoken again
+
+
+def test_each_voice_keeps_its_own_track_so_swapping_is_instant_and_a_newer_choice_is_not_lost():
+    f = project([L(0, 'one two three', 0.0, 3.0), L(1, 'four five', 3.0, 3.0)]); a = V.build(f, voice='Test'); ta = os.path.join(V.track_dir(f, V.track_key('fake', 'Test', 150)), 'voiceover.wav'); m = os.path.getmtime(ta)
+    b = V.build(f, voice='Other'); assert b['voice'] == 'Other' and V.load_timings(f)['voice'] == 'Other' and {c['voice'] for c in V.cached_tracks(f)} == {'Test', 'Other'} and [c['voice'] for c in V.cached_tracks(f) if c['active']] == ['Other']
+    a2 = V.build(f, voice='Test'); assert os.path.getmtime(ta) == m and a2['voice'] == 'Test' and V.load_timings(f)['voice'] == 'Test'                # back to the first: nothing was made again, just switched
+    assert V.load_state(f)['voice'] == 'Test'                                                                                                        # the job never writes a voice back over the user's choice
+    V.save_edit(f, {'1': 'four five six'}); assert V.cached_tracks(f) == []                                                                         # a new script makes every old track stale
+    V.build(f, voice='Other'); assert [c['voice'] for c in V.cached_tracks(f)] == ['Other']
 
 
 def test_no_engine_is_reported_clearly():

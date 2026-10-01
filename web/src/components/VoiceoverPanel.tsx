@@ -33,13 +33,18 @@ export default function VoiceoverPanel({ folder }: { folder: string }) {
       {st.engines.length === 0 ? <p className="text-sm text-amber-700">The voice model is not installed. Run <code>pip install kokoro-onnx</code> and <code>./strata360 voiceover . --fetch</code> (about 350 MB, an open model, runs locally).</p> : (
         <div className="mb-3 flex flex-wrap items-end gap-3 text-sm">
           <label>Voice<select value={voiceName} onChange={e => { setVoice(e.target.value); void api.buildVoiceover(folder, { engine: engine?.id, voice: e.target.value, rate: rate ?? st.state.rate }) }} className={`${input} ml-2`}>
-            {[...new Set(engine?.voices.map(v => (v as { group?: string }).group ?? ''))].map(g => <optgroup key={g} label={g || 'voices'}>{engine?.voices.filter(v => ((v as { group?: string }).group ?? '') === g).map(v => <option key={v.name} value={v.name}>{(v as { label?: string }).label ?? v.name}</option>)}</optgroup>)}</select></label>
+            {[...new Set(engine?.voices.map(v => (v as { group?: string }).group ?? ''))].map(g => <optgroup key={g} label={g || 'voices'}>{engine?.voices.filter(v => ((v as { group?: string }).group ?? '') === g).map(v => <option key={v.name} value={v.name}>{st.cached?.some(c => c.voice === v.name && c.rate === st.state.rate) ? '✓ ' : ''}{(v as { label?: string }).label ?? v.name}</option>)}</optgroup>)}</select></label>
           <label>Speed<input type="number" min={100} max={260} value={rate ?? st.state.rate} onChange={e => setRate(Number(e.target.value))} className={`${input} ml-2 w-20`} /></label>
           <button disabled={st.building || !st.lines} onClick={build} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50">{st.building ? `Speaking ${st.progress?.done ?? 0}/${st.progress?.total || '…'}` : t ? 'Speak again' : 'Speak the script'}</button>
           {t && <button className="rounded-lg border border-stone-300 px-3 py-2 dark:border-stone-700" onClick={() => play(api.voiceoverAudio(folder))}>▶ Whole track</button>}
           <audio ref={player} controls className="h-9" />
         </div>
       )}
+      {!!st.cached?.length && <div className="mb-2 flex flex-wrap items-center gap-2 text-xs"><span className="text-stone-500">Compare (made for this script, ✓ in the list):</span>
+        {st.cached.map(c => { const label = (engine?.voices.find(v => v.name === c.voice) as { label?: string } | undefined)?.label ?? c.voice
+          return <span key={c.key} className={`inline-flex items-center overflow-hidden rounded border ${c.active ? 'border-emerald-600' : 'border-stone-300 dark:border-stone-700'}`}>
+            <button className="px-1.5 py-0.5 hover:bg-stone-100 dark:hover:bg-stone-800" title="play this voice's whole track without switching to it" onClick={() => play(api.voiceoverAudio(folder, undefined, undefined, c.key))}>▶ {label}</button>
+            {c.active ? <span className="bg-emerald-600 px-1.5 py-0.5 text-white">in use</span> : <button className="border-l border-stone-300 px-1.5 py-0.5 hover:bg-stone-100 dark:border-stone-700 dark:hover:bg-stone-800" onClick={() => { setVoice(c.voice); void api.buildVoiceover(folder, { engine: c.engine, voice: c.voice, rate: c.rate }) }}>use</button>}</span> })}</div>}
       {!st.lines && <p className="text-sm text-stone-500">Write the script first.</p>}
       {!!st.lines && <p className="mb-2 text-xs text-stone-500">The script is spoken automatically whenever it is written or an edit is saved; unchanged lines are reused.</p>}
       {(err || st.error) && <p className="mb-2 text-sm text-red-600">{err || st.error}</p>}

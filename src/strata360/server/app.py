@@ -345,7 +345,7 @@ def create_app(roots, token=None):
         f = folder_of(folder); st = VO.load_state(folder_of(folder)); av = VO.available_engines(); script, lines = VO.script_lines(f)
         try: eng, voice = VO.pick(st)
         except RuntimeError: eng = voice = None
-        return dict(engines=av, state=dict(engine=eng, voice=voice, rate=st['rate'], use=st['use']), timings=VO.load_timings(f), script=script, lines=len(lines), building=VO.running(f), progress=(VO.load_status(f) or {}), error=((VO.load_status(f) or {}).get('error') if (VO.load_status(f) or {}).get('state') == 'error' else None))
+        return dict(engines=av, state=dict(engine=eng, voice=voice, rate=st['rate'], use=st['use']), timings=VO.load_timings(f), cached=VO.cached_tracks(f), script=script, lines=len(lines), building=VO.running(f), progress=(VO.load_status(f) or {}), error=((VO.load_status(f) or {}).get('error') if (VO.load_status(f) or {}).get('state') == 'error' else None))
 
     @api.post('/api/voiceover/build', dependencies=[Depends(auth)])
     def post_voiceover(body: dict):                                                      # {folder, engine?, voice?, rate?}: speak the script and mix the track (in the background; unchanged lines are reused)
@@ -381,10 +381,11 @@ def create_app(roots, token=None):
         VO.delete_recording(folder_of(folder), seg); return dict(ok=True)
 
     @api.get('/api/voiceover/audio')
-    def get_voiceover_audio(request: Request, folder: str, seg: int | None = None, source: str = 'track'):   # one line (source synth|recorded) or the whole mixed track; <audio> cannot send headers, so the cookie/query token authenticates
+    def get_voiceover_audio(request: Request, folder: str, seg: int | None = None, source: str = 'track', track: str = ''):   # one line (source synth|recorded) or the whole mixed track; <audio> cannot send headers, so the cookie/query token authenticates
         auth(request); from strata360.edit import voiceover as VO
         f = folder_of(folder); b = VO.base(f)
-        if seg is None: p = os.path.join(b, 'voiceover.wav')
+        if seg is None and track and '/' not in track and '..' not in track: p = os.path.join(b, 'tracks', track, 'voiceover.wav')       # one voice's whole track, to compare without switching
+        elif seg is None: p = os.path.join(b, 'voiceover.wav')
         elif source == 'recorded': p = VO.recorded_path(f, seg)
         else:
             tm = VO.load_timings(f) or {}; o = next((o for o in tm.get('lines', []) if o['seg'] == seg), None); p = os.path.join(b, o['path']) if o and o['source'] == 'synth' else ''

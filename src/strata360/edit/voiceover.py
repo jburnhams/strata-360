@@ -177,14 +177,57 @@ def build(folder, engine=None, voice=None, rate=None, progress=None):
     write_status(folder, 'done', len(doc['lines']), len(doc['lines'])); return doc
 
 
+def track_key(engine, voice, rate): return f'{engine}-{voice}-{int(rate)}'
+
+
+def track_dir(folder, key): return os.path.join(base(folder), 'tracks', key)
+
+
+def signature(folder, script, st, total):
+    """What a finished track depends on: the script, the voice and speed, your recordings and which take each line uses, and the film length. A track with this signature is still right."""
+    rec = {os.path.basename(p): int(os.path.getmtime(p)) for p in sorted(glob.glob(os.path.join(base(folder), 'recorded', '*.wav')))}
+    return hashlib.sha1(json.dumps([script, st['engine'], st['voice'], st['rate'], rec, st['use'], round(total, 2)], sort_keys=True).encode()).hexdigest()[:12]
+
+
+def _publish(folder, key):
+    """Make a finished track the active one: its mix and timings become voiceover.wav / timings.json (what the film's sound and the app use)."""
+    import shutil
+    d = track_dir(folder, key)
+    for n in ('voiceover.wav', 'timings.json'):
+        shutil.copyfile(os.path.join(d, n), os.path.join(base(folder), n + '.part')); os.replace(os.path.join(base(folder), n + '.part'), os.path.join(base(folder), n))
+
+
+def cached_tracks(folder):
+    """The voices that already have a finished track for the CURRENT script and recordings: [{engine, voice, rate, key, measured_wpm, over, sped, active}], to swap between and compare."""
+    script, lines = script_lines(folder)
+    if not lines: return []
+    st = load_state(folder); total = film_length(folder) or max(l['film_start_s'] + l['seconds'] for l in lines); out = []; active = (load_timings(folder) or {})
+    for p in sorted(glob.glob(os.path.join(base(folder), 'tracks', '*', 'timings.json'))):
+        try: d = json.load(open(p))
+        except (OSError, ValueError): continue
+        s2 = dict(st, engine=d['engine'], voice=d['voice'], rate=d['rate'])
+        if d.get('sig') == signature(folder, script, s2, total) and os.path.exists(os.path.join(os.path.dirname(p), 'voiceover.wav')):
+            out.append(dict(engine=d['engine'], voice=d['voice'], rate=d['rate'], key=os.path.basename(os.path.dirname(p)), measured_wpm=d.get('measured_wpm'), over=len(d.get('over', [])), sped=len(d.get('sped', [])),
+                            active=(active.get('voice'), active.get('rate'), active.get('sig')) == (d['voice'], d['rate'], d.get('sig'))))
+    return out
+
+
 def _build(folder, engine=None, voice=None, rate=None, progress=None):
     st = load_state(folder)
-    if engine: st['engine'] = engine
-    if voice: st['voice'] = voice
-    if rate: st['rate'] = int(rate)
+    if engine or voice or rate:                                                          # an explicit request is the user's choice: kept (the job never writes the voice back, so a newer request is not lost)
+        if engine: st['engine'] = engine
+        if voice: st['voice'] = voice
+        if rate: st['rate'] = int(rate)
+        save_state(folder, st)
     st['engine'], st['voice'] = pick(st); script, lines = script_lines(folder)
     if not lines: raise RuntimeError('there is no script yet: write one first')
     lines.sort(key=lambda l: l['film_start_s']); total = film_length(folder) or max(l['film_start_s'] + l['seconds'] for l in lines)
+    key = track_key(st['engine'], st['voice'], st['rate']); sig = signature(folder, script, st, total); tj = os.path.join(track_dir(folder, key), 'timings.json')
+    try:
+        done = json.load(open(tj))
+        if done.get('sig') == sig and os.path.exists(os.path.join(track_dir(folder, key), 'voiceover.wav')):         # this voice was already made for this script: swapping to it is instant
+            _publish(folder, key); return done
+    except (OSError, ValueError): pass
     wins = sorted({round(l['film_start_s'], 3) for l in lines}); out = []
     for i, l in enumerate(lines):
         sp = synth_line(folder, l['seg'], l['text'], st['engine'], st['voice'], st['rate']); rp = recorded_path(folder, l['seg']); has_rec = os.path.exists(rp)
@@ -200,14 +243,14 @@ def _build(folder, engine=None, voice=None, rate=None, progress=None):
                         natural_s=round(d, 3), played_s=round(min(played, avail) if fit == 'over' else played, 3), overrun_s=round(max(0.0, played - avail), 3), tempo=tempo, fit=fit,
                         synth_s=round(duration(sp), 3)))
         if progress: progress(i + 1, len(lines))
-    _mix(folder, out, total)
+    os.makedirs(track_dir(folder, key), exist_ok=True); _mix(folder, out, total, os.path.join(track_dir(folder, key), 'voiceover.wav'))
     words = sum(len(o['text'].split()) for o in out); syn = sum(o['synth_s'] for o in out)
-    doc = dict(script=script, engine=st['engine'], voice=st['voice'], rate=st['rate'], film_length_s=round(total, 3), lines=out, measured_wpm=round(words / syn * 60, 1) if syn else None,
+    doc = dict(script=script, sig=sig, engine=st['engine'], voice=st['voice'], rate=st['rate'], film_length_s=round(total, 3), lines=out, measured_wpm=round(words / syn * 60, 1) if syn else None,
                over=[o['seg'] for o in out if o['fit'] == 'over'], sped=[o['seg'] for o in out if o['fit'] == 'sped'])
-    save_state(folder, st); json.dump(doc, open(os.path.join(base(folder), 'timings.json'), 'w'), indent=1); return doc
+    json.dump(doc, open(tj, 'w'), indent=1); _publish(folder, key); return doc
 
 
-def _mix(folder, out, total):
+def _mix(folder, out, total, dest):
     inputs = []; chains = []
     for i, o in enumerate(out):
         p = os.path.join(base(folder), o['path']); inputs += ['-i', p]; f = []
@@ -215,8 +258,7 @@ def _mix(folder, out, total):
         if o['fit'] == 'over': f.append(f"atrim=0:{o['played_s']}"); f.append(f"afade=t=out:st={max(0.0, o['played_s'] - 0.08):.3f}:d=0.08")
         f.append(f"adelay={int(round(o['film_start_s'] * 1000))}:all=1"); chains.append(f"[{i}:a]" + ','.join(f) + f'[a{i}]')
     mix = ''.join(f'[a{i}]' for i in range(len(out))) + f'amix=inputs={len(out)}:normalize=0:duration=longest,apad=whole_dur={total:.3f},atrim=0:{total:.3f},alimiter=limit=0.95[m]'
-    p = os.path.join(base(folder), 'voiceover.wav')
-    _run(['ffmpeg', '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(chains + [mix]), '-map', '[m]', '-ar', str(SR), '-ac', '1', p + '.part.wav']); os.replace(p + '.part.wav', p)
+    _run(['ffmpeg', '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(chains + [mix]), '-map', '[m]', '-ar', str(SR), '-ac', '1', dest + '.part.wav']); os.replace(dest + '.part.wav', dest)
 
 
 def newest_script(folder):

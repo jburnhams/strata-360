@@ -310,9 +310,10 @@ def cmd_voiceover(a):
     if a.list:
         for e in VO.available_engines(): print(e['id'], '-', e['label']); [print('   ', v['name'], v['lang']) for v in e['voices']]
         return
-    for _ in range(5):                                                                   # a script saved while speaking is spoken next
+    for _ in range(8):                                                                   # a script, voice or speed chosen while speaking is made next
         d = VO.build(f, engine=a.engine, voice=a.voice, rate=a.rate, progress=lambda i, n: print(f'\rspeaking {i}/{n}', end='', flush=True)); print()
-        if VO.newest_script(f) == d['script']: break
+        st = VO.load_state(f)
+        if VO.newest_script(f) == d['script'] and (st['voice'] in (None, d['voice'])) and st['rate'] == d['rate']: break          # a voice, speed or script chosen meanwhile is made next
     print(f"{d['engine']} / {d['voice']}: {len(d['lines'])} lines, measured {d['measured_wpm']} words/min; sped up: {d['sped']}; too long: {d['over']}\n-> {os.path.join(VO.base(f), 'voiceover.wav')}")
 
 
