@@ -80,12 +80,12 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
 | `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `gps/clock.py`, `gps/context.py`, `gps/overview.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
+| `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
 | everything else | see `--cov-report=term-missing` | todo |
 
 ## Known issues in the existing suite
 
 - `integration/test_edit.py` (the optimiser on synthetic candidates, ~100 s) needs no ffmpeg: it is slow pure computation. Candidate to move to `unit/` with smaller inputs, or to mark `slow`.
-- `integration/test_server.py` and `test_music.py` are still script-style (`sys.path` hacks, `__main__` runners); `test_server.py` overlaps `unit/test_server_api.py`. Convert them to the fixtures above when touched.
 - A `RuntimeWarning: overflow encountered in divide` from `render/photo.py:64` appears when the synthetic clip goes through exposure (a division by a zero scale on the synthetic lens). Possible product bug; not hidden here.
 - Several old files assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); `restore_globals` papers over a few of them. Convert them to `monkeypatch` when you touch them.
 - `test_workers.py` starts real processes and sleeps (about 5 s).
