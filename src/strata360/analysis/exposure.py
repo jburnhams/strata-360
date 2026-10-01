@@ -47,7 +47,7 @@ class Analyser:
     def __init__(self, osv):
         sl = read_slots(osv)
         self.master, self.slave = Lens(sl[2]), Lens(sl[1])       # stream 1 = master (front), stream 0 = slave (rear)
-        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y']); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'])
+        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
         self.P, self.B = imu_offsets()
         lon = ((np.arange(SPH_W) + 0.5) / SPH_W - 0.5) * 2 * np.pi; lat = (0.5 - (np.arange(SPH_H) + 0.5) / SPH_H) * np.pi
         LON, LAT = np.meshgrid(lon, lat)

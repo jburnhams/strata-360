@@ -41,11 +41,26 @@ def smoothstep(t):
     t = np.clip(t, 0, 1); return t * t * (3 - 2 * t)
 
 
-def occlusion_map(poly_x, poly_y, size=3840, scale=0.5, feather=OCCL_FEATHER_PX):
-    """Signed occlusion factor map at `scale` of the lens frame: 0 inside the polygon, ramping to 1 at `feather` px outside."""
-    n = int(size * scale)
-    pts = (np.stack([poly_x, poly_y], 1) * scale).astype(np.int32).reshape(-1, 1, 2)
-    inside = np.zeros((n, n), np.uint8); cv2.fillPoly(inside, [pts], 255)
+def occlusion_polygon(poly_x, poly_y, cx, cy, rim_px):
+    """The selfie stick's region in a lens image, as OpenOSV builds it (geom/LensRig.cpp buildOcclusion). The calibration stores an OPEN ARC of 14 points near the bottom rim (the apex twice, in an
+    order that crosses itself), not a closed shape: filling it as it is gives a bowtie, or with any chord a huge cap, and masks the wrong picture. The stick enters from outside the frame, so the occluded
+    region is the thin sliver between the arc and the edge of the image circle: sort the arc by angle about the lens centre, then come back along the rim at the same angles."""
+    arc = []
+    for x, y in zip(np.asarray(poly_x, float), np.asarray(poly_y, float)):
+        if np.isfinite(x) and np.isfinite(y) and not any(abs(x - a) < 1e-6 and abs(y - b) < 1e-6 for a, b in arc): arc.append((x, y))        # the apex appears twice
+    if len(arc) < 3 or not np.isfinite(rim_px) or rim_px <= 0: return np.zeros((0, 2))
+    arc = sorted(arc, key=lambda p: np.arctan2(p[1] - cy, p[0] - cx)); rim = max(rim_px, 1.02 * max(np.hypot(x - cx, y - cy) for x, y in arc))
+    back = [(cx + rim * np.cos(a), cy + rim * np.sin(a)) for a in [np.arctan2(y - cy, x - cx) for x, y in reversed(arc)]]
+    return np.array(arc + back)
+
+
+def occlusion_map(poly_x, poly_y, size=3840, scale=0.5, feather=OCCL_FEATHER_PX, centre=None, rim=None):
+    """Signed occlusion factor map at `scale` of the lens frame: 0 inside the stick region, ramping to 1 at `feather` px outside. `centre` (cx, cy) and `rim` (radius of the usable image circle) close the
+    stored arc outward (occlusion_polygon); without them the lens is assumed centred with the rim at the frame edge."""
+    n = int(size * scale); cx, cy = centre if centre is not None else (size / 2.0, size / 2.0)
+    poly = occlusion_polygon(poly_x, poly_y, cx, cy, rim if rim is not None else size / 2.0 - 20.0)
+    inside = np.zeros((n, n), np.uint8)
+    if len(poly): cv2.fillPoly(inside, [(poly * scale).astype(np.int32).reshape(-1, 1, 2)], 255)
     dist = cv2.distanceTransform((inside == 0).astype(np.uint8), cv2.DIST_L2, 5) / scale   # px in lens coordinates, 0 inside
     return np.clip(dist / feather, 0, 1).astype(np.float32)
 

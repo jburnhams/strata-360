@@ -148,7 +148,7 @@ class Renderer(Globe):
         self.W, self.H, self.grid = W, H, grid
         sl = read_slots(osv)
         self.master, self.slave = Lens(sl[2]), Lens(sl[1])  # stream 1 = master (front), stream 0 = slave (rear)
-        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y']); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'])
+        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
         self.rtm = ph.THETA_MAX_DEG - ph.RENDER_INSET_DEG          # render-only blend inset (PhotoSeam.h), 94.99 deg
         self.gain_m = np.ones(3); self.gain_s = np.ones(3); self._lut = None
         self.osv = osv; self.init_globe()

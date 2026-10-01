@@ -301,14 +301,15 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
             if fail_fast:
                 update_state(race, c.id, name, dict(status='failed', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=''.join(traceback.format_exception_only(type(e), e)).strip(), trace=traceback.format_exc()[-1500:]))
                 result[(c.id, name)] = 'failed'; release(race, c.id, name); raise
-            prev = load_state(race, c.id).get(name) or {}; kind, ent = retry.next_state(prev if prev.get('status') == 'retry' else None, e, getattr(e, 'retryable', True), getattr(e, 'progress', False), st.retries)
+            prev = load_state(race, c.id).get(name) or {}; retryable = getattr(e, 'retryable', not isinstance(e, retry.PROGRAMMING_ERRORS))           # a bug in the code is not helped by trying again
+            kind, ent = retry.next_state(prev if prev.get('status') == 'retry' else None, e, retryable, getattr(e, 'progress', False), st.retries)
             err = ''.join(traceback.format_exception_only(type(e), e)).strip()
             if kind == 'retry':
                 update_state(race, c.id, name, dict(status='retry', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=err, **ent)); tried.discard((c.id, name)); result[(c.id, name)] = 'retry'
                 L(f"[{n}/{len(cl)}] {c.id} {name}: failed for now ({err[:160]}); retry {ent['attempts']} of {st.retries} after a {ent['wait_s']:.0f} s sleep")
             else:
                 update_state(race, c.id, name, dict(status='failed', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=err, trace=traceback.format_exc()[-1500:], **ent)); result[(c.id, name)] = 'failed'
-                why = 'not retryable' if not getattr(e, 'retryable', True) else 'after %d tries' % ent['attempts']; L(f'[{n}/{len(cl)}] {c.id} {name}: FAILED ({why}) {e!r}')
+                why = 'not retryable' if not retryable else 'after %d tries' % ent['attempts']; L(f'[{n}/{len(cl)}] {c.id} {name}: FAILED ({why}) {e!r}')
         finally:
             release(race, c.id, name)
     if not workers(race) or workers(race) == [os.getpid()]:

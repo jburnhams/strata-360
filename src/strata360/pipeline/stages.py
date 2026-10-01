@@ -114,8 +114,9 @@ def align(ctx):
 def transcript_check(ctx):
     from strata360.analysis import transcript_fix as TF
     c = ctx.cfg.get('transcript_check') or {}
-    ens = {k: c[k] for k in ('min_calls', 'max_calls', 'accept', 'min_votes', 'patience') if k in c}
-    ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), thinking=c.get('thinking', 'low'), provider=c.get('provider'), model=c.get('model'), pool=c.get('pool'), log=ctx.log, **(ens if c.get('pool') else {}))))
+    if c.get('pool'): kw = dict(pool=c['pool'], **{k: c[k] for k in ('min_calls', 'max_calls', 'accept', 'min_votes', 'patience') if k in c})       # the adaptive ensemble
+    else: kw = dict(runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), provider=c.get('provider'), model=c.get('model'))      # the fixed vote
+    ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, thinking=c.get('thinking', 'low'), log=ctx.log, **kw)))
 
 
 @stage('exposure', 1, keys=('exposure_every_frames',), outputs=('exposure.json',), deps=('ingest',),
@@ -132,7 +133,7 @@ def motion(ctx):
     ctx.write('motion.json', ctx.stamped(analyse(ctx.clip.osv)))
 
 
-@stage('proxy', 3, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
+@stage('proxy', 4, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
        note='the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, H.264 with audio, about 16 Mbps): the detectors, the scene model, thumbnails AND the browser player all use this one file instead of the lens files (slow: about 10x real time)')
 def proxy(ctx):
     from strata360.render.proxy import make_proxy

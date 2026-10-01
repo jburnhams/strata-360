@@ -49,6 +49,10 @@ def test_an_attempt_that_made_progress_does_not_use_up_a_retry():
     assert len(CALLS) == 6 and state(f, 't_slow')['status'] == 'ok'                                          # five slow-progress attempts, only 2 retries allowed: still done
 
 
+def test_a_bug_in_the_code_is_not_retried():
+    fake('t_bug', lambda n: TypeError('got multiple values for keyword argument')); f = project('t_bug'); runner.work(f, ['t_bug'], log=lambda *a: None); assert len(CALLS) == 1 and state(f, 't_bug')['status'] == 'failed'
+
+
 def test_next_state_rules_and_backoff():
     k, e = retry.next_state(None, 'x', True, False, 2, now=100.0); assert k == 'retry' and e['attempts'] == 1 and retry.backoff_s(1) <= e['wait_s'] <= retry.backoff_s(1) * 1.2 + 0.1 and abs(e['next_try_at'] - 100.0 - e['wait_s']) < 0.1
     k, e = retry.next_state(e, 'x', True, False, 2, now=110.0); assert k == 'retry' and e['attempts'] == 2 and e['first_failure_at'] == 100.0

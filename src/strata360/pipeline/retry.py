@@ -6,6 +6,9 @@ import random, time
 BASE_WAIT_S = 15.0; MAX_WAIT_S = 600.0
 
 
+PROGRAMMING_ERRORS = (TypeError, NameError, AttributeError, ImportError, SyntaxError, AssertionError, NotImplementedError)       # failures of the code itself: never retried
+
+
 class RetryLater(Exception):
     """Raised by a stage when part of the work failed for now (overloaded service, network): what worked is kept, the item is tried again later."""
     retryable = True

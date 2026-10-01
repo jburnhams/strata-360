@@ -56,6 +56,10 @@ class Lens:
         thd = th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5)))
         return (self.cx + self.fx * thd * np.cos(phi)) * scale, (self.cy + self.fy * thd * np.sin(phi)) * scale, th
 
+    def rim_radius(self, theta_deg=97.59):
+        """Radius in lens pixels of the edge of the usable image circle (where theta reaches `theta_deg`), the rim the stick polygon is closed out to."""
+        th = np.radians(theta_deg); return float(self.fx * th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5))))
+
     def edge_theta(self, radius_px=1900.0):
         th = np.linspace(0, np.pi, 4000); thd = th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5)))
         r = self.fx * thd; ok = np.where(np.diff(r) > 0)[0]
