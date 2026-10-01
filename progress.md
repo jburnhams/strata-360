@@ -481,3 +481,8 @@ By noise type (small, all SNRs): wind raw 0.14 → DeepFilterNet3 0.11 and MossF
 - Measured: the lens-to-lens disagreement in the overlap falls 36-54% (e.g. 0.085 -> 0.039) on four of five test frames; a clip with too little texture gets no warp.
 - A first version smeared and doubled the HAND (a near object: the gate did not stop it). Fix: a cell whose disparity is over 1 degree is a near object (a hand at 30 cm has about 6 degrees; calibration error and far parallax are under 1), left to the seam; the warp is the smooth far-field part only (max correction 0.95 degrees). After it the hand stays sharp.
 - On by default (proxy, final, flat `--parallax off`). Proxy version 6. Tests: tests/test_parallax.py.
+
+
+## Transcript check: Pro, twice plus tiebreak (Oct 2026)
+- `transcript_check` default: Gemini 3.1 Pro (paid key) on 60-120 s speech-only excerpts, twice; a third check only when the two differ; a fix needs 2 votes (`pair`). Flash mixture and the transcription model alone were weaker (see config comments). `min_votes` is now passed through to the ensemble (it was silently 3).
+- Cost: `transcript_fix.usage_summary` prices paid-key calls (Pro $2/$12 per M tokens) from `gemini_usage.jsonl`; shown in the transcript panel. Clip 0023: 9 Pro calls, about $0.14.

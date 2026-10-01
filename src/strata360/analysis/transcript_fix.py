@@ -145,6 +145,27 @@ def call_key(ch, audio_path, prompt, model, thinking, run):
 def usage_log_path(folder): return os.path.join(config.race_dir(folder), 'gemini_usage.jsonl')
 
 
+PRICES = {'gemini-3.1-pro-preview': (2.00, 12.00)}      # US$ per million tokens (input, output), paid tier, prompts up to 200k tokens; models not listed have no price here (free tier is free)
+
+
+def usage_summary(folder):
+    """Everything the usage log holds: {calls, input, output, paid_calls, cost_usd, by_model: {model: {calls, input, output, paid, cost_usd}}}. Only calls on the PAID key cost anything; the cost is an estimate
+    from `PRICES` (thinking tokens are in the output price, and may not all be in the logged output count) and covers priced models only."""
+    out = dict(calls=0, input=0, output=0, paid_calls=0, cost_usd=0.0, by_model={})
+    try: lines = open(usage_log_path(folder)).read().splitlines()
+    except OSError: return out
+    for l in lines:
+        try: r = json.loads(l)
+        except ValueError: continue
+        t = r.get('tokens') or {}; i = int(t.get('input') or 0); o = int(t.get('output') or 0); m = r.get('model') or '?'; paid = r.get('tier') == 'paid'
+        e = out['by_model'].setdefault(m, dict(calls=0, input=0, output=0, paid=0, cost_usd=0.0)); c = (i * PRICES[m][0] + o * PRICES[m][1]) / 1e6 if paid and m in PRICES else 0.0
+        for d in (out, e): d['calls'] += 1; d['input'] += i; d['output'] += o; d['cost_usd'] += c
+        if paid: out['paid_calls'] += 1; e['paid'] += 1
+    out['cost_usd'] = round(out['cost_usd'], 4)
+    for e in out['by_model'].values(): e['cost_usd'] = round(e['cost_usd'], 4)
+    return out
+
+
 def check_chunk(folder, clip, tr, ch, audio_path, ctx, provider='vertex', model=None, thinking='low', run=0, cache_dir=None, log=None):
     """One request for one excerpt: returns (fixes, info). The audio is the excerpt of `audio_path`, mono 16 kHz FLAC. Every reply is kept on disk (`cache_dir`): asking the same thing again costs
     nothing, whatever is changed afterwards (voting rules, which fixes are applied); each NEW call is logged with its token counts in <project>/gemini_usage.jsonl."""
@@ -259,7 +280,7 @@ def check_clip(folder, clip, runs=3, min_votes=2, thinking='low', provider=None,
     au = next((os.path.join(d, n) for n in ('audio_clean.flac', 'audio_original.flac') if os.path.exists(os.path.join(d, n))), None)
     if au is None: raise RuntimeError('the clip has no stored audio yet (the audio_extract stage)')
     chs = chunks(tr, dur)
-    if pool: return check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, **ens)
+    if pool: return check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, min_votes=min_votes, **ens)
     doc = dict(settings=dict(runs=runs, min_votes=min_votes, thinking=thinking, model=model, prompt_version=PROMPT_VERSION, audio=os.path.basename(au)), excerpts=[], kept=[], calls=dict(made=0, reused=0), tokens=dict(input=0, output=0))
     if not chs: TE.set_gemini(d, [], model=model); return doc
     ctx = TG.context(folder, clip); cache = os.path.join(d, 'gemini_checks'); jobs = [(i, r) for i in range(len(chs)) for r in range(runs)]; res = {i: [None] * runs for i in range(len(chs))}; n = [0]
