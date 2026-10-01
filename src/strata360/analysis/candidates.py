@@ -26,7 +26,7 @@ def _iso_add(start_utc, s):
     t0 = dt.datetime.fromisoformat(start_utc.replace('Z', '+00:00')); return (t0 + dt.timedelta(seconds=float(s))).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
 
-GRID_LOW_DETAIL = 0.004; GRID_LOW_CONTRAST = 0.03; GRID_BAD_FRAC = 0.5      # view-quality grid: a cell is "empty" below both; the whole frame is bad when more than this share of it is empty
+GRID_LOW_DETAIL = 0.002; GRID_LOW_CONTRAST = 0.015; GRID_BAD_FRAC = 0.5      # view-quality grid: a cell is "empty" below both (set from clips 0010, 0018, 0021: a misty field peaks at 0.31 of the frame empty, a truly empty second at 0.72); the whole frame is bad when more than this share of it is empty
 
 
 def low_fraction(vq):
