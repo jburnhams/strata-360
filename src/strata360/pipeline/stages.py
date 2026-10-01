@@ -114,7 +114,7 @@ def align(ctx):
 def transcript_check(ctx):
     from strata360.analysis import transcript_fix as TF
     c = ctx.cfg.get('transcript_check') or {}
-    ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), thinking=c.get('thinking', 'low'), log=ctx.log)))
+    ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), thinking=c.get('thinking', 'low'), provider=c.get('provider'), model=c.get('model'), log=ctx.log)))
 
 
 @stage('exposure', 1, keys=('exposure_every_frames',), outputs=('exposure.json',), deps=('ingest',),
