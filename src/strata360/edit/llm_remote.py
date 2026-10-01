@@ -82,7 +82,7 @@ def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7
     if provider == 'vertex' and not key: raise LLMError('no Google Cloud (Vertex) API key: put VERTEX_API_KEY in secrets.env, or run `strata360 set-key --provider vertex`, or paste it in the app (Script panel)')
     if not key: raise LLMError('no Gemini API key: put GEMINI_API_KEY in secrets.env, or run `strata360 set-key --provider gemini`, or paste it in the app (Script panel)')
     system = '\n\n'.join(m['content'] for m in messages if m['role'] == 'system')
-    contents = [dict(role='model' if m['role'] == 'assistant' else 'user', parts=[dict(text=m['content'])]) for m in messages if m['role'] != 'system']
+    contents = [dict(role='model' if m['role'] == 'assistant' else 'user', parts=(m['content'] if isinstance(m['content'], list) else [dict(text=m['content'])])) for m in messages if m['role'] != 'system']      # a list of parts can carry audio: {inlineData: {mimeType, data}}
     gen = dict(temperature=float(temperature), maxOutputTokens=int(max(max_tokens, 4096)))
     if json_mode: gen['responseMimeType'] = 'application/json'
     body = dict(contents=contents, generationConfig=gen)

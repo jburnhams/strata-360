@@ -38,7 +38,7 @@ def save_state(folder, s):
 MODEL_DIR = os.environ.get('STRATA360_KOKORO') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'models', 'kokoro')
 MODEL_FILES = {'kokoro-v1.0.onnx': 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx', 'voices-v1.0.bin': 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin'}
 GROUPS = {'bm': 'British male', 'bf': 'British female', 'am': 'American male', 'af': 'American female'}   # English voices; British male first
-DEFAULT_VOICES = ['bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel']
+DEFAULT_VOICES = ['bm_lewis', 'bm_george', 'bm_fable', 'bm_daniel']          # British male first; the first is the default
 BASE_WPM = 150.0                                  # the voice at speed 1.0 speaks about this fast; `rate` (words per minute) sets the speed relative to it
 _K = {}
 
@@ -65,7 +65,7 @@ def _kokoro():
 
 
 def voices():
-    """The English voices in the model's voice file: [{name, label, group, lang}], British male first (the default is bm_george)."""
+    """The English voices in the model's voice file: [{name, label, group, lang}], British male first (the default is bm_lewis)."""
     try:
         import numpy as np
         names = [n for n in np.load(os.path.join(MODEL_DIR, 'voices-v1.0.bin')).files if n[:2] in GROUPS]
@@ -83,7 +83,7 @@ def _kokoro_available():
 def _kokoro_speak(voice, rate, text, out):
     import numpy as np
     from scipy.io import wavfile
-    speed = float(min(max(rate / BASE_WPM, 0.6), 1.4)); samples, sr = _kokoro().create(text, voice=voice or 'bm_george', speed=speed, lang='en-gb' if (voice or 'b')[0] == 'b' else 'en-us')
+    speed = float(min(max(rate / BASE_WPM, 0.6), 1.4)); samples, sr = _kokoro().create(text, voice=voice or DEFAULT_VOICES[0], speed=speed, lang='en-gb' if (voice or 'b')[0] == 'b' else 'en-us')
     wavfile.write(out, sr, (np.clip(samples, -1, 1) * 32767).astype(np.int16))
 
 
