@@ -359,7 +359,7 @@ def cmd_script(a):
         race_line = f"The race: {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours."
     from strata360.pipeline import meta as MT
     race_line = (MT.describe(a.name) + ' ' + race_line).strip()
-    print(f'planned {len(plan)} segments for {a.length:.0f} s; writing the script ({(a.provider or (cfg.get("llm") or {}).get("provider", "vertex"))})...')
+    print(f'planned {len(plan_doc["segments"])} segments for {a.length:.0f} s; writing the script ({(a.provider or (cfg.get("llm") or {}).get("provider", "vertex"))})...')
     llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider', 'vertex'); model = a.model or (llm.get('model') if llm.get('provider', 'vertex') == prov else None)
     doc = SC.write_script(facts, notes['folder'], a.length, wpm=a.wpm, style=a.style or '', race_line=race_line, work_dir=rd, model=model if prov != 'local' else None, provider=prov)
     os.makedirs(os.path.join(rd, 'scripts'), exist_ok=True); p = os.path.join(rd, 'scripts', 'script-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S') + '.json'); json.dump(dict(doc, facts=facts), open(p, 'w'), indent=1)
