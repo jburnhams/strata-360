@@ -16,3 +16,4 @@ pytest-randomly                # random test order + seeded RNGs: finds order de
 pytest-timeout                 # a hung test fails instead of hanging CI
 pytest-xdist                   # pytest -n auto
 diff-cover                     # coverage of the lines a change touches: diff-cover coverage.xml --compare-branch origin/main
+tzdata                         # IANA timezone database, needed on Windows for zoneinfo
