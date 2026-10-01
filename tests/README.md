@@ -79,7 +79,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `edit/llm_remote.py` | 81% | partial: Vertex/Gemini/Claude request shape, retries and tiers done |
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
-| `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `gps/clock.py`, `gps/context.py`, `gps/overview.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
+| `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |
+| `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
 | `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
 | everything else | see `--cov-report=term-missing` | todo |
 
