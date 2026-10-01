@@ -294,10 +294,13 @@ def cmd_voice(a):
 def cmd_voiceover(a):
     from strata360.edit import voiceover as VO
     f = a.name
+    if a.fetch: VO.fetch_model(); print('voice model ready in', os.path.abspath(VO.MODEL_DIR)); return
     if a.list:
         for e in VO.available_engines(): print(e['id'], '-', e['label']); [print('   ', v['name'], v['lang']) for v in e['voices']]
         return
-    d = VO.build(f, engine=a.engine, voice=a.voice, rate=a.rate, progress=lambda i, n: print(f'\rspeaking {i}/{n}', end='', flush=True)); print()
+    for _ in range(5):                                                                   # a script saved while speaking is spoken next
+        d = VO.build(f, engine=a.engine, voice=a.voice, rate=a.rate, progress=lambda i, n: print(f'\rspeaking {i}/{n}', end='', flush=True)); print()
+        if VO.newest_script(f) == d['script']: break
     print(f"{d['engine']} / {d['voice']}: {len(d['lines'])} lines, measured {d['measured_wpm']} words/min; sped up: {d['sped']}; too long: {d['over']}\n-> {os.path.join(VO.base(f), 'voiceover.wav')}")
 
 
@@ -348,6 +351,10 @@ def cmd_script(a):
     for l in doc['lines']: print(f"  [{l['seg']:2d}] {l['film_start_s']:5.1f}s +{l['seconds']:4.1f}s {l['clip'][-6:]}  " + (l['text'] or '—'))
     if doc['remaining_problems']: print('remaining problems:', doc['remaining_problems'])
     print('saved', p)
+    try:                                                                                 # a new script is spoken at once (a separate step: its status is shown in the app)
+        from strata360.edit import voiceover as VO
+        VO.build(a.name); print('voice-over spoken')
+    except Exception as e: print(f'voice-over not made: {e}')
 
 
 def cmd_clear(a):
@@ -395,7 +402,7 @@ def main():
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
     p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.add_argument('--reload', action='store_true', help='restart on code changes'); p.set_defaults(fn=cmd_serve)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
-    p = sub.add_parser('voiceover', help='speak the script with a local voice and mix the voice-over track (recordings replace lines)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--engine'); p.add_argument('--voice'); p.add_argument('--rate', type=int); p.add_argument('--list', action='store_true', help='list engines and voices'); p.set_defaults(fn=cmd_voiceover)
+    p = sub.add_parser('voiceover', help='speak the script with a local voice and mix the voice-over track (recordings replace lines)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--engine'); p.add_argument('--voice'); p.add_argument('--rate', type=int); p.add_argument('--list', action='store_true', help='list engines and voices'); p.add_argument('--fetch', action='store_true', help='download the voice model (Kokoro, about 350 MB)'); p.set_defaults(fn=cmd_voiceover)
     p = sub.add_parser('script', help='propose a voice-over script for a film of the target length (notes + transcript + track data -> local LLM)'); p.add_argument('name', metavar='FOLDER_OR_RACE')
     p.add_argument('--length', type=float, default=None, help='film length in seconds (default: the saved plan\'s)'); p.add_argument('--wpm', type=float, default=145.0); p.add_argument('--style', help='e.g. "dry, self-deprecating, British"'); p.add_argument('--seed', type=int, default=None); p.add_argument('--reseed', action='store_true', help='re-plan with the given seed'); p.add_argument('--provider', choices=['vertex', 'gemini', 'anthropic', 'local']); p.add_argument('--model'); p.set_defaults(fn=cmd_script)
     p = sub.add_parser('clear', help='forget the status of a stage so it is processed again (with the stages that depend on it)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('stage')

@@ -448,3 +448,7 @@ By noise type (small, all SNRs): wind raw 0.14 → DeepFilterNet3 0.11 and MossF
 - Music (`edit/music.py`, Timeline > Music): tempo, first downbeat (bar line) and per-bar energy by numpy/scipy; the planner uses the real bpm and energy sections and never plans longer than the track; the film's sound mixes it from its first downbeat, ducked under the voice-over, fading out at the end.
 - GUI panels: camera clock (nudge, set, suggest from running starts/stops), who is me (face groups sheet, choose one or several), film details prefilled from the note (111 starters, 21 finishers, did not finish).
 - Server: `serve --reload` restarts on code changes; film/final jobs record their pid, so a restart does not lose track of a running render.
+
+## Voice-over: one open model, its own stage
+- Replaced macOS/Windows/Linux system voices with Kokoro-82M (Apache 2.0, ONNX, runs locally on any platform; British male voices George, Fable, Lewis, Daniel; default George). Install: `pip install kokoro-onnx`, `./strata360 voiceover . --fetch` (350 MB into models/kokoro). 24 lines of the Legends script in about 20 s.
+- Voice generation is a separate project-level step in its own low-priority process (`strata360 voiceover`, progress in `voiceover/status.json`, survives a server restart). It runs whenever a script is written (end of `strata360 script`) or an edit is saved (script lines are editable in the app: POST /api/script/edit saves a new script version and starts it); a script saved while speaking is spoken next; unchanged lines are reused.

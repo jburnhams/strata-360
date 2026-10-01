@@ -19,4 +19,5 @@ Local models used by the vision stages (downloaded into models/, gitignored):
   - YOLO11 pose (Ultralytics, AGPL-3.0): person detection. Fine for personal, local use; check the licence before distributing a product.
   - InsightFace buffalo_l (SCRFD + ArcFace): face detection and recognition. The pretrained weights are for NON-COMMERCIAL research use only.
   - SpeechBrain ECAPA-TDNN (speechbrain/spkrec-ecapa-voxceleb, Apache-2.0): speaker embeddings.
+  - Kokoro-82M (hexgrad/Kokoro-82M, Apache-2.0) through kokoro-onnx (MIT): the voice-over voice (British male voices); model files from the kokoro-onnx v1.0 release, in models/kokoro.
   - Qwen2.5-VL-3B-Instruct 4-bit (mlx-community, Qwen licence): scene description and tagging.

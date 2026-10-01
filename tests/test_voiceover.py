@@ -45,10 +45,18 @@ def test_unchanged_lines_are_reused_and_recordings_replace_them():
     V.delete_recording(f, 1); assert not os.path.exists(V.recorded_path(f, 1))
 
 
+def test_an_edited_script_is_a_new_version_that_is_spoken_and_progress_is_recorded():
+    f = project([L(0, 'one two three', 0.0, 3.0), L(1, 'four five', 3.0, 3.0)]); d = V.build(f); st = V.load_status(f); assert st['state'] == 'done' and st['done'] == st['total'] == 2 and not V.running(f)
+    old = V.newest_script(f); name = V.save_edit(f, {'1': 'four five six seven'}); assert name and name > old and V.newest_script(f) == name and V.save_edit(f, {'1': 'four five six seven'}) is None        # unchanged: no new version
+    assert os.path.exists(os.path.join(V.config.race_dir(f), 'scripts', old))                                                                     # the old one is kept
+    d2 = V.build(f); assert d2['script'] == name and {x['seg']: x for x in d2['lines']}[1]['text'] == 'four five six seven'
+    a = {x['seg']: x for x in d['lines']}[0]['path']; assert {x['seg']: x for x in d2['lines']}[0]['path'] == a                                    # the unchanged line was not spoken again
+
+
 def test_no_engine_is_reported_clearly():
     saved = V.ENGINES; V.ENGINES = {'none': ('None', lambda: False, lambda: [], None)}
     try: V.pick({}); assert False
-    except RuntimeError as e: assert 'no speech engine' in str(e)
+    except RuntimeError as e: assert 'voice model is not installed' in str(e)
     finally: V.ENGINES = saved
 
 

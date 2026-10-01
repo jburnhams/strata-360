@@ -15,6 +15,11 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
   const [style, setStyle] = useState('')
   const [model, setModel] = useState<string>()
   const [prov, setProv] = useState<string>()
+  const [saved, setSaved] = useState<string>()
+  const saveLine = async (seg: number, old: string, text: string) => {
+    if (text.trim() === old.trim()) return
+    try { const r = await api.editScript(folder, { [String(seg)]: text }); setSaved(r.saved ? 'saved: the voice-over is being made again' : undefined) } catch (e) { setErr((e as Error).message) }
+  }
   if (!st) return <PanelSkeleton title="Voice-over script" rows={4} />
   const provider = prov ?? st.llm.provider, info = st.providers[provider], models = info?.models ?? st.models, configured = info?.configured ?? st.key_configured, label = ({ vertex: 'Gemini (Google Cloud key)', gemini: 'Gemini (AI Studio key)', anthropic: 'Claude' } as Record<string, string>)[provider] ?? provider
   const save = async () => { try { await api.setKey(key, provider); setKey(''); setErr(undefined) } catch (e) { setErr((e as Error).message) } }
@@ -45,13 +50,14 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
       {st.last_exit != null && st.last_exit !== 0 && <pre className="mb-2 max-h-32 overflow-auto rounded bg-stone-50 p-2 text-xs text-red-700 dark:bg-stone-950">{st.log}</pre>}
       {d && (
         <div>
+          {saved && <p className="mb-1 text-xs text-emerald-700">{saved}</p>}
           <div className="mb-2 text-sm"><b>{d.title || 'Untitled'}</b> <span className="text-stone-500">· {d.total_words} words, about {d.total_speak_s} s of speech in {d.target_s} s · {d.model ?? d.provider}</span></div>
           <ul className="divide-y divide-stone-200 text-sm dark:divide-stone-800">
             {d.lines.map(l => (
               <li key={l.seg} className="flex gap-3 py-1.5">
                 <span className="w-16 shrink-0 font-mono text-xs text-stone-500">{Math.floor(l.film_start_s / 60)}:{String(Math.floor(l.film_start_s % 60)).padStart(2, '0')}<br />{l.seconds}s</span>
                 <button className="w-20 shrink-0 text-left font-mono text-xs text-emerald-700 underline dark:text-emerald-400" onClick={() => onOpen(l.clip)}>{short(l.clip)}</button>
-                <span className={l.text ? '' : 'text-stone-400'}>{l.text || (l.says?.length ? <span className="italic text-sky-700 dark:text-sky-300" title="you speak here">💬 “{l.says.join(' … ')}”</span> : l.budget_words === 0 ? '(you speak here)' : '—')}</span>
+                {(l.text || l.budget_words > 0) ? <textarea defaultValue={l.text} key={d.file + l.seg} rows={Math.max(1, Math.ceil((l.text || '').length / 70))} placeholder="(nothing said here: type a line to add one)" onBlur={e => saveLine(l.seg, l.text, e.target.value)} title="edit the line: it is saved when you click away, and the voice-over is made again" className="min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 hover:border-stone-300 focus:border-emerald-600 focus:outline-none dark:hover:border-stone-700" /> : <span className={l.text ? '' : 'text-stone-400'}>{l.text || (l.says?.length ? <span className="italic text-sky-700 dark:text-sky-300" title="you speak here">💬 “{l.says.join(' … ')}”</span> : l.budget_words === 0 ? '(you speak here)' : '—')}</span>}
                 {l.text && <span className={`ml-auto shrink-0 text-xs ${l.words > l.budget_words ? 'text-red-600' : 'text-stone-500'}`}>{l.words}/{l.budget_words}</span>}
               </li>
             ))}

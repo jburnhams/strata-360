@@ -15,7 +15,7 @@ STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
-FINAL_JOBS = {}; FILM_JOBS = {}; VO_JOBS = {}; VO_ERRORS = {}     # folder -> the running voice-over thread / its last error
+FINAL_JOBS = {}; FILM_JOBS = {}
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
 
@@ -268,24 +268,38 @@ def create_app(roots, token=None):
         try: return overview(p)
         except Exception as e: return dict(present=True, error=f'{type(e).__name__}: {e}')
 
+    def start_voiceover(f):
+        """Speak the newest script in a separate low-priority process (its progress is in voiceover/status.json); false when one is already working (it speaks a script saved meanwhile after it finishes)."""
+        from strata360.edit import voiceover as VO
+        if VO.running(f): return False
+        rd = config.race_dir(f); os.makedirs(os.path.join(rd, 'voiceover'), exist_ok=True); log = open(os.path.join(rd, 'voiceover', 'job.log'), 'ab')
+        subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'voiceover', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return True
+
+    @api.post('/api/script/edit', dependencies=[Depends(auth)])
+    def post_script_edit(body: dict):                                                    # {folder, texts: {seg: new text}}: saved as a new script version, then spoken at once
+        from strata360.edit import voiceover as VO
+        f = folder_of(body.get('folder')); texts = body.get('texts')
+        if not isinstance(texts, dict) or not texts: raise HTTPException(400, 'texts: {segment: text}')
+        try: name = VO.save_edit(f, {str(k): str(v) for k, v in texts.items()})
+        except RuntimeError as e: raise HTTPException(400, str(e))
+        return dict(saved=name, speaking=bool(name) and start_voiceover(f))
+
     @api.get('/api/voiceover', dependencies=[Depends(auth)])
     def get_voiceover(folder: str):                                                      # engines and voices on this machine, the saved choice, and the timings of the last build
         from strata360.edit import voiceover as VO
         f = folder_of(folder); st = VO.load_state(folder_of(folder)); av = VO.available_engines(); script, lines = VO.script_lines(f)
         try: eng, voice = VO.pick(st)
         except RuntimeError: eng = voice = None
-        return dict(engines=av, state=dict(engine=eng, voice=voice, rate=st['rate'], use=st['use']), timings=VO.load_timings(f), script=script, lines=len(lines), building=f in VO_JOBS and VO_JOBS[f].is_alive(), error=VO_ERRORS.get(f))
+        return dict(engines=av, state=dict(engine=eng, voice=voice, rate=st['rate'], use=st['use']), timings=VO.load_timings(f), script=script, lines=len(lines), building=VO.running(f), progress=(VO.load_status(f) or {}), error=((VO.load_status(f) or {}).get('error') if (VO.load_status(f) or {}).get('state') == 'error' else None))
 
     @api.post('/api/voiceover/build', dependencies=[Depends(auth)])
     def post_voiceover(body: dict):                                                      # {folder, engine?, voice?, rate?}: speak the script and mix the track (in the background; unchanged lines are reused)
         from strata360.edit import voiceover as VO
-        f = folder_of(body.get('folder')); j = VO_JOBS.get(f)
-        if j and j.is_alive(): return dict(started=False)
-        VO_ERRORS.pop(f, None)
-        def run():
-            try: VO.build(f, engine=body.get('engine'), voice=body.get('voice'), rate=body.get('rate'))
-            except Exception as e: VO_ERRORS[f] = f'{type(e).__name__}: {e}'
-        VO_JOBS[f] = threading.Thread(target=run, daemon=True); VO_JOBS[f].start(); return dict(started=True)
+        f = folder_of(body.get('folder')); st = VO.load_state(f)
+        for k in ('engine', 'voice'):
+            if body.get(k): st[k] = body[k]
+        if body.get('rate'): st['rate'] = int(body['rate'])
+        VO.save_state(f, st); return dict(started=start_voiceover(f))
 
     @api.post('/api/voiceover/use', dependencies=[Depends(auth)])
     def post_voiceover_use(body: dict):                                                  # {folder, seg, use: 'synth'|'recorded'}

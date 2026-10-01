@@ -1,4 +1,4 @@
-"""The voice-over track: the script spoken by a local synthetic voice (macOS `say`, Windows SAPI, eSpeak NG or Piper: whichever this machine has), placed on the film timeline, so timings and previews are realistic. Any line can later be replaced by your own
+"""The voice-over track: the script spoken by a local synthetic voice (Kokoro, an open neural model that runs locally on macOS, Windows and Linux), placed on the film timeline, so timings and previews are realistic. Any line can later be replaced by your own
 recording; the mix then uses the recording for that line and the synthetic voice for the rest.
 
 Files in `<project>/voiceover/`:
@@ -10,11 +10,11 @@ Files in `<project>/voiceover/`:
 
 A line starts a moment after its window starts and may run on into following windows that have no line of their own. A synthetic line that still does not fit is sped up (at most 1.25x);
 a recording is never changed. What cannot fit is cut at the next line's start with a short fade, and reported as 'over'."""
-import glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
+import glob, hashlib, json, os, re, subprocess, time
 from strata360.pipeline import config
 
 LEAD_S = 0.12; GAP_S = 0.15; MAX_TEMPO = 1.25; SR = 48000
-DEFAULT_STATE = dict(engine=None, voice=None, rate=165, use={})
+DEFAULT_STATE = dict(engine=None, voice=None, rate=150, use={})
 _TRIM = 'silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse'
 
 
@@ -34,76 +34,49 @@ def save_state(folder, s):
     os.makedirs(base(folder), exist_ok=True); json.dump(s, open(_state_path(folder), 'w'), indent=1)
 
 
-# ---- speech engines: one per platform, all local; each writes a wav for one line -------------------------------------------------------------------------------------------------------
-def _ps(script, *args):
-    exe = shutil.which('powershell') or shutil.which('pwsh')
-    return subprocess.run([exe, '-NoProfile', '-NonInteractive', '-Command', script, *args], capture_output=True, text=True, timeout=120)
+# ---- the speech engine: Kokoro-82M (Apache 2.0), an open neural voice that runs locally on any platform (ONNX); one engine, British male voices ----------------------------------------------------
+MODEL_DIR = os.environ.get('STRATA360_KOKORO') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'models', 'kokoro')
+MODEL_FILES = {'kokoro-v1.0.onnx': 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx', 'voices-v1.0.bin': 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin'}
+VOICES = [dict(name='bm_george', label='George', lang='en_GB'), dict(name='bm_fable', label='Fable', lang='en_GB'), dict(name='bm_lewis', label='Lewis', lang='en_GB'), dict(name='bm_daniel', label='Daniel', lang='en_GB')]
+BASE_WPM = 150.0                                  # the voice at speed 1.0 speaks about this fast; `rate` (words per minute) sets the speed relative to it
+_K = {}
 
 
-_NOVELTY = {'Albert', 'Bad News', 'Bahh', 'Bells', 'Boing', 'Bubbles', 'Cellos', 'Wobble', 'Good News', 'Jester', 'Organ', 'Superstar', 'Trinoids', 'Whisper', 'Zarvox', 'Fred', 'Junior', 'Ralph'}   # macOS joke voices
+def model_ready(): return all(os.path.exists(os.path.join(MODEL_DIR, f)) for f in MODEL_FILES)
 
 
-def _say_voices():
-    out = subprocess.run(['say', '-v', '?'], capture_output=True, text=True, timeout=20).stdout; res = []; seen = set()
-    for ln in out.splitlines():
-        m = re.match(r'^(.+?)\s{2,}([a-z]{2}_[A-Z]{2})\s', ln)
-        if m and m.group(2).startswith('en_') and m.group(1) not in seen and m.group(1) not in _NOVELTY: seen.add(m.group(1)); res.append(dict(name=m.group(1), lang=m.group(2)))
-    return res
+def fetch_model(log=print):
+    """Download the model files (about 350 MB) into models/kokoro; skips files that are there."""
+    import urllib.request
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    for f, url in MODEL_FILES.items():
+        dest = os.path.join(MODEL_DIR, f)
+        if os.path.exists(dest): continue
+        log(f'downloading {f} ...'); urllib.request.urlretrieve(url, dest + '.part'); os.replace(dest + '.part', dest)
 
 
-def _say_speak(voice, rate, text, out): _run(['say', '-v', voice or 'Daniel', '-r', str(rate), '-o', out, '--', text])
+def _kokoro():
+    if 'k' not in _K:
+        import logging; logging.getLogger('phonemizer').setLevel(logging.ERROR)             # its 'words count mismatch' warnings are harmless
+        from kokoro_onnx import Kokoro
+        _K['k'] = Kokoro(os.path.join(MODEL_DIR, 'kokoro-v1.0.onnx'), os.path.join(MODEL_DIR, 'voices-v1.0.bin'))
+    return _K['k']
 
 
-def _sapi_voices():
-    r = _ps('Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).GetInstalledVoices() | % { $_.VoiceInfo.Name + "|" + $_.VoiceInfo.Culture.Name }')
-    return [dict(name=a.strip(), lang=b.strip().replace('-', '_')) for a, b in (x.split('|', 1) for x in r.stdout.splitlines() if '|' in x) if b.strip().lower().startswith('en')]
+def _kokoro_available():
+    try: import kokoro_onnx  # noqa: F401
+    except ImportError: return False
+    return model_ready()
 
 
-def _sapi_speak(voice, rate, text, out):                                           # rate in words per minute -> SAPI -10..10 (0 = about 175 wpm; each step about 10%)
-    step = max(-10, min(10, round((rate / 175.0 - 1) * 10)))
-    tf = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False, encoding='utf-8'); tf.write(text); tf.close()
-    try:
-        sel = f"$s.SelectVoice('{voice}');" if voice else ''
-        r = _ps(f"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; {sel} $s.Rate = {step}; $s.SetOutputToWaveFile('{out}'); $s.Speak([IO.File]::ReadAllText('{tf.name}')); $s.Dispose()")
-        if r.returncode: raise RuntimeError(r.stderr[-300:])
-    finally: os.remove(tf.name)
+def _kokoro_speak(voice, rate, text, out):
+    import numpy as np
+    from scipy.io import wavfile
+    speed = float(min(max(rate / BASE_WPM, 0.6), 1.4)); samples, sr = _kokoro().create(text, voice=voice or 'bm_george', speed=speed, lang='en-gb')
+    wavfile.write(out, sr, (np.clip(samples, -1, 1) * 32767).astype(np.int16))
 
 
-def _espeak_exe(): return shutil.which('espeak-ng') or shutil.which('espeak')
-
-
-def _espeak_voices():
-    r = subprocess.run([_espeak_exe(), '--voices=en'], capture_output=True, text=True, timeout=20); res = []
-    for ln in r.stdout.splitlines()[1:]:
-        c = ln.split()
-        if len(c) >= 4: res.append(dict(name=c[3], lang=c[1]))
-    return res
-
-
-def _espeak_speak(voice, rate, text, out): _run([_espeak_exe(), '-v', voice or 'en-gb', '-s', str(rate), '-w', out, '--', text])
-
-
-def _piper_exe(): return shutil.which('piper')
-
-
-def _piper_voices():                                                               # piper needs a model file: any *.onnx in $STRATA360_PIPER_VOICES (or ./models/piper)
-    d = os.environ.get('STRATA360_PIPER_VOICES') or os.path.join(os.path.dirname(os.path.abspath(config.__file__)), '..', '..', '..', 'models', 'piper')
-    return [dict(name=os.path.basename(f)[:-5], lang='en', path=f) for f in sorted(glob.glob(os.path.join(d, '*.onnx')))]
-
-
-def _piper_speak(voice, rate, text, out):
-    m = next((v['path'] for v in _piper_voices() if v['name'] == voice), None)
-    if not m: raise RuntimeError('no piper voice model found')
-    r = subprocess.run([_piper_exe(), '-m', m, '-f', out, '--length_scale', str(round(165.0 / rate, 3))], input=text, capture_output=True, text=True)
-    if r.returncode: raise RuntimeError(r.stderr[-300:])
-
-
-ENGINES = {   # id -> (label, available?, voices, speak); the first available one in this order is the default
-    'piper': ('Piper (neural, any platform)', lambda: bool(_piper_exe()) and bool(_piper_voices()), _piper_voices, _piper_speak),
-    'say': ('macOS voices', lambda: sys.platform == 'darwin' and bool(shutil.which('say')), _say_voices, _say_speak),
-    'sapi': ('Windows voices (SAPI)', lambda: sys.platform == 'win32' and bool(shutil.which('powershell') or shutil.which('pwsh')), _sapi_voices, _sapi_speak),
-    'espeak': ('eSpeak NG', lambda: bool(_espeak_exe()), _espeak_voices, _espeak_speak),
-}
+ENGINES = {'kokoro': ('Kokoro (open model, British male)', _kokoro_available, lambda: [dict(name=v['name'], lang=v['lang'], label=v['label']) for v in VOICES], _kokoro_speak)}
 
 
 def available_engines():
@@ -111,16 +84,16 @@ def available_engines():
     for k, (label, ok, vs, _) in ENGINES.items():
         try:
             if ok(): res.append(dict(id=k, label=label, voices=vs()))
-        except (OSError, subprocess.SubprocessError, RuntimeError): pass
+        except (OSError, subprocess.SubprocessError, RuntimeError, ImportError): pass
     return res
 
 
 def pick(state):
-    """(engine id, voice) to use: the saved ones if still available, else the first available engine and its first (preferring en_GB) voice."""
+    """(engine id, voice) to use: the saved ones if still available, else the first available engine and its first voice."""
     av = available_engines()
-    if not av: raise RuntimeError('no speech engine found: macOS has `say`; on Windows PowerShell with System.Speech is used; on Linux install espeak-ng (or piper with a voice model)')
+    if not av: raise RuntimeError('the voice model is not installed: run `strata360 fetch-models --voice` (about 350 MB, Kokoro, Apache 2.0) and `pip install kokoro-onnx`')
     e = next((x for x in av if x['id'] == state.get('engine')), av[0]); names = [v['name'] for v in e['voices']]
-    v = state.get('voice') if state.get('voice') in names else next((v['name'] for v in e['voices'] if v['lang'] == 'en_GB'), names[0] if names else None)
+    v = state.get('voice') if state.get('voice') in names else (names[0] if names else None)
     return e['id'], v
 
 
@@ -158,7 +131,7 @@ def synth_path(folder, seg, text, engine, voice, rate):
 def synth_line(folder, seg, text, engine, voice, rate):
     p = synth_path(folder, seg, text, engine, voice, rate)
     if os.path.exists(p): return p
-    os.makedirs(os.path.dirname(p), exist_ok=True); tmp = p + '.raw.wav' if engine != 'say' else p + '.aiff'
+    os.makedirs(os.path.dirname(p), exist_ok=True); tmp = p + '.raw.wav'
     ENGINES[engine][3](voice, rate, _spoken(text), tmp)
     _run(['ffmpeg', '-y', '-v', 'error', '-i', tmp, '-af', _TRIM, '-ar', str(SR), '-ac', '1', p + '.part.wav']); os.replace(p + '.part.wav', p); os.remove(tmp)
     return p
@@ -184,7 +157,16 @@ def source_for(state, seg, has_recording):
 
 
 def build(folder, engine=None, voice=None, rate=None, progress=None):
-    """Speak every line (reusing unchanged ones), place them on the timeline and mix `voiceover.wav`. Returns the timings document."""
+    """Speak every line (reusing unchanged ones), place them on the timeline and mix `voiceover.wav`; progress is kept in status.json (the GUI shows it). Returns the timings document."""
+    write_status(folder, 'speaking', 0, 0)
+    def prog(i, n):
+        write_status(folder, 'speaking', i, n); progress and progress(i, n)
+    try: doc = _build(folder, engine, voice, rate, prog)
+    except BaseException as e: write_status(folder, 'error', error=f'{type(e).__name__}: {e}'); raise
+    write_status(folder, 'done', len(doc['lines']), len(doc['lines'])); return doc
+
+
+def _build(folder, engine=None, voice=None, rate=None, progress=None):
     st = load_state(folder)
     if engine: st['engine'] = engine
     if voice: st['voice'] = voice
@@ -224,6 +206,50 @@ def _mix(folder, out, total):
     mix = ''.join(f'[a{i}]' for i in range(len(out))) + f'amix=inputs={len(out)}:normalize=0:duration=longest,apad=whole_dur={total:.3f},atrim=0:{total:.3f},alimiter=limit=0.95[m]'
     p = os.path.join(base(folder), 'voiceover.wav')
     _run(['ffmpeg', '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(chains + [mix]), '-map', '[m]', '-ar', str(SR), '-ac', '1', p + '.part.wav']); os.replace(p + '.part.wav', p)
+
+
+def newest_script(folder):
+    f = sorted(glob.glob(os.path.join(config.race_dir(folder), 'scripts', 'script-*.json')))
+    return os.path.basename(f[-1]) if f else None
+
+
+def alive(pid):
+    try: os.kill(int(pid), 0); return True
+    except (OSError, TypeError, ValueError): return False
+
+
+def running(folder):
+    """Is a voice-over job working on this project (its own pid is in status.json, so this also holds after the server restarts)."""
+    st = load_status(folder); return bool(st and st.get('state') == 'speaking' and alive(st.get('pid')))
+
+
+def save_edit(folder, texts):
+    """Save an edited script as a NEW version (the old ones stay): `texts` maps segment number -> new text. Returns the new file name."""
+    import datetime as dt
+    files = sorted(glob.glob(os.path.join(config.race_dir(folder), 'scripts', 'script-*.json')))
+    if not files: raise RuntimeError('there is no script yet')
+    d = json.load(open(files[-1])); wpm = float(d.get('wpm') or 145.0); changed = 0
+    for l in d.get('lines', []):
+        new = texts.get(str(l['seg']), texts.get(l['seg']))
+        if new is not None and new.strip() != (l.get('text') or '').strip():
+            l['text'] = new.strip(); l['words'] = len(l['text'].split()); l['est_speak_s'] = round(l['words'] / wpm * 60.0, 1); changed += 1
+    if not changed: return None
+    d['edited'] = True; d['total_words'] = sum(l.get('words') or 0 for l in d['lines']); d['total_speak_s'] = round(sum(l.get('est_speak_s') or 0 for l in d['lines']), 1)
+    name = 'script-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S') + '.json'
+    if name <= os.path.basename(files[-1]): name = os.path.basename(files[-1])[:-5] + 'e.json'                     # never sorts before the one it was made from
+    json.dump(d, open(os.path.join(config.race_dir(folder), 'scripts', name), 'w'), indent=1); return name
+
+
+def status_path(folder): return os.path.join(base(folder), 'status.json')
+
+
+def write_status(folder, state, done=0, total=0, **kw):
+    os.makedirs(base(folder), exist_ok=True); tmp = status_path(folder) + '.tmp'; json.dump(dict(state=state, pid=os.getpid(), done=done, total=total, at=time.time(), **kw), open(tmp, 'w')); os.replace(tmp, status_path(folder))
+
+
+def load_status(folder):
+    try: return json.load(open(status_path(folder)))
+    except (OSError, ValueError): return None
 
 
 def load_timings(folder):

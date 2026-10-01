@@ -30,17 +30,17 @@ export default function VoiceoverPanel({ folder }: { folder: string }) {
   return (
     <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
       <h3 className="mb-2 text-sm font-semibold">Voice-over audio</h3>
-      {st.engines.length === 0 ? <p className="text-sm text-amber-700">No speech engine found on this machine (macOS has one built in; Windows uses its own voices; on Linux install espeak-ng).</p> : (
+      {st.engines.length === 0 ? <p className="text-sm text-amber-700">The voice model is not installed. Run <code>pip install kokoro-onnx</code> and <code>./strata360 voiceover . --fetch</code> (about 350 MB, an open model, runs locally).</p> : (
         <div className="mb-3 flex flex-wrap items-end gap-3 text-sm">
-          <label>Engine<select value={engine?.id} onChange={e => { setEng(e.target.value); setVoice(undefined) }} className={`${input} ml-2`}>{st.engines.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}</select></label>
-          <label>Voice<select value={voiceName} onChange={e => setVoice(e.target.value)} className={`${input} ml-2`}>{engine?.voices.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}</select></label>
+          <label>Voice<select value={voiceName} onChange={e => setVoice(e.target.value)} className={`${input} ml-2`}>{engine?.voices.map(v => <option key={v.name} value={v.name}>{(v as { label?: string }).label ?? v.name}</option>)}</select></label>
           <label>Speed<input type="number" min={100} max={260} value={rate ?? st.state.rate} onChange={e => setRate(Number(e.target.value))} className={`${input} ml-2 w-20`} /></label>
-          <button disabled={st.building || !st.lines} onClick={build} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50">{st.building ? 'Speaking…' : t ? 'Speak again' : 'Speak the script'}</button>
+          <button disabled={st.building || !st.lines} onClick={build} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50">{st.building ? `Speaking ${st.progress?.done ?? 0}/${st.progress?.total || '…'}` : t ? 'Speak again' : 'Speak the script'}</button>
           {t && <button className="rounded-lg border border-stone-300 px-3 py-2 dark:border-stone-700" onClick={() => play(api.voiceoverAudio(folder))}>▶ Whole track</button>}
           <audio ref={player} controls className="h-9" />
         </div>
       )}
       {!st.lines && <p className="text-sm text-stone-500">Write the script first.</p>}
+      {!!st.lines && <p className="mb-2 text-xs text-stone-500">The script is spoken automatically whenever it is written or an edit is saved; unchanged lines are reused.</p>}
       {(err || st.error) && <p className="mb-2 text-sm text-red-600">{err || st.error}</p>}
       {t && (
         <div>
