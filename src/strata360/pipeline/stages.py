@@ -131,11 +131,13 @@ def transcript_check(ctx):
     ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, thinking=c.get('thinking', 'low'), log=ctx.log, **kw)))
 
 
-@stage('exposure', 1, keys=('exposure_every_frames',), outputs=('exposure.json',), deps=('ingest',),
-       note='brightness statistics every N frames for a later auto-gain (README 5.9)')
+@stage('exposure', 2, keys=('exposure_every_frames',), outputs=('exposure.json', 'view_quality.npz'), deps=('ingest',),
+       note='brightness statistics every N frames for a later auto-gain (README 5.9), and once a second a quality map of the whole sphere (detail, contrast, colour, which lens) and the balance of detail between the lenses (view_quality.npz)')
 def exposure(ctx):
-    from strata360.analysis.exposure import analyse
-    ctx.write('exposure.json', ctx.stamped(analyse(ctx.clip.osv, ctx.cfg['exposure_every_frames'])))
+    from strata360.analysis.exposure import analyse, save_quality
+    rows = []; doc = analyse(ctx.clip.osv, ctx.cfg['exposure_every_frames'], quality=rows)
+    if rows: save_quality(ctx.path('view_quality.npz'), rows)
+    ctx.write('exposure.json', ctx.stamped(doc))
 
 
 @stage('motion', 2, outputs=('motion.json',), deps=('ingest',),

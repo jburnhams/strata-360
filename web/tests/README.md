@@ -1,6 +1,6 @@
 # Web tests
 
-vitest 4, Testing Library, user-event, msw (backend mocks), vitest-axe, fast-check. Run from `web/`: `npm run test:unit`, `npm run test:integration`, `npm run test:coverage` (unit only, the number CI gates on), `npm run test:coverage:all` (unit + integration, informational), `npm run typecheck` (also checks the tests).
+vitest 4, Testing Library, user-event, msw (backend mocks), vitest-axe, fast-check. Run from `web/`: `npm run test:unit`, `npm run test:integration`, `npm run test:coverage:gate` (unit + integration together, the number CI gates on: floors in `web/coverage-floor.json`), `npm run test:coverage:all` (same run, no gate), `npm run test:coverage` (unit only, informational: most tests here are jsdom integration tests), `npm run typecheck` (also checks the tests).
 
 ## Layout
 

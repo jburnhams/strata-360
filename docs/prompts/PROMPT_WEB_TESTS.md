@@ -4,7 +4,7 @@ You are a coding agent new to this repo. Find a coherent slice of **untested fro
 
 ## 0. Orient yourself (read before writing anything)
 
-1. Read `AGENTS.md` and `CLAUDE.md` at the repo root. They are authoritative. Python code is out of scope: don't touch `src/strata360/` or the Python `tests/`.
+1. Read `AGENTS.md` and `CLAUDE.md` at the repo root. They are authoritative. Python code is out of scope: don't touch `src/strata360/`, the Python `tests/`, `pyproject.toml` or the workflows. **This task runs in parallel with the backend unit-test and integration-test tasks on other branches**, which never touch `web/`; keep your changes inside `web/` (plus `package.json`/`package-lock.json` only if a new dev dependency is unavoidable) so nothing collides. Your notes and ledger live only in `web/tests/README.md`; don't edit `tests/README.md` or the other READMEs.
 2. Read **`web/tests/README.md`** in full. It documents the conventions, the shared helpers and a per-file coverage ledger. Then read everything in `web/tests/utils/` and the worked examples it lists:
    - `integration/FolderBrowser.test.tsx`: request and response states, navigation, accessibility.
    - `integration/NoteBox.test.tsx`: debounced saves with fake timers, and request assertions.
@@ -12,8 +12,8 @@ You are a coding agent new to this repo. Find a coherent slice of **untested fro
    - `unit/api.test.ts`: the API client's contract.
    Copy their style.
 3. Stack: React 19, TypeScript, Vite 7, vitest 4, Testing Library, `@testing-library/user-event`, **msw v3**, `vitest-axe`, `fast-check`. Source is in `web/src/` (`api.ts`, `usePoll.ts`, `aim.ts`, `App.tsx`, `components/*.tsx`). The app calls a FastAPI backend through the typed client in `web/src/api.ts`, using same-origin relative `/api/...` URLs.
-4. Test projects: `unit` runs in node (`tests/unit/**`, setup `utils/setup-node.ts`). `integration` runs in jsdom (`tests/integration/**`, setup `utils/setup.ts`). Commands, from `web/`: `npm ci`, `npm run test:unit`, `npm run test:integration`, `npm run test:coverage` (unit only, what CI gates on), `npm run test:coverage:all` (unit + integration, informational), `npm run typecheck` (tests are typechecked too), `npm run build`.
-5. **GitHub Actions is the source of truth.** `unit.yml` runs the web typecheck, unit coverage, an informational all-projects coverage step, and the build. `integration.yml` runs `npm run test:integration`. Run what you can locally, but the PR is done only when CI is green on the head commit.
+4. Test projects: `unit` runs in node (`tests/unit/**`, setup `utils/setup-node.ts`). `integration` runs in jsdom (`tests/integration/**`, setup `utils/setup.ts`). Commands, from `web/`: `npm ci`, `npm run test:unit`, `npm run test:integration`, `npm run test:coverage:gate` (unit + integration together, what CI gates on; floors in `web/coverage-floor.json`), `npm run test:coverage:all` (no gate), `npm run test:coverage` (unit only, informational), `npm run typecheck` (tests are typechecked too), `npm run build`.
+5. **GitHub Actions is the source of truth.** `unit.yml` runs the web typecheck, unit coverage (informational), the coverage gate over all projects, and the build. `integration.yml` runs `npm run test:integration`. Run what you can locally, but the PR is done only when CI is green on the head commit.
 
 ## 1. Choose the slice (data-driven, so reruns don't collide)
 
@@ -62,7 +62,7 @@ Only the endpoints the example slice needed have default handlers and factories 
 - In `web/tests/README.md`, update the "Coverage status" row of every file you touched (line %, `done`/`partial`/`todo`, notes) and add rows for new files. Take the numbers from `npm run test:coverage:all` or the CI log, not an estimate.
 - Keep the README's helper table and conventions current. If you added a helper or learned a gotcha, write it down there.
 - Aim for ≥90% lines and ≥85% branches on files in your slice. Justify any gap in the ledger.
-- Don't add a failing coverage threshold.
+- **Ratchet:** you are the only task that edits `web/coverage-floor.json`. After CI is green, raise each floor (lines, statements, functions, branches) to the integer floor of the new totals from the gate step's report, in your last commit. Floors only go up: never lower one to get green, and never add a threshold anywhere else.
 
 ## 5. Verify locally (if node is available)
 
@@ -76,7 +76,7 @@ From `web/`: `npm ci`, `npm run typecheck`, `npm run test:unit`, `npm run test:i
   1. Read the results with the GitHub MCP tools (`actions_list`, `actions_get`, `get_job_logs`).
   2. If red, reproduce, root-cause, push a minimal fix, repeat.
   3. If a failure is clearly not yours (a Python job, or an infrastructure error naming something your diff doesn't touch), say so in one PR comment with the evidence and re-run at most once. Never mask a flake. Never skip tests or push an empty commit to retrigger CI.
-  4. CI-only failures to anticipate: `package-lock.json` out of sync (commit a lockfile generated with Node 22), timing-sensitive tests on slower runners (use `findBy*`/fake timers), and type errors in test files (tests are typechecked).
+  4. CI-only failures to anticipate: `package-lock.json` out of sync (commit a lockfile generated with Node 26), timing-sensitive tests on slower runners (use `findBy*`/fake timers), and type errors in test files (tests are typechecked).
 - The PR description must include:
   - the slice and why, and what's left for next runs;
   - coverage before → after for each target file, taken from CI;

@@ -49,3 +49,11 @@ if __name__ == '__main__':
         try: fn(); print('ok  ', fn.__name__)
         except Exception as e: bad += 1; print('FAIL', fn.__name__, repr(e)[:300])
     print(f'{len(fns) - bad}/{len(fns)} passed'); sys.exit(bad)
+
+
+def test_straight_ahead_turns_toward_a_clearly_more_interesting_view_and_otherwise_stays():
+    from test_view_quality import maps
+    lib = TQ.load(); q = maps(22)                                                                       # heading is 30 deg: column 19; the detail sits at column 22 (about 40 deg to the right of the heading)
+    d = data(); d['quality'] = q; p = FR.resolve_segment(seg('hold_wide', t0=0.0), lib, d)
+    assert p['subject'] == 'heading' and p['keyframes'][0]['yaw'] > 30 + 15 and 'turned' in p['why']
+    d['quality'] = maps(19); p = FR.resolve_segment(seg('hold_wide', t0=0.0), lib, d); assert abs(p['keyframes'][0]['yaw'] - 30) < 1e-6      # already in view: no turn

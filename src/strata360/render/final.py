@@ -9,6 +9,7 @@ stopped or crashed render continues where it left off. The pieces are joined wit
   <project>/final/<key>/film.mp4           the result
 
 Cost: 4K at 50 frames a second takes of the order of a second per frame on this kind of Mac; the preview (render/preview.py) is for judging the cut, this for delivering it."""
+from strata360.pipeline import guard
 import datetime as dt, hashlib, json, os, shutil, subprocess, sys, time
 import numpy as np
 from strata360.pipeline import config
@@ -82,7 +83,7 @@ def encode_piece(path, W, H, fps, bitrate, run):
     """run(emit) renders the piece's frames into emit; they are encoded to `path` (kept only when complete)."""
     cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',
            *encoder_args(bitrate), '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', path + '.part.mov']
-    enc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    enc = guard.popen(cmd, stdin=subprocess.PIPE)
     try:
         run(lambda img: enc.stdin.write(np.ascontiguousarray(img).tobytes())); enc.stdin.close(); enc.wait()
         if enc.returncode: raise RuntimeError('the encoder failed')
@@ -93,7 +94,11 @@ def encode_piece(path, W, H, fps, bitrate, run):
     os.replace(path + '.part.mov', path); open(path + '.done', 'w').close()
 
 
-def render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='100M', limit_pieces=None, out=None, progress=None):
+def render_final(*a, **k):
+    with guard.heavy('final render', 4.0): return _render_final(*a, **k)
+
+
+def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='100M', limit_pieces=None, out=None, progress=None):
     """Render (or continue) the final film; returns the path of the film. `limit_pieces` renders only the first pieces and does not assemble (for trying things out)."""
     key = final_key(plan, list(size), fps, bitrate, folder); d = final_dir(folder, key); os.makedirs(d, exist_ok=True); segs = plan['segments']; ps = pieces(segs, fps); W, H = size
     total = sum(p['frames'] for p in ps); t0 = time.time(); done_frames = 0

@@ -6,10 +6,19 @@ Rules (all applied by every worker, whoever started it):
   * only ONE worker runs unless there is plenty of free memory (default: at least 7 GB available for each extra worker, tuned for a 16 GB Mac) and the machine is not busy;
   * before starting an item a worker checks the memory that stage needs and waits while there is not enough, or while the machine is busy;
   * the heavy stages (the vision model, detectors, proxy rendering, speech recognition) never run twice at the same time: parallelism is only across different stages;
-  * the detectors use the CPU rather than the GPU by default, so the screen stays responsive (set STRATA_GPU=1 to allow the GPU).
+  * models use the GPU where it pays (STRATA_GPU=0 forces the CPU), in short slices with gaps (hw.gpu_throttled, duty STRATA_GPU_DUTY) so the screen stays responsive: macOS has no per-process GPU priority.
 The numbers can be changed in race.json under `resources`; STRATA_NO_RESOURCE_LIMITS=1 turns the waiting off (the integration tests set it: a CI runner with little free memory would otherwise wait for ever)."""
 import ctypes, ctypes.util, os, re, subprocess, sys, time
 from strata360 import oslib
+
+_REAL_POPEN = subprocess.Popen          # the real class, kept: tests replace subprocess.Popen to record what the code under test starts, and the machine probes below must not be recorded
+
+
+def run_text(cmd, timeout=10):
+    """stdout of a short probe command as text ('' when it cannot be run); never goes through a replaced subprocess.Popen."""
+    try:
+        p = _REAL_POPEN(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True); out, _ = p.communicate(timeout=timeout); return out or ''
+    except Exception: return ''
 
 DEFAULTS = dict(max_workers=2, extra_worker_free_gb=7.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
@@ -29,7 +38,7 @@ def mem_available_gb():
         try: return oslib.windows_available_gb()
         except Exception: return 1e3
     try:
-        out = subprocess.run(['vm_stat'], stdout=subprocess.PIPE, text=True, timeout=5).stdout
+        out = run_text(['vm_stat'], 5)
         page = int(re.search(r'page size of (\d+) bytes', out).group(1)); n = lambda k: int(re.search(rf'{k}:\s+(\d+)', out).group(1))
         return (n('Pages free') + n('Pages inactive') + n('Pages speculative') + n('Pages purgeable')) * page / 1e9
     except Exception:

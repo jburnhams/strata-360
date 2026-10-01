@@ -1,9 +1,17 @@
 """Retrying stage items: counts per stage, waiting between tries, non-retryable errors, progress that does not use a retry, and the health shown in the app. Run: .venv/bin/python tests/test_retry.py"""
 import json, os, sys, tempfile, time
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src'))
 from strata360.pipeline import runner, config, retry, stages
 
 retry.BASE_WAIT_S = 0.05; retry.MAX_WAIT_S = 0.2
+
+
+@pytest.fixture(autouse=True)
+def resource_guards_off(monkeypatch):
+    """These tests are about retrying, not about the machine: unit/conftest.py turns the guards on, and on a busy runner (macOS) `guard.heavy` then refuses the item before the stage runs."""
+    monkeypatch.setenv('STRATA_NO_RESOURCE_LIMITS', '1')
+
 CALLS = []
 
 
