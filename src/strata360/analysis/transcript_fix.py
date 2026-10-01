@@ -6,10 +6,12 @@ from strata360.pipeline import config
 from strata360.analysis import transcript_edits as TE
 
 SYSTEM = """You correct speech-recognition errors in transcripts of a runner talking to a camera during an ultra-distance race, and of people near them (English, with some French, Dutch, German).
-You get several clips (numbered), each with numbered phrases; each word has a number and the recogniser's confidence (0-1) in brackets. Suggest a substitution ONLY where a word is clearly wrong: it makes no sense in context and a
-similar-sounding word does (for example 'in the ark' for 'in the dark', a wrong name of a place or a race term). Do not rewrite style, grammar, fillers or dialect; do not translate; do not 'improve' correct
-words; a low confidence alone is not a reason. Keep the punctuation attached to the word as in the original token (the 'to' text replaces the whole token). To remove a word that was clearly invented by
-the recogniser (a repeated or hallucinated word) use an empty 'to'. Prefer few, certain fixes over many guesses.
+This is SPOKEN language, transcribed exactly as said. People repeat words, stutter, restart sentences, use fillers, speak ungrammatically, trail off and use dialect or slang: all of that is real and
+intended, so NEVER change it. Do not fix grammar, do not remove repeated words, do not tidy or rephrase, do not 'improve' anything that was actually said, and do not delete words.
+The ONLY thing to correct is a word the recogniser MISHEARD: it makes no sense where it stands, and a similar-sounding word (or a place name or race term from the context given) clearly does
+(for example 'in the ark' for 'in the dark', 'wave across the river' for 'wade across the river', a wrong name of a place). A low confidence number alone is not a reason.
+You get several clips (numbered), each with numbered phrases; each word has a number and the recogniser's confidence (0-1) in brackets. Keep the punctuation attached to the word as in the original
+token (the 'to' text replaces the whole token, with exactly one replacement word). Prefer few, certain fixes over many guesses; if in doubt, leave it.
 Answer with JSON only: {"fixes": [{"clip": <clip number>, "seg": <phrase number>, "word": <word number>, "from": "<the token as given>", "to": "<replacement token>", "why": "<five words at most>"}]}"""
 
 

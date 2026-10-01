@@ -92,6 +92,6 @@ def set_gemini(d, suggestions, model=None):
         try: si, wi = int(s['seg']), int(s['word']); w = tr['segments'][si]['words'][wi]
         except (KeyError, ValueError, IndexError, TypeError): continue
         to = str(s.get('to', '')).strip()
-        if to == w['w'].strip() or (s.get('from') is not None and str(s['from']).strip() != w['w'].strip()): continue
+        if not to or to == w['w'].strip() or (s.get('from') is not None and str(s['from']).strip() != w['w'].strip()): continue
         e = edits.setdefault(key(si, wi), dict(orig=w['w'], t0=tr['segments'][si]['t0'])); e['gemini'] = dict(text=to, why=str(s.get('why', ''))[:200], model=model, at=_now()); n += 1
     save(d, edits); return n
