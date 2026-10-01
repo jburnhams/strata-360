@@ -21,7 +21,7 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '22'
 
     - name: Install system dependencies
       run: |
@@ -32,15 +32,14 @@ jobs:
       run: |
         VENV=".venv" ./scripts/setup_env.sh --no-dfn
 
-    - name: Install pytest
+    - name: Install pytest and httpx
       run: |
-        .venv/bin/pip install pytest
+        .venv/bin/pip install pytest httpx
 
     - name: Run Python tests
       run: |
-        mkdir -p videos
-        touch videos/CAM_20260221120007_0019_D.OSV
         .venv/bin/pytest tests/
+        .venv/bin/python tests/test_pipeline.py
 
     - name: Typecheck Frontend
       run: |

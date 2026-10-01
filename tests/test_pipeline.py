@@ -12,6 +12,9 @@ def cli(env, *args, check=True):
     return r
 
 def main():
+    if not os.path.exists(SAMPLE):
+        print(f"Skipping pipeline test: sample file {SAMPLE} not found.")
+        return
     slow = '--slow' in sys.argv
     with tempfile.TemporaryDirectory() as tmp:
         lib = os.path.join(tmp, 'lib'); os.makedirs(lib); os.symlink(SAMPLE, os.path.join(lib, os.path.basename(SAMPLE)))
