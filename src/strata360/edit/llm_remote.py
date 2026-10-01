@@ -59,7 +59,12 @@ def api_key(provider='anthropic'):
     return k or None
 
 
-PAID_ENV = ('GEMINI_PAID_API_KEY',)          # a paid AI Studio key: used for the pro models (the free tier has no quota for them) and as the fallback when the free key is rate limited
+def secret(name):
+    """Any other secret by variable name (the map tile key, for one): the environment, then the project's secrets.env."""
+    return os.environ.get(name, '').strip() or _read_vars().get(name) or None
+
+
+PAID_ENV = ('GEMINI_PAID_API_KEY',)         # a paid AI Studio key: used for the pro models (the free tier has no quota for them) and as the fallback when the free key is rate limited
 _FREE_DOWN = {}                              # model -> time until which the free key is not tried (it just hit its limit)
 
 

@@ -51,4 +51,5 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/Phrase.tsx` | 100% | done (trivial branch misses) |
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/usePoll.ts` | 100% | done |
+| `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
 | every other file in `src/` | 0% | todo |

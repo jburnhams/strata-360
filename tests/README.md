@@ -26,6 +26,7 @@ diff-cover coverage.xml --compare-branch origin/main    # after `--cov-report=xm
 | Fixture | What it gives you |
 | --- | --- |
 | `tmp_path`, `monkeypatch` | pytest built-ins. Use instead of `tempfile.mkdtemp()` and direct assignment such as `module.fn = lambda ...` (these leak into other tests). |
+| `overlay_fakes` (utils) | `race_track(...)` (a straight run as track arrays), `TileServer()` (a tile service in memory: pass as `Tiles(fetch=...)`; `.urls`, `.fail`), `T0`. |
 | `fake_urlopen` | Scripts `urllib.request.urlopen`: `fake_urlopen.reply({...}, http_error(429, {...}))`; assert on `fake_urlopen.calls` (`url`, `method`, `headers` lower-cased, `body` parsed from JSON). An unexpected request fails the test. |
 | `fake_popen` | `subprocess.Popen` replaced: nothing starts. `fake_popen.instances[i].cmd` / `.kw`. |
 | `fake_run` | `subprocess.run` / `check_output` replaced: `.calls`, `.returns['ffprobe'] = b'...'`, `.code = 1`. |
@@ -80,6 +81,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
 | `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |
+| `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network |
+| `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
 | `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
 | `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
 | everything else | see `--cov-report=term-missing` | todo |

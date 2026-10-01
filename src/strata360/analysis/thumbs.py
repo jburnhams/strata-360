@@ -4,7 +4,10 @@ quick  (`thumb` stage, needs only motion): the steadiest moment in the middle of
 best   (`thumb_best` stage, after candidates, identity and scenes): the most attractive moment of the best candidate (quality, scenic score, wearer or people in shot, steadiness), looking
        ahead, or behind at the wearer when their face is clearly there. Replaces the quick one (`thumb.jpg` is served in preference to `thumb_quick.jpg`).
 
-Both write a flat, upright 16:9 view (960x540) and a small json saying how it was chosen."""
+Both write a flat, upright 16:9 view (960x540) and a small json saying how it was chosen.
+
+with_overlay  (`thumb_overlay` stage, when there is a race track): the current thumbnail with the race overlay drawn as it will be in the film, at the thumbnail's own moment.
+       A new quick or best thumbnail removes it, so it is redone."""
 import json, math, os
 import numpy as np
 
@@ -40,13 +43,49 @@ def _thumb(osv, d, t, yaw, pitch, hfov):
     return V.render_thumb(osv, t, yaw=yaw, pitch=pitch, hfov=hfov)
 
 
+def _drop_overlay(d):
+    for n in ('thumb_overlay.jpg', 'thumb_overlay.json'):
+        p = os.path.join(d, n)
+        if os.path.exists(p): os.remove(p)
+
+
+def current(d):
+    """(file name, info) of the thumbnail the app shows: the best one when there is one, else the quick one; (None, None) without a thumbnail."""
+    for n in ('thumb', 'thumb_quick'):
+        if os.path.exists(os.path.join(d, n + '.jpg')): return n + '.jpg', _load(d, n + '.json') or {}
+    return None, None
+
+
+def with_overlay(d, cfg, track, tiles=None):
+    """Write thumb_overlay.jpg: the current thumbnail with the race overlay at its moment. Without a map key the maps are left out (the numbers and clock are still drawn)."""
+    import datetime as dt
+    from PIL import Image
+    from strata360.overlay import build
+    from strata360.overlay.tiles import MissingKey
+    name, info = current(d)
+    if not name: raise RuntimeError('no thumbnail yet')
+    clip = _load(d, 'clip.json'); t_s = float(info.get('t_s', 0.0)); t = dt.datetime.fromisoformat(clip['time']['start_utc'].replace('Z', '+00:00')).timestamp() + t_s
+    img = np.asarray(Image.open(os.path.join(d, name)).convert('RGB')).copy(); size = (img.shape[1], img.shape[0]); why = None
+    try: ov = build(cfg, track, size, tiles)
+    except MissingKey as e: ov = build(cfg, track, size, tiles, maps=False); why = f'maps left out: {e}'
+    Image.fromarray(ov.apply(img, t)).save(os.path.join(d, 'thumb_overlay.jpg.part'), 'JPEG', quality=90); os.replace(os.path.join(d, 'thumb_overlay.jpg.part'), os.path.join(d, 'thumb_overlay.jpg'))
+    out = dict(source=name, source_mtime=os.path.getmtime(os.path.join(d, name)), t_s=round(t_s, 2), utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(), maps=why is None, why=why)
+    json.dump(out, open(os.path.join(d, 'thumb_overlay.json'), 'w')); return out
+
+
+def overlay_fresh(d):
+    """Whether thumb_overlay.jpg was made from the thumbnail shown now."""
+    o = _load(d, 'thumb_overlay.json'); name, _ = current(d)
+    return bool(o and name and o.get('source') == name and os.path.exists(os.path.join(d, 'thumb_overlay.jpg')) and abs(os.path.getmtime(os.path.join(d, name)) - o.get('source_mtime', 0)) < 1e-3)
+
+
 def quick(osv, d):
     from strata360.analysis import views as V
     mo = _load(d, 'motion.json'); clip = _load(d, 'clip.json'); dur = clip['video']['source_frames'] / clip['video']['nominal_fps']; t = 0.5 * dur
     if mo:
         ts = np.array(mo['series']['t']); steady = np.exp(-np.array(mo['series']['shake_dps']) / 25.0); score = steady - 0.6 * np.abs(ts - 0.5 * dur) / max(dur, 1.0); m = (ts > 0.1 * dur) & (ts < 0.9 * dur)
         if m.any(): t = float(ts[m][np.argmax(score[m])])
-    open(os.path.join(d, 'thumb_quick.jpg'), 'wb').write(_thumb(osv, d, t, 0.0, 0.0, AHEAD_HFOV))
+    open(os.path.join(d, 'thumb_quick.jpg'), 'wb').write(_thumb(osv, d, t, 0.0, 0.0, AHEAD_HFOV)); _drop_overlay(d)
     info = dict(kind='quick', t_s=round(t, 2), yaw=0.0, fov=AHEAD_HFOV, corner_stretch=round(corner_stretch(AHEAD_HFOV), 2), why='steadiest moment near the middle, looking ahead, wide view'); json.dump(info, open(os.path.join(d, 'thumb_quick.json'), 'w')); return info
 
 
@@ -56,7 +95,7 @@ def best(osv, d):
     if not cd or not cd['candidates']: return quick(osv, d)
     def interest(c):
         f = c['features']; return 0.5 * c['quality'] + 0.25 * f.get('subject', 0) + 0.25 * f.get('protagonist', 0) + 0.1 * (1 if f.get('speech') else 0) - 0.3 * f.get('chatter', 0)
-    c = max(cd['candidates'], key=interest); a, b = c['start_s'], c['end_s']
+    c = max(cd['candidates'], key=interest); a, b = c['start_s'], c['end_s']; _drop_overlay(d)
     ts = np.arange(a + 0.5, b, 0.5) if b - a > 1 else np.array([0.5 * (a + b)])
     # the wearer's face samples inside the candidate (heading-relative direction measured on the same stabilised views): the thumbnail must LOOK AT them, at the sample's own time
     faces = [r for r in (idn['samples'] if idn else []) if r['me'] and r['me']['how'] == 'face' and a <= r['t_s'] <= b]
