@@ -118,6 +118,7 @@ export const api = {
   setClock: (folder: string, offset_seconds: number) => call<{ clock: ClockState; retimed: number }>('/api/clock', { folder, offset_seconds }),
   who: (folder: string, refresh = false) => call<WhoState>('/api/who?' + q({ folder, refresh: refresh ? 'true' : 'false' })),
   whoSheetUrl: (folder: string, v: number) => '/api/who/sheet?' + q({ folder, v: String(v) }),
+  whoMeUrl: (folder: string, v: number) => '/api/who/me?' + q({ folder, v: String(v) }),
   setWho: (folder: string, me: number[]) => call<{ ok: boolean }>('/api/who', { folder, me }),
   editGet: (folder: string) => call<EditResponse>('/api/edit?' + q({ folder })),
   propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; keep?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),

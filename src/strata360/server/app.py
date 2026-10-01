@@ -466,6 +466,16 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404)
         return FileResponse(p, media_type='image/png', headers={'Cache-Control': 'no-cache'})
 
+    @api.get('/api/who/me')
+    def get_who_me(request: Request, folder: str, n: int = 4):                           # a strip of the chosen face (the saved profile's thumbnails)
+        auth(request)
+        import cv2, numpy as np
+        f = folder_of(folder); p = os.path.join(ROOT_DIR, 'profiles', config.load(f).get('profile', 'me') + '.npz')
+        if not os.path.exists(p): raise HTTPException(404, 'no face chosen yet')
+        t = np.load(p)['thumbs']; k = max(1, min(int(n), len(t))); idx = np.argsort(-(t.max(3) > 12).mean((1, 2)), kind='stable')[:k]           # the crops with the least black border (faces near the frame edge are cut off)
+        ok, buf = cv2.imencode('.jpg', np.concatenate([t[i] for i in idx], 1)[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90])           # thumbnails are RGB
+        return Response(buf.tobytes(), media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
+
     @api.post('/api/who', dependencies=[Depends(auth)])
     def post_who(body: dict):                                                            # {folder, me: [cluster numbers]}: save them as the wearer's face profile and let the waiting stages continue
         from strata360.analysis import identity

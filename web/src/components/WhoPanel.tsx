@@ -17,6 +17,7 @@ export default function WhoPanel({ folder }: { folder: string }) {
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <h3 className="text-sm font-semibold">Which face is you</h3>
         <span className={w.profile ? 'text-emerald-700' : 'text-amber-700'}>{w.profile ? 'chosen' : 'not chosen yet'}</span>
+        {w.profile && <img src={api.whoMeUrl(folder, ver)} alt="the chosen face" className="h-14 rounded border border-stone-200 dark:border-stone-700" />}
         <button className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" onClick={() => setOpen(o => !o)}>{open || !w.profile ? (open ? 'hide' : 'show the faces') : 'change'}</button>
       </div>
       {(open || !w.profile) && <div className="mt-3">
