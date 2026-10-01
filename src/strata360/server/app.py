@@ -282,7 +282,7 @@ def create_app(roots, token=None):
         if ev:
             from strata360.analysis import sound_events as SE
             out['sounds'] = dict(seconds=SE.category_seconds(ev), windows=[dict(t0=w['t0'], t1=w['t1'], cats={k: v for k, v in w['cats'].items() if v >= 0.2}, top=w['top'][:3]) for w in ev['windows']], hints={c: list(h) for c, h in SE.HINTS.items()})
-        out['audio_files'] = dict(original=os.path.exists(d + 'audio_original.flac'), clean=os.path.exists(d + 'audio_clean.flac'))
+        out['audio_files'] = dict(original=os.path.exists(os.path.join(d, 'audio_original.flac')), clean=os.path.exists(os.path.join(d, 'audio_clean.flac')))
         mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
             from strata360.analysis.views import focus_samples, person_samples
