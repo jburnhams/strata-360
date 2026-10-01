@@ -5,7 +5,7 @@ You are a coding agent new to this repo. Find a coherent slice of **under-tested
 ## 0. Orient yourself (read before writing anything)
 
 1. Read `AGENTS.md` and `CLAUDE.md` at the repo root. They are authoritative. Web code (`web/`) is out of scope for this task.
-2. Read **`tests/README.md`** in full: how to run things, the fixtures, the conventions and a per-module coverage ledger. Then read `tests/conftest.py`, `tests/unit/conftest.py`, `tests/utils/fakes.py`, `tests/utils/projects.py`, and the worked examples it lists: `tests/unit/test_server_api.py`, `test_llm_remote.py`, `test_track.py`, `test_fixtures.py`. Copy their style.
+2. Read **`tests/README.md`** (shared commands, fixtures, file-ownership rules) and **`tests/unit/README.md`** (unit conventions and the per-module coverage ledger) in full. **This task runs in parallel with the integration-test and web-test tasks on other branches, so obey the ownership table in `tests/README.md`**: you may edit `tests/unit/**`, `tests/conftest.py`, `tests/utils/` (except `library.py` and `synthetic_osv.py`), `tests/unit/README.md` and the `fail_under` line in `pyproject.toml`. Don't touch `tests/integration/**`, `tests/README.md`, `web/`, `requirements-test.txt` (unless a new test dependency is unavoidable, and say so in the PR) or the workflows. Then read `tests/conftest.py`, `tests/unit/conftest.py`, `tests/utils/fakes.py`, `tests/utils/projects.py`, and the worked examples it lists: `tests/unit/test_server_api.py`, `test_llm_remote.py`, `test_track.py`, `test_fixtures.py`. Copy their style.
 3. Layout: application code is in `src/strata360/` (`server/app.py` FastAPI; `pipeline/`, `edit/`, `analysis/`, `audio/`, `gps/`, `osv/`, `render/`, `cli.py`, `oslib.py`, `hw.py`). Unit tests are in `tests/unit/`, fast, hermetic (no ffmpeg, models, footage, network or real home folder; enforced by the autouse fixtures in `tests/conftest.py`). Integration tests (`tests/integration/`) need ffmpeg and are out of scope except to avoid breaking them.
 4. Setup and commands, from the repo root: `pip install -r requirements-test.txt`, then
    - `pytest tests/unit --cov --cov-report=term-missing --cov-report=xml` (coverage gate: `fail_under` in `pyproject.toml`)
@@ -16,11 +16,11 @@ You are a coding agent new to this repo. Find a coherent slice of **under-tested
 
 ## 1. Choose the slice (data-driven, so reruns don't collide)
 
-1. Open the **coverage ledger** in `tests/README.md` and cross-check it against a fresh `pytest tests/unit --cov --cov-report=term-missing` (or the latest CI log). The report wins on conflict.
-2. Check what's in flight: `git log --oneline -20`, `git branch -a`, and the open PRs (GitHub MCP tools). Don't pick modules another branch or PR already covers. If an earlier run's PR for the same slice is still open, continue on it.
+1. Open the **coverage ledger** in `tests/unit/README.md` and cross-check it against a fresh `pytest tests/unit --cov --cov-report=term-missing` (or the latest CI log). The report wins on conflict.
+2. Check what's in flight (other branches and PRs, including the integration-test one, which has its own ledger in `tests/integration/README.md`): `git log --oneline -20`, `git branch -a`, and the open PRs (GitHub MCP tools). Don't pick modules another branch or PR already covers. If an earlier run's PR for the same slice is still open, continue on it.
 3. Pick **one cohesive slice**, about 2–5 related modules or 300–600 statements of missing coverage, ranked by:
    - logic density that can be tested without heavy dependencies (numpy/scipy math, parsing, state machines, config and path handling, retry/backoff, HTTP endpoints);
-   - pure or near-pure code at 0–50% (`audio/dsp.py`, `audio/wordtimes.py`, `gps/clock.py`, `gps/context.py`, `gps/overview.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `pipeline/stages.py`, `edit/optimise.py`, `cli.py`, the rest of `server/app.py`'s endpoints);
+   - pure or near-pure code at 0–50% (modules the integration task owns, `cli.py`, `pipeline/runner.py`, `pipeline/stages.py`, `render/*`, `edit/music.py` and the media endpoints of `server/app.py`, are only yours for their pure functions: leave real-ffmpeg behaviour to it) (`audio/dsp.py`, `audio/wordtimes.py`, `gps/clock.py`, `gps/context.py`, `gps/overview.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `pipeline/stages.py`, `edit/optimise.py`, `cli.py`, the rest of `server/app.py`'s endpoints);
    - bug-prone areas (concurrency, file locks, time and clock handling, input validation, security checks on paths).
 
    Test the pure parts of modules that need torch, whisper, ffmpeg, or a GPU, and fake the rest at the boundary (`fake_run`, `fake_popen`, `monkeypatch` on the single function that loads a model). Don't import heavyweight libraries that aren't in `requirements-test.txt`: if a module needs one at import time, import it lazily in the test or skip with `pytest.importorskip`.
@@ -29,7 +29,7 @@ You are a coding agent new to this repo. Find a coherent slice of **under-tested
 
 ## 2. Reuse and extend the shared helpers (don't bypass them)
 
-- Use the fixtures in `tests/README.md` instead of `tempfile.mkdtemp()`, hand-rolled `urlopen`/`Popen` fakes, or assigning to module globals. If a helper is missing, add it: a new double in `tests/utils/fakes.py` (with a fixture in `tests/conftest.py`, and a test in `tests/unit/test_fixtures.py`), a new builder in `tests/utils/projects.py` (e.g. `add_transcript`, a synthetic track, a `.wav` writer), or a new `tests/utils/<topic>.py` for something like numpy signal/track generators. Anything two test files share moves into `tests/utils/`.
+- Use the fixtures in `tests/README.md` (shared) instead of `tempfile.mkdtemp()`, hand-rolled `urlopen`/`Popen` fakes, or assigning to module globals. If a helper is missing, add it: a new double in `tests/utils/fakes.py` (with a fixture in `tests/conftest.py`, and a test in `tests/unit/test_fixtures.py`), a new builder in `tests/utils/projects.py` (e.g. `add_transcript`, a synthetic track, a `.wav` writer), or a new `tests/utils/<topic>.py` for something like numpy signal/track generators. Anything two test files share moves into `tests/utils/`.
 - Add a new test dependency only for a clear reason (candidates: `fitdecode`/`gpxpy` if you test FIT/GPX loading, `freezegun`/`time-machine` if clock injection isn't enough), put it in `requirements-test.txt`, and say why in the PR.
 - When you touch an older test file, convert it to the house style (see `test_llm_remote.py`): pytest functions/classes with plain `assert`, `monkeypatch`/`tmp_path`, no `sys.path` hacks, no `__main__` runner, no `assert False` in `try`, no module-global assignments. Preserve every assertion's meaning. Don't convert files outside your slice.
 - Use `pytest-randomly` as a bug-finder: run your slice and the whole suite under several seeds (`--randomly-seed=1..5`) and with `-n 4`. A failure that depends on order is a leaked global: fix its cause (usually a direct assignment in an old test) with `monkeypatch`, and mention it in the PR.
@@ -44,8 +44,8 @@ You are a coding agent new to this repo. Find a coherent slice of **under-tested
 
 ## 4. Update the ledger and the ratchet
 
-- In `tests/README.md`, update the coverage ledger rows for every module you touched (percent from CI or the coverage report, `done`/`partial`/`todo`, notes on what remains), and keep the fixtures table and conventions current (new helpers, new gotchas).
-- After CI is green and the total coverage is known, raise `fail_under` in `pyproject.toml` to the floor of the new total, rounded down (it only ratchets up). Do this in your last commit.
+- In `tests/unit/README.md`, update the coverage ledger rows for every module you touched (percent from CI or the coverage report, `done`/`partial`/`todo`, notes on what remains), and keep its conventions and gotchas current. Document a new shared fixture or double as one added row in the fixtures table in `tests/unit/README.md` (under a short "Added by unit work" heading) rather than editing `tests/README.md`, which stays untouched to avoid merge conflicts.
+- You are the only task that edits `fail_under` (the integration suite has no gate and the web suite has no threshold). After CI is green and the total coverage is known, raise `fail_under` in `pyproject.toml` to the floor of the new total, rounded down (it only ratchets up). Do this in your last commit.
 - Aim for >= 90% (line + branch) on the modules in your slice. Justify any gap in the ledger.
 
 ## 5. Verify locally
