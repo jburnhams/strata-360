@@ -1,30 +1,48 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { api } from '../../src/api'
-
-const reply = (ok: boolean, status: number, body: unknown) => vi.fn().mockResolvedValue({ ok, status, json: () => Promise.resolve(body) })
-
-afterEach(() => { vi.unstubAllGlobals() })
+import { mockError, mockGet, mockNetworkError, mockPost, recordRequests } from '../utils/api'
+import { makeBrowse } from '../utils/factories'
 
 describe('api client', () => {
   it('GETs without a body and returns the parsed JSON', async () => {
-    const f = reply(true, 200, { folder: '/x' }); vi.stubGlobal('fetch', f)
+    mockGet('/api/last', { folder: '/x' })
+    const seen = recordRequests('/api/last')
     expect(await api.last()).toEqual({ folder: '/x' })
-    expect(f).toHaveBeenCalledWith('/api/last', undefined)
+    expect(seen).toMatchObject([{ method: 'GET', body: undefined }])
   })
 
   it('encodes query parameters', async () => {
-    const f = reply(true, 200, {}); vi.stubGlobal('fetch', f)
+    const seen = recordRequests('/api/browse')
     await api.browse('/a b/c')
-    expect(f.mock.calls[0][0]).toBe('/api/browse?path=%2Fa+b%2Fc')
+    expect(seen[0].url.search).toBe('?path=%2Fa+b%2Fc')
+  })
+
+  it('sends no query at all when browsing the default folder', async () => {
+    mockGet('/api/browse', makeBrowse({ path: '/root' }))
+    const seen = recordRequests('/api/browse')
+    expect((await api.browse()).path).toBe('/root')
+    expect(seen[0].url.search).toBe('')
+  })
+
+  it('POSTs a JSON body', async () => {
+    mockPost('/api/notes', { folder: 'hi', clips: {}, updated: {} })
+    const seen = recordRequests('/api/notes')
+    await api.saveNote('/f', 'hi', 'c1')
+    expect(seen[0]).toMatchObject({ method: 'POST', body: { folder: '/f', text: 'hi', clip: 'c1' } })
   })
 
   it('throws the server detail on an error response', async () => {
-    vi.stubGlobal('fetch', reply(false, 400, { detail: 'not a folder' }))
+    mockError('/api/roots', 400, 'not a folder')
     await expect(api.roots()).rejects.toThrow('not a folder')
   })
 
   it('falls back to the status code when the body is not JSON', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, json: () => Promise.reject(new Error('bad json')) }))
+    mockGet('/api/roots', () => { throw new Response('<html>', { status: 502 }) })
     await expect(api.roots()).rejects.toThrow('HTTP 502')
+  })
+
+  it('rejects when the connection drops', async () => {
+    mockNetworkError('/api/roots')
+    await expect(api.roots()).rejects.toThrow()
   })
 })
