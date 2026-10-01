@@ -32,7 +32,8 @@ export default function VoiceoverPanel({ folder }: { folder: string }) {
       <h3 className="mb-2 text-sm font-semibold">Voice-over audio</h3>
       {st.engines.length === 0 ? <p className="text-sm text-amber-700">The voice model is not installed. Run <code>pip install kokoro-onnx</code> and <code>./strata360 voiceover . --fetch</code> (about 350 MB, an open model, runs locally).</p> : (
         <div className="mb-3 flex flex-wrap items-end gap-3 text-sm">
-          <label>Voice<select value={voiceName} onChange={e => setVoice(e.target.value)} className={`${input} ml-2`}>{engine?.voices.map(v => <option key={v.name} value={v.name}>{(v as { label?: string }).label ?? v.name}</option>)}</select></label>
+          <label>Voice<select value={voiceName} onChange={e => { setVoice(e.target.value); void api.buildVoiceover(folder, { engine: engine?.id, voice: e.target.value, rate: rate ?? st.state.rate }) }} className={`${input} ml-2`}>
+            {[...new Set(engine?.voices.map(v => (v as { group?: string }).group ?? ''))].map(g => <optgroup key={g} label={g || 'voices'}>{engine?.voices.filter(v => ((v as { group?: string }).group ?? '') === g).map(v => <option key={v.name} value={v.name}>{(v as { label?: string }).label ?? v.name}</option>)}</optgroup>)}</select></label>
           <label>Speed<input type="number" min={100} max={260} value={rate ?? st.state.rate} onChange={e => setRate(Number(e.target.value))} className={`${input} ml-2 w-20`} /></label>
           <button disabled={st.building || !st.lines} onClick={build} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50">{st.building ? `Speaking ${st.progress?.done ?? 0}/${st.progress?.total || '…'}` : t ? 'Speak again' : 'Speak the script'}</button>
           {t && <button className="rounded-lg border border-stone-300 px-3 py-2 dark:border-stone-700" onClick={() => play(api.voiceoverAudio(folder))}>▶ Whole track</button>}

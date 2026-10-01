@@ -37,7 +37,8 @@ def save_state(folder, s):
 # ---- the speech engine: Kokoro-82M (Apache 2.0), an open neural voice that runs locally on any platform (ONNX); one engine, British male voices ----------------------------------------------------
 MODEL_DIR = os.environ.get('STRATA360_KOKORO') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'models', 'kokoro')
 MODEL_FILES = {'kokoro-v1.0.onnx': 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx', 'voices-v1.0.bin': 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin'}
-VOICES = [dict(name='bm_george', label='George', lang='en_GB'), dict(name='bm_fable', label='Fable', lang='en_GB'), dict(name='bm_lewis', label='Lewis', lang='en_GB'), dict(name='bm_daniel', label='Daniel', lang='en_GB')]
+GROUPS = {'bm': 'British male', 'bf': 'British female', 'am': 'American male', 'af': 'American female'}   # English voices; British male first
+DEFAULT_VOICES = ['bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel']
 BASE_WPM = 150.0                                  # the voice at speed 1.0 speaks about this fast; `rate` (words per minute) sets the speed relative to it
 _K = {}
 
@@ -63,6 +64,16 @@ def _kokoro():
     return _K['k']
 
 
+def voices():
+    """The English voices in the model's voice file: [{name, label, group, lang}], British male first (the default is bm_george)."""
+    try:
+        import numpy as np
+        names = [n for n in np.load(os.path.join(MODEL_DIR, 'voices-v1.0.bin')).files if n[:2] in GROUPS]
+    except (OSError, ValueError): names = DEFAULT_VOICES
+    order = list(GROUPS); names = sorted(names, key=lambda n: (order.index(n[:2]), DEFAULT_VOICES.index(n) if n in DEFAULT_VOICES else 99, n))
+    return [dict(name=n, label=n[3:].title(), group=GROUPS[n[:2]], lang='en_GB' if n[0] == 'b' else 'en_US') for n in names]
+
+
 def _kokoro_available():
     try: import kokoro_onnx  # noqa: F401
     except ImportError: return False
@@ -72,11 +83,11 @@ def _kokoro_available():
 def _kokoro_speak(voice, rate, text, out):
     import numpy as np
     from scipy.io import wavfile
-    speed = float(min(max(rate / BASE_WPM, 0.6), 1.4)); samples, sr = _kokoro().create(text, voice=voice or 'bm_george', speed=speed, lang='en-gb')
+    speed = float(min(max(rate / BASE_WPM, 0.6), 1.4)); samples, sr = _kokoro().create(text, voice=voice or 'bm_george', speed=speed, lang='en-gb' if (voice or 'b')[0] == 'b' else 'en-us')
     wavfile.write(out, sr, (np.clip(samples, -1, 1) * 32767).astype(np.int16))
 
 
-ENGINES = {'kokoro': ('Kokoro (open model, British male)', _kokoro_available, lambda: [dict(name=v['name'], lang=v['lang'], label=v['label']) for v in VOICES], _kokoro_speak)}
+ENGINES = {'kokoro': ('Kokoro (open model, British male)', _kokoro_available, voices, _kokoro_speak)}
 
 
 def available_engines():
