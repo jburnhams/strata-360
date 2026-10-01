@@ -65,6 +65,7 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
 ### V2. Script written per block (S to M)
 - `edit/script.py`: the writer gets blocks instead of beat windows: per block its facts (as now), its seconds minus its dialogue, and a word budget from that; lines carry the `block` id (and an optional anchor: "before the dialogue" or "after it"). Blocks with dialogue keep a marked gap.
 - Keep `check()` and the one retry; budgets are now a guide, not a hard cut, because V4 re-sizes the blocks to what is actually spoken.
+- **Built (1 Oct):** `script.block_facts`, `build_block_messages`, `check_blocks`, `write_block_script` (lines carry `block` and `anchor`; the budget is soft: 1.3x plus 2 words before a retry, nothing is cut; the doc has per-block totals). Tests: `tests/unit/test_script_blocks.py` (scripted model, not HTTP). Not yet called from `strata360 script` or the app, which still use the beat-window path until V4 lands. Also fixed `words_in_window` failing when no clips folder is given.
 - **Done when:** fake-HTTP unit tests: lines map to blocks, a block's dialogue gap is never written over, the totals report words per block.
 
 ### V3. Measure the spoken voice-over (M)
