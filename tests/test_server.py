@@ -47,6 +47,21 @@ def test_project_folders_are_opened_whole():
     n = app.browse([root], os.path.join(root, 'new')); assert n['can_create'] and not n['is_project']
 
 
+def test_endpoints_that_show_a_clip_and_the_transcript_work_with_words_and_corrections():
+    import json
+    from fastapi.testclient import TestClient
+    from strata360.analysis import transcript_edits as TE
+    root, _ = make(); f = os.path.join(root, 'race1'); rd = config.race_dir(f); cd = os.path.join(rd, 'clips', 'CAM_20260101000000_0001_D'); os.makedirs(cd)
+    json.dump(dict(clip_id='CAM_20260101000000_0001_D', time=dict(start_utc='2026-01-01T00:00:00Z'), video=dict(source_frames=500, nominal_fps=50.0), source_files=dict(osv='x.OSV')), open(os.path.join(cd, 'clip.json'), 'w'))
+    ws = [dict(w='a', t0=0.0, t1=0.4, p=0.9), dict(w='wave', t0=0.4, t1=0.8, p=0.3)]
+    json.dump(dict(segments=[dict(t0=0.0, t1=1.0, lang='en', text='a wave', text_en='a wave', words=ws)]), open(os.path.join(cd, 'transcript.json'), 'w')); json.dump(dict(library=f), open(os.path.join(rd, 'race.json'), 'w'))
+    TE.set_user(cd, 0, 1, 'wade'); c = TestClient(app.create_app([root], None)); q = dict(folder=f, clip='CAM_20260101000000_0001_D')
+    r = c.get('/api/clip', params=q); assert r.status_code == 200, r.text[-300:]
+    tr = r.json()['transcript'][0]; assert tr['si'] == 0 and tr['text'] == 'a wade' and tr['words'][1]['e']['orig'] == 'wave' and tr['words'][1]['e']['src'] == 'user'
+    r = c.get('/api/transcript', params=dict(folder=f)); assert r.status_code == 200 and r.json()['segments'][0]['words'][1]['w'] == 'wade'
+    assert c.post('/api/transcript/edit', json=dict(folder=f, clip='CAM_20260101000000_0001_D', seg=0, word=1, action='clear')).status_code == 200 and c.get('/api/clip', params=q).json()['transcript'][0]['text'] == 'a wave'
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

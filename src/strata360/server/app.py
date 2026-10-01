@@ -258,7 +258,7 @@ def create_app(roots, token=None):
         mo = _j(d, 'motion.json'); out['motion'] = None if not mo else mo['summary']
         au = _j(d, 'audio.json'); out['audio'] = None if not au else dict(summary=au.get('summary'), segments=au.get('segments', [])[:40])
         tr = TE.load_effective(d); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
-        out['transcript'] = [dict(si=si, words=word_view(s), t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en'), flagged=bool(s.get('flags')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))) for s in (tr or {}).get('segments', [])]
+        out['transcript'] = [dict(si=si, words=word_view(s), t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en'), flagged=bool(s.get('flags')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))) for si, s in enumerate((tr or {}).get('segments', []))]
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
