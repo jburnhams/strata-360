@@ -1277,7 +1277,7 @@ Background processing must never make the computer unusable (three parallel work
 - checks **available memory** (free + inactive + speculative + purgeable pages) before every item against what that stage needs (scenes about 6 GB, people 4, proxy 2.5, transcribe 4, ...) plus a 2 GB reserve, and **waits** while there is not enough, or while the 1-minute load average is above 60% of the CPUs;
 - lets the **heavy stages run one at a time** (scenes, people, proxy, speakers, transcribe, align, exposure, preview): parallelism is only across different stages, and two workers claiming the same heavy stage at the same instant are resolved in favour of the earlier claim;
 - uses the **CPU, not the GPU**, for the detectors (`STRATA_GPU=1` to allow the GPU);
-- **a second worker only starts with plenty of free memory** (at least 12 GB available per extra worker, machine not busy, at most 2 workers); the first worker is always allowed (it is low priority and waits for memory itself). The app says why "add a worker" is missing ("only 5 GB of memory is free; another worker needs at least 12 GB free").
+- **a second worker only starts with plenty of free memory** (at least 7 GB available per extra worker (default for a 16 GB Mac; raise it on a machine you want to keep freer), machine not busy, at most 2 workers); the first worker is always allowed (it is low priority and waits for memory itself). The app says why "add a worker" is missing ("only 5 GB of memory is free; another worker needs at least 12 GB free").
 Settings in `race.json` `resources`: `max_workers`, `extra_worker_free_gb`, `reserve_gb`, `busy_load_fraction`, `threads`. Code: `pipeline/resources.py`; tests: `tests/unit/test_resources.py`.
 
 ### 18.4i Parallel workers and reprocessing

@@ -110,7 +110,7 @@ class TestOpen:
 
 class TestNotes:
     def test_empty_by_default(self, client, project):
-        assert client.get('/api/notes', params={'folder': project.folder}).json() == {'folder': '', 'clips': {}, 'updated': {}}
+        assert client.get('/api/notes', params={'folder': project.folder}).json() == {'folder': '', 'clips': {}, 'updated': {}, 'vo_must': {'folder': '', 'folder_ordered': True, 'clips': {}}}
 
     def test_saves_the_folder_note(self, client, project):
         n = client.post('/api/notes', json={'folder': project.folder, 'text': 'a good day'}).json()
@@ -156,3 +156,26 @@ class TestLogAndClips:
     def test_a_clip_with_a_note_is_flagged(self, client, project):
         client.post('/api/notes', json={'folder': project.folder, 'clip': CLIP_ID, 'text': 'hi'})
         assert client.get('/api/clips', params={'folder': project.folder}).json()['clips'][0]['has_note'] is True
+
+
+class TestMarksAndNarrationNotes:
+    TR = dict(segments=[dict(t0=1.0, t1=3.0, text='we are fine', text_en='we are fine', lang='en', words=[dict(w=x, t0=1.0 + i * 0.5, t1=1.4 + i * 0.5, p=0.9) for i, x in enumerate(['we', 'are', 'fine'])])])
+
+    def test_marking_words_shows_up_on_the_clip_transcript(self, client, project):
+        project.add_clip(transcript=self.TR); q = dict(folder=project.folder, clip=CLIP_ID)
+        r = client.post('/api/transcript/mark', json=dict(**q, spans=[dict(seg=0, **{'from': 1, 'to': 2})], state='never')); assert r.status_code == 200 and r.json()['marked'] == 2
+        words = [w for p in client.get('/api/clip', params=q).json()['transcript'] for w in p['words']]; assert [w.get('m') for w in words] == [None, 'never', 'never']
+        assert client.post('/api/transcript/mark', json=dict(**q, spans=[dict(seg=0, **{'from': 0, 'to': 2})], state='none')).json()['marked'] == 0
+
+    def test_bad_marks_are_refused(self, client, project):
+        project.add_clip(transcript=self.TR); q = dict(folder=project.folder, clip=CLIP_ID)
+        assert client.post('/api/transcript/mark', json=dict(**q, spans=[], state='must')).status_code == 400
+        assert client.post('/api/transcript/mark', json=dict(**q, spans=[dict(seg=0, **{'from': 0, 'to': 9})], state='must')).status_code == 404
+        assert client.post('/api/transcript/mark', json=dict(**q, spans=[dict(seg=0, **{'from': 0, 'to': 1})], state='purple')).status_code == 400
+
+    def test_the_narration_must_include_fields_save_beside_the_notes(self, client, project):
+        f = project.folder
+        r = client.post('/api/notes', json=dict(folder=f, kind='vo', text='One.\nTwo.', ordered=False)); assert r.json()['vo_must'] == dict(folder='One.\nTwo.', folder_ordered=False, clips={})
+        client.post('/api/notes', json=dict(folder=f, kind='vo', text='In the clip.', clip=CLIP_ID)); n = client.get('/api/notes', params=dict(folder=f)).json()
+        assert n['vo_must']['clips'] == {CLIP_ID: 'In the clip.'} and n['folder'] == '' and n['clips'] == {}                       # the ordinary notes are untouched
+        client.post('/api/notes', json=dict(folder=f, kind='vo', text='  ', clip=CLIP_ID)); assert client.get('/api/notes', params=dict(folder=f)).json()['vo_must']['clips'] == {}

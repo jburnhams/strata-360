@@ -19,7 +19,7 @@ export interface TrackOverview {
 }
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
-  timezone?: string; title: string | null; date: string | null; results: Results
+  timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
 export interface WordEdit { orig: string; src: 'user' | 'gemini'; why?: string | null; user_text?: string | null; gemini_text?: string | null }
@@ -43,7 +43,8 @@ export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recor
 export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
 export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | 'rendering' | 'done' | 'error'; running: boolean; key?: string; frames_done?: number; frames_total?: number; placeholders?: string[]; error?: string | null; length_s?: number }
 export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; bitrate: string }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean }
-export interface MusicState { file: string | null; analysis: { bpm: number; offset_s: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number } | null }
+export interface MusicAnalysis { bpm: number; offset_s: number; bar_beats?: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number }
+export interface MusicState { file: string | null; name?: string | null; analysis: MusicAnalysis | null; waveform?: number[] | null; spectrogram?: boolean }
 export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
 export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
@@ -92,7 +93,7 @@ export const api = {
   previewUrl: (folder: string, clip: string) => '/api/preview?' + q({ folder, clip }),
   thumbUrl: (folder: string, clip: string, v: string, overlay = false) => '/api/thumb?' + q({ folder, clip, v, ...(overlay ? { overlay: '1' } : {}) }),     // v: busts the browser cache when the picture changes
   meta: (folder: string) => call<Meta>('/api/meta?' + q({ folder })),
-  saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
+  saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date' | 'distance_km'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
   transcript: (folder: string) => call<{ segments: Seg[] }>('/api/transcript?' + q({ folder })),
   script: (folder: string) => call<ScriptState>('/api/script?' + q({ folder })),
   setKey: (key: string, provider = 'vertex') => call<{ configured: boolean }>('/api/llm/key', { key, provider }),
@@ -125,6 +126,8 @@ export const api = {
     if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
     return j as MusicState & { warning?: string }
   },
+  musicAudioUrl: (folder: string) => '/api/music/audio?' + q({ folder }),
+  musicSpectrogramUrl: (folder: string, v: string) => '/api/music/spectrogram?' + q({ folder, v }),
   removeMusic: (folder: string) => fetch('/api/music?' + q({ folder }), { method: 'DELETE' }),
   clock: (folder: string) => call<ClockState>('/api/clock?' + q({ folder })),
   clockSuggest: (folder: string) => call<{ current: number; suggestions: { offset_s: number; votes: number; confidence: number; score: number; clips?: string[] }[] }>('/api/clock/suggest?' + q({ folder })),

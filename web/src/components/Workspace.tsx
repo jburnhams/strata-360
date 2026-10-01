@@ -13,6 +13,7 @@ import ScriptPanel from './ScriptPanel'
 import VoiceoverPanel from './VoiceoverPanel'
 import Timeline from './Timeline'
 import FilmDetails from './FilmDetails'
+import MusicPanel from './MusicPanel'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -44,6 +45,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <FilmDetails folder={folder} />
             <ProjectProgress folder={folder} />
             <TrackPanel folder={folder} />
+            <MusicPanel folder={folder} />
             <ClockPanel folder={folder} />
             <WhoPanel folder={folder} />
             <NoteBox folder={folder} title="Notes for the whole folder" placeholder="What was this? Who was there? What is the story of the day, in your own words…" />
