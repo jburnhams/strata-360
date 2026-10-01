@@ -81,6 +81,23 @@ def test_script_writer_uses_the_remote_provider_and_enforces_budgets():
     l0, l1 = d['lines']; assert l0['text'] == 'A short line.' and l1['text'] == '' and l0['words'] <= l0['budget_words']
 
 
+def test_the_free_key_goes_first_the_paid_key_takes_over_at_a_limit_and_alone_for_pro():
+    d = tempfile.mkdtemp(); L.KEY_FILE = os.path.join(d, 'k'); L.VARS_FILE = os.path.join(d, 'secrets.env'); L.time.sleep = lambda s: None
+    for e in ('GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_PAID_API_KEY'): os.environ.pop(e, None)
+    open(L.VARS_FILE, 'w').write('GEMINI_API_KEY=AIza' + 'f' * 35 + '\nGEMINI_PAID_API_KEY=AQ.' + 'p' * 40 + '\n'); ok = dict(candidates=[dict(content=dict(parts=[dict(text='ok')]))], usageMetadata=dict(promptTokenCount=1, candidatesTokenCount=1))
+    L._FREE_DOWN.clear(); calls = []; L.urllib.request.urlopen = fake(calls, [ok]); r = L.chat_gemini([dict(role='user', content='x')], model='gemini-3.8-flash', provider='gemini', json_mode=False)
+    assert r['tier'] == 'free' and calls[0]['headers']['x-goog-api-key'].startswith('AIza')                                       # free first
+    L._FREE_DOWN.clear(); calls = []; L.urllib.request.urlopen = fake(calls, [(429, 'You exceeded your current quota'), ok]); r = L.chat_gemini([dict(role='user', content='x')], model='gemini-3.8-flash', provider='gemini', json_mode=False)
+    assert r['tier'] == 'paid' and [c['headers']['x-goog-api-key'][:3] for c in calls] == ['AIz', 'AQ.'] and L._FREE_DOWN['gemini-3.8-flash'] > L.time.time()           # limit: the paid key at once
+    calls = []; L.urllib.request.urlopen = fake(calls, [ok]); r = L.chat_gemini([dict(role='user', content='x')], model='gemini-3.8-flash', provider='gemini', json_mode=False)
+    assert r['tier'] == 'paid' and len(calls) == 1                                                                                # while the free key cools down it is not asked
+    L._FREE_DOWN.clear(); calls = []; L.urllib.request.urlopen = fake(calls, [ok]); r = L.chat_gemini([dict(role='user', content='x')], model='gemini-3.1-pro-preview', provider='gemini', json_mode=False)
+    assert r['tier'] == 'paid' and calls[0]['headers']['x-goog-api-key'].startswith('AQ.')                                         # pro: the paid key only
+    L._FREE_DOWN.clear(); calls = []; L.urllib.request.urlopen = fake(calls, [(503, 'high demand')] * 2 + [(503, 'high demand')] * 3); 
+    try: L.chat_gemini([dict(role='user', content='x')], model='gemini-3.8-flash', provider='gemini', json_mode=False); assert False
+    except L.LLMBusy as e: assert 'AIza' not in str(e) and 'AQ.' not in str(e)                                                      # still busy on both keys: retryable, and no key in the message
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

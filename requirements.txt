@@ -23,3 +23,6 @@ packaging==23.2
 fastapi
 uvicorn
 kokoro-onnx>=0.6        # the voice-over voice (Kokoro-82M, open model); model files: ./strata360 voiceover . --fetch
+librosa                 # TIGER-DnR (audio_background stage): model code fetched at a pinned commit by audio/background.py
+torch_complex
+typeguard<3

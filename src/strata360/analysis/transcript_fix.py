@@ -95,7 +95,7 @@ Answer with JSON only: {"fixes": [{"seg": <n>, "word": <n>, "through": <n or omi
 ISLAND_GAP_S = 4.0       # a silence this long is cut out: the audio is the speech only
 
 
-def chunks(tr, dur, min_s=30.0, max_s=60.0, pad=0.5, island_gap=ISLAND_GAP_S):
+def chunks(tr, dur, min_s=60.0, max_s=120.0, pad=0.5, island_gap=ISLAND_GAP_S):
     """Speech-only excerpts of a clip: [{segs: [segment numbers], t0, t1, a0, a1}] (t = first/last spoken word, a = the audio to cut, with `pad` seconds either side). Phrases are grouped into
     stretches of speech separated by silences of `island_gap` seconds or more (the silence is not sent); a stretch longer than `max_s` is broken at the natural pause (preferring a sentence end) that
     leaves pieces of `min_s` to `max_s`; a shorter stretch is one excerpt."""
@@ -145,6 +145,27 @@ def call_key(ch, audio_path, prompt, model, thinking, run):
 def usage_log_path(folder): return os.path.join(config.race_dir(folder), 'gemini_usage.jsonl')
 
 
+PRICES = {'gemini-3.1-pro-preview': (2.00, 12.00), 'flash': (0.75, 3.75), 'transcribe': (2.00, 12.00)}      # ('flash', 'transcribe': any model with that in its name) US$ per million tokens (input, output), paid tier, prompts up to 200k tokens; models not listed have no price here (free tier is free)
+
+
+def usage_summary(folder):
+    """Everything the usage log holds: {calls, input, output, paid_calls, cost_usd, by_model: {model: {calls, input, output, paid, cost_usd}}}. Only calls on the PAID key cost anything; the cost is an estimate
+    from `PRICES` (thinking tokens are in the output price, and may not all be in the logged output count) and covers priced models only."""
+    out = dict(calls=0, input=0, output=0, paid_calls=0, cost_usd=0.0, by_model={})
+    try: lines = open(usage_log_path(folder)).read().splitlines()
+    except OSError: return out
+    for l in lines:
+        try: r = json.loads(l)
+        except ValueError: continue
+        t = r.get('tokens') or {}; i = int(t.get('input') or 0); o = int(t.get('output') or 0); m = r.get('model') or '?'; paid = r.get('tier') == 'paid'
+        e = out['by_model'].setdefault(m, dict(calls=0, input=0, output=0, paid=0, cost_usd=0.0)); pr = PRICES.get(m) or next((v for k, v in PRICES.items() if k in m), None); c = (i * pr[0] + o * pr[1]) / 1e6 if paid and pr else 0.0
+        for d in (out, e): d['calls'] += 1; d['input'] += i; d['output'] += o; d['cost_usd'] += c
+        if paid: out['paid_calls'] += 1; e['paid'] += 1
+    out['cost_usd'] = round(out['cost_usd'], 4)
+    for e in out['by_model'].values(): e['cost_usd'] = round(e['cost_usd'], 4)
+    return out
+
+
 def check_chunk(folder, clip, tr, ch, audio_path, ctx, provider='vertex', model=None, thinking='low', run=0, cache_dir=None, log=None):
     """One request for one excerpt: returns (fixes, info). The audio is the excerpt of `audio_path`, mono 16 kHz FLAC. Every reply is kept on disk (`cache_dir`): asking the same thing again costs
     nothing, whatever is changed afterwards (voting rules, which fixes are applied); each NEW call is logged with its token counts in <project>/gemini_usage.jsonl."""
@@ -159,10 +180,10 @@ def check_chunk(folder, clip, tr, ch, audio_path, ctx, provider='vertex', model=
     msgs = [dict(role='system', content=SYSTEM_AUDIO), dict(role='user', content=[dict(inlineData=dict(mimeType='audio/flac', data=base64.b64encode(raw).decode())), dict(text=prompt)])]
     r = LR.chat(msgs, model, 16000, 0.1, timeout=600, provider=provider, thinking=thinking); parsed = SC._parse_json(r['text'])
     fixes = (parsed or {}).get('fixes') if isinstance(parsed, dict) else None; fixes = fixes or []
-    info = dict(seconds=r['seconds'], tokens=r.get('tokens'), finish=r.get('finish'), audio_kb=round(len(raw) / 1024), parsed=isinstance(parsed, dict), cached=False)
+    info = dict(seconds=r['seconds'], tokens=r.get('tokens'), finish=r.get('finish'), audio_kb=round(len(raw) / 1024), parsed=isinstance(parsed, dict), cached=False, tier=r.get('tier'))
     if cp and isinstance(parsed, dict):                                                    # a reply that could not be read is not kept: it is worth asking again
         os.makedirs(cache_dir, exist_ok=True); json.dump(dict(key=key, clip=clip, excerpt=[ch['a0'], ch['a1']], model=model, thinking=thinking, run=run, prompt_version=PROMPT_VERSION, fixes=fixes, info=info, raw=r['text'], at=time.time()), open(cp + '.tmp', 'w'), indent=1); os.replace(cp + '.tmp', cp)
-    try: open(usage_log_path(folder), 'a').write(json.dumps(dict(at=time.time(), clip=clip, model=model, thinking=thinking, run=run, tokens=r.get('tokens'), seconds=r['seconds'], audio_kb=info['audio_kb'])) + '\n')
+    try: open(usage_log_path(folder), 'a').write(json.dumps(dict(at=time.time(), clip=clip, model=model, tier=r.get('tier'), thinking=thinking, run=run, tokens=r.get('tokens'), seconds=r['seconds'], audio_kb=info['audio_kb'])) + '\n')
     except OSError: pass
     return fixes, info
 
@@ -218,17 +239,20 @@ def decide(calls, accept=0.5, min_votes=3):
     return accepted, [k for k in undecided if tally[k]['votes'] / max(n, 1) >= 0.2], tally
 
 
-def ensemble_excerpt(folder, clip, tr, ch, au, ctx, cache, pool, thinking='low', min_calls=6, max_calls=18, accept=0.5, min_votes=3, patience=3, seed='1', log=print, progress=None):
+def ensemble_excerpt(folder, clip, tr, ch, au, ctx, cache, pool, thinking='low', min_calls=6, max_calls=18, accept=0.5, min_votes=3, patience=3, seed='1', log=print, progress=None, seeds=(), pair=False):
     """Keep asking a random model of `pool` about ONE excerpt until the answer is settled: at least `min_calls` checks, and the accepted fixes unchanged for the last `patience` checks, and no fix left
     with partial support (or `max_calls` is reached). Replies are cached per (model, k-th ask of that model), so a re-run replays the same sequence for free. A model that is over quota or busy is left
     alone for a while; when none can be asked, raises RetryLater (the stage retries later). Returns dict(accepted, calls, models, tally, stopped, undecided)."""
     import random, time
     from strata360.pipeline.retry import RetryLater
-    rng = random.Random(f'{clip}:{ch["a0"]}:{seed}'); calls = []; used = {m: 0 for m in pool}; history = []; made = 0; errors = []
+    rng = random.Random(f'{clip}:{ch["a0"]}:{seed}'); calls = list(seeds); used = {m: 0 for m in pool}; history = []; made = 0; errors = []
     while True:
         accepted, undecided, tally = decide(calls, accept, min_votes); history.append(tuple(sorted(accepted)))
-        if len(calls) >= min_calls and len(history) > patience and len(set(history[-(patience + 1):])) == 1 and not undecided: stopped = 'settled'; break
-        if len(calls) >= max_calls: stopped = 'max_calls'; break
+        if pair:                                                                                  # two checks; a third only when the first two differ (then a fix needs 2 of 3)
+            if len(calls) >= 2 and {_fkey(f) for f in calls[0][1] or []} == {_fkey(f) for f in calls[1][1] or []}: stopped = 'two agree'; break
+            if len(calls) >= 3: stopped = 'tiebreak'; break
+        elif len(calls) >= min_calls and len(history) > patience and len(set(history[-(patience + 1):])) == 1 and not undecided: stopped = 'settled'; break
+        if not pair and len(calls) >= max_calls: stopped = 'max_calls'; break
         ready = [m for m in pool if _DOWN.get(m, 0) < time.time()]
         if not ready: raise RetryLater('every model is over quota or busy for now (' + (errors[-1] if errors else 'waiting') + f'); {len(calls)} checks of this excerpt are done and kept', progress=made > 0)
         low = min(used[m] for m in ready); m = rng.choice([x for x in ready if used[x] == low])                      # a random model, the least used first: the mixture stays even
@@ -256,7 +280,7 @@ def check_clip(folder, clip, runs=3, min_votes=2, thinking='low', provider=None,
     au = next((os.path.join(d, n) for n in ('audio_clean.flac', 'audio_original.flac') if os.path.exists(os.path.join(d, n))), None)
     if au is None: raise RuntimeError('the clip has no stored audio yet (the audio_extract stage)')
     chs = chunks(tr, dur)
-    if pool: return check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, **ens)
+    if pool: return check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, min_votes=min_votes, **ens)
     doc = dict(settings=dict(runs=runs, min_votes=min_votes, thinking=thinking, model=model, prompt_version=PROMPT_VERSION, audio=os.path.basename(au)), excerpts=[], kept=[], calls=dict(made=0, reused=0), tokens=dict(input=0, output=0))
     if not chs: TE.set_gemini(d, [], model=model); return doc
     ctx = TG.context(folder, clip); cache = os.path.join(d, 'gemini_checks'); jobs = [(i, r) for i in range(len(chs)) for r in range(runs)]; res = {i: [None] * runs for i in range(len(chs))}; n = [0]
@@ -292,15 +316,19 @@ def run_audio(folder, clips=None, **kw):
     return out
 
 
-def check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, **ens):
+def check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, transcriber=True, **ens):
     """The adaptive version of check_clip: every excerpt is checked by a random mixture of the models in `pool` until its answer is settled (see ensemble_excerpt)."""
     from concurrent.futures import ThreadPoolExecutor
     from strata360.analysis import transcribe_gemini as TG
     doc = dict(settings=dict(pool=pool, thinking=thinking, prompt_version=PROMPT_VERSION, audio=os.path.basename(au), **{k: v for k, v in ens.items()}), excerpts=[], kept=[], calls=dict(made=0, reused=0), tokens=dict(input=0, output=0))
     if not chs: TE.set_gemini(d, [], model='ensemble'); return doc
-    ctx = TG.context(folder, clip); cache = os.path.join(d, 'gemini_checks'); res = [None] * len(chs); errs = []
+    ctx = TG.context(folder, clip); cache = os.path.join(d, 'gemini_checks'); res = [None] * len(chs); errs = []; t35 = None
+    if transcriber:                                                                       # the transcription model's text, made in big batches over many clips, is one more vote of a different kind
+        from strata360.analysis import transcribe35 as T35
+        T35.ensure(folder, clip, log=log); t35 = T35.load(d, tr)
     def one(i):
-        try: res[i] = ensemble_excerpt(folder, clip, tr, chs[i], au, ctx, cache, pool, thinking=thinking, log=log, **ens)
+        seeds = [(T35.MODEL, [f for f in t35 if f['seg'] in chs[i]['segs']])] if t35 is not None else []
+        try: res[i] = ensemble_excerpt(folder, clip, tr, chs[i], au, ctx, cache, pool, thinking=thinking, log=log, seeds=seeds, **ens)
         except Exception as e: errs.append(e)
     with ThreadPoolExecutor(min(workers, len(chs))) as ex: list(ex.map(one, range(len(chs))))
     for i, r in enumerate(res):

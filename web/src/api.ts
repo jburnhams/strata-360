@@ -99,7 +99,7 @@ export const api = {
   buildVoiceover: (folder: string, o: { engine?: string; voice?: string; rate?: number } = {}) => call<{ started: boolean }>('/api/voiceover/build', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
-  transcriptFix: (folder: string) => call<{ health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
+  transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
   clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean') => '/api/clip/audio?' + q({ folder, clip, kind }),
   editScript: (folder: string, texts: Record<string, string>) => call<{ saved: string | null; speaking: boolean }>('/api/script/edit', { folder, texts }),
   voiceoverUse: (folder: string, seg: number, use: 'synth' | 'recorded') => call<{ ok: boolean }>('/api/voiceover/use', { folder, seg, use }),

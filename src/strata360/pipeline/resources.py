@@ -7,15 +7,15 @@ Rules (all applied by every worker, whoever started it):
   * before starting an item a worker checks the memory that stage needs and waits while there is not enough, or while the machine is busy;
   * the heavy stages (the vision model, detectors, proxy rendering, speech recognition) never run twice at the same time: parallelism is only across different stages;
   * the detectors use the CPU rather than the GPU by default, so the screen stays responsive (set STRATA_GPU=1 to allow the GPU).
-The numbers can be changed in race.json under `resources`."""
+The numbers can be changed in race.json under `resources`; STRATA_NO_RESOURCE_LIMITS=1 turns the waiting off (the integration tests set it: a CI runner with little free memory would otherwise wait for ever)."""
 import ctypes, ctypes.util, os, re, subprocess, time
 
 DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
 STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=6.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
-                    places=0.3, identity=0.5, candidates=0.5, audio_extract=0.5, audio_clean=2.0, audio_events=2.0, transcript_check=0.5)
-STAGE_MAX_CONCURRENT = dict(transcript_check=1, audio_clean=1, audio_events=1, proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
+                    places=0.3, identity=0.5, candidates=0.5, audio_extract=0.5, audio_clean=2.0, audio_events=2.0, audio_background=1.2, transcript_check=0.5)
+STAGE_MAX_CONCURRENT = dict(transcript_check=1, audio_clean=1, audio_events=1, audio_background=1, proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
 
 
 def cfg_values(cfg):
@@ -67,6 +67,7 @@ def low_priority(cfg=None):
 def wait_for_headroom(stage, cfg=None, active=None, log=print, poll=20, max_wait=None):
     """Block until the machine has room for one item of `stage`: enough available memory, not busy, and (for a heavy stage) no other worker running it. `active` is a callable returning the
     stages currently being processed by all workers. Returns True when it may go ahead, False if `max_wait` seconds passed."""
+    if os.environ.get('STRATA_NO_RESOURCE_LIMITS'): return True                                    # tests and CI runners: nobody is waiting for the machine to be free
     v = cfg_values(cfg); need = STAGE_MEM_GB.get(stage, 1.0) + float(v['reserve_gb']); cap = STAGE_MAX_CONCURRENT.get(stage); t0 = time.time(); said = None
     while True:
         why = None; avail = mem_available_gb()

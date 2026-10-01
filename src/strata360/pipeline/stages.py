@@ -78,10 +78,19 @@ def audio_clean(ctx):
     y = dsp.clean_for_playback(dsp.load_audio(ctx.path('audio_original.flac'), 1)[:, 0]); out = ctx.path('audio_clean.flac'); dsp.write_flac(out + '.part.flac', y); os.replace(out + '.part.flac', out)
 
 
-@stage('audio_events', 1, outputs=('audio_events.json',), deps=('audio_extract',), note='what the sound is, second by second (sound-event classifier, 527 AudioSet classes grouped into speech, shouting, cheering, crowd, breathing, footsteps, wind, handling noise, nature, water, vehicles, music, bells, beeps) with a suggested role and level for the film')
+@stage('audio_background', 1, outputs=('audio_background.flac',), deps=('audio_extract',), default=False,
+       note='the sound without the speech: the background (wind, footsteps, nature, crowd murmur) as its own track, for the sound classifier and the final mix (TIGER-DnR effects model; slow on the CPU, about real time on the Apple GPU: set STRATA_GPU=1)')
+def audio_background(ctx):
+    from strata360.audio import dsp, background as BG
+    y = BG.separate(dsp.load_audio(ctx.path('audio_original.flac'), 1)[:, 0], log=ctx.log); out = ctx.path('audio_background.flac'); dsp.write_flac(out + '.part.flac', y); os.replace(out + '.part.flac', out)
+
+
+@stage('audio_events', 1, outputs=('audio_events.json',), deps=('audio_extract',), soft_deps=('audio_background',), note='what the sound is, second by second (sound-event classifier, 527 AudioSet classes grouped into speech, shouting, cheering, crowd, breathing, footsteps, wind, handling noise, nature, water, vehicles, music, bells, beeps) with a suggested role and level for the film')
 def audio_events(ctx):
     from strata360.analysis import sound_events as SE
-    ctx.write('audio_events.json', ctx.stamped(SE.classify(ctx.path('audio_original.flac'))))
+    doc = SE.classify(ctx.path('audio_original.flac'))
+    if os.path.exists(ctx.path('audio_background.flac')): doc['background'] = SE.classify(ctx.path('audio_background.flac'))      # the same classifier on the sound without the speech: what the place sounds like
+    ctx.write('audio_events.json', ctx.stamped(doc))
 
 
 @stage('audio', 1, outputs=('audio.json',), deps=('ingest',), soft_deps=('audio_extract',), note='levels, loudness, clipping, wind/speech/crowd/ambience labels (README 5.10)')
@@ -114,7 +123,10 @@ def align(ctx):
 def transcript_check(ctx):
     from strata360.analysis import transcript_fix as TF
     c = ctx.cfg.get('transcript_check') or {}
-    if c.get('pool'): kw = dict(pool=c['pool'], **{k: c[k] for k in ('min_calls', 'max_calls', 'accept', 'min_votes', 'patience') if k in c})       # the adaptive ensemble
+    if c.get('mode') == 'transcribe':                                                                      # the transcription model alone
+        from strata360.analysis import transcribe35 as T35
+        ctx.write('transcript_check.json', ctx.stamped(T35.apply_clip(ctx.cfg['library'], ctx.clip.id, log=ctx.log))); return
+    if c.get('pool'): kw = dict(pool=c['pool'], **{k: c[k] for k in ('min_calls', 'max_calls', 'accept', 'min_votes', 'patience', 'pair', 'transcriber') if k in c})       # the adaptive ensemble
     else: kw = dict(runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), provider=c.get('provider'), model=c.get('model'))      # the fixed vote
     ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, thinking=c.get('thinking', 'low'), log=ctx.log, **kw)))
 
@@ -133,7 +145,7 @@ def motion(ctx):
     ctx.write('motion.json', ctx.stamped(analyse(ctx.clip.osv)))
 
 
-@stage('proxy', 4, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
+@stage('proxy', 6, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
        note='the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, H.264 with audio, about 16 Mbps): the detectors, the scene model, thumbnails AND the browser player all use this one file instead of the lens files (slow: about 10x real time)')
 def proxy(ctx):
     from strata360.render.proxy import make_proxy
@@ -169,7 +181,7 @@ def people(ctx):
     ctx.write('people.json', ctx.stamped(doc)); np.save(ctx.path('faces.npy'), emb); np.save(ctx.path('faces_thumbs.npy'), th)
 
 
-@stage('identity', 1, keys=('profile',), outputs=('identity.json',), deps=('people',),
+@stage('identity', 2, keys=('profile',), outputs=('identity.json',), deps=('people',),
        note='which detected person is the wearer (face profile from `who`), who else is in shot; needs profiles/<profile>.npz')
 def identity(ctx):
     import numpy as np, os

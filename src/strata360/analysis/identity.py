@@ -97,6 +97,20 @@ def score_faces(emb, prof):
     return np.maximum(c, top)
 
 
+VIEW_PX = 1024.0; VIEW_FOV = 100.0        # the views people_detect looks at: 1024 px square, 100 degrees
+
+
+def head_up(p):
+    """Degrees the TOP OF THE HEAD is above the centre of the person's box (the pitch the detections carry): from the face when one was found (its box is the face itself, so the hair is added), else the top of
+    the person's box; None when the box is cut off at the top of the view or there is nothing to go on."""
+    box = p.get('box'); fb = (p.get('face') or {}).get('box')
+    if fb: top = fb[1] - 0.35 * (fb[3] - fb[1])
+    elif box and box[1] > 4: top = box[1]                                                  # a box cut off at the top of the view has no known top
+    else: return None
+    cy = (box[1] + box[3]) / 2 if box else (fb[1] + fb[3]) / 2
+    return round((cy - top) / VIEW_PX * VIEW_FOV, 1)
+
+
 def analyse_clip(people_doc, emb, prof, thr=None):
     """identity.json body for one clip: per sampled frame, which detected person is the wearer (by face; else the large person straight behind the rear lens with no other
     face claiming to be someone else), and who else is in shot. Yaw is degrees from the front lens (180 = the rear lens)."""
@@ -114,9 +128,9 @@ def analyse_clip(people_doc, emb, prof, thr=None):
             if rear: p = max(rear, key=lambda p: p['height_deg']); me = dict(p=p, sim=None); how = 'position'
         others = [p for p in ps if (me is None or p is not me['p']) and ((p.get('conf') or 0) > 0.5 or p.get('face')) and (p['height_deg'] or 0) > 8 or (p.get('face') and me and p is not me['p'])]
         rec = dict(frame=int(k), t_s=ps[0]['t_s'], n_people=len(others) + (1 if me else 0), me=None,
-                   others=[dict(yaw=p['yaw'], pitch=p['pitch'], height_deg=p['height_deg'], face=bool(p.get('face'))) for p in sorted(others, key=lambda p: -(p['height_deg'] or 0))[:6]])
+                   others=[dict(yaw=p['yaw'], pitch=p['pitch'], height_deg=p['height_deg'], head_up=head_up(p), face=bool(p.get('face'))) for p in sorted(others, key=lambda p: -(p['height_deg'] or 0))[:6]])
         if me:
-            p = me['p']; rec['me'] = dict(how=how, sim=None if me['sim'] is None else round(me['sim'], 3), yaw=p['yaw'], pitch=p['pitch'], height_deg=p['height_deg'], box=p.get('box'), view=p['view'],
+            p = me['p']; rec['me'] = dict(how=how, sim=None if me['sim'] is None else round(me['sim'], 3), yaw=p['yaw'], pitch=p['pitch'], height_deg=p['height_deg'], head_up=head_up(p), box=p.get('box'), view=p['view'],
                                           face_box=(p['face'] or {}).get('box') if p.get('face') else None)
         out.append(rec)
     n = max(len(out), 1)
