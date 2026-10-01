@@ -97,8 +97,8 @@ def align(draft, text):
     sm = difflib.SequenceMatcher(None, a, b, autojunk=False); fixes = {}; skipped = dict(insert=0, delete=0, cross=0, equal=0)
     def add(i0, i1, to):
         s = draft[i0][:2]
-        if difflib.SequenceMatcher(None, ''.join(TG.norm(d[3]) for d in draft[i0:i1]), ''.join(TG.norm(w) for w in to.split())).ratio() < MIN_LIKE: skipped['unlike'] = skipped.get('unlike', 0) + 1; return
         if any(draft[k][:2] != s for k in range(i0, i1)): skipped['cross'] += 1; return                      # a run across phrases (or clips): not one correction
+        if difflib.SequenceMatcher(None, ''.join(TG.norm(d[3]) for d in draft[i0:i1]), ''.join(TG.norm(w) for w in to.split())).ratio() < MIN_LIKE: skipped['unlike'] = skipped.get('unlike', 0) + 1; return
         it, si, wi, _ = draft[i0]; fixes.setdefault(it, []).append(dict(seg=si, word=wi, through=draft[i1 - 1][2], to=to, **{'from': ' '.join(d[3] for d in draft[i0:i1])}, why='the transcription model heard this', model=MODEL))
     for op, i1, i2, j1, j2 in sm.get_opcodes():
         if op == 'equal': skipped['equal'] += i2 - i1
