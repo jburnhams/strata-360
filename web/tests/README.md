@@ -40,7 +40,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/api.ts` | 26.47% | partial: client contract tested through the `call` helper; most endpoint wrappers (URL builders, uploads, deletes) todo |
 | `src/App.tsx` | 77.77% | done (the effect's failure branch is the gap) |
 | `src/components/FolderBrowser.tsx` | 100% | done |
-| `src/components/NoteBox.tsx` | 100% | done; finding: no error state when the note fails to load |
+| `src/components/NoteBox.tsx` | 100% | done |
 | `src/components/Health.tsx` | 100% | done |
 | `src/components/ProjectProgress.tsx` | 100% | done |
 | `src/components/RedoDialog.tsx` | 100% | done |

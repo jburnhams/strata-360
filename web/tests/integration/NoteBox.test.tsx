@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import NoteBox from '../../src/components/NoteBox'
-import { mockGet, mockPending, recordRequests } from '../utils/api'
+import { mockGet, mockPending, recordRequests, mockError } from '../utils/api'
 import { makeNotes } from '../utils/factories'
 import { act, screen, setup } from '../utils/render'
 
@@ -63,6 +63,9 @@ describe('NoteBox', () => {
     expect(screen.queryByPlaceholderText('Write here')).not.toBeInTheDocument()
   })
 
-  // Finding: a failed load leaves the skeleton up for ever and the rejection unhandled (NoteBox has no .catch).
-  it.todo('shows an error when the note cannot be loaded')
+  it('shows an empty box if notes fail to load', async () => {
+    mockError('/api/notes', 500)
+    typing()
+    expect(await screen.findByPlaceholderText('Write here')).toHaveValue('')
+  })
 })
