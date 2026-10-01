@@ -1,8 +1,8 @@
-# strata-360: Automated 360° Race Video Editing Pipeline
+# strata-360 overview: automated 360° race video editing pipeline
 
 Turn dozens of short 360° clips shot during an ultramarathon (DJI 360 today, Insta360 for older races) into a single edited highlight film. The film is reframed to flat video, trimmed, optionally beat-synced to music, and stays time-aligned with the race GPX so an existing moving-map renderer can overlay it.
 
-This document is the developer brief: goals, architecture, data contracts, phase-by-phase requirements, and a test plan for each phase. `progress.md` is the running log of what was tried and learned.
+This document is the developer brief: goals, architecture, data contracts, phase-by-phase requirements, and a test plan for each phase. Code and other docs cite its sections as "README N" (it was the README until 1 Oct 2026). [`progress.md`](progress.md) is the running log of what was tried and learned; [`implementation-plan.md`](implementation-plan.md) is what to build next.
 
 ## 0. Quick start: running the pipeline on a new race collection
 
@@ -24,7 +24,7 @@ scripts/setup_env.sh --fetch-models          # once per machine: virtual environ
 - **Other cameras.** Discovery reports files it cannot process (Insta360 `.insv`, flat MP4 exports) instead of ignoring them; an Insta360 adapter is future work (section 14).
 - **Platforms.** macOS (Apple Silicon, the development machine) and Linux are tested in CI; Windows unit tests run in CI but are not blocking yet, and the bash launcher `./strata360` and `scripts/setup_env.sh` are POSIX-only (use `python -m strata360`). Hardware video options are chosen per OS in `src/strata360/hw.py`: VideoToolbox decode and encode on macOS, NVENC on Windows when ffmpeg has it, and software libx264/libx265 with software decode elsewhere (slower, same results). Override with `STRATA_HWACCEL=none|<name>` and `STRATA_ENCODER=software`; `STRATA_GPU=1` lets the person detector use Apple's GPU or CUDA. `./strata360 doctor` reports what was detected.
 - **Data and privacy.** `races/` is gitignored: transcripts contain other people's speech. The DJI factory lens calibration comes from the OSV files themselves, and the IMU offsets are a fitted constant (progress.md).
-- **Rendering** is not part of `run` yet: `./strata360 render CAM.OSV out.mp4 --mode heading --fov 90 ...` (arguments as for the flat renderer, README 14.2) or `--path camera.json`.
+- **Rendering** is not part of `run` yet: `./strata360 render CAM.OSV out.mp4 --mode heading --fov 90 ...` (arguments as for the flat renderer, section 14.2) or `--path camera.json`.
 - **Tests:** `pip install -r requirements-test.txt`, then `pytest tests/unit --cov` (about 15 s) and `pytest tests/integration` (needs ffmpeg with libx265; builds a synthetic clip, about 2 min). Web: `cd web && npm run test:coverage`. By hand with real footage and models: `.venv/bin/python spike/test_audio.py`, `spike/test_camera.py`, `spike/test_render_smoke.py`. See AGENTS.md.
 
 ---
@@ -137,7 +137,8 @@ Principles:
 
 ```
 strata-360/
-  README.md  progress.md  NOTICE  requirements.txt  requirements-cv.txt
+  README.md  AGENTS.md  NOTICE  requirements.txt  requirements-cv.txt
+  docs/                           # overview.md (this file), progress.md, implementation-plan.md, notes-and-script.md, prompts/
   strata360                       # launcher for the CLI (uses .venv, or STRATA_PYTHON)
   scripts/                        # setup_env.sh (build the environment), patch_deepfilternet.py
   src/strata360/
@@ -1096,7 +1097,7 @@ A technique is a named, parametrised camera-and-projection program with the prop
 | `program` | A template for the camera path over normalised time u in [0, 1]: yaw, pitch, roll, field of view and projection (`dist`, 0 = rectilinear, 1 = stereographic), with easing and parameter ranges (spin turns, pan angle, start and end field of view). Instantiated for a shot's real duration and content by the framing solve. |
 | `duration` | `min`, `ideal`, `max` seconds, and preferred beat multiples (a spin resolves on a bar; a whip pan lasts a beat). Outside the range the technique is infeasible; inside, its fit falls off from the ideal. |
 | `energy` | 0 (calm) to 1 (intense), matched against the music section's energy at that point, or against the desired pacing curve. |
-| `needs` | Content requirements, each with a weight and where it is measured: steady camera (`motion.json`), clear nadir or zenith (`quality.json`, no hand over the lens), open ground or canopy (`scenes.json`, exposure grid), a subject in view (`targets.json`), speech present (`audio.json`, `alignment.json`), protagonist present, low obstruction, effective resolution (source pixels per output pixel, README 8.10). |
+| `needs` | Content requirements, each with a weight and where it is measured: steady camera (`motion.json`), clear nadir or zenith (`quality.json`, no hand over the lens), open ground or canopy (`scenes.json`, exposure grid), a subject in view (`targets.json`), speech present (`audio.json`, `alignment.json`), protagonist present, low obstruction, effective resolution (source pixels per output pixel, section 8.10). |
 | `transition_in/out` | How it connects: a cut, a whip, a spin match, a planet-to-view zoom; and which techniques pair (a `little_planet_zoom_out` wants a planet or spin before it). |
 | `hero` | Strong effects (both little planets, tunnel, spin) are rare by design: a hero cap per film and a longer cooldown. |
 | `limits` | `max_share` of runtime, `max_uses`, `cooldown` in shots, `max_consecutive`. |
@@ -1105,14 +1106,14 @@ A technique is a named, parametrised camera-and-projection program with the prop
 **Initial set** (all implemented in the renderer as camera paths except where marked): `hold_wide` (steady rectilinear about 100 degrees, 2-8 s), `selfie_hold` (body-locked look at the user, 2-15 s), `follow_runner` (heading-follow, 3-10 s), `pan_reveal` (slow yaw pan 40-90 degrees, 3-6 s), `whip_pan` (fast pan used as a transition, 0.3-0.6 s), `push_in` and `pull_out` (field of view 100 to 65 degrees and back, 2-5 s), `look_around` (yaw sweep of 180 degrees past the scene, 3-6 s), `spin_roll` (image roll of a full turn, 1-2 s, on a beat), **two kinds of little planet:** `planet_fill` (stereographic straight down at 250-300 degrees, the planet stretched to fill the whole frame, spinning, 2-6 s) and `planet_globe` (the entire sphere shown as a round ball on a background colour or a blurred copy of the scene, which shrinks to the globe or grows from it to fill the frame, 2-5 s); their transitions `planet_fill_zoom_out` and `planet_fill_zoom_in` (planet to rectilinear and back, 1.5-3 s) and `globe_shrink` and `globe_grow` (fill to globe and back, 1-3 s); `tunnel_up` (stereographic straight up through the canopy, 2-5 s), and `dialogue_hold` (section 16.4). **The renderer already supports the projections this needs** (`dist` in the camera path, 0 to 1, and fields of view up to 360 degrees; verified with a fill-planet spin that zooms out to the horizon, `spike/example_little_planet.json`), and the globe (`disc` and `bg` in the camera path; section 16.6).
 
 ### 16.2 The optimisation
-**Inputs:** the music (beat and bar grid, section boundaries and energy) or a fixed duration; the candidate pool (every clip's proposed ranges with handles and safe cut points, README 5.3); for each candidate the feasible techniques with their content-based fit; user pins and bans; the variety settings.
+**Inputs:** the music (beat and bar grid, section boundaries and energy) or a fixed duration; the candidate pool (every clip's proposed ranges with handles and safe cut points, section 5.3); for each candidate the feasible techniques with their content-based fit; user pins and bans; the variety settings.
 
 **Decisions:** an ordered sequence of segments, each with (candidate, trim window, technique, technique variant), such that every segment boundary is on a beat (or, in the voice-over workflow, on a line boundary, section 17), the durations sum to the target exactly, and the clip is used within its handles.
 
-**Hard constraints:** target duration; cuts on the beat grid (with the fallbacks of README 5c); each segment's duration inside its technique's `min` to `max` and inside the candidate's handles; overlapping ranges of one clip are mutually exclusive; technique caps and cooldowns (`limits`); no cut inside a word (only at `safe` cut points, README 5.11); chronological order if configured; a technique's `needs` marked hard (no planet with a hand over the lens).
+**Hard constraints:** target duration; cuts on the beat grid (with the fallbacks of section 5c); each segment's duration inside its technique's `min` to `max` and inside the candidate's handles; overlapping ranges of one clip are mutually exclusive; technique caps and cooldowns (`limits`); no cut inside a word (only at `safe` cut points, section 5.11); chronological order if configured; a technique's `needs` marked hard (no planet with a hand over the lens).
 
 **Objective (maximised):**
-1. Candidate quality: interest score, protagonist presence, speech clarity, coverage of the course sections (README 5b).
+1. Candidate quality: interest score, protagonist presence, speech clarity, coverage of the course sections (section 5b).
 2. Technique fit: how well the content meets the technique's `needs`, and how close the duration is to its ideal.
 3. Energy match: technique and shot energy against the music section (or pacing curve) at that time.
 4. Beat quality: preference for cuts on downbeats and section starts, effects landing on bars.
@@ -1126,16 +1127,16 @@ A technique is a named, parametrised camera-and-projection program with the prop
 **User controls:** pin or ban a clip, a technique or a time range; set a technique budget (for example at most two little planets); a variety slider (scales the variety terms); a seed; a locked-sections mask so a re-roll only changes the unlocked part.
 
 ### 16.3 Data
-`techniques.json` (the library, versioned); `edit_plan.json` (the chosen segments: clip, source in and out, technique and variant, instantiated camera path reference, out time, beat position, explanation, alternatives and the variety report). The plan is `timed` and then `framed` exactly as the EDL of README 5.6.
+`techniques.json` (the library, versioned); `edit_plan.json` (the chosen segments: clip, source in and out, technique and variant, instantiated camera path reference, out time, beat position, explanation, alternatives and the variety report). The plan is `timed` and then `framed` exactly as the EDL of section 5.6.
 
 ### 16.4 Dialogue: steady, decently cropped framing on the speaker
 When a segment plays the original speech (a clip with dialogue), the optimiser is restricted to the `dialogue_hold` family and its rules apply. They exist because speech is what the viewer follows, and shaky or showy framing competes with it.
 - **Steady:** the world-locked or heavily smoothed heading-follow stabilisation (long time constant), no spins, planets, whips or field-of-view animation; at most a very slow push-in at an emotional peak (under 5% per second).
-- **Decent crop:** a tighter medium framing on the speaker's head and shoulders (typically 60 to 75 degrees horizontally, chosen so the face fills roughly a quarter to a third of the frame height), centred with a little headroom and the space they face on the leading side, with the **minimum field of view respected** so the crop is not soft (the source has about 21 px per degree, README 8.10; the effective-resolution report flags too-tight crops).
+- **Decent crop:** a tighter medium framing on the speaker's head and shoulders (typically 60 to 75 degrees horizontally, chosen so the face fills roughly a quarter to a third of the frame height), centred with a little headroom and the space they face on the leading side, with the **minimum field of view respected** so the crop is not soft (the source has about 21 px per degree, section 8.10; the effective-resolution report flags too-tight crops).
 - **Who:** the framing target is the active speaker from speaker attribution (section 7, item 6b); when the wearer speaks to camera the framing is the steady `selfie_hold` on them; if two people talk, hold the current speaker and cut (or a two-shot if both fit) at pauses between their turns, never mid-word; if the speaker cannot be identified, fall back to the steady wide view of the group.
-- **Timing:** the hold lasts the whole phrase; the in-point comes shortly before the first word (about 60 ms before the aligned start) and the out-point after the last word (about 120 ms), at `safe` cut points only, so the words are never clipped (README 5.11).
+- **Timing:** the hold lasts the whole phrase; the in-point comes shortly before the first word (about 60 ms before the aligned start) and the out-point after the last word (about 120 ms), at `safe` cut points only, so the words are never clipped (section 5.11).
 - **If the speaker leaves the frame or is occluded:** hold, then ease to the wide fallback; never snap.
-- **Audio:** the original dialogue sits at the front of the mix; music ducks under it (README 5c-3).
+- **Audio:** the original dialogue sits at the front of the mix; music ducks under it (section 5c-3).
 
 ### 16.6 The two little planets (rendering)
 - **Fill planet:** the stereographic projection (`dist` = 1) looking straight down (or up for the tunnel) with a field of view of about 250 to 300 degrees: the ground becomes a disc at the centre and the sky and trees are stretched out to the edges, filling the frame. Animating `(fov, dist)` from (260, 1) to (95, 0) is the zoom out into a normal view. Implemented and verified.
@@ -1164,9 +1165,9 @@ An alternative to fitting shots to music alone: **the narration decides the timi
 2. **Story pass.** Choose the narrative beats and, for each, the shots and any dialogue clip that carries it; draft the script (an LLM draft from the transcripts, reviewed and edited by the user).
 3. **Script output** for the user to read: numbered lines, each with an estimated duration, and the gaps marked, for example `[DIALOGUE: clip 0023, 12:31-12:38, "and then we lost the trail" (translated from French) - leave 6.4 s]`, `[MUSIC ONLY 3 s]`. Formats: Markdown and a printable or teleprompter HTML page, plus `script.json`. Timing estimates come from words per second plus pause allowances (comma 0.25 s, sentence 0.5 s, paragraph 0.9 s) using **the user's own reading rate**, measured from a short calibration reading. For reference, the spontaneous on-the-trail speech in the Belgian library measures 3.55 words/s (213 wpm; 3.9 words/s with pauses removed), median phrase 3.3 s, median pause between phrases 1.3 s, 0.9% fillers; deliberate narration is normally slower (about 2.5 words/s), so the calibration matters and the plan tolerates plus or minus 15%.
 4. **Record** the voice-over (the user follows the script, leaving the marked pauses).
-5. **Fit pass.** Transcribe the recording and force-align it **to the script text** (the text is known, so the alignment is much more accurate than from recognition alone; same tools as README 5.11) to get every line's start and end, the pauses between them and word times. Multiple takes: the best per line by alignment score or the user's pick. Result `vo.json`.
+5. **Fit pass.** Transcribe the recording and force-align it **to the script text** (the text is known, so the alignment is much more accurate than from recognition alone; same tools as section 5.11) to get every line's start and end, the pauses between them and word times. Multiple takes: the best per line by alignment score or the user's pick. Result `vo.json`.
 6. **Re-plan with the recording as fixed anchors** (the joint optimisation of section 16 with extra hard constraints): every line's recorded interval is fixed on the timeline; the picture is never empty; each narration line gets the shots assigned to it, with durations flexing to fit the line; a dialogue clip is scheduled in its pause, trimmed at safe cut points to the pause length (or, if the recorded pause is longer, extended with ambience and a steady hold); shot boundaries prefer line boundaries and pauses inside lines; techniques still obey section 16 (a hero technique on a long line, dialogue holds in pauses). Where a recorded pause is too short for its dialogue clip even after trimming, the tool reports the shortfall by name and offers to re-record only that pause.
-7. **Mix.** Music ducks under the voice-over using the exact line times; dialogue clips play at their own level in their pauses; ambience swells in the gaps (README 5c-3).
+7. **Mix.** Music ducks under the voice-over using the exact line times; dialogue clips play at their own level in their pauses; ambience swells in the gaps (section 5c-3).
 8. **Iterate:** re-record a single line and only the affected part of the timeline is re-fitted.
 
 ### 17.2 Data contracts

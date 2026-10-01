@@ -1,6 +1,6 @@
 # Implementation plan (from 1 Oct 2026)
 
-This turns the README's ideas (sections 10 to 18) and the open items in `progress.md` into an ordered list of work. Each item has a goal, the code it touches, what "done" means (with a test), and a rough size (S: under a day, M: 1 to 3 days, L: about a week). The README stays the reference for how things work; this file only says what to build next and in what order.
+This turns the README's ideas (sections 10 to 18) and the open items in `progress.md` into an ordered list of work. Each item has a goal, the code it touches, what "done" means (with a test), and a rough size (S: under a day, M: 1 to 3 days, L: about a week). The overview (`overview.md`, formerly the README) stays the reference for how things work; this file only says what to build next and in what order.
 
 ## Where we are
 
@@ -16,7 +16,7 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 2. **The final sound is a rough mix.** `preview.build_audio` (used by the final render too): mono, fixed gains (0.25, or 1.0 where people speak), 10 ms fades at every cut, music at 0.5 with a sidechain duck, a limiter. No loudness target, no crossfade on dissolves, no use of the `audio_events` roles or `audio_clean`.
 3. **No exposure matching between shots.** `exposure.json` is collected but not applied; adjacent shots from different times of day will jump.
 4. **No real 4K film has been rendered.** The only trial was 11 s at 640x360 (280 s on a busy machine). At about a second per 4K frame, a 120 s film at the source's 50 fps is about 1.7 hours of pure rendering at best; we do not know the real number.
-5. **The voice-over does not drive the picture.** Today the order is plan, then script, then voice: the planner (`edit/chrono.py`) fixes every window in whole beats of a constant-tempo grid, the script is written into those windows, and `edit/voiceover.py` squeezes each spoken line into its window (synthetic lines sped up to 1.25x, recordings cut and flagged `over`). README 17 steps 5 and 6 (measure the recording, then fit the picture around it) are not built, and cuts can only fall on a constant grid (`edit/music.py` assumes a fixed tempo), not on the music's actual beats to the millisecond.
+5. **The voice-over does not drive the picture.** Today the order is plan, then script, then voice: the planner (`edit/chrono.py`) fixes every window in whole beats of a constant-tempo grid, the script is written into those windows, and `edit/voiceover.py` squeezes each spoken line into its window (synthetic lines sped up to 1.25x, recordings cut and flagged `over`). overview 17 steps 5 and 6 (measure the recording, then fit the picture around it) are not built, and cuts can only fall on a constant grid (`edit/music.py` assumes a fixed tempo), not on the music's actual beats to the millisecond.
 6. **No lens-quality data.** There is no `quality` stage, so `clear_nadir` (needed before showing a planet, a tunnel or a spin) is a guess from the VLM's "lens problems".
 
 **Debt worth paying while we are in there:** the README has grown to 210 KB with out-of-date passages (section 1 still lists "a GUI editor" as a non-goal; section numbers are out of order); the Python coverage floor is 38%.
@@ -26,8 +26,8 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 | # | Assumption | Why it matters |
 |---|---|---|
 | D1 | The first goal is **one finished Legends film with the map overlay**, not more analysis. | Puts the deliverable film (A, V) before more analysis. |
-| D2 | **Decided (1 Oct):** the delivered film is **one file**, but the map overlay is made **per input clip**: each window of the film is overlaid from its own clip's UTC span (the scheme the overlay fork already supports: `creation_time` = true start, exact UTC in the comment tag, `--video-time-start mp4-created`, branch `mp4-exact-start`), and the overlaid windows are joined into the film. A `timemap.csv` is written too, for checking and for anything else. | Resolves README 12, open question 1. Shapes A2. |
-| D3 | **Decided (1 Oct):** the output frame rate **matches the source**, whatever it is (50 or 60 for the Osmo 360; 59.94 kept as the exact rational), with a GUI option to **halve it** (25 / 30) for a faster render. If clips in one film differ, the majority rate is used (README 12) and the others are resampled. Delivery: 3840x2160, HEVC Main 10, stereo AAC at -14 LUFS integrated, -1 dBTP. | Fixes the render and audio acceptance numbers. |
+| D2 | **Decided (1 Oct):** the delivered film is **one file**, but the map overlay is made **per input clip**: each window of the film is overlaid from its own clip's UTC span (the scheme the overlay fork already supports: `creation_time` = true start, exact UTC in the comment tag, `--video-time-start mp4-created`, branch `mp4-exact-start`), and the overlaid windows are joined into the film. A `timemap.csv` is written too, for checking and for anything else. | Resolves overview 12, open question 1. Shapes A2. |
+| D3 | **Decided (1 Oct):** the output frame rate **matches the source**, whatever it is (50 or 60 for the Osmo 360; 59.94 kept as the exact rational), with a GUI option to **halve it** (25 / 30) for a faster render. If clips in one film differ, the majority rate is used (overview 12) and the others are resampled. Delivery: 3840x2160, HEVC Main 10, stereo AAC at -14 LUFS integrated, -1 dBTP. | Fixes the render and audio acceptance numbers. |
 | D4 | Rendering stays on the CPU (Python/OpenCV) for this round; a Metal port is only done if B3's measurement says the film cannot render overnight. | Keeps the biggest piece of work optional. |
 | D5 | Insta360, the MCP interface and face blur stay parked until the Legends film exists. | They are listed in Later. |
 | D6 | **Decided (1 Oct):** the first cut is **voice-over driven**. The spoken voice-over sets the rough length of each clip's part of the film (with each clip's usable and preferred content); the music then sets the **precise cut moments** (to the millisecond, then the nearest frame) on its beats, without ever cutting a clip's own speech short. | Puts milestone V on the critical path straight after A1, ahead of the rest of A. |
@@ -36,7 +36,7 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 
 ### A1. Finish the Legends batch on current stage versions (S, mostly machine time)
 - Run every default stage to completion at its current version (proxy v6 for all 25 clips; scenes, speakers, candidates, thumb_best).
-- Add `strata360 coverage FOLDER [--json]` (README 15.3): per clip, which section 15.1 artefacts exist and which decisions they unblock. Show it in the Overview's progress panel.
+- Add `strata360 coverage FOLDER [--json]` (overview 15.3): per clip, which section 15.1 artefacts exist and which decisions they unblock. Show it in the Overview's progress panel.
 - **Done when:** `progress` reports `complete` for Legends; `coverage` lists nothing missing for default stages. Unit test for `coverage` on a built project (`tests/utils` builders).
 
 ## Milestone V: the voice-over cut (first cut; critical path after A1)
@@ -51,7 +51,7 @@ rough plan (clip blocks)  ->  script per block  ->  voice-over spoken / recorded
 Terms: a **block** is one clip's continuous part of the film (the film stays chronological, so blocks are in shooting order); a block holds one or more **windows** (the existing plan segments: one view and technique each). Narration **lines** belong to blocks. A clip's **dialogue** (the wearer speaking on camera, the `speech` windows) is played in a gap between lines.
 
 ### V1. Rough plan: clip blocks and preferred content (M)
-- `edit/chrono.py` step 1 (`allocate`) already splits the film between clips; expose it as a planning level of its own, in seconds rather than beats: per clip a block with a target length, the usable stretches it may use, its **preferred content** (best candidates by kind and priority: `speech`, `you`, `person`, `scene`, `best`) and any dialogue it must carry (with its exact speech span from `alignment.json`, padded 60 ms before and 120 ms after, README 16.4).
+- `edit/chrono.py` step 1 (`allocate`) already splits the film between clips; expose it as a planning level of its own, in seconds rather than beats: per clip a block with a target length, the usable stretches it may use, its **preferred content** (best candidates by kind and priority: `speech`, `you`, `person`, `scene`, `best`) and any dialogue it must carry (with its exact speech span from `alignment.json`, padded 60 ms before and 120 ms after, overview 16.4).
 - Locks, bans and per-clip weights (the existing overrides) apply at this level unchanged.
 - **Done when:** unit tests: every clip gets a block, blocks are in shooting order, a block's minimum is at least its dialogue plus padding, and the targets sum to the requested length.
 
@@ -62,7 +62,7 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
 
 ### V3. Measure the spoken voice-over (M)
 - `edit/voiceover.py` stops squeezing: each line is spoken (Kokoro) or recorded at its natural length (no tempo change, no cut), and its real duration is measured; for recordings, leading and trailing silence are trimmed by energy and the words are force-aligned to the line's text with the existing aligner (`audio/align.py`) to get word times and to catch a missing or repeated line.
-- Output `voiceover/vo.json` (README 17.2): per line, take, natural duration, speech start and end inside the file, word times, alignment score, loudness. Recording a new take re-measures only that line.
+- Output `voiceover/vo.json` (overview 17.2): per line, take, natural duration, speech start and end inside the file, word times, alignment score, loudness. Recording a new take re-measures only that line.
 - **Done when:** P5-33 on a synthetic recording (Kokoro reading a known text with inserted silences): line boundaries within 50 ms, a missing line reported.
 
 ### V4. Re-size blocks to the voice-over (M)
@@ -104,7 +104,7 @@ How it works: every window of the plan comes from one input clip, so its UTC spa
 - Crossfade the clips' sound across dissolves and dips (equal-power, the transition's length); 30 ms crossfade on hard cuts instead of fade-out/fade-in, so cuts do not dip.
 - Stereo out (the clips' own stereo where it exists, voice-over and dialogue centred).
 - Loudness: two-pass `loudnorm` (or `pyloudnorm`) on the final mix to D3's target; report the measured values in the final's `status.json`.
-- Duck the music to bars (`music.json`) under dialogue as well as under the voice-over (README 17.1 step 7).
+- Duck the music to bars (`music.json`) under dialogue as well as under the voice-over (overview 17.1 step 7).
 - **Done when:** unit tests on synthetic tones: the integrated loudness of the output is -14 +/-0.5 LUFS and true peak at most -1 dBTP; no level dip of more than 1 dB at a hard cut between two equal tones; music at least 10 dB down within 100 ms of each voice-over line start (P5-36).
 
 ### A4. Exposure match between shots (M)
@@ -144,7 +144,7 @@ How it works: every window of the plan comes from one input clip, so its UTC spa
 - **Done when:** unit tests on `edit/script.py` with the fake HTTP layer: a pinned line survives a re-write byte-identical; a regenerated range leaves other lines unchanged.
 
 ### C3. Who is speaking on screen (L, optional for v1)
-- Active speaker detection from mouth motion on full-resolution face crops (README 7 item 6b), fused into `speakers.json`, so dialogue framing holds on the person speaking rather than the biggest other person.
+- Active speaker detection from mouth motion on full-resolution face crops (overview 7 item 6b), fused into `speakers.json`, so dialogue framing holds on the person speaking rather than the biggest other person.
 - **Done when:** P5-29 passes on a fixture with a known speaker. Can slip to Later if dialogue framing looks acceptable in A5.
 
 ## Milestone D: editing in the GUI is fast
@@ -160,19 +160,19 @@ How it works: every window of the plan comes from one input clip, so its UTC spa
 - **Done when:** a unit test compares the TypeScript path evaluation with the Python one on the example paths in `spike/` (same yaw, pitch, fov to 0.01 degrees).
 
 ## Milestone E: documentation and test debt (S each, alongside the others)
-- **E1.** Split the README: keep sections 0 to 3 and a short "how it works" in the README; move phase specs, data contracts and design sections into `docs/` (one file per area: capture and time, stitching and render, analysis, edit, audio, GUI and server); remove passages contradicted by later work (non-goals, the two-proxy design, the free-order optimiser as the main path).
+- **E1.** Done 1 Oct: the README became `docs/overview.md`, the other Markdown files moved into `docs/`, and the README is now a short page of links. Still to do: remove passages in the overview contradicted by later work (section 1 non-goals, the two-proxy design, the free-order optimiser as the main path) and, if it keeps growing, split it into one file per area.
 - **E2.** Trim `progress.md` to findings and decisions; the build narrative is in git history.
-- **E3.** Move the three `PROMPT_*.md` files from the repo root into `docs/prompts/`.
+- **E3.** Done 1 Oct: the three `PROMPT_*.md` files are in `docs/prompts/`.
 - **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A).
 
 ## Later (parked until the film exists)
-- Insta360 adapter (needs sample `.insv` files; README 12 questions 2 and 10).
+- Insta360 adapter (needs sample `.insv` files; overview 12 questions 2 and 10).
 - MCP / conversational interface (Phase 9).
-- Face blur for other runners and spectators (README 12 question 7).
-- OpenOSV's remaining stages: photometric seam field, lens shading, flare (README 14.1); nadir inpainting; rolling-shutter correction from the 20 per-frame quaternions.
+- Face blur for other runners and spectators (overview 12 question 7).
+- OpenOSV's remaining stages: photometric seam field, lens shading, flare (overview 14.1); nadir inpainting; rolling-shutter correction from the 20 per-frame quaternions.
 - D-Log M and HLG input.
-- Taste learning from the user's earlier finished films (README 15.1, `taste.json`).
-- Speech enhancement chosen per segment (README 14.6) beyond what `audio_clean` does.
+- Taste learning from the user's earlier finished films (overview 15.1, `taste.json`).
+- Speech enhancement chosen per segment (overview 14.6) beyond what `audio_clean` does.
 
 ## Order and dependencies
 
@@ -186,7 +186,6 @@ C2 after V4;  D1 after V5;  E runs alongside.
 Suggested sequence: A1, then the V milestone in order (V5 is the largest piece), with A2 to A4 in parallel; then A5 (the first real film: voice-over driven, cut on the beat, with overlay); then B1 and C1, C2, D1, and B2/B3 as A5's numbers require.
 
 ## Questions for you
-(D2, D3 and D6 answered on 1 Oct.)
+(D2, D3, D6 and the docs move answered on 1 Oct.)
 1. Defaults in V4 and V5 to confirm: pause between lines 0.4 s, lead-in and lead-out 0.5 s per block, snapping tolerance half a beat, and when no beat fits, cut off the beat (reported) rather than hold the last frame.
 2. Should the film length stay a hard target (shorten or drop lines to fit) or follow the voice-over (V4 as written)?
-3. Are you happy for the README to be split into `docs/` (E1)?

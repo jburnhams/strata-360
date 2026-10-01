@@ -13,7 +13,7 @@ algorithms described in, and read from the source of, OpenOSV:
     include/osv/color/ColorMath.h, src/osv/render/SeamAnalysis.cpp, docs/GEOMETRY.md, docs/FORMAT.md, docs/COLOR.md.
 
 The code here is a from-scratch Python re-implementation (no OpenOSV source is copied verbatim); the constants,
-formulas and pipeline order follow OpenOSV. See progress.md for exactly what has and has not been ported.
+formulas and pipeline order follow OpenOSV. See docs/progress.md for exactly what has and has not been ported.
 
 Local models used by the vision stages (downloaded into models/, gitignored):
   - YOLO11 pose (Ultralytics, AGPL-3.0): person detection. Fine for personal, local use; check the licence before distributing a product.

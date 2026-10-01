@@ -246,7 +246,7 @@ SPEECH_CHAIN = dict(hp=100, nr=18, nf=-40, tr=1, rf=-45, presence_db=3.0, boom_d
 
 
 def enhance_speech(x, sr=SR, profile='asr', **over):
-    """Denoise and auto-gain a quiet or muffled voice. NOTE (measured, README 5.11 / progress.md): for whisper-class recognisers use RAW audio
+    """Denoise and auto-gain a quiet or muffled voice. NOTE (measured, README 5.11 / docs/progress.md): for whisper-class recognisers use RAW audio
     resampled to 16 kHz, not this: enhancement raised word error rate (0.16 -> 0.19-0.22 with `small`, 0.12 -> 0.14 with `large-v3-turbo`) except
     against wind. Use profile 'mix' for the film. profile 'asr' -> 16 kHz mono float (kept for recognisers that need conditioning);
     profile 'mix' -> 48 kHz mono (gentler denoise, loudness set to -18 LUFS, peak-safe) for the film.

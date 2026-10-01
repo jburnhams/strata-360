@@ -1,4 +1,4 @@
-# Notes and the voice-over script (README 17 and 18)
+# Notes and the voice-over script (overview 17 and 18)
 
 ## Notes
 - **What:** free text, one note for the whole folder (what the race was, who was there, the story of the day) and one per clip (what happened, names, places, feelings, things to mention or avoid).
@@ -25,7 +25,7 @@ The language model (the Claude API by default; or the local Qwen2.5-7B-Instruct,
 ```
 ./strata360 script FOLDER --length 90 [--wpm 145] [--style "dry and understated"] [--seed 1] [--provider anthropic|local] [--model claude-sonnet-5-5]
 ```
-plans a film of that length from the candidates (the optimiser), writes the script, prints it segment by segment and saves it. Later in the GUI: edit the text per segment, regenerate one segment or a range, pin a line, change the length (the plan and the script re-fit together), then record (README 17).
+plans a film of that length from the candidates (the optimiser), writes the script, prints it segment by segment and saves it. Later in the GUI: edit the text per segment, regenerate one segment or a range, pin a line, change the length (the plan and the script re-fit together), then record (overview 17).
 
 ## Known limits
 - Place names are not available offline (coordinates only): the user's notes supply them.
