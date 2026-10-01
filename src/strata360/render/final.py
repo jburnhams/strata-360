@@ -38,12 +38,12 @@ class FinalSource:
         return self.info[clip]
 
     def frames(self, k, a0, a1, yaw_extra=None):
-        sg = self.segs[k]; ci = self._clip(sg['clip']); R = ci['R']; m = a1 - a0
+        sg = self.segs[k]; ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.seam = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
         path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
         ks = np.clip(np.round(t_abs * ci['src_fps']).astype(int), 0, ci['n'] - 1); quat = ci['T']['quat']; Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
         P = path.evaluate(times, Ms, self.fps); first = int(ks[0]); ss = max(first / ci['src_fps'] - 0.002, 0.0)
-        dm, ds = flat.decoder(ci['osv'], 1, ss=ss), flat.decoder(ci['osv'], 0, ss=ss); k_dec = first - 1; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
+        dm, ds = flat.decoder(ci['osv'], 1, ss=ss), flat.decoder(ci['osv'], 0, ss=ss); k_dec = first - 1; last_seam = None; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
         try:
             for i in range(m):
                 while k_dec < ks[i]:
@@ -51,6 +51,7 @@ class FinalSource:
                     if a is None or b is None: break                                              # past the end of the clip: the last frame is held
                     cur_m, cur_s = a, b; k_dec += 1
                 if cur_m is None: raise RuntimeError(f"could not read {ci['osv']} at {t_abs[i]:.2f} s")
+                if k_dec != last_seam: R.update_seam(cur_m, cur_s); last_seam = k_dec                             # one seam per source frame
                 R.set_fov(P['fov'][i], P['dist'][i], P['disc'][i] if P['use_disc'] else None)
                 yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0); d = cam.direction(yaw, P['pitch'][i]); M = Ms[i]
                 yield R.render(cur_m, cur_s, d if P['ref'] == 'body' else M @ d, M @ ez, float(P['roll'][i]))

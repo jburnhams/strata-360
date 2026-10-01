@@ -151,7 +151,7 @@ class Renderer(Globe):
         self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
         self.rtm = ph.THETA_MAX_DEG - ph.RENDER_INSET_DEG          # render-only blend inset (PhotoSeam.h), 94.99 deg
         self.gain_m = np.ones(3); self.gain_s = np.ones(3); self._lut = None
-        self.osv = osv; self.init_globe()
+        self.osv = osv; self.init_globe(); self.seam = None; self._carver = None; self.carve_seam = False                  # carve_seam: measure a seam from the lens frames before each render (update_seam)
         P, B = imu_offsets()
         self.P, self.B = P, B
         self.interp = {'cubic': cv2.INTER_CUBIC, 'linear': cv2.INTER_LINEAR, 'lanczos': cv2.INTER_LANCZOS4}[interp]
@@ -180,12 +180,19 @@ class Renderer(Globe):
         return self.B.T @ quat_to_R(np.asarray(q)).T @ self.P.T
 
     def maps(self, fwd_b, up_b, roll=0.0):
-        d = view_rays(self.theta, self.cphi, self.sphi, fwd_b, up_b, roll)
+        d = view_rays(self.theta, self.cphi, self.sphi, fwd_b, up_b, roll); self._dirs = d                  # body-frame rays (the seam is read per ray)
         out = []
         for L in (self.master, self.slave):
             uu, vv, th = L.project(d)
             out.append((uu.reshape(self.gh, self.gw), vv.reshape(self.gh, self.gw), np.degrees(th).reshape(self.gh, self.gw)))
         return out
+
+    def update_seam(self, L_master, L_slave, reset=False):
+        """Carve the seam for this frame (the previous one steadies it: `reset` forgets it, after a jump in time). A no-op unless carve_seam is on."""
+        if not self.carve_seam: return
+        from strata360.render import seam as SM
+        if self._carver is None: self._carver = SM.SeamCarver(self.master, self.slave, self.occl_m, self.occl_s)
+        self.seam = self._carver.carve(L_master, L_slave, None if (reset or self.seam is None) else self.seam)
 
     def set_gains(self, g_master, g_slave):
         self.gain_m, self.gain_s = np.asarray(g_master, float), np.asarray(g_slave, float)
@@ -208,6 +215,10 @@ class Renderer(Globe):
         up = lambda a: cv2.resize(np.ascontiguousarray(a, dtype=np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
         oc_m = ph.sample_occl(self.occl_m, um, vm); oc_s = ph.sample_occl(self.occl_s, us, vs)
         wm = ph.lens_weight(tm, oc_m, self.rtm, ph.RENDER_FEATHER_DEG); ws = ph.lens_weight(ts, oc_s, self.rtm, ph.RENDER_FEATHER_DEG)
+        if self.seam is not None:                                                                         # a carved seam decides the mix: one lens on each side, a narrow feather between them
+            from strata360.render import seam as SM
+            t = self.seam.master_share(self._dirs).reshape(tm.shape); vis_m = ph.lens_weight(tm, oc_m, self.rtm, SM.EDGE_RAMP_DEG); vis_s = ph.lens_weight(ts, oc_s, self.rtm, SM.EDGE_RAMP_DEG)
+            wm, ws = t * vis_m, (1.0 - t) * vis_s; dead = (wm + ws) < 1e-3; wm = np.where(dead, vis_m, wm); ws = np.where(dead, vis_s, ws)          # where the chosen lens cannot see, the other fills in
         wm, ws = ph.rescue(wm, ws, tm, ts, oc_m, oc_s, ph.THETA_MAX_DEG)   # as OpenOSV: the rescue works inside the full lens limit, not the render inset
         wsum = wm + ws
         cover = wsum > 1e-4
@@ -287,6 +298,7 @@ def main():
     ap.add_argument('--start', type=float, default=None); ap.add_argument('--end', type=float, default=None)
     ap.add_argument('--audio', choices=['copy', 'aac', 'none'], default='copy')
     ap.add_argument('--frames', type=int, default=0); ap.add_argument('--interp', default='cubic')
+    ap.add_argument('--seam', choices=['on', 'off'], default='on', help='carve the seam between the lenses where they agree (hands and other near objects no longer ghost); off = the plain feathered blend')
     ap.add_argument('--gain', choices=['off', 'auto'], default='off', help='OpenOSV exposure match between lenses (unreliable on wet-lens / near-object clips, so off by default)')
     ap.add_argument('--size', default='3840x2160')
     ap.add_argument('--bitrate', default='200M', help='quality first: the overlay tool re-encodes this (README 8.10); 350M for archive')
@@ -304,7 +316,7 @@ def main():
     whole = (k0 == 0 and k1 == n_src - 1 and not a.frames)
     slot_t = pts[k0] + np.arange(n_out) * dt                                    # absolute pts of every output slot
     slot_k = np.array([max(int(np.searchsorted(pts, t + dt * 0.5, side='right') - 1), k0) for t in slot_t])   # newest source frame at or before the slot
-    R = Renderer(a.osv, W, H, a.fov, a.interp)
+    R = Renderer(a.osv, W, H, a.fov, a.interp); R.carve_seam = a.seam == 'on'
     # --- camera path over all slots (heading-follow needs the whole sequence to smooth)
     Ms = [R.stab_matrix(T['quat'][k]) for k in slot_k]
     if a.path:
@@ -336,7 +348,7 @@ def main():
             if cur_m is None or cur_s is None: break
             if a.gain == 'auto' and k % ph.GAIN_BUCKET == 0:
                 gm, gs, n = ph.estimate_gain(cur_m, cur_s, R.master, R.slave, R.occl_m, R.occl_s); R.set_gains(gm, gs)
-            M = Ms[i]; ez = np.array([0, 0, 1.0])
+            M = Ms[i]; ez = np.array([0, 0, 1.0]); R.update_seam(cur_m, cur_s, reset=(last is None))
             R.set_fov(P['fov'][i], P['dist'][i], P['disc'][i] if P['use_disc'] else None); d = cam.direction(P['yaw'][i], P['pitch'][i])
             fwd_b = d if P['ref'] == 'body' else M @ d                           # body-frame view direction
             t0 = time.time(); last = R.render(cur_m, cur_s, fwd_b, M @ ez, P['roll'][i]); tm['remap'] += time.time() - t0

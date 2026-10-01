@@ -133,7 +133,7 @@ def motion(ctx):
     ctx.write('motion.json', ctx.stamped(analyse(ctx.clip.osv)))
 
 
-@stage('proxy', 4, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
+@stage('proxy', 5, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
        note='the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, H.264 with audio, about 16 Mbps): the detectors, the scene model, thumbnails AND the browser player all use this one file instead of the lens files (slow: about 10x real time)')
 def proxy(ctx):
     from strata360.render.proxy import make_proxy
