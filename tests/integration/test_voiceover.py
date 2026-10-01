@@ -92,3 +92,17 @@ class TestMeasure:
         assert d['lines'][0]['natural_s'] == pytest.approx(0.3, abs=0.05) and d['lines'][1]['natural_s'] == pytest.approx(0.5, abs=0.05)            # 0.1 s a word: no tempo change
         V.save_recording(f, '000n0', make_tone(tmp_path / 'take.wav', 1.2, 500)); d = M.measure_script(f, doc, lambda x, w: [(i * 0.4, (i + 1) * 0.4, 0.9) for i in range(len(w))])
         assert d['lines'][0]['take'] == 'recorded' and d['lines'][0]['natural_s'] == pytest.approx(1.2, abs=0.1) and os.path.exists(M.vo_path(f))
+
+
+class TestFitRespeak:
+    def test_a_line_too_long_for_its_footage_is_spoken_again_faster_and_then_fits(self, speech, monkeypatch, tmp_path):
+        from strata360.edit import blocks as B, vo_fit as F, vo_measure as M, voiceover as V
+        def speak(voice, rate, text, out): make_tone(out, len(text.split()) * 0.4 * 150.0 / rate, hz=300)         # a voice whose pace follows the requested words a minute
+        monkeypatch.setattr(V, 'ENGINES', {'fake': ('Fake', lambda: True, lambda: [dict(name='Test', lang='en_GB')], speak)})
+        f = speech([]); clips = [dict(id='C00', start_utc='2026-02-19T10:00:00Z', duration_s=15.0, candidates=[dict(id='C00#00', clip='C00', kind='span', start_s=0.0, end_s=10.0, quality=0.6, priority=1)])]
+        plan = B.plan_blocks(clips, 10.0); script = dict(title='T', lines=[dict(block=0, anchor=None, text=' '.join(['w'] * 25))])           # 10 s of speech in 10 s of footage, plus 1 s of leads
+        al = lambda x, w: [(i * 0.4, (i + 1) * 0.4, 0.9) for i in range(len(w))]
+        fit = F.fit_project(f, plan, script, aligner=al); b = fit.blocks[0]; l = b.lines[0]
+        assert b.tempo == pytest.approx(10 / 9, abs=0.002) and l.applied == pytest.approx(b.tempo) and l.tempo == 1.0 and b.overflow_s == 0 and fit.problems == []
+        assert l.end_s - l.start_s == pytest.approx(10 / b.tempo, abs=0.15) and b.length_s <= 10.0 + 1e-6
+        assert M.load(f)['lines'][0]['tempo_applied'] == pytest.approx(b.tempo, abs=0.002)

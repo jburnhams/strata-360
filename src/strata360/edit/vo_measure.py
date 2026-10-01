@@ -143,6 +143,11 @@ def load(folder):
     except (OSError, ValueError): return None
 
 
+def save(folder, doc):
+    from strata360.edit import voiceover as V
+    os.makedirs(V.base(folder), exist_ok=True); tmp = vo_path(folder) + '.tmp'; json.dump(doc, open(tmp, 'w'), indent=1); os.replace(tmp, vo_path(folder))
+
+
 def _file_sig(path, text, voice):
     st = os.stat(path); return hashlib.sha1(f'{text}|{voice}|{st.st_size}|{int(st.st_mtime)}'.encode()).hexdigest()[:12]
 
@@ -172,4 +177,4 @@ def measure_script(folder, doc, aligner=None, resolve=None, log=None):
         if log: log(i + 1, len(pairs))
     doc_out = dict(schema=1, script_title=doc.get('title'), engine=st.get('engine'), voice=st.get('voice'), rate=st.get('rate'), lines=out,
                    total_speech_s=round(sum((m.get('speech_end_s') or 0) - (m.get('speech_start_s') or 0) for m in out), 3), problems=[dict(key=m['key'], status=m['status']) for m in out if m['status'] != 'ok'])
-    os.makedirs(V.base(folder), exist_ok=True); tmp = vo_path(folder) + '.tmp'; json.dump(doc_out, open(tmp, 'w'), indent=1); os.replace(tmp, vo_path(folder)); return doc_out
+    save(folder, doc_out); return doc_out
