@@ -18,7 +18,7 @@ describe('RedoDialog', () => {
   it('renders the grid with correct title for a full folder redo', async () => {
     mockGet('/api/state', makeStateMatrix({
       stages: ['download', 'transcode'],
-      clips: { 'CAM_1234_D': { 'download': 'ok', 'transcode': 'none' }, 'CAM_5678_D': { 'download': 'active' } },
+      clips: { 'CAM_1234_D': { 'download': 'ok', 'transcode': null }, 'CAM_5678_D': { 'download': 'active' } },
       dependents: { 'download': ['transcode'], 'transcode': [] }
     }))
     mount()
@@ -33,7 +33,7 @@ describe('RedoDialog', () => {
   it('renders with pre-selected stages when opened for a specific stage', async () => {
     mockGet('/api/state', makeStateMatrix({
       stages: ['download', 'transcode'],
-      clips: { 'CAM_1': { 'download': 'ok', 'transcode': 'none' }, 'CAM_2': { 'download': 'ok' } },
+      clips: { 'CAM_1': { 'download': 'ok', 'transcode': null }, 'CAM_2': { 'download': 'ok' } },
       dependents: { 'download': ['transcode'], 'transcode': [] }
     }))
     mount({ stage: 'download' })
