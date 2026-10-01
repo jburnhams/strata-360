@@ -1,7 +1,8 @@
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests/utils"]
 testpaths = ["tests/unit", "tests/integration"]
-addopts = "-ra"
+addopts = "-ra --timeout=300"
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]       # TestClient noise from the installed starlette; remove when the dependency moves on
 markers = [
     "integration: needs ffmpeg/ffprobe and builds a synthetic clip (tests/integration)",
     "slow: needs downloaded models (transcription, alignment); run manually or on a schedule",
@@ -16,7 +17,7 @@ omit = ["*/__main__.py"]
 skip_empty = true
 show_missing = false
 # Measured from the unit suite only (tests/unit). Ratchet this up as coverage improves.
-fail_under = 30
+fail_under = 38
 
 [tool.ruff]
 line-length = 400            # the codebase uses long, dense lines on purpose

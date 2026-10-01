@@ -4,10 +4,11 @@
 - Python tests live under `tests/`, grouped by type:
   - `tests/unit/`: fast, isolated tests of pure logic (synthetic data, fakes). No ffmpeg, models or real footage.
   - `tests/integration/`: slower tests that run ffmpeg/ffprobe, the CLI, the server, or the full optimiser. They build a tiny synthetic OSV with `tests/utils/synthetic_osv.py` (the `synthetic_osv` fixture); real footage (`videos/`) is gitignored and never required.
-  - `tests/utils/`: shared helpers. `tests/conftest.py` holds shared fixtures and restores patched globals after each test.
+  - `tests/utils/`: shared helpers (fakes for HTTP/subprocess, project builders). `tests/conftest.py` holds shared fixtures and restores patched globals after each test; `tests/unit/conftest.py` makes the unit suite hermetic (isolated home, no network).
+  - Read `tests/README.md` before writing any Python test: fixtures, conventions and a per-module coverage ledger.
 - Web tests live in `web/tests/{unit,integration,utils}` (vitest; unit runs in node, integration in jsdom). Backend calls are mocked with msw; read `web/tests/README.md` before writing any.
 - Commands (Python, from the repo root; `pip install -r requirements-test.txt` is enough for the suites):
-  - `pytest tests/unit --cov` runs the unit suite with coverage.
+  - `pytest tests/unit --cov` runs the unit suite with coverage (random order via pytest-randomly; `-n auto` runs in parallel; `diff-cover` checks the lines a change touches).
   - `pytest tests/integration` runs the integration suite (needs ffmpeg with libx265).
   - `ruff check src tests` lints for syntax errors and undefined names.
 - Commands (web, from `web/`): `npm run test:unit`, `npm run test:integration`, `npm run test:coverage` (unit only, what counts), `npm run test:coverage:all` (unit + integration, informational), `npm run typecheck`, `npm run build`.

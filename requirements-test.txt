@@ -10,3 +10,9 @@ httpx
 pytest>=8
 pytest-cov>=5
 ruff
+# Test tooling (see tests/README.md)
+hypothesis                     # property-based tests for numeric/parsing code
+pytest-randomly                # random test order + seeded RNGs: finds order dependence (reproduce with -p randomly -p "randomly_seed=N")
+pytest-timeout                 # a hung test fails instead of hanging CI
+pytest-xdist                   # pytest -n auto
+diff-cover                     # coverage of the lines a change touches: diff-cover coverage.xml --compare-branch origin/main
