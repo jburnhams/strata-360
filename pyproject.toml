@@ -1,0 +1,26 @@
+[tool.pytest.ini_options]
+pythonpath = ["src", "tests/utils"]
+testpaths = ["tests/unit", "tests/integration"]
+addopts = "-ra"
+markers = [
+    "integration: needs ffmpeg/ffprobe and builds a synthetic clip (tests/integration)",
+    "slow: needs downloaded models (transcription, alignment); run manually or on a schedule",
+]
+
+[tool.coverage.run]
+source = ["src/strata360"]
+branch = true
+omit = ["*/__main__.py"]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = false
+# Measured from the unit suite only (tests/unit). Ratchet this up as coverage improves.
+fail_under = 30
+
+[tool.ruff]
+line-length = 400            # the codebase uses long, dense lines on purpose
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

@@ -122,6 +122,10 @@ def cmd_report(a):
     open(os.path.join(config.race_dir(a.name), 'report.md'), 'w').write('\n'.join(md)); print('\n'.join(md))
 
 
+def install_hint():
+    return {'darwin': 'brew install ffmpeg exiftool', 'win32': 'winget install Gyan.FFmpeg OliverBetz.ExifTool'}.get(sys.platform, 'sudo apt-get install ffmpeg libimage-exiftool-perl   (or your distribution\'s equivalent)')
+
+
 def cmd_doctor(a):
     import importlib, shutil, warnings
     ok = True
@@ -129,9 +133,11 @@ def cmd_doctor(a):
         nonlocal ok; ok &= level != 'FAIL'; print(f'  {level:4s} {what}' + (f'   -> {hint}' if hint and level != 'ok' else ''))
     print('tools:')
     for t, need in (('ffmpeg', True), ('ffprobe', True), ('exiftool', False), ('say', False)):
-        p = shutil.which(t); line('ok' if p else ('FAIL' if need else 'warn'), f'{t}: {p or "not found"}', 'brew install ffmpeg exiftool' if t != 'say' else 'only the tests need macOS `say`')
+        p = shutil.which(t); line('ok' if p else ('FAIL' if need else 'warn'), f'{t}: {p or "not found"}', install_hint() if t != 'say' else 'optional: the macOS voice-over engine')
     enc = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], capture_output=True, text=True).stdout if shutil.which('ffmpeg') else ''
-    line('ok' if 'hevc_videotoolbox' in enc else 'warn', 'hevc_videotoolbox encoder', 'renders fall back to libx265 (much slower)' if 'hevc_videotoolbox' not in enc else '')
+    from strata360 import hw
+    hwenc = hw._hardware('hevc'); line('ok' if hwenc else 'warn', f'hardware HEVC encoder ({sys.platform}): {hwenc or "none, using software libx265"}', '' if hwenc else 'renders use libx265 (slower but works everywhere)')
+    line('ok' if 'libx265' in enc else 'FAIL', 'libx265 encoder', 'install an ffmpeg build with libx265' if 'libx265' not in enc else '')
     try: import hashlib; hashlib.blake2b(); line('ok', 'python hashlib has blake2 (OpenSSL build)')
     except Exception: line('warn', 'python hashlib lacks blake2b/blake2s (Python built without OpenSSL): harmless but prints error noise on every start', 'reinstall Python with OpenSSL, e.g. brew install openssl then pyenv install 3.13')
     print(f'python {sys.version.split()[0]} ({sys.executable})' + ('' if sys.version_info[:2] == (3, 13) else '  (tested on 3.13)'))
@@ -359,7 +365,7 @@ def cmd_script(a):
         race_line = f"The race: {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours."
     from strata360.pipeline import meta as MT
     race_line = (MT.describe(a.name) + ' ' + race_line).strip()
-    print(f'planned {len(plan)} segments for {a.length:.0f} s; writing the script ({(a.provider or (cfg.get("llm") or {}).get("provider", "vertex"))})...')
+    print(f'planned {len(plan_doc["segments"])} segments for {a.length:.0f} s; writing the script ({(a.provider or (cfg.get("llm") or {}).get("provider", "vertex"))})...')
     llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider', 'vertex'); model = a.model or (llm.get('model') if llm.get('provider', 'vertex') == prov else None)
     doc = SC.write_script(facts, notes['folder'], a.length, wpm=a.wpm, style=a.style or '', race_line=race_line, work_dir=rd, model=model if prov != 'local' else None, provider=prov)
     os.makedirs(os.path.join(rd, 'scripts'), exist_ok=True); p = os.path.join(rd, 'scripts', 'script-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S') + '.json'); json.dump(dict(doc, facts=facts), open(p, 'w'), indent=1)
