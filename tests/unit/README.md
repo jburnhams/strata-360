@@ -42,3 +42,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 - Several old files assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); `restore_globals` papers over a few of them. Convert them to `monkeypatch` when you touch them.
 - `test_workers.py` starts real processes and sleeps (about 5 s).
 - Integration-side issues (slow `test_edit.py`, the exposure overflow warning) are listed in `tests/integration/README.md`.
+
+
+### Added by unit work
+
+- `FakeTorchTensor`, `mock_torch`, `FakeHuggingFaceModel`, `mock_transformers` in `tests/utils/fakes.py`: Mock the PyTorch inference graph and transformers dependencies to avoid deep disk loading and processing in the unit suite.
