@@ -142,3 +142,125 @@ def test_workers_returns_active_worker_pids(processed):
         f.write("time")
     ws = runner.workers(processed)
     assert os.getpid() in ws
+
+
+def test_work_worker_catalog(processed):
+    rd = runner.config.race_dir(processed)
+    catalog_path = os.path.join(rd, 'catalog.json')
+    if os.path.exists(catalog_path):
+        os.remove(catalog_path)
+    runner.work(processed, max_items=0)
+    assert os.path.exists(catalog_path)
+    import json
+    with open(catalog_path) as f:
+        data = json.load(f)
+        assert 'clips' in data
+
+def test_run_clip_glob(processed):
+    cfg = runner.config.load(processed)
+    runner.clear(processed, 'audio', cascade=True)
+    result = runner.run(processed, clip_glob='*120007_0019_D', stages=['audio'])
+    assert ('CAM_20260221120007_0019_D', 'audio') in result
+    assert result[('CAM_20260221120007_0019_D', 'audio')] == 'ok'
+    assert len(result) == 1
+
+def test_run_force(processed):
+    clip = 'CAM_20260221120007_0019_D'
+    state1 = runner.load_state(processed, clip)
+    assert 'audio' in state1
+    result = runner.run(processed, stages=['audio'], force=True)
+    assert (clip, 'audio') in result
+
+def test_work_wait_retry(processed, monkeypatch):
+    clip = 'CAM_20260221120007_0019_D'
+    state = runner.load_state(processed, clip)
+    audio_key = state['audio']['key']
+    runner.update_state(processed, clip, 'audio', {
+        'status': 'retry', 'attempts': 1, 'wait_s': 10,
+        'next_try_at': time.time() + 10, 'error': 'test', 'key': audio_key
+    })
+    delays = []
+    def fake_sleep(seconds):
+        delays.append(seconds)
+        raise ValueError("Stop worker")
+    monkeypatch.setattr(time, 'sleep', fake_sleep)
+    with pytest.raises(ValueError, match="Stop worker"):
+        runner.work(processed, max_items=None, stages=['audio'])
+    assert len(delays) >= 1
+
+def test_run_restamp_ingest(processed, monkeypatch):
+    import strata360.pipeline.ingest
+    restamp_called = False
+    def fake_restamp(dir_path):
+        nonlocal restamp_called
+        restamp_called = True
+        return 1
+    monkeypatch.setattr(strata360.pipeline.ingest, 'restamp', fake_restamp)
+    runner.clear(processed, 'ingest', cascade=True)
+    runner.run(processed, stages=['ingest'])
+    assert restamp_called
+
+def test_work_claim_concurrency_cap(processed, monkeypatch):
+    cfg = runner.config.load(processed)
+    clip = 'CAM_20260221120007_0019_D'
+    runner.clear(processed, 'audio', cascade=True)
+    original_claim = runner.claim
+    def fake_claim(race, cid, name):
+        claims_dir = runner._claims(race)
+        os.makedirs(claims_dir, exist_ok=True)
+        p = os.path.join(claims_dir, f'OTHER_CLIP__{name}')
+        with open(p, 'w') as f:
+            f.write(f'{os.getpid()} {time.time() - 100:.0f}')
+        return original_claim(race, cid, name)
+    monkeypatch.setattr(runner, 'claim', fake_claim)
+    monkeypatch.setitem(runner.resources.STAGE_MAX_CONCURRENT, 'audio', 1)
+    result = runner.work(processed, max_items=1, stages=['audio'])
+    assert not result
+
+def test_work_idempotent(processed):
+    result1 = runner.work(processed, stages=['audio'])
+    assert not result1
+    runner.clear(processed, 'audio', cascade=False)
+    result2 = runner.work(processed, stages=['audio'])
+    assert result2
+    result3 = runner.work(processed, stages=['audio'])
+    assert not result3
+
+def test_stage_fails_fast_exception(processed, monkeypatch):
+    clip = 'CAM_20260221120007_0019_D'
+    def failing_stage(ctx):
+        raise ValueError("Simulated crash in stage")
+    monkeypatch.setattr(runner.STAGES['audio'], 'fn', failing_stage)
+    runner.clear(processed, 'audio', clips=[clip])
+    with pytest.raises(ValueError, match="Simulated crash in stage"):
+        runner.work(processed, max_items=1, stages=['audio'], fail_fast=True)
+    state = runner.load_state(processed, clip)
+    assert state['audio']['status'] == 'failed'
+    assert 'trace' in state['audio']
+    assert 'Simulated crash in stage' in state['audio']['trace']
+
+def test_stage_programming_error_no_retry(processed, monkeypatch):
+    clip = 'CAM_20260221120007_0019_D'
+    def failing_stage(ctx):
+        raise SyntaxError("Bad code")
+    monkeypatch.setattr(runner.STAGES['audio'], 'fn', failing_stage)
+    runner.clear(processed, 'audio', clips=[clip])
+    result = runner.work(processed, max_items=1, stages=['audio'])
+    assert result[(clip, 'audio')] == 'failed'
+    state = runner.load_state(processed, clip)
+    assert state['audio']['status'] == 'failed'
+    assert state['audio']['attempts'] == 1
+
+def test_clear_removes_outputs_on_disk(processed):
+    clip = 'CAM_20260221120007_0019_D'
+    runner.clear(processed, 'audio', clips=[clip], cascade=False)
+    ctx_dir = runner.clip_dir(processed, clip)
+    pass
+
+def test_clear_with_missing_stage(processed):
+    with pytest.raises(ValueError, match="unknown stage 'fake_stage'"):
+        runner.clear(processed, 'fake_stage')
+
+def test_work_with_unknown_stage(processed):
+    with pytest.raises(SystemExit, match="unknown stage.*fake_stage"):
+        runner.work(processed, stages=['fake_stage'])
