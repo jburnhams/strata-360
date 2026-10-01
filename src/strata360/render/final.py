@@ -38,7 +38,7 @@ class FinalSource:
         return self.info[clip]
 
     def frames(self, k, a0, a1, yaw_extra=None):
-        sg = self.segs[k]; ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.seam = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
+        sg = self.segs[k]; ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
         path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
         ks = np.clip(np.round(t_abs * ci['src_fps']).astype(int), 0, ci['n'] - 1); quat = ci['T']['quat']; Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]

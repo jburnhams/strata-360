@@ -86,10 +86,10 @@ class SeamCarver:
         self.row_deg = 2 * BAND_DEG / BAND_ROWS; self.lat_rows = BAND_DEG - (np.arange(BAND_ROWS + 1)) * self.row_deg      # latitude (degrees) of the boundary above row s
         self._proj = [L.project(self.dirs) for L in (master, slave)]
 
-    def band(self, img_m, img_s):
-        """Luma and coverage of both lenses in the band: ((A, covA), (B, covB)), each (rows, BAND_COLS)."""
-        out = []
-        for img, (u, v, th), om in ((img_m, self._proj[0], self.occl_m), (img_s, self._proj[1], self.occl_s)):
+    def band(self, img_m, img_s, warp=None):
+        """Luma and coverage of both lenses in the band: ((A, covA), (B, covB)), each (rows, BAND_COLS). With a parallax `warp` each lens is sampled where the warp moves it (what the renderer will show)."""
+        out = []; proj = self._proj if warp is None else [self.master.project(warp.apply(self.dirs, 1)), self.slave.project(warp.apply(self.dirs, -1))]
+        for img, (u, v, th), om in ((img_m, proj[0], self.occl_m), (img_s, proj[1], self.occl_s)):
             u2 = u.astype(np.float32).reshape(BAND_ROWS, BAND_COLS); v2 = v.astype(np.float32).reshape(BAND_ROWS, BAND_COLS)
             rgb = cv2.remap(img, u2, v2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0).astype(np.float32) / 65535.0
             y = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
@@ -97,9 +97,9 @@ class SeamCarver:
             out.append((y, cov))
         return out
 
-    def carve(self, img_m, img_s, prior=None):
+    def carve(self, img_m, img_s, prior=None, warp=None):
         """Carve the seam from two decoded lens frames (uint16 RGB code values, 3840 x 3840). `prior` (a Seam from the neighbouring frame) adds the hold and the clamp."""
-        (A, cA), (B, cB) = self.band(img_m, img_s); h = lambda x: x.reshape(BAND_ROWS, COLS, 2).mean(2)             # to seam columns
+        (A, cA), (B, cB) = self.band(img_m, img_s, warp); h = lambda x: x.reshape(BAND_ROWS, COLS, 2).mean(2)             # to seam columns
         a, b, ca, cb = h(A), h(B), h(cA), h(cB); R = BAND_ROWS; S = R + 1; w = max(int(round(COST_WINDOW_DEG / self.row_deg)), 1)
         D = np.abs(a - b); cs = np.concatenate([np.zeros((1, COLS), np.float32), np.cumsum(D, 0)]); s_idx = np.arange(S)
         lo = np.clip(s_idx - w, 0, R); hi = np.clip(s_idx + w, 0, R); diff = (cs[hi] - cs[lo]) / np.maximum(hi - lo, 1)[:, None]

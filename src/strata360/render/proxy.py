@@ -51,7 +51,7 @@ def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt',
     """encoder 'h264' (the pipeline default): H.264 from VideoToolbox with the clip's audio, one file for analysis AND the browser player; 'vt' HEVC / 'x265' for archival proxies."""
     """Render the canonical analysis proxy and its JSON sidecar (next to `out`, .json). Returns the sidecar dict."""
     W, H = map(int, size.split('x')); t0 = time.time()
-    R = EquirectRenderer(osv, W, H); R.carve_seam = True
+    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True
     tel = read_frames(osv); pts = video_pts(osv, 0); n_src = len(pts)
     idx = list(range(0, n_src, every))
     if frames_limit: idx = idx[:frames_limit]
@@ -104,7 +104,7 @@ def make_preview(osv, out, size='2048x1024', bitrate='6M', progress=None, frames
     """Browser preview for the GUI player: the same upright, world-locked equirect as the proxy but at 25 fps (every 2nd source frame), H.264 8-bit (plays in every browser, seeks well)
     with the clip's audio (AAC). The GUI viewer projects it on a sphere (drag to pan, wheel to zoom) and can follow the runner's heading. Sidecar `<name>.json` has the per-frame source times."""
     W, H = map(int, size.split('x')); t0 = time.time(); every = 2
-    R = EquirectRenderer(osv, W, H); R.carve_seam = True; tel = read_frames(osv); pts = video_pts(osv, 0); idx = list(range(0, len(pts), every))
+    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True; tel = read_frames(osv); pts = video_pts(osv, 0); idx = list(range(0, len(pts), every))
     if frames_limit: idx = idx[:frames_limit]
     dm, ds = decoder(osv, 1, every), decoder(osv, 0, every); tmp = out + '.video.mp4'
     enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', '25', '-i', '-',
