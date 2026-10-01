@@ -41,10 +41,11 @@ def _maybe_json(b):
 
 
 class FakePopen:
-    """Stands in for `subprocess.Popen`: records the command line and kwargs, never starts anything. `.instances` lists every one made."""
+    """Stands in for `subprocess.Popen`: records the command line and kwargs, never starts anything. `.instances` lists every one made.
+    File objects passed as stdin/stdout/stderr are recorded by name, not kept: holding them open would stop a test deleting the project folder on Windows."""
     instances = []
     def __init__(self, cmd, **kw):
-        self.cmd, self.kw, self.pid, self.returncode = list(cmd), kw, 4242 + len(FakePopen.instances), None
+        self.cmd, self.kw, self.pid, self.returncode = list(cmd), {k: getattr(v, 'name', v) if hasattr(v, 'fileno') else v for k, v in kw.items()}, 4242 + len(FakePopen.instances), None
         FakePopen.instances.append(self)
     def poll(self): return self.returncode
     def wait(self, timeout=None): return self.returncode if self.returncode is not None else 0

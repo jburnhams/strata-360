@@ -28,6 +28,11 @@ def test_fake_popen_starts_nothing(fake_popen):
     p.terminate(); assert p.poll() == -15
 
 
+def test_fake_popen_does_not_keep_the_files_it_was_given_open(fake_popen, tmp_path):
+    log = open(tmp_path / 'job.log', 'ab'); p = subprocess.Popen(['x'], stdout=log); log.close()
+    assert p.kw['stdout'] == str(tmp_path / 'job.log')          # a name, not the file: an open handle blocks deleting the folder on Windows
+
+
 def test_fake_run_returns_scripted_output_and_can_fail(fake_run):
     fake_run.returns['ffprobe'] = b'{"streams": []}'
     assert subprocess.check_output(['ffprobe', '-v', 'quiet']) == b'{"streams": []}' and subprocess.run(['ffmpeg', '-y']).returncode == 0
