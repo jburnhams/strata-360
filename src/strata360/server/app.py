@@ -278,6 +278,10 @@ def create_app(roots, token=None):
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
+        ev = _j(d, 'audio_events.json')
+        if ev:
+            from strata360.analysis import sound_events as SE
+            out['sounds'] = dict(seconds=SE.category_seconds(ev), windows=[dict(t0=w['t0'], t1=w['t1'], cats={k: v for k, v in w['cats'].items() if v >= 0.2}, top=w['top'][:3]) for w in ev['windows']], hints={c: list(h) for c, h in SE.HINTS.items()})
         out['audio_files'] = dict(original=os.path.exists(d + 'audio_original.flac'), clean=os.path.exists(d + 'audio_clean.flac'))
         mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
@@ -633,6 +637,11 @@ def create_app(roots, token=None):
                 for l in json.load(open(files[-1])).get('lines', []):
                     if l.get('id'): lines[l['id']] = dict(text=l.get('text', ''), says=l.get('says') or [], words=l.get('words'), budget=l.get('budget_words'))
             except ValueError: pass
+        from strata360.analysis import sound_events as SE
+        for g in (e.get('plan') or {}).get('segments', []):
+            try: doc = json.load(open(os.path.join(rd, 'clips', g['clip'], 'audio_events.json')))
+            except (OSError, ValueError): continue
+            m = SE.window_mix(doc, g['clip_start_s'], g['clip_start_s'] + g['dur_s'], bool(g.get('speech'))); g['sound'] = dict(gain_db=m['gain_db'], why=m['why'])
         return dict(edit=e, techniques=[dict(id=t.id, family=t.family, hero=t.hero, dur=list(t.dur), dialogue_ok=t.dialogue_ok) for t in lib.values()], script=lines)
 
     @api.post('/api/edit/propose', dependencies=[Depends(auth)])

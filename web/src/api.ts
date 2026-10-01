@@ -30,7 +30,7 @@ export interface PlanOption { tech: string; score: number }
 export interface PlanSegment {
   id: string; index: number; clip: string; cand_id: string; film_start_s: number; beats: number; dur_s: number; clip_start_s: number; utc_start: string; utc_end: string
   technique: string; family: string; hero: boolean; forced: boolean; speech: boolean; locked: boolean; options: PlanOption[]
-  kind?: string; view?: string; transition?: { type: 'cut' | 'dissolve' | 'dip' | 'whip'; beats: number; dur_s: number; why: string }
+  sound?: { gain_db: number; why: string[] }; kind?: string; view?: string; transition?: { type: 'cut' | 'dissolve' | 'dip' | 'whip'; beats: number; dur_s: number; why: string }
 }
 export interface EditState {
   settings: { length_s: number; bpm: number; bar_beats: number; seed: number; wpm: number; style: string }
@@ -53,7 +53,9 @@ export interface Line { si: number; part?: number; play0?: number; play1?: numbe
 export interface Why { starts_because: string; ends_because?: string; steadiness: number; shake_dps: number; exposure_ok: number; scenic: number; lens_blocked: number; score: number; speech: boolean; chatter: number }
 export interface Candidate { id: string; kind?: 'span' | 'best' | 'speech' | 'person' | 'you' | 'scene'; view?: string; priority?: number; span?: number; start_s: number; end_s: number; start_utc: string; quality: number; energy: number; features: Record<string, number>; settings: string[]; people: number; why?: Why }
 export interface Unusable { start_s: number; end_s: number; usable: false; reasons: string[]; detail: string | null; starts_because: string; ends_because?: string; stats: Record<string, number | string | null> }
+export interface Sounds { seconds: Record<string, number>; windows: { t0: number; t1: number; cats: Record<string, number>; top: [string, number][] }[]; hints: Record<string, [string, number]> }
 export interface ClipDetail {
+  sounds?: Sounds
   audio_files?: { original: boolean; clean: boolean }
   id: string; note: string; time: Record<string, string | number | boolean | null>; video: Record<string, any>; camera?: Record<string, string>
   motion: Record<string, number | null> | null; audio: { summary: any; segments: { label: string; t0_s: number; t1_s: number }[] } | null

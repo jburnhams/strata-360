@@ -64,6 +64,15 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
           <Moments duration={c.video.source_frames / c.video.nominal_fps} usable={c.candidates} unusable={c.unusable} thresholds={c.thresholds} />
         </Card>
       </div>
+      {c.sounds && <Card title="Sounds">
+        <div className="mb-2 flex flex-wrap gap-1.5 text-xs">{Object.entries(c.sounds.seconds).map(([k, v]) => {
+          const h = c.sounds!.hints[k]; return <span key={k} title={h ? `${h[0]}: suggested level ${h[1]} dB` : ''} className={`rounded-full border px-2 py-0.5 ${h?.[0] === 'avoid' ? 'border-red-300 text-red-700 dark:text-red-300' : h?.[0] === 'voice' ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-stone-300 text-stone-600 dark:border-stone-600 dark:text-stone-300'}`}>{k} {Math.round(v)} s</span> })}</div>
+        <div className="flex h-4 w-full overflow-hidden rounded bg-stone-200 dark:bg-stone-800" title="the strongest sound other than speech in each stretch">{c.sounds.windows.map((w, i) => {
+          const top = Object.entries(w.cats).filter(([k]) => k !== 'speech').sort((a, b) => b[1] - a[1])[0]; const role = top ? c.sounds!.hints[top[0]]?.[0] : undefined
+          return <div key={i} title={top ? `${fmt(w.t0)}–${fmt(w.t1)}: ${top[0]} ${top[1].toFixed(2)}` : `${fmt(w.t0)}: nothing but speech`} style={{ width: `${100 * (Math.min(w.t1, w.t0 + 3) - w.t0) / (c.sounds!.windows[c.sounds!.windows.length - 1].t1)}%` }}
+            className={role === 'avoid' ? 'bg-red-400' : role === 'voice' || role === 'energy' ? 'bg-emerald-500' : top ? 'bg-sky-400' : 'bg-stone-300 dark:bg-stone-700'} /> })}</div>
+        <p className="mt-1 text-xs text-stone-500">green: cheering, laughter, shouting · blue: textures (water, nature, footsteps, bells, crowd) · red: sounds the mix pulls down (wind, handling noise, traffic, nearby music, beeps)</p>
+      </Card>}
       <Card title="Transcript">
         <div className="mb-2 flex items-center gap-2 text-xs text-stone-500">other languages shown as
           <select value={mode} onChange={e => setMode(e.target.value as Mode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="translated">translated</option><option value="original">original</option><option value="both">both</option></select></div>

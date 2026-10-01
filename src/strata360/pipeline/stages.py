@@ -77,6 +77,12 @@ def audio_clean(ctx):
     y = dsp.clean_for_playback(dsp.load_audio(ctx.path('audio_original.flac'), 1)[:, 0]); out = ctx.path('audio_clean.flac'); dsp.write_flac(out + '.part.flac', y); os.replace(out + '.part.flac', out)
 
 
+@stage('audio_events', 1, outputs=('audio_events.json',), deps=('audio_extract',), note='what the sound is, second by second (sound-event classifier, 527 AudioSet classes grouped into speech, shouting, cheering, crowd, breathing, footsteps, wind, handling noise, nature, water, vehicles, music, bells, beeps) with a suggested role and level for the film')
+def audio_events(ctx):
+    from strata360.analysis import sound_events as SE
+    ctx.write('audio_events.json', ctx.stamped(SE.classify(ctx.path('audio_original.flac'))))
+
+
 @stage('audio', 1, outputs=('audio.json',), deps=('ingest',), soft_deps=('audio_extract',), note='levels, loudness, clipping, wind/speech/crowd/ambience labels (README 5.10)')
 def audio(ctx):
     from strata360.audio import dsp

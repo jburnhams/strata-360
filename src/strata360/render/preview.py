@@ -126,6 +126,14 @@ def has_audio(p):
     r = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', p], capture_output=True, text=True); return bool(r.stdout.strip())
 
 
+def window_gain(folder, g):
+    """Linear gain for a window's own sound: you speaking is full volume; otherwise what the sound classifier found decides (analysis/sound_events.window_mix); without it the old rule (1.0 speech, 0.25 else)."""
+    from strata360.analysis import sound_events as SE
+    try: doc = json.load(open(os.path.join(config.race_dir(folder), 'clips', g['clip'], 'audio_events.json')))
+    except (OSError, ValueError): return 1.0 if g.get('speech') else 0.25
+    return 10 ** (SE.window_mix(doc, g['clip_start_s'], g['clip_start_s'] + g['dur_s'], bool(g.get('speech')))['gain_db'] / 20.0)
+
+
 def audio_of(folder, clip):
     """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none."""
     d = os.path.join(config.race_dir(folder), 'clips', clip)
@@ -138,7 +146,7 @@ def build_audio(folder, plan, out, total_s):
     """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track."""
     inputs = []; chains = []; n = 0
     for g in plan['segments']:
-        p = audio_of(folder, g['clip']); d = g['dur_s']; gain = 1.0 if g.get('speech') else 0.25
+        p = audio_of(folder, g['clip']); d = g['dur_s']; gain = window_gain(folder, g)
         if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
         n += 1
