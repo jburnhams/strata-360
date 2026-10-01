@@ -114,6 +114,9 @@ def align(ctx):
 def transcript_check(ctx):
     from strata360.analysis import transcript_fix as TF
     c = ctx.cfg.get('transcript_check') or {}
+    if c.get('mode') == 'transcribe':                                                                      # the transcription model alone
+        from strata360.analysis import transcribe35 as T35
+        ctx.write('transcript_check.json', ctx.stamped(T35.apply_clip(ctx.cfg['library'], ctx.clip.id, log=ctx.log))); return
     if c.get('pool'): kw = dict(pool=c['pool'], **{k: c[k] for k in ('min_calls', 'max_calls', 'accept', 'min_votes', 'patience') if k in c})       # the adaptive ensemble
     else: kw = dict(runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), provider=c.get('provider'), model=c.get('model'))      # the fixed vote
     ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, thinking=c.get('thinking', 'low'), log=ctx.log, **kw)))

@@ -18,7 +18,7 @@ DEFAULTS = {
     'people_every_frames': 50,
     'profile': 'me',
     'scenes_every_s': 5.0,
-    'transcript_check': {'thinking': 'low', 'pool': ['gemini:gemini-3.8-flash', 'gemini:gemini-3.7-flash', 'gemini:gemini-3.6-flash', 'gemini:gemini-3.5-flash', 'gemini:gemini-3-flash-preview'],
+    'transcript_check': {'mode': 'transcribe', 'thinking': 'low', 'pool': ['gemini:gemini-3.8-flash', 'gemini:gemini-3.7-flash', 'gemini:gemini-3.6-flash', 'gemini:gemini-3.5-flash', 'gemini:gemini-3-flash-preview'],
                          'min_calls': 6, 'max_calls': 18, 'accept': 0.5, 'min_votes': 3, 'patience': 3},          # a random mixture of free-key Flash models until the answer settles (analysis/transcript_fix.py); add 'vertex:gemini-3.1-pro-preview' for the paid Pro; remove 'pool' for the fixed 3-check vote          # the audio check of the transcript (opt-in stage `transcript_check`: it makes paid API calls; replies are cached per call)
     'llm': {'provider': 'gemini', 'model': 'gemini-3.1-pro-preview'},           # the voice-over script writer: Gemini Pro through a Google Cloud (Vertex AI) key in secrets.env; or 'gemini' (AI Studio key), 'anthropic', 'local' (mlx-lm)
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass

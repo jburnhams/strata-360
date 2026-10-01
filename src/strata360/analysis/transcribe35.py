@@ -15,6 +15,9 @@ from strata360.analysis import transcript_fix as TF, transcribe_gemini as TG, tr
 MODEL = 'gemini-3.5-transcribe'
 URL = 'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
 GAP_S = 2.0
+FILLERS = {'um', 'uh', 'er', 'erm', 'uhm', 'hmm', 'mm', 'ah', 'eh'}   # this model writes them, Whisper leaves them out: not corrections
+MIN_LIKE = 0.5                                                        # the correction must look like the word it replaces (where the two transcripts drift apart, words get paired with unrelated ones)
+MAX_RUN = 3                                                           # a replaced run longer than this (either side) is a different reading of the whole stretch, not a correction
 MAX_BYTES = 16 * 1024 * 1024          # inline request limit is about 20 MB with the base64 overhead
 MAX_AUDIO_S = 120.0                    # about two minutes of speech a request (the paid key: not huge requests)
 SR = 16000
@@ -78,7 +81,7 @@ def transcribe(audio_bytes, cache_dir=None, usage=None, log=print):
     body = dict(contents=[dict(role='user', parts=[dict(inlineData=dict(mimeType='audio/flac', data=base64.b64encode(audio_bytes).decode())), dict(text='Transcribe this audio.')])]); t0 = time.time()
     r, tier = LR.gemini_post(MODEL, body, timeout=600)                                     # the free key first, the paid key when the free one is at its limit
     parts = (r.get('candidates') or [{}])[0].get('content', {}).get('parts', []); text = ' '.join(p.get('audioTranscription', {}).get('text', '') or p.get('text', '') for p in parts).strip()
-    if not text: raise LR.LLMError('the transcription model returned nothing')
+    if not text: raise LR.LLMBusy('the transcription model returned nothing (will retry)')
     u = r.get('usageMetadata', {})
     if cp:
         os.makedirs(cache_dir, exist_ok=True); json.dump(dict(key=key, model=MODEL, text=text, tokens=u.get('promptTokenCount'), seconds=round(time.time() - t0, 1), kb=round(len(audio_bytes) / 1024), tier=tier, at=time.time()), open(cp + '.tmp', 'w'), indent=1); os.replace(cp + '.tmp', cp)
@@ -90,10 +93,11 @@ def transcribe(audio_bytes, cache_dir=None, usage=None, log=print):
 
 def align(draft, text):
     """Corrections from aligning the transcript `text` to `draft` [(item, seg, word, token)]: {item: [fix]} where a fix is {seg, word, through, to, from, why} (the format of the other checks), plus counts of what could not be applied."""
-    gw = [w for w in text.split() if TG.norm(w)]; a = [TG.norm(d[3]) for d in draft]; b = [TG.norm(w) for w in gw]
+    gw = [w for w in text.split() if TG.norm(w) and TG.norm(w) not in FILLERS]; a = [TG.norm(d[3]) for d in draft]; b = [TG.norm(w) for w in gw]
     sm = difflib.SequenceMatcher(None, a, b, autojunk=False); fixes = {}; skipped = dict(insert=0, delete=0, cross=0, equal=0)
     def add(i0, i1, to):
         s = draft[i0][:2]
+        if difflib.SequenceMatcher(None, ''.join(TG.norm(d[3]) for d in draft[i0:i1]), ''.join(TG.norm(w) for w in to.split())).ratio() < MIN_LIKE: skipped['unlike'] = skipped.get('unlike', 0) + 1; return
         if any(draft[k][:2] != s for k in range(i0, i1)): skipped['cross'] += 1; return                      # a run across phrases (or clips): not one correction
         it, si, wi, _ = draft[i0]; fixes.setdefault(it, []).append(dict(seg=si, word=wi, through=draft[i1 - 1][2], to=to, **{'from': ' '.join(d[3] for d in draft[i0:i1])}, why='the transcription model heard this', model=MODEL))
     for op, i1, i2, j1, j2 in sm.get_opcodes():
@@ -101,7 +105,8 @@ def align(draft, text):
         elif op == 'replace':
             if i2 - i1 == j2 - j1:
                 for k in range(i2 - i1): add(i1 + k, i1 + k + 1, gw[j1 + k])
-            else: add(i1, i2, ' '.join(gw[j1:j2]))
+            elif max(i2 - i1, j2 - j1) <= MAX_RUN: add(i1, i2, ' '.join(gw[j1:j2]))
+            else: skipped['long'] = skipped.get('long', 0) + 1
         elif op == 'insert': skipped['insert'] += j2 - j1
         elif op == 'delete': skipped['delete'] += i2 - i1
     return fixes, skipped
@@ -151,3 +156,11 @@ def run(folder, clips=None, log=print, progress=None, only_missing=False):
         from strata360.pipeline.retry import RetryLater
         raise RetryLater(f'{len(failed)} of {len(bs)} batches failed for now ({failed[0][:100]}); {made + reused} done and kept', progress=made > 0)
     return dict(batches=len(bs), clips=len(its), made=made, reused=reused, corrections=sum(len(v) for v in per.values()))
+
+
+def apply_clip(folder, clip, log=print):
+    """Store the transcription model's corrections for one clip as its Gemini corrections (the transcription-only way of the `transcript_check` stage). Returns a summary document."""
+    cd = os.path.join(config.race_dir(folder), 'clips', clip); tr = json.load(open(cd + '/transcript.json'))
+    ensure(folder, clip, log=log); fx = load(cd, tr) or []
+    n = TE.set_gemini(cd, fx, model=MODEL)
+    return dict(settings=dict(mode='transcribe', model=MODEL), proposed=len(fx), stored=n, kept=fx)
