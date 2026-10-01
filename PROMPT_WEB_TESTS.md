@@ -75,7 +75,7 @@ From `web/`: `npm ci`, `npm run typecheck`, `npm run test:unit`, `npm run test:i
 - Loop until the **web** jobs of "Unit tests" and "Integration tests" are green on the latest head commit:
   1. Read the results with the GitHub MCP tools (`actions_list`, `actions_get`, `get_job_logs`).
   2. If red, reproduce, root-cause, push a minimal fix, repeat.
-  3. If a failure is clearly not yours (a Python job, Windows jobs which are non-blocking, or an infrastructure error naming something your diff doesn't touch), say so in one PR comment with the evidence and re-run at most once. Never mask a flake. Never skip tests or push an empty commit to retrigger CI.
+  3. If a failure is clearly not yours (a Python job, or an infrastructure error naming something your diff doesn't touch), say so in one PR comment with the evidence and re-run at most once. Never mask a flake. Never skip tests or push an empty commit to retrigger CI.
   4. CI-only failures to anticipate: `package-lock.json` out of sync (commit a lockfile generated with Node 22), timing-sensitive tests on slower runners (use `findBy*`/fake timers), and type errors in test files (tests are typechecked).
 - The PR description must include:
   - the slice and why, and what's left for next runs;

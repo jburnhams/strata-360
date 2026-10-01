@@ -12,7 +12,7 @@ You are a coding agent new to this repo. Find a coherent slice of **under-tested
    - `pytest tests/unit -n auto` (parallel), `pytest tests/unit -p randomly --randomly-seed=N` (reproduce an order)
    - `ruff check src tests`
    - `diff-cover coverage.xml --compare-branch origin/main` (coverage of just your changed lines)
-5. **GitHub Actions is the source of truth.** `unit.yml` runs the unit suite with coverage, ruff, and the web checks across Python 3.11–3.13 on Linux, macOS, and Windows (Windows is non-blocking). `integration.yml` runs the ffmpeg suites. The PR is done only when CI is green on the head commit. Code must be cross-platform: build paths with `os.path`, don't assume symlinks work (skip with a reason if they can't be created), and read AGENTS.md on `oslib.py`/`hw.py` before touching anything process- or hardware-related.
+5. **GitHub Actions is the source of truth.** `unit.yml` runs the unit suite with coverage, ruff, and the web checks across Python 3.11–3.13 on Linux, macOS, and Windows (all blocking). `integration.yml` runs the ffmpeg suites. The PR is done only when CI is green on the head commit. Code must be cross-platform: build paths with `os.path`, don't assume symlinks work (skip with a reason if they can't be created), and read AGENTS.md on `oslib.py`/`hw.py` before touching anything process- or hardware-related.
 
 ## 1. Choose the slice (data-driven, so reruns don't collide)
 
@@ -59,6 +59,6 @@ You are a coding agent new to this repo. Find a coherent slice of **under-tested
 - Loop until CI is green on the latest head commit:
   1. Read results with the GitHub MCP tools (`actions_list`, `actions_get`, `get_job_logs`).
   2. If red, reproduce, root-cause, push a minimal fix, repeat. macOS- or Windows-only failures are usually path, line-ending, or symlink/permission assumptions: fix them in the test.
-  3. If a failure is clearly not yours (the web jobs, Windows which is non-blocking, an infrastructure error), say so in one PR comment with the evidence and re-run at most once. Never mask a flake, skip tests, or push an empty commit to retrigger CI.
+  3. If a failure is clearly not yours (the web jobs, or an infrastructure error), say so in one PR comment with the evidence and re-run at most once. Never mask a flake, skip tests, or push an empty commit to retrigger CI.
 - The PR description must include: the slice and why (and what's left); coverage before -> after per module and overall (from CI); new dependencies/fixtures/helpers and which older tests were converted; "Findings" (bugs as xfails, order-dependence fixes, risky or untestable areas, any `src/` change).
 - Finish by stating the CI status on the head commit, the PR link, and what remains. Don't merge. Don't start a second slice. If review comments or CI events arrive on your PR, handle them as part of this same PR.

@@ -16,14 +16,12 @@ concurrency:
 jobs:
   python:
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental == true }}     # Windows support is new: reported but not blocking yet
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
         include:
           - os: windows-latest
-            experimental: true
     env:
       # CI VMs have no video hardware: use the software paths on every OS (the hardware paths are covered by tests/unit/test_hw.py)
       STRATA_HWACCEL: none
