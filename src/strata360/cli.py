@@ -38,7 +38,16 @@ def cmd_catalog(a):
     print(f'{len(cl)} clips; {len(other)} unsupported files')
 
 
+def worker_allowed(name):
+    """False (with the reason printed) when starting a worker on this project now would break the limits: one is the first free, more only with plenty of free memory (pipeline/resources.py; the app checks the same)."""
+    from strata360.pipeline import resources
+    wk = runner.workers(name); ok, why = resources.may_start_extra_worker(len(wk), config.load(name))
+    if not ok: print(f"not starting another worker: {len(wk)} already running (pid {', '.join(map(str, wk))}); {why}")
+    return ok
+
+
 def cmd_run(a):
+    if not worker_allowed(a.name): return
     stages = a.stages.split(',') if a.stages else None
     res = runner.run(a.name, stages, a.clips, a.force, fail_fast=a.fail_fast)
     failed = [k for k, v in res.items() if v == 'failed']
@@ -255,6 +264,22 @@ def cmd_progress(a):
     if p['needs']: print('  waiting for you:', ', '.join(p['needs']))
 
 
+def cmd_plan_blocks(a):
+    from strata360.edit import project as PJ
+    r = PJ.rough_blocks(a.name, a.target_s, a.auto)
+    if a.json: print(json.dumps(r, indent=1)); return
+    p = r['plan']; src = {'music': f"the music track ({r['music']['duration_s']:.0f} s long, from its first bar at {r['music']['offset_s']:.1f} s)" if r['music'] else '', 'target': f"the target you gave ({a.target_s} s)", 'automatic': 'automatic (from the usable footage)'}[r['target_source']]
+    print(f"film length guide: {src}\nrough plan: {len(p['blocks'])} blocks, {p['target_s']:.1f} s, {len(p['dropped'])} clip(s) dropped" + (f", short by {p['shortfall_s']:.1f} s" if p['shortfall_s'] else ''))
+    print(f"{'#':>3} {'clip':27} {'target':>7} {'usable':>7} {'speech':>7} {'min':>5} {'max':>6}  preferred")
+    for b in p['blocks']:
+        kinds = {}
+        for x in b['preferred']: kinds[x['kind']] = kinds.get(x['kind'], 0) + 1
+        print(f"{b['index']:>3} {b['clip']:27} {b['target_s']:>7.1f} {b['usable_s']:>7.1f} {b['dialogue_s']:>7.1f} {b['min_s']:>5.1f} {b['max_s']:>6.1f}  " + ' '.join(f'{k}x{n}' for k, n in kinds.items()))
+    for d in p['dropped']: print(f"dropped {d['clip']}: {d['reason']}")
+    for w in p['warnings']: print('warning:', w)
+    if r['clips_without_candidates']: print(f"{len(r['clips_without_candidates'])} clip(s) have no candidates yet and are not in the plan")
+
+
 def cmd_coverage(a):
     from strata360.pipeline.coverage import coverage
     r = coverage(a.name)
@@ -286,7 +311,7 @@ def cmd_open(a):
         if ext in ('.fit', '.gpx'): shutil.copyfile(a.gps, os.path.join(rd, 'track' + ext)); print('race track saved as', os.path.join(rd, 'track' + ext))
     p = project_progress(folder); print(f"state: {p['state']}, {p['percent']}% done" + (f", about {p['eta_s'] / 60:.0f} min left" if p['eta_s'] else ''))
     if p['state'] in ('processing',) and not a.no_run:                                # a worker: it loops until nothing is left; more can run at once (each picks unfinished, unclaimed items)
-        res = runner.run(folder, None, None, False); p = project_progress(folder)
+        if worker_allowed(folder): runner.run(folder, None, None, False); p = project_progress(folder)
     if p['state'] == 'complete': print('everything is processed: next is the results / export stage')
     if p['needs']: print('waiting for you:', ', '.join(p['needs']), '(wearer_profile: ./strata360 who FOLDER --auto; camera_clock: ./strata360 clock FOLDER --suggest)')
 
@@ -433,6 +458,7 @@ def main():
     p = sub.add_parser('open', help='open a footage folder as a project: create it if new, continue whatever is unfinished (what the GUI does first)'); p.add_argument('name', metavar='FOLDER')
     p.add_argument('--languages'); p.add_argument('--gps', help='the race FIT/GPX'); p.add_argument('--no-run', action='store_true'); p.set_defaults(fn=cmd_open)
     p = sub.add_parser('progress', help='project state and per-stage progress (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_progress)
+    p = sub.add_parser('plan-blocks', help='the rough plan: one block per clip with its target length, usable footage and dialogue (the film length from --target-s, else the music track, else automatic)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--target-s', type=float, help='film length guide in seconds'); p.add_argument('--auto', action='store_true', help='ignore the music track: automatic length'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_plan_blocks)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)

@@ -34,10 +34,10 @@ class EquirectRenderer(r4.Renderer):
         self.dE = np.stack([np.sin(lon) * np.cos(lat), np.cos(lon) * np.cos(lat), np.sin(lat)], -1).reshape(-1, 3)
 
     def maps(self, M, _unused, roll=0.0):
-        d = np.einsum('nj,ij->ni', self.dE, M)                                          # d_body = M d_E
+        d = np.einsum('nj,ij->ni', self.dE, M); self._dirs = d                          # d_body = M d_E; the carved seam reads the body-frame rays (as in flat.Renderer.maps)
         out = []
-        for L in (self.master, self.slave):
-            uu, vv, th = L.project(d)
+        for L, sign in ((self.master, 1), (self.slave, -1)):
+            uu, vv, th = L.project(d if self.warp is None else self.warp.apply(d, sign))     # the parallax warp, as in flat.Renderer.maps
             out.append((uu.reshape(self.gh, self.gw), vv.reshape(self.gh, self.gw), np.degrees(th).reshape(self.gh, self.gw)))
         return out
 
