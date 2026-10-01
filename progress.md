@@ -490,3 +490,10 @@ By noise type (small, all SNRs): wind raw 0.14 → DeepFilterNet3 0.11 and MossF
 ## Background track (opt-in `audio_background` stage, Oct 2026)
 - Speech taken out, the place kept: TIGER-DnR effects model (dialogue / effects / music separation). Tried first: original minus DeepFilterNet's speech: the classifier still scored the rest 0.41 speech (original 0.52). TIGER: speech score gone on a 5 s test, the classifier hears animals, a bicycle, hooves.
 - Speed: CPU about 6 s per second of audio; Apple GPU (STRATA_GPU=1) about 1 s per second. Output `audio_background.flac`; `audio_events` classifies it too (`background` windows) and `window_mix` uses it for the non-voice categories. Not yet run through the whole pipeline: only the model call was timed on a 5 s piece.
+
+## Gemini keys, cost, tracking, CI (Oct 2026)
+- Keys (`secrets.env`): free key first for Flash and the transcription model, paid key as the fallback on a rate limit and alone for Pro; Vertex key is the older route. Calls are logged with their tier and tokens (`gemini_usage.jsonl`); the transcript panel shows the paid spend. Prices in `transcript_fix.PRICES`: Pro and transcribe $2 / $12, Flash $0.75 / $3.75 per million tokens.
+- Transcript check settled on Pro, twice plus a tiebreak (above). Clip 0023: Pro votes agree with the transcription model on `saying -> sane`, `around -> round`; they disagree on `shoulders` (Pro: socks, transcribe: shorts): needs a listen.
+- Person / You tracking (`edit/aim.py`, `web/src/aim.ts`): dead band, slow pan, one jump; head a hard requirement in frame (identity stage v2 stores `head_up`).
+- CI: unit and integration suites run on GitHub Actions (main). The macOS integration job hung because the resource gate waited for free memory for ever: `STRATA_NO_RESOURCE_LIMITS=1` (set by `tests/integration/conftest.py`).
+- Background track measured on two clips (above): good for a single close voice, keeps crowd and distant chatter.
