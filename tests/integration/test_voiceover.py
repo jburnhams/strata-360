@@ -80,3 +80,15 @@ class TestVoices:
     def test_no_engine_is_reported_clearly(self, monkeypatch, fake_engine):
         monkeypatch.setattr(fake_engine, 'ENGINES', {'none': ('None', lambda: False, lambda: [], None)})
         with pytest.raises(RuntimeError, match='voice model is not installed'): fake_engine.pick({})
+
+
+class TestMeasure:
+    def test_block_script_lines_are_spoken_at_natural_length_and_measured(self, speech, fake_engine, tmp_path):
+        from strata360.edit import vo_measure as M
+        V = fake_engine; f = speech([]); doc = dict(title='T', lines=[dict(block=0, anchor=None, text='one two three'), dict(block=1, anchor='before', text='four five six seven eight'), dict(block=1, anchor='after', text='')])
+        def al(x, w): n = len(w); return [(i * 0.1, (i + 1) * 0.1, 0.9) for i in range(n)]
+        d = M.measure_script(f, doc, al)
+        assert [l['key'] for l in d['lines']] == ['000n0', '001b0'] and [l['take'] for l in d['lines']] == ['synth', 'synth'] and {l['status'] for l in d['lines']} == {'short'}       # the tone voice reads 600 words a minute: far faster than a person, so the words-missing check fires
+        assert d['lines'][0]['natural_s'] == pytest.approx(0.3, abs=0.05) and d['lines'][1]['natural_s'] == pytest.approx(0.5, abs=0.05)            # 0.1 s a word: no tempo change
+        V.save_recording(f, '000n0', make_tone(tmp_path / 'take.wav', 1.2, 500)); d = M.measure_script(f, doc, lambda x, w: [(i * 0.4, (i + 1) * 0.4, 0.9) for i in range(len(w))])
+        assert d['lines'][0]['take'] == 'recorded' and d['lines'][0]['natural_s'] == pytest.approx(1.2, abs=0.1) and os.path.exists(M.vo_path(f))
