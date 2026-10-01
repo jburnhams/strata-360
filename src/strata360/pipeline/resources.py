@@ -7,7 +7,7 @@ Rules (all applied by every worker, whoever started it):
   * before starting an item a worker checks the memory that stage needs and waits while there is not enough, or while the machine is busy;
   * the heavy stages (the vision model, detectors, proxy rendering, speech recognition) never run twice at the same time: parallelism is only across different stages;
   * the detectors use the CPU rather than the GPU by default, so the screen stays responsive (set STRATA_GPU=1 to allow the GPU).
-The numbers can be changed in race.json under `resources`."""
+The numbers can be changed in race.json under `resources`; STRATA_NO_RESOURCE_LIMITS=1 turns the waiting off (the integration tests set it: a CI runner with little free memory would otherwise wait for ever)."""
 import ctypes, ctypes.util, os, re, subprocess, time
 
 DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
@@ -67,6 +67,7 @@ def low_priority(cfg=None):
 def wait_for_headroom(stage, cfg=None, active=None, log=print, poll=20, max_wait=None):
     """Block until the machine has room for one item of `stage`: enough available memory, not busy, and (for a heavy stage) no other worker running it. `active` is a callable returning the
     stages currently being processed by all workers. Returns True when it may go ahead, False if `max_wait` seconds passed."""
+    if os.environ.get('STRATA_NO_RESOURCE_LIMITS'): return True                                    # tests and CI runners: nobody is waiting for the machine to be free
     v = cfg_values(cfg); need = STAGE_MEM_GB.get(stage, 1.0) + float(v['reserve_gb']); cap = STAGE_MAX_CONCURRENT.get(stage); t0 = time.time(); said = None
     while True:
         why = None; avail = mem_available_gb()
