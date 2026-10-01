@@ -11,6 +11,15 @@ The numbers can be changed in race.json under `resources`; STRATA_NO_RESOURCE_LI
 import ctypes, ctypes.util, os, re, subprocess, sys, time
 from strata360 import oslib
 
+_REAL_POPEN = subprocess.Popen          # the real class, kept: tests replace subprocess.Popen to record what the code under test starts, and the machine probes below must not be recorded
+
+
+def run_text(cmd, timeout=10):
+    """stdout of a short probe command as text ('' when it cannot be run); never goes through a replaced subprocess.Popen."""
+    try:
+        p = _REAL_POPEN(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True); out, _ = p.communicate(timeout=timeout); return out or ''
+    except Exception: return ''
+
 DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
@@ -29,7 +38,7 @@ def mem_available_gb():
         try: return oslib.windows_available_gb()
         except Exception: return 1e3
     try:
-        out = subprocess.run(['vm_stat'], stdout=subprocess.PIPE, text=True, timeout=5).stdout
+        out = run_text(['vm_stat'], 5)
         page = int(re.search(r'page size of (\d+) bytes', out).group(1)); n = lambda k: int(re.search(rf'{k}:\s+(\d+)', out).group(1))
         return (n('Pages free') + n('Pages inactive') + n('Pages speculative') + n('Pages purgeable')) * page / 1e9
     except Exception:

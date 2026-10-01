@@ -30,10 +30,15 @@ def _env_f(name, default):
     except ValueError: return float(default)
 
 
+def _load1():
+    try: return os.getloadavg()[0]
+    except (OSError, AttributeError): return 0.0                                                    # Windows has no load average
+
+
 def processes():
-    """[(pid, ppid, cpu %, rss MB, elapsed, command)] of every process (`ps`); [] if ps is unavailable."""
-    try: out = subprocess.run(['ps', '-Ao', 'pid=,ppid=,pcpu=,rss=,etime=,command='], capture_output=True, text=True, timeout=10).stdout
-    except Exception: return []
+    """[(pid, ppid, cpu %, rss MB, elapsed, command)] of every process (`ps`); [] where ps is unavailable (Windows)."""
+    if sys.platform == 'win32': return []
+    out = RS.run_text(['ps', '-Ao', 'pid=,ppid=,pcpu=,rss=,etime=,command='])
     rows = []
     for ln in out.splitlines():
         p = ln.split(None, 5)
@@ -56,21 +61,27 @@ def top(rows=None, n=4, by='rss'):
 
 def pressure_level():
     """The system's memory-pressure level: 1 normal, 2 warning, 4 critical (macOS `kern.memorystatus_vm_pressure_level`); 1 where it cannot be read."""
-    try: return int(subprocess.run(['sysctl', '-n', 'kern.memorystatus_vm_pressure_level'], capture_output=True, text=True, timeout=5).stdout.strip() or 1)
+    if sys.platform != 'darwin': return 1
+    try:
+        import ctypes, ctypes.util
+        libc = ctypes.CDLL(ctypes.util.find_library('c')); v = ctypes.c_int(0); n = ctypes.c_size_t(4)
+        return int(v.value) if libc.sysctlbyname(b'kern.memorystatus_vm_pressure_level', ctypes.byref(v), ctypes.byref(n), None, 0) == 0 else 1
     except Exception: return 1
 
 
 def swap_used_gb():
     """Swap in use, GB (macOS `vm.swapusage`); 0 where it cannot be read."""
+    if sys.platform != 'darwin': return 0.0
     try:
-        out = subprocess.run(['sysctl', '-n', 'vm.swapusage'], capture_output=True, text=True, timeout=5).stdout; used = out.split('used =')[1].split()[0]
-        return float(used[:-1]) / (1024.0 if used[-1] == 'M' else 1.0) if used[-1] in 'MG' else 0.0
+        import ctypes, ctypes.util                                                                     # struct xsw_usage { u64 total, avail, used; u32 pagesize; bool encrypted }
+        libc = ctypes.CDLL(ctypes.util.find_library('c')); buf = ctypes.create_string_buffer(32); n = ctypes.c_size_t(32)
+        if libc.sysctlbyname(b'vm.swapusage', buf, ctypes.byref(n), None, 0) != 0: return 0.0
+        return int.from_bytes(buf.raw[16:24], 'little') / 1e9
     except Exception: return 0.0
 
 
 def load_per_cpu():
-    try: return os.getloadavg()[0] / (os.cpu_count() or 4)
-    except OSError: return 0.0
+    return _load1() / (os.cpu_count() or 4)
 
 
 def check(label, gb=1.0, cfg=None, max_ffmpeg=None):
@@ -84,7 +95,7 @@ def check(label, gb=1.0, cfg=None, max_ffmpeg=None):
     elif sw > START_SWAP_GB: rows = rows or processes(); problems.append(f'{sw:.1f} GB of swap is in use already; biggest: {top(rows)}')
     lim = float(v['busy_load_fraction'])
     if load_per_cpu() > lim:
-        rows = rows or processes(); problems.append(f'the machine is busy (load {os.getloadavg()[0]:.0f} on {os.cpu_count()} CPUs, limit {lim * (os.cpu_count() or 4):.0f}); busiest: {top(rows, by="cpu")}')
+        rows = rows or processes(); problems.append(f'the machine is busy (load {_load1():.0f} on {os.cpu_count()} CPUs, limit {lim * (os.cpu_count() or 4):.0f}); busiest: {top(rows, by="cpu")}')
     cap = int(max_ffmpeg if max_ffmpeg is not None else _env_f('STRATA_MAX_FFMPEG', MAX_FFMPEG)); rows = rows or processes(); ff = ffmpeg_processes(rows)
     if len(ff) >= cap: problems.append(f"{len(ff)} ffmpeg/ffprobe processes are already running (limit {cap}), oldest pids {[r[0] for r in sorted(ff, key=lambda r: -len(r[4]))[:5]]}: finished or crashed jobs may have left them (pkill ffmpeg clears them)")
     if problems: raise ResourceBusy(f'not starting {label}: ' + ' | '.join(problems) + '. Wait for it to clear, or free those up, then run it again.')
@@ -165,7 +176,7 @@ def verdict(max_gb=None, kill_load=None, kill_free_gb=None, rows=None):
     if lvl >= 2: return f'the system reports memory pressure (level {lvl})'
     sw = swap_used_gb(); ks = _env_f('STRATA_KILL_SWAP_GB', KILL_SWAP_GB)
     if sw > ks: return f'swap is filling up ({sw:.1f} GB used, limit {ks:.1f} GB)'
-    if load_per_cpu() > kl: return f'the machine is overloaded (load {os.getloadavg()[0]:.0f} on {os.cpu_count()} CPUs, limit {kl * (os.cpu_count() or 4):.0f})'
+    if load_per_cpu() > kl: return f'the machine is overloaded (load {_load1():.0f} on {os.cpu_count()} CPUs, limit {kl * (os.cpu_count() or 4):.0f})'
     free = RS.mem_available_gb()
     if free < kf: return f'the machine is out of memory ({free:.1f} GB free, limit {kf:.1f} GB)'
     if max_gb:

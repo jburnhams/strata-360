@@ -128,5 +128,5 @@ def client(make_client): return make_client()
 def machine_watchdog():
     """The test run (and every process it starts) is stopped, with a message, when the machine gets short of memory, starts swapping heavily or is overloaded: a run of the suite must never take the computer down.
     STRATA_NO_WATCHDOG=1 turns it off."""
-    if os.environ.get('STRATA_NO_WATCHDOG'): yield; return
+    if os.environ.get('STRATA_NO_WATCHDOG') or os.environ.get('CI'): yield; return                      # on CI the runner is a fresh VM of its own
     stop = guard.watch('the test run', max_gb=6.0); yield; stop()

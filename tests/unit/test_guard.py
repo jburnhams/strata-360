@@ -1,3 +1,4 @@
+import sys
 import pytest
 from strata360.pipeline import guard as G, resources as RS
 
@@ -59,6 +60,7 @@ def test_memory_pressure_and_swap_stop_a_job_and_block_a_start(monkeypatch):
     monkeypatch.setattr(G, 'swap_used_gb', lambda: 0.0); assert G.verdict(rows=[]) is None
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='needs ps')
 def test_kill_tree_and_panic_stop_leftovers_but_not_the_server(monkeypatch):
     import subprocess, sys, time
     a = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); b = subprocess.Popen(['sleep', '60'])
