@@ -37,10 +37,13 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 
 | Source | Lines | Status |
 | --- | --- | --- |
-| `src/api.ts` | ~18% | partial: client contract tested through the `call` helper; most endpoint wrappers (URL builders, uploads, deletes) todo |
-| `src/App.tsx` | 78% | done (the effect's failure branch is the gap) |
+| `src/api.ts` | 26.47% | partial: client contract tested through the `call` helper; most endpoint wrappers (URL builders, uploads, deletes) todo |
+| `src/App.tsx` | 77.77% | done (the effect's failure branch is the gap) |
 | `src/components/FolderBrowser.tsx` | 100% | done |
-| `src/components/NoteBox.tsx` | see coverage report | done; finding: no error state when the note fails to load |
-| `src/components/Phrase.tsx` | 11% | todo (`isForeign` unit-tested) |
-| `src/usePoll.ts` | n/a | done |
+| `src/components/NoteBox.tsx` | 100% | done |
+| `src/components/Health.tsx` | 100% | done |
+| `src/components/ProjectProgress.tsx` | 100% | done |
+| `src/components/RedoDialog.tsx` | 100% | done |
+| `src/components/Phrase.tsx` | 11.11% | todo (`isForeign` unit-tested) |
+| `src/usePoll.ts` | 100% | done |
 | every other file in `src/` | 0% | todo |

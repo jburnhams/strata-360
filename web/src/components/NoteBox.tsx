@@ -10,14 +10,16 @@ export default function NoteBox({ folder, clip, title, placeholder }: { folder: 
   useEffect(() => {
     let live = true
     setSaved(true); setText(undefined)
-    api.notes(folder).then(n => live && setText(clip ? n.clips[clip] ?? '' : n.folder))
+    api.notes(folder)
+      .then(n => live && setText(clip ? n.clips[clip] ?? '' : n.folder))
+      .catch(() => live && setText(''))
     return () => { live = false; window.clearTimeout(timer.current) }
   }, [folder, clip])
   if (text === undefined) return <PanelSkeleton title={title} rows={clip ? 3 : 5} />
   const change = (v: string) => {
     setText(v); setSaved(false)
     window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(async () => { await api.saveNote(folder, v, clip); setSaved(true) }, 600)
+    timer.current = window.setTimeout(async () => { await api.saveNote(folder, v, clip).catch(() => {}); setSaved(true) }, 600)
   }
   return (
     <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
