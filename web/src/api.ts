@@ -27,7 +27,7 @@ export interface ScriptDraft {
   title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
   problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null
 }
-export interface Script2State { draft: ScriptDraft | null; drafts: string[]; pins: Record<string, unknown>; running: boolean; last_exit: number | null; log: string[]; used: string[]; key_configured: boolean }
+export interface Script2State { draft: ScriptDraft | null; drafts: string[]; pins: ScriptPins; running: boolean; last_exit: number | null; log: string[]; used: string[]; key_configured: boolean }
 export interface WordEdit { orig: string; src: 'user' | 'gemini'; why?: string | null; user_text?: string | null; gemini_text?: string | null }
 export type WordMark = 'must' | 'never'
 export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit; m?: WordMark }
@@ -72,7 +72,9 @@ export interface ClipDetail {
   transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; clarity?: { t: number; yaw: number; pitch: number; score?: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
   places?: Places | null; exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string; overlay?: boolean } | null; track?: Record<string, any>; track_text?: string
 }
-export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string> }
+export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string>; vo_must?: { folder: string; folder_ordered: boolean; clips: Record<string, string> } }
+export interface VoPin { id: string; text: string; mode: 'clip' | 'ordered' | 'anywhere'; clip?: string }
+export interface ScriptPins { include?: string[]; exclude?: string[]; vo?: VoPin[]; vo_never?: string[] }
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const r = await fetch(path, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -152,6 +154,8 @@ export const api = {
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),
+  saveVo: (folder: string, text: string, clip?: string, ordered?: boolean) => call<Notes>('/api/notes', { folder, kind: 'vo', text, clip, ordered }),
+  saveScriptPins: (folder: string, pins: ScriptPins) => call<ScriptPins>('/api/script2/pins', { folder, ...pins }),
   open: (folder: string, extra: { languages?: string; gps?: string } = {}) => call<{ started: boolean }>('/api/open', { folder, ...extra }),
   run: (folder: string) => call<{ started: boolean }>('/api/run', { folder }),
   state: (folder: string) => call<StateMatrix>('/api/state?' + q({ folder })),

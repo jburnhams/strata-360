@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
-import { api, type ScriptItem, type Seg } from '../api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { api, type ScriptItem, type ScriptPins, type Seg, type VoPin } from '../api'
 import { usePoll } from '../usePoll'
 import { usedSet } from '../marks'
 import { diffDrafts } from '../scriptDiff'
+import { addNever, addPin, editNarration, highlight, removeNever, removePin, setMode } from '../scriptPins'
 import { PanelSkeleton } from './Skeleton'
 import Phrase from './Phrase'
 import WordMarker from './WordMarker'
@@ -25,6 +26,23 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
   const [prevItems, setPrevItems] = useState<ScriptItem[]>()
   const [target, setTarget] = useState(''), [auto, setAuto] = useState(false), [err, setErr] = useState<string>(), [busy, setBusy] = useState(false)
   const draft = st?.draft ?? null
+  const pins: ScriptPins = st?.pins ?? {}
+  const [edited, setEdited] = useState<Record<number, string>>({}), [editing, setEditing] = useState<number | null>(null), [text, setText] = useState('')
+  const [vsel, setVsel] = useState<{ text: string; i: number; x: number; y: number }>()
+  const list = useRef<HTMLDivElement>(null)
+  useEffect(() => { setEdited({}); setEditing(null) }, [draft?.created])
+  useEffect(() => {
+    const on = () => {
+      const s = window.getSelection(), r = s && s.rangeCount ? s.getRangeAt(0) : null
+      if (!r || r.collapsed || !list.current) { setVsel(undefined); return }
+      const n = r.commonAncestorContainer, el = (n.nodeType === 1 ? (n as Element) : n.parentElement)?.closest<HTMLElement>('[data-vo]')
+      const t = r.toString().trim()
+      if (!el || !list.current.contains(el) || !t) { setVsel(undefined); return }
+      const b = typeof r.getBoundingClientRect === 'function' ? r.getBoundingClientRect() : { left: 0, width: 0, top: 0 }
+      setVsel({ text: t, i: Number(el.dataset.vo), x: b.left + b.width / 2, y: b.top })
+    }
+    document.addEventListener('selectionchange', on); return () => document.removeEventListener('selectionchange', on)
+  }, [])
   useEffect(() => {
     const name = draft?.draft_of ?? null
     if (name === prevName) return
@@ -41,6 +59,13 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
     try { const r = await api.generateScript2(folder, { revise, target_s: target ? Number(target) : undefined, auto }); if (!r.started) setErr(r.reason ?? 'could not start'); setVer(v => v + 1) } catch (e) { setErr((e as Error).message) }
     setBusy(false)
   }
+  const savePins = async (next: ScriptPins) => { try { await api.saveScriptPins(folder, next); setErr(undefined) } catch (e) { setErr((e as Error).message) } setVer(v => v + 1) }
+  const pinVo = async (never: boolean) => {
+    if (!vsel || !draft) return; const clip = draft.items[vsel.i]?.clip ?? ''
+    window.getSelection()?.removeAllRanges(); setVsel(undefined); await savePins(never ? addNever(pins, vsel.text) : addPin(pins, vsel.text, clip))
+  }
+  const saveEdit = async (i: number, it: ScriptItem) => { const old = edited[i] ?? it.text ?? ''; setEditing(null); if (text.trim() === old.trim()) return; setEdited(e => ({ ...e, [i]: text.trim() })); await savePins(editNarration(pins, old, text.trim(), it.clip)) }
+  const pinTexts = (clip: string) => (pins.vo ?? []).filter(p => p.mode !== 'clip' || p.clip === clip).map(p => p.text)
   const r = draft?.report
   const words = (it: ScriptItem) => (it.refs ?? []).map((ref, k) => {
     const ws = (segs.get(`${ref.clip}|${ref.si}`) ?? []).flatMap(s => s.words).filter((w, j) => { const i = w.i ?? j; return i >= ref.w0 && i < ref.w1 })
@@ -66,6 +91,7 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
           {draft.story && <p className="text-sm italic text-stone-500">{draft.story}</p>}
           <p className="mt-1 text-xs text-stone-500">{r?.total_s} s of {draft.target_s} s{draft.target_source ? ` (${draft.target_source})` : ''} · you {r?.clip_s} s · narration {r?.vo_s} s ({r?.vo_words} words at {draft.wpm} wpm) · b-roll {r?.broll_s} s · {r?.clips_used} clips used, {r?.clips_skipped} skipped · {draft.revised ? 'revised' : 'first draft'} {draft.created.replace('T', ' ')}{diff.added.size ? ` · ${diff.added.size} new, ${diff.removed.length} removed` : ''}</p>
         </div>
+        <div ref={list}>
         <WordMarker folder={folder} onSaved={() => setVer(v => v + 1)}>
           <ol className="mt-3 space-y-1 text-sm">
             {draft.items.map((it, i) => {
@@ -77,7 +103,15 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
                     <span className={`mt-0.5 h-fit shrink-0 rounded-full px-2 text-xs ${KIND[it.type].cls}`}>{KIND[it.type].label}</span>
                     <span className="w-10 shrink-0 text-right font-mono text-xs text-stone-500">{it.seconds != null ? mmss(it.seconds) : ''}</span>
                     <span className="min-w-0 flex-1 leading-relaxed">
-                      {it.type === 'vo' && <span title={it.basis?.length ? 'based on: ' + it.basis.join(' · ') : undefined}>{it.text}</span>}
+                      {it.type === 'vo' && (editing === i ? (
+                        <span className="flex flex-col gap-1">
+                          <textarea aria-label={`Narration ${i + 1}`} value={text} onChange={e => setText(e.target.value)} rows={2} className="w-full rounded border border-stone-300 bg-transparent p-1.5 text-sm dark:border-stone-700" />
+                          <span className="flex gap-1"><button className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white" onClick={() => void saveEdit(i, it)}>save (pins this wording)</button><button className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" onClick={() => setEditing(null)}>cancel</button></span>
+                        </span>
+                      ) : (<>
+                        <span data-vo={i} title={it.basis?.length ? 'based on: ' + it.basis.join(' · ') : undefined}>{highlight(edited[i] ?? it.text ?? '', pinTexts(it.clip), pins.vo_never ?? []).map((p, k) => <span key={k} className={p.kind === 'must' ? 'rounded bg-emerald-200 dark:bg-emerald-500/40' : p.kind === 'never' ? 'rounded bg-red-200 dark:bg-red-500/40' : ''}>{p.t}</span>)}</span>
+                        <button className="ml-1 text-xs text-stone-400 hover:text-stone-700" aria-label={`Edit narration ${i + 1}`} title="edit the wording: your version is kept word for word in later drafts" onClick={() => { setText(edited[i] ?? it.text ?? ''); setEditing(i) }}>✎</button>
+                      </>))}
                       {it.type === 'clip' && (words(it).some(Boolean) ? words(it) : <span>{it.text}</span>)}
                       {it.type === 'broll' && <span className="text-stone-500">{it.why}</span>}
                       {diff.added.has(i) && <span className="ml-2 rounded bg-emerald-200 px-1 text-xs text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100">new</span>}
@@ -88,6 +122,22 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
             })}
           </ol>
         </WordMarker>
+        {vsel && (
+          <div role="toolbar" aria-label="Mark the selected narration" className="fixed z-50 flex items-center gap-1 rounded-lg border border-stone-300 bg-white p-1 shadow-lg dark:border-stone-700 dark:bg-stone-900" style={{ left: Math.max(vsel.x - 120, 8), top: Math.max(vsel.y - 44, 8) }} onMouseDown={e => e.preventDefault()}>
+            <button className="rounded bg-emerald-200 px-2 py-1 text-xs font-medium text-emerald-900 dark:bg-emerald-500/40 dark:text-emerald-100" title="keep exactly these words, in this clip, in every later draft" onClick={() => void pinVo(false)}>Say exactly this</button>
+            <button className="rounded bg-red-200 px-2 py-1 text-xs font-medium text-red-900 dark:bg-red-500/40 dark:text-red-100" title="never say these words" onClick={() => void pinVo(true)}>Never say</button>
+          </div>)}
+        </div>
+        {((pins.vo ?? []).length > 0 || (pins.vo_never ?? []).length > 0) && (
+          <details className="mt-3 text-sm"><summary className="cursor-pointer text-xs text-stone-500">Your narration pins ({(pins.vo ?? []).length + (pins.vo_never ?? []).length})</summary>
+            <ul className="mt-1 space-y-1">
+              {(pins.vo ?? []).map((p: VoPin) => (
+                <li key={p.id} className="flex flex-wrap items-center gap-2"><span className="rounded bg-emerald-200 px-1 text-xs dark:bg-emerald-500/40">say</span><span className="min-w-0 flex-1">{p.text}</span>
+                  <select aria-label={`Where to say ${p.id}`} value={p.mode} onChange={e => void savePins(setMode(pins, p.id, e.target.value as VoPin['mode'], p.clip ?? draft.items.find(x => x.type === 'vo' && x.text?.includes(p.text))?.clip))} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 text-xs dark:border-stone-700">
+                    <option value="clip">in clip {p.clip ?? '…'}</option><option value="ordered">in order, anywhere</option><option value="anywhere">anywhere</option></select>
+                  <button className="text-xs underline" aria-label={`Remove pin ${p.id}`} onClick={() => void savePins(removePin(pins, p.id))}>remove</button></li>))}
+              {(pins.vo_never ?? []).map(ph => <li key={ph} className="flex items-center gap-2"><span className="rounded bg-red-200 px-1 text-xs dark:bg-red-500/40">never</span><span className="min-w-0 flex-1">{ph}</span><button className="text-xs underline" aria-label={`Remove never-say ${ph}`} onClick={() => void savePins(removeNever(pins, ph))}>remove</button></li>)}
+            </ul></details>)}
         {diff.removed.length > 0 && <details className="mt-2 text-xs text-stone-500"><summary>{diff.removed.length} item(s) removed since the previous draft</summary><ul className="mt-1 list-disc pl-5">{diff.removed.map((it, i) => <li key={i}>{KIND[it.type].label} · clip {it.clip}: {it.text ?? it.why ?? `${it.from}–${it.to}`}</li>)}</ul></details>}
         {draft.skipped.length > 0 && <details className="mt-2 text-xs text-stone-500"><summary>{draft.skipped.length} clip(s) left out</summary><ul className="mt-1 list-disc pl-5">{draft.skipped.map(s => <li key={s.clip}>clip {s.clip}: {s.why}</li>)}</ul></details>}
         {draft.problems.length > 0 && <p className="mt-2 text-xs text-amber-700">The writer could not satisfy: {draft.problems.filter(p => !itemOf(p)).join('; ') || 'see the ⚠ marks'}</p>}

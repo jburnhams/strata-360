@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { act } from '@testing-library/react'
 import ScriptDraftPanel from '../../src/components/ScriptDraftPanel'
 import { screen, setup, waitFor, within } from '../utils/render'
 import { makeScript2State, makeScriptDraft, makeSeg } from '../utils/factories'
@@ -31,7 +32,7 @@ describe('ScriptDraftPanel', () => {
     setup(<ScriptDraftPanel folder="/data" />)
     expect(await screen.findByText('A Film')).toBeInTheDocument()
     expect(screen.getByText(/61.2 s of 60 s \(music\)/)).toBeInTheDocument()
-    expect(screen.getByText('It is Sunday afternoon.')).toHaveAttribute('title', 'based on: Sun 22 Feb 14:04')
+    expect(screen.getByText('It is Sunday afternoon.').closest('[data-vo]')).toHaveAttribute('title', 'based on: Sun 22 Feb 14:04')
     expect(screen.getByText('a foggy trail')).toBeInTheDocument()
     const w = await screen.findByText('are'); expect(w).toHaveAttribute('data-state', 'used')                 // the runner's words come from the transcript, yellow because the draft plays them
     expect(screen.queryByText('not')).not.toBeInTheDocument()                                                  // only the words of the lines the draft plays
@@ -88,5 +89,73 @@ describe('ScriptDraftPanel', () => {
   it('has the three-line summary inside a labelled section', async () => {
     mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft() })); setup(<ScriptDraftPanel folder="/data" />)
     await screen.findByText('A Film'); const h = screen.getByText('Film script'); expect(within(h.closest('section')!).getByText('clip 0023')).toBeInTheDocument()
+  })
+})
+
+async function selectText(el: HTMLElement) {
+  const r = document.createRange(); r.selectNodeContents(el); const s = window.getSelection()!; s.removeAllRanges(); s.addRange(r)
+  await act(async () => { document.dispatchEvent(new Event('selectionchange')) })
+}
+
+describe('ScriptDraftPanel narration pins', () => {
+  const withDraft = (pins = {}) => mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft(), pins }))
+
+  it('shows pinned wording in green and never-say wording in red', async () => {
+    withDraft({ vo: [{ id: 'v1', text: 'Sunday afternoon', mode: 'clip', clip: '0023' }], vo_never: ['It is'] })
+    setup(<ScriptDraftPanel folder="/data" />)
+    await screen.findByText('A Film'); const green = screen.getAllByText('Sunday afternoon')[0]; expect(green.className).toContain('emerald'); expect(screen.getAllByText('It is')[0].className).toContain('red')
+  })
+
+  it('pins selected narration as "say exactly this" in its clip', async () => {
+    withDraft(); const seen = recordRequests('/api/script2/pins')
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    await selectText(await screen.findByText('It is Sunday afternoon.'))
+    expect(await screen.findByRole('toolbar', { name: 'Mark the selected narration' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Say exactly this' }))
+    await waitFor(() => expect(seen).toHaveLength(1))
+    expect(seen[0].body).toEqual({ folder: '/data', vo: [{ id: 'v1', text: 'It is Sunday afternoon.', mode: 'clip', clip: '0023' }] })
+  })
+
+  it('bans selected narration with "never say"', async () => {
+    withDraft(); const seen = recordRequests('/api/script2/pins')
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    await selectText(await screen.findByText('It is Sunday afternoon.')); await user.click(await screen.findByRole('button', { name: 'Never say' }))
+    await waitFor(() => expect(seen).toHaveLength(1)); expect(seen[0].body).toEqual({ folder: '/data', vo_never: ['It is Sunday afternoon.'] })
+  })
+
+  it('keeps an edited narration word for word: it becomes a pin, and shows the new wording at once', async () => {
+    withDraft(); const seen = recordRequests('/api/script2/pins')
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    await user.click(await screen.findByRole('button', { name: 'Edit narration 1' }))
+    const box = screen.getByLabelText('Narration 1'); await user.clear(box); await user.type(box, 'Sunday, two in the afternoon.')
+    await user.click(screen.getByRole('button', { name: /save/ }))
+    await waitFor(() => expect(seen).toHaveLength(1))
+    expect(seen[0].body).toEqual({ folder: '/data', vo: [{ id: 'v1', text: 'Sunday, two in the afternoon.', mode: 'clip', clip: '0023' }] })
+    expect(await screen.findByText('Sunday, two in the afternoon.')).toBeInTheDocument()
+  })
+
+  it('does nothing when an edit is cancelled or unchanged', async () => {
+    withDraft(); const seen = recordRequests('/api/script2/pins')
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    await user.click(await screen.findByRole('button', { name: 'Edit narration 1' })); await user.click(screen.getByRole('button', { name: 'cancel' }))
+    await user.click(screen.getByRole('button', { name: 'Edit narration 1' })); await user.click(screen.getByRole('button', { name: /save/ }))
+    expect(seen).toHaveLength(0); expect(screen.getByText('It is Sunday afternoon.')).toBeInTheDocument()
+  })
+
+  it('lists the pins, loosens one to "anywhere" and removes another', async () => {
+    withDraft({ vo: [{ id: 'v1', text: 'Keep this', mode: 'clip', clip: '0023' }, { id: 'v2', text: 'And this', mode: 'ordered' }], vo_never: ['best day'] }); const seen = recordRequests('/api/script2/pins')
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    await user.click(await screen.findByText(/Your narration pins \(3\)/))
+    await user.selectOptions(screen.getByLabelText('Where to say v1'), 'anywhere')
+    await waitFor(() => expect(seen).toHaveLength(1)); expect((seen[0].body as { vo: unknown[] }).vo[0]).toEqual({ id: 'v1', text: 'Keep this', mode: 'anywhere' })
+    await user.click(screen.getByRole('button', { name: 'Remove never-say best day' }))
+    await waitFor(() => expect(seen).toHaveLength(2)); expect((seen[1].body as { vo_never: string[] }).vo_never).toEqual([])
+  })
+
+  it('says so when the pins cannot be saved', async () => {
+    withDraft({ vo: [{ id: 'v1', text: 'x', mode: 'anywhere' }] }); mockError('/api/script2/pins', 400, 'bad pins', 'post')
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    await user.click(await screen.findByText(/Your narration pins/)); await user.click(screen.getByRole('button', { name: 'Remove pin v1' }))
+    expect(await screen.findByText('bad pins')).toBeInTheDocument()
   })
 })

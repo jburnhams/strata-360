@@ -31,6 +31,7 @@ export const handlers = [
   http.get('/api/who', () => HttpResponse.json(makeWhoState())),
   http.post('/api/who', () => HttpResponse.json({ ok: true })),
   http.get('/api/script2', () => HttpResponse.json(makeScript2State())),
+  http.post('/api/script2/pins', async ({ request }) => HttpResponse.json(await request.json())),
   http.post('/api/script2/generate', () => HttpResponse.json({ started: true })),
   http.post('/api/transcript/mark', () => HttpResponse.json({ ok: true, marked: 0 })),
   http.get('/api/music', () => HttpResponse.json(makeMusicState())),
