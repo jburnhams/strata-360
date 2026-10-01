@@ -9,19 +9,19 @@ The plan says which part of which clip and which technique (hold, push in, pan .
   selfie hold            you (the wearer), or straight behind the runner when you are not found
   globe / spin / follow  no subject (planets look down, follow runner follows the heading)
 
-A subject is followed: the camera path gets the subject's yaw over time added (smoothed), so a person walking across the view stays framed. Output is the dict
-CameraPath.from_json takes: world frame, yaw in degrees, keyframes every half second (window-relative seconds), plus `subject` and `why` for the GUI.
+A subject is followed by edit/aim.py: the camera holds while the subject stays near the centre, pans slowly when it drifts and moves once, fast, when it goes far; the pitch puts the head near the top of the frame. Output is the dict
+CameraPath.from_json takes: world frame, yaw in degrees, keyframes every tenth of a second (window-relative seconds), plus `subject` and `why` for the GUI.
 Nothing here needs the video: only identity.json / speakers.json / motion.json of the clip (analysis/views.py samples)."""
 import json, os
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from strata360.pipeline import config
-from strata360.edit import techniques as TQ
+from strata360.edit import techniques as TQ, aim as AIM
 
 FOLLOW = {'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold'}          # techniques that keep their subject in frame as it moves
 NO_SUBJECT = {'follow_runner', 'planet_fill', 'planet_globe', 'planet_fill_zoom_out', 'globe_shrink', 'tunnel_up', 'spin_roll'}
 TIGHT = {'push_in', 'dialogue_hold'}
-STEP_S = 0.5
+STEP_S = 0.1
 
 
 def _coverage(samples, t0, t1):
@@ -34,7 +34,20 @@ def _coverage(samples, t0, t1):
 def _track(samples, t0, t1):
     """(times, yaw unwrapped radians, pitch radians) of the samples in and around the window."""
     s = [x for x in samples if t0 - 2.0 <= x['t'] <= t1 + 2.0]
-    return np.array([x['t'] for x in s]), np.unwrap(np.radians([x['yaw'] for x in s])), np.radians([x['pitch'] for x in s])
+    h = []; last = None
+    for x in s:                                                                          # the box height (degrees), carried over where the person was found by the face only
+        last = x.get('height') or last; h.append(last)
+    h = [v if v else next((u for u in h if u), 45.0) for v in h]
+    hd = np.array([x['head'] if x.get('head') is not None else np.nan for x in s], float)                         # the pitch of the top of the head where it is known
+    if np.isnan(hd).all(): hd = None
+    else: hd = np.where(np.isnan(hd), np.nan, hd)
+    return np.array([x['t'] for x in s]), np.unwrap(np.radians([x['yaw'] for x in s])), np.radians([x['pitch'] for x in s]), np.array(h, float), hd
+
+
+def _head(abs_t, ts, hd):
+    """The pitch of the top of the head (degrees) at the times, interpolated between the samples where it is known; NaN where there is none within 2 s."""
+    if hd is None or not np.isfinite(hd).any(): return np.full(len(abs_t), np.nan)
+    ok = np.isfinite(hd); v = np.interp(abs_t, ts[ok], hd[ok]); far = np.array([np.min(np.abs(ts[ok] - t)) > 2.0 for t in abs_t]); v[far] = np.nan; return v
 
 
 def _speaker(segs, t0, t1):
@@ -76,20 +89,22 @@ def resolve_segment(g, lib, data):
     tech = lib[g['technique']]; subject, why = choose_subject(g, tech, data); T = float(g['dur_s']); t0 = float(g['clip_start_s'])
     rng = np.random.default_rng(int(g.get('variant_seed') or 0)); heading = data['heading']
     if subject in ('person', 'you'):
-        ts, yw, pt = _track(data[subject], t0, t0 + T)
+        ts, yw, pt, hh, hd = _track(data[subject], t0, t0 + T)
         times = np.arange(0.0, T + 1e-9, STEP_S); abs_t = t0 + times
-        if len(ts) >= 2: y = np.interp(abs_t, ts, yw); p = np.interp(abs_t, ts, pt)
-        elif len(ts) == 1: y = np.full(len(times), yw[0]); p = np.full(len(times), pt[0])
+        if len(ts) >= 2: y = np.interp(abs_t, ts, yw); p = np.interp(abs_t, ts, pt); h = np.interp(abs_t, ts, hh); hdd = _head(abs_t, ts, hd)
+        elif len(ts) == 1: y = np.full(len(times), yw[0]); p = np.full(len(times), pt[0]); h = np.full(len(times), hh[0]); hdd = _head(abs_t, ts, hd)
         else: subject = 'heading'
     if subject not in ('person', 'you'):
         look = heading(t0 + T / 2) if tech.id not in NO_SUBJECT else heading(t0)
         path = TQ.instantiate(tech, T, rng, look_yaw=float(look)); path['subject'] = subject; path['why'] = why; return path
-    y = gaussian_filter1d(y, 1.0 / STEP_S, mode='nearest'); p = gaussian_filter1d(p, 1.0 / STEP_S, mode='nearest')
     look = float(np.degrees(y[0])); path = TQ.instantiate(tech, T, rng, look_yaw=look)
-    if tech.id in FOLLOW:                                                   # the technique's own move (fov, slow drift) stays; the subject's motion is added
+    if tech.id in FOLLOW:                                                   # the technique's own move (fov, slow drift) stays; the subject is followed: held while still, panned slowly when it drifts, one quick move when it goes far
         from strata360.render.camera import CameraPath
         ev = CameraPath(path['keyframes'], path.get('ref', 'world')).evaluate(times)
-        kf = [dict(t=round(float(tt), 3), yaw=round(float(np.degrees(ev['yaw'][i]) + np.degrees(y[i] - y[0])), 2), pitch=round(float(np.clip(np.degrees(p[i]) * 0.6, -35, 35)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')
+        ty = np.degrees(y); tp = np.array([AIM.aim_pitch(float(np.degrees(p[i])), float(h[i]), AIM.vfov_deg(float(ev['fov'][i])), None if np.isnan(hdd[i]) else float(hdd[i])) for i in range(len(times))])
+        fy, fp = AIM.follow(times, ty, tp)
+        fy = np.degrees(np.unwrap(np.radians(fy)))
+        kf = [dict(t=round(float(tt), 3), yaw=round(float(np.degrees(ev['yaw'][i]) + fy[i] - fy[0]), 2), pitch=round(float(np.clip(fp[i], -60, 60)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')
               for i, tt in enumerate(times)]
         path = dict(ref='world', keyframes=kf)
     path['subject'] = subject; path['why'] = why; return path

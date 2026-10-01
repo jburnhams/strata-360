@@ -11,7 +11,7 @@ import argparse, glob, json, os, secrets, subprocess, sys, threading, time
 
 from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod
-from strata360.analysis import transcript_edits as TE
+from strata360.analysis import transcript_edits as TE, transcript_fix as TF
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -231,7 +231,7 @@ def create_app(roots, token=None):
             elif st.get('status') == 'failed': err = st.get('error') or 'failed'
         running = any(s_ == 'transcript_check' for _, s_, _ in runner.active_items(f))
         health = runner.stage_health(f).get('transcript_check')
-        return dict(state='running' if running else ('done' if total and done == total else ('error' if err else 'none')), health=health, done=done, total=total, fixes=fixes, calls_made=made, calls_reused=reused, tokens=dict(input=tin, output=tout), error=err)
+        return dict(state='running' if running else ('done' if total and done == total else ('error' if err else 'none')), health=health, done=done, total=total, fixes=fixes, calls_made=made, calls_reused=reused, tokens=dict(input=tin, output=tout), usage=TF.usage_summary(f), error=err)
 
     @api.get('/api/transcript', dependencies=[Depends(auth)])
     def get_transcript(folder: str):                                                     # every recognised phrase of every clip, in clip order: the overview's running transcript

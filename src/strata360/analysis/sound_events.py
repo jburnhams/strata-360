@@ -37,6 +37,7 @@ HINTS = {   # category -> (role, suggested level in dB relative to full volume)
     'speech': ('voice', 0.0), 'shouting': ('voice', -3.0), 'laughter': ('energy', -3.0), 'cheering': ('energy', -6.0), 'crowd': ('bed', -14.0), 'breathing': ('texture', -12.0), 'footsteps': ('texture', -12.0),
     'nature': ('texture', -10.0), 'animals': ('texture', -10.0), 'water': ('texture', -10.0), 'bells': ('texture', -9.0),
     'wind': ('avoid', -26.0), 'handling': ('avoid', -26.0), 'vehicle': ('avoid', -16.0), 'music': ('avoid', -20.0), 'beeps': ('avoid', -18.0)}
+VOICE = ('speech', 'shouting', 'laughter', 'cheering')       # categories read from the original sound (the background has the speech taken out)
 QUIET_DB = -18.0        # nothing recognisable: a quiet bed
 _M = {}
 
@@ -99,6 +100,9 @@ def window_mix(doc, t0, t1, wearer_speaks=False, present=0.3):
     """Suggested level for the clip's own sound over [t0, t1]: dict(gain_db, why, cats). The wearer speaking is always full volume. Otherwise the level follows what is there: each category above
     `present` pulls the level towards its suggested level in proportion to its score, and a strong 'avoid' sound (wind, handling noise, traffic, music, beeps) pulls it down the same way."""
     cats = scores_between(doc, t0, t1) if doc else {}
+    if doc and doc.get('background'):                                                      # the sound without the speech tells what the place is like: its categories replace the mixed sound's, except the voice ones (they live in the original); the crowd is the larger of the two
+        bg = scores_between(doc['background'], t0, t1)
+        cats = {c: (s if c in VOICE else max(s, bg.get(c, 0.0)) if c == 'crowd' else bg.get(c, 0.0)) for c, s in cats.items()}
     if wearer_speaks: return dict(gain_db=0.0, why=['you are speaking'], cats=cats)
     hot = {c: s for c, s in cats.items() if s >= present and c in HINTS and c != 'speech'}
     if not hot:

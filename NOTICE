@@ -21,3 +21,7 @@ Local models used by the vision stages (downloaded into models/, gitignored):
   - SpeechBrain ECAPA-TDNN (speechbrain/spkrec-ecapa-voxceleb, Apache-2.0): speaker embeddings.
   - Kokoro-82M (hexgrad/Kokoro-82M, Apache-2.0) through kokoro-onnx (MIT): the voice-over voice (British male voices); model files from the kokoro-onnx v1.0 release, in models/kokoro.
   - Qwen2.5-VL-3B-Instruct 4-bit (mlx-community, Qwen licence): scene description and tagging.
+
+TIGER-DnR (opt-in `audio_background` stage): Xu, Li, Chen, Hu, "TIGER: Time-frequency Interleaved Gain Extraction and Reconstruction for Efficient Speech Separation", ICLR 2025.
+  Model code https://github.com/JusperLee/TIGER (MIT licence), fetched at a pinned commit into models/tiger-dnr/ at first use, not included in this repository;
+  weights https://huggingface.co/JusperLee/TIGER-DnR (Apache-2.0), downloaded into models/tiger-dnr/weights.

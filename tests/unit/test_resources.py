@@ -43,3 +43,10 @@ if __name__ == '__main__':
         try: f(); print('ok  ', f.__name__)
         except AssertionError as e: bad += 1; print('FAIL', f.__name__, e)
     print(f'{len(fns) - bad}/{len(fns)} passed'); sys.exit(bad)
+
+
+def test_no_resource_limits_switch_skips_the_waiting(monkeypatch):
+    from strata360.pipeline import resources as R
+    monkeypatch.setattr(R, 'mem_available_gb', lambda: 0.1); monkeypatch.setenv('STRATA_NO_RESOURCE_LIMITS', '1')
+    assert R.wait_for_headroom('exposure', None, None, log=lambda *_: None, max_wait=0) is True               # with no memory at all it still goes ahead
+    monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS'); assert R.wait_for_headroom('exposure', None, None, log=lambda *_: None, poll=0, max_wait=0) is False

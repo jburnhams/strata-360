@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
+import { Follower, aimPitch, vfovDeg } from '../aim'
 
 // Player for a clip's 360 preview (upright equirect video). The thumbnail is shown first; play loads the video. The picture is a flat window into the sphere that you can pan by dragging
 // (touch too) and zoom with the wheel or the slider. Four ways to aim: Free (stays where you put it), Heading (points where the runner is going, from the motion data), You (turns to the wearer) and Person
@@ -18,7 +19,7 @@ void main(){
 }`
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-type Focus = { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }
+type Focus = { t: number; yaw: number; pitch: number; height?: number | null; head?: number | null; who: 'you' | 'other'; speaking: boolean; person?: number }
 type Aim = 'free' | 'heading' | 'you' | 'person'
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
@@ -28,7 +29,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
-  const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, gl: null as null | { draw: () => void }, raf: 0 })
+  const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, fol: null as null | Follower, folAim: '' as string, lastT: 0, lastMs: 0, gl: null as null | { draw: () => void }, raf: 0 })
   const [started, setStarted] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [t, setT] = useState(0)
@@ -56,7 +57,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
     const a = focus[Math.max(lo, 0)], b = focus[Math.min(lo + 1, focus.length - 1)]
     if (Math.abs(a.t - time) > 2 && Math.abs(b.t - time) > 2) return null
     const w = b.t > a.t ? Math.min(Math.max((time - a.t) / (b.t - a.t), 0), 1) : 0, ay = (a.yaw * Math.PI) / 180, by = (b.yaw * Math.PI) / 180
-    return { yaw: ay + wrap(by - ay) * w, pitch: (((a.pitch + (b.pitch - a.pitch) * w) * Math.PI) / 180), who: (w < 0.5 ? a : b).who, speaking: (w < 0.5 ? a : b).speaking }
+    return { yaw: ay + wrap(by - ay) * w, pitch: (((a.pitch + (b.pitch - a.pitch) * w) * Math.PI) / 180), height: a.height ?? b.height, head: a.head ?? b.head, who: (w < 0.5 ? a : b).who, speaking: (w < 0.5 ? a : b).speaking }
   }, [youList, person])
 
   // WebGL: one full-screen triangle pair; the video frame is the texture, the shader turns each pixel into a ray into the sphere.
@@ -77,14 +78,23 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
       gl.viewport(0, 0, cv.width, cv.height)
       if (v.readyState >= 2) { gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, v) }
       const s = st.current, now = v.currentTime, hd = headingAt(now)
-      let baseYaw = 0, basePitch = 0
+      let baseYaw = 0, basePitch = 0, follow = false
+      const ms = performance.now(), dts = Math.min(Math.max((ms - s.lastMs) / 1000, 0), 0.1); s.lastMs = ms
       if (s.aim === 'heading') baseYaw = hd
-      else if (s.aim === 'you' || s.aim === 'person') { const f = focusAt(now, s.aim); if (f) { baseYaw = f.yaw; basePitch = f.pitch; s.tyaw = f.yaw; s.tpitch = f.pitch } else baseYaw = hd }
-      if (s.aim !== 'free') {                                                                        // ease towards the target instead of jumping between samples
-        const d = wrap(baseYaw - s.cur); s.cur = s.cur + d * 0.12; baseYaw = s.cur
+      else if (s.aim === 'you' || s.aim === 'person') {
+        const f = focusAt(now, s.aim)
+        if (f) {                                                                                       // a steady follower: holds, pans slowly, or moves once when the person goes far; the head sits near the top of the frame
+          const ty = (f.yaw * 180) / Math.PI, tp = aimPitch((f.pitch * 180) / Math.PI, f.height, vfovDeg(s.fov, cv.width / cv.height), f.head)
+          if (!s.fol || s.folAim !== s.aim || Math.abs(now - s.lastT) > 1) { s.fol = new Follower(ty, tp); s.folAim = s.aim }
+          const [fy, fp] = s.fol.step(ty, tp, dts); baseYaw = (fy * Math.PI) / 180; basePitch = (fp * Math.PI) / 180; follow = true; s.cur = baseYaw
+        } else { s.fol = null; baseYaw = hd }
+      }
+      s.lastT = now
+      if (s.aim !== 'free') {
+        if (!follow) { const d = wrap(baseYaw - s.cur); s.cur = s.cur + d * 0.12; baseYaw = s.cur }          // heading (and nobody found): ease towards the target
         if (s.decay > 0) { s.yaw *= 0.9; s.pitch *= 0.9; s.decay -= 1 }                               // after a mode switch the manual offset eases back to the automatic aim
       } else s.cur = baseYaw
-      const yaw = s.yaw + baseYaw, pitch = Math.max(-1.45, Math.min(1.45, s.pitch + (s.aim === 'free' || s.aim === 'heading' ? 0 : basePitch * 0.6)))
+      const yaw = s.yaw + baseYaw, pitch = Math.max(-1.45, Math.min(1.45, s.pitch + (follow ? basePitch : 0)))
       gl.uniform1f(U('yaw'), yaw); gl.uniform1f(U('pitch'), pitch); gl.uniform1f(U('tanx'), Math.tan((s.fov * Math.PI) / 360)); gl.uniform1f(U('aspect'), cv.width / cv.height)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
     }
@@ -98,7 +108,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   const changeAim = (next: Aim) => {
     const s = st.current, v = video.current, now = v?.currentTime ?? 0; const cur = s.yaw + (s.aim === 'free' ? 0 : s.cur)
     const base = next === 'free' ? 0 : next === 'heading' ? headingAt(now) : (focusAt(now, next)?.yaw ?? headingAt(now))
-    s.yaw = wrap(cur - (next === 'free' ? 0 : base)); s.cur = base; s.aim = next; s.decay = next === 'free' ? 0 : 45; setAim(next)
+    s.yaw = wrap(cur - (next === 'free' ? 0 : base)); s.cur = base; s.fol = null; s.aim = next; s.decay = next === 'free' ? 0 : 45; setAim(next)
   }
   useEffect(() => { const id = setInterval(() => { const a = st.current.aim, f = a === 'you' || a === 'person' ? focusAt(video.current?.currentTime ?? 0, a) : null; setShown(a === 'you' || a === 'person' ? (f ? (a === 'you' ? (f.speaking ? 'you (speaking)' : 'you') : f.speaking ? 'another person (someone is speaking)' : 'another person') : a === 'you' ? 'you are not in view: following the heading' : 'nobody else in view: following the heading') : '') }, 500); return () => clearInterval(id) }, [focusAt, headingAt])
   useEffect(() => { st.current.fov = fov }, [fov])
