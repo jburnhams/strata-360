@@ -12,10 +12,10 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 - The web app: clips, moments, transcript, timeline, script, voice-over, music, clock, who-is-me, film preview, final render.
 
 **Gaps that stop us delivering the film the README promises (goal 4, section 13):**
-1. **No time map from the final film.** `render/final.py` joins every piece into one `film.mp4` with no UTC tags and no `timemap.json`/`.csv`, so the GPX overlay (the reason footage UTC is kept so carefully) cannot be driven from it. `flat.py --start-utc` can tag one clip; nothing does it for the film.
+1. **No map overlay on the final film.** `render/final.py` joins every piece into one `film.mp4` with no per-clip UTC and no `timemap.json`/`.csv`, so the GPX overlay (the reason footage UTC is kept so carefully) cannot be driven from it. `flat.py --start-utc` can tag one clip; nothing does it for the pieces of the film. Its frame rate is also a fixed default (`fps=50.0`) rather than the source's.
 2. **The final sound is a rough mix.** `preview.build_audio` (used by the final render too): mono, fixed gains (0.25, or 1.0 where people speak), 10 ms fades at every cut, music at 0.5 with a sidechain duck, a limiter. No loudness target, no crossfade on dissolves, no use of the `audio_events` roles or `audio_clean`.
 3. **No exposure matching between shots.** `exposure.json` is collected but not applied; adjacent shots from different times of day will jump.
-4. **No real 4K film has been rendered.** The only trial was 11 s at 640x360 (280 s on a busy machine). At about a second per 4K frame, a 120 s film at 50 fps is about 1.7 hours of pure rendering at best; we do not know the real number.
+4. **No real 4K film has been rendered.** The only trial was 11 s at 640x360 (280 s on a busy machine). At about a second per 4K frame, a 120 s film at the source's 50 fps is about 1.7 hours of pure rendering at best; we do not know the real number.
 5. **The voice-over does not drive the picture.** README 17 steps 5 and 6 (align the recording to the script, then re-fit the picture around it) are not built: today the recording is squeezed into windows that were planned without it, and overflow is cut and flagged.
 6. **No lens-quality data.** There is no `quality` stage, so `clear_nadir` (needed before showing a planet, a tunnel or a spin) is a guess from the VLM's "lens problems".
 
@@ -26,8 +26,8 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 | # | Assumption | Why it matters |
 |---|---|---|
 | D1 | The first goal is **one finished Legends film with the map overlay**, not more analysis. | Puts milestones A and B before everything else. |
-| D2 | The overlay is driven by **one MP4 per film segment** (creation_time = the segment's true start, exact UTC in the comment tag), the scheme the overlay fork already supports (`--video-time-start mp4-created`, branch `mp4-exact-start`), plus a `timemap.csv` for anything else. | Resolves README 12, open question 1, with what already works. The alternative (teach the overlay tool to read a time map for one joined file) is listed as A2b. |
-| D3 | Delivery target: 3840x2160, the source rate (50 fps), HEVC Main 10, stereo AAC at -14 LUFS integrated, -1 dBTP. | Fixes the audio and render acceptance numbers. |
+| D2 | **Decided (1 Oct):** the delivered film is **one file**, but the map overlay is made **per input clip**: each window of the film is overlaid from its own clip's UTC span (the scheme the overlay fork already supports: `creation_time` = true start, exact UTC in the comment tag, `--video-time-start mp4-created`, branch `mp4-exact-start`), and the overlaid windows are joined into the film. A `timemap.csv` is written too, for checking and for anything else. | Resolves README 12, open question 1. Shapes A2. |
+| D3 | **Decided (1 Oct):** the output frame rate **matches the source**, whatever it is (50 or 60 for the Osmo 360; 59.94 kept as the exact rational), with a GUI option to **halve it** (25 / 30) for a faster render. If clips in one film differ, the majority rate is used (README 12) and the others are resampled. Delivery: 3840x2160, HEVC Main 10, stereo AAC at -14 LUFS integrated, -1 dBTP. | Fixes the render and audio acceptance numbers. |
 | D4 | Rendering stays on the CPU (Python/OpenCV) for this round; a Metal port is only done if B3's measurement says the film cannot render overnight. | Keeps the biggest piece of work optional. |
 | D5 | Insta360, the MCP interface and face blur stay parked until the Legends film exists. | They are listed in Later. |
 
@@ -38,12 +38,14 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 - Add `strata360 coverage FOLDER [--json]` (README 15.3): per clip, which section 15.1 artefacts exist and which decisions they unblock. Show it in the Overview's progress panel.
 - **Done when:** `progress` reports `complete` for Legends; `coverage` lists nothing missing for default stages. Unit test for `coverage` on a built project (`tests/utils` builders).
 
-### A2. Time map and per-segment export for the overlay (M)
-- New `render/timemap.py`: from the plan and the pieces of `render/film.py`, write `<final>/timemap.json` and `timemap.csv`: for every output frame range, film time, clip, source time, UTC (rational), and the transition regions (where two clips overlap, record both; the overlay follows the incoming clip from the transition's midpoint).
-- `final --segments`: besides `film.mp4`, write `segments/NNN_<clip>.mp4` (cut on piece boundaries without re-encoding where possible), each with `creation_time` set to its UTC start and `comment = strata360 start_utc=<exact>`, the same tags `flat.py --start-utc` writes, plus the `<out>.utc.json` sidecar (README 5.8).
-- `scripts/overlay/overlay_film.sh FOLDER`: runs the overlay tool on each segment and joins the results; documented in README section 9.
-- A2b (only if D2 is rejected): add time-map input to the overlay fork's `support-fulltimeseries-journey` branch instead.
-- **Done when:** P7-05 style test: on the synthetic OSV, a two-window plan renders, every segment's tags read back (ffprobe) equal the plan's UTC to within one frame, and the time map is monotonic and covers every output frame exactly once. Integration test in `tests/integration/`; time-map maths unit-tested.
+### A2. Map overlay per input clip, joined into one film (M to L)
+How it works: every window of the plan comes from one input clip, so its UTC span is known exactly. The overlay is rendered for each window separately against the route, and the windows are then joined (with their transitions) into the single delivered file.
+- **Source frame rate (D3).** `render/final.py` takes the rate from the clips (`clip.json` `video.nominal_fps`, as a rational), not the fixed 50; a `half_rate` setting (Final film panel: "Half frame rate (faster)") renders every other source frame. The preview, the time map, the overlay and the audio all use the same rate. Mixed rates: the majority rate, others resampled by nearest source frame (the renderer already maps output times to source frames).
+- **Time map.** New `render/timemap.py`: from the plan and the pieces of `render/film.py`, write `<final>/timemap.json` and `timemap.csv`: per window, film in/out frame, clip, source in/out time, UTC in/out (rational), and the transition regions with both clips' UTC.
+- **Overlay layer per window.** For each window (plus its transition handles, so a dissolve has overlay on both sides), run the overlay tool against the race track over that window's UTC span and produce an **overlay-only layer with alpha** at the film's size and rate. To check first: whether the fork can render an overlay-only output with transparency (its overlay-only generate mode with an alpha codec such as ProRes 4444 or PNG-in-MOV); if not, add that to the fork. Fallback if alpha is not possible: render each window's picture piece as a tagged MP4 (`creation_time` + exact UTC comment, as `flat.py --start-utc` does), overlay onto it directly, and join those (costs one extra encode of the picture).
+- **Composite and join.** `render/final.py` composites each window's layer onto its picture piece before encoding (one encode, no extra generation loss), cross-fading the two layers inside a dissolve or dip just like the picture, then joins the pieces into `film.mp4` as today. The overlay layers are cached per window (key: UTC span, size, rate, overlay layout, track file signature), so re-planning only redoes changed windows.
+- **Settings.** Overlay layout (the overlay tool's layout file), on/off, and position, in `race.json` `overlay` and the Final film panel; the overlay tool's location in `~/.strata360/server.json` (it lives in its own virtual environment, `.venv-overlay`). `doctor` checks it.
+- **Done when:** integration test on the synthetic OSV with a synthetic GPX and a stub overlay command (writes a layer whose pixels encode the UTC it was asked for): a two-window plan with a dissolve renders one file in which each window shows its own clip's UTC to within one frame, the dissolve blends both, and the frame rate equals the source's (and half of it with `half_rate`). Time-map maths unit-tested (monotonic, every output frame covered once). One real check on Legends: the overlay's position marker matches the place seen on screen at three known points (the start line, an aid station, a village sign).
 
 ### A3. Final sound mix (M)
 - Move the mix out of `render/preview.py` into `audio/mix.py` (shared by preview and final; the preview keeps a fast path).
@@ -61,7 +63,7 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 - **Done when:** unit test: two synthetic windows at 0.5x and 1.5x brightness come out within 10% of each other with no clipping added; a night window keeps its relative darkness. Visual check on three real cuts noted in `progress.md`.
 
 ### A5. A real end-to-end Legends render (S, plus machine time)
-- Render the 120 s plan at 4K50 overnight with A2 to A4; measure frames per second, peak memory, disk; run the overlay on the segments.
+- Render the 120 s plan at 4K and the source frame rate overnight with A2 to A4 (overlay included); measure frames per second, peak memory, disk; also time the half-rate option.
 - Record what looks wrong (seams, grade, framing, sound) as issues; they feed milestone C.
 - **Done when:** a finished film with overlay exists, and `progress.md` has the timings and the list of defects.
 
@@ -141,7 +143,6 @@ D1 can start any time after A1;  E runs alongside.
 Suggested sequence: A1, A2, A3, A4 (A2 to A4 are independent and can go in parallel), A5, then B1 and C1 together, C2, C3, D1, B2/B3 as A5's numbers require.
 
 ## Questions for you
-1. **D2:** is one MP4 per segment acceptable for the overlay, or do you want a single joined file the overlay tool reads with a time map?
-2. **D3:** is 50 fps 4K right for the delivered film, or would 25 fps (half the render time) do?
-3. Which matters more for the first film: the **voice-over driving the cut (C2)** or **music-driven** pacing? It decides whether C2 moves ahead of C1.
-4. Are you happy for the README to be split into `docs/` (E1)?
+(D2 and D3 answered on 1 Oct.)
+1. Which matters more for the first film: the **voice-over driving the cut (C2)** or **music-driven** pacing? It decides whether C2 moves ahead of C1.
+2. Are you happy for the README to be split into `docs/` (E1)?
