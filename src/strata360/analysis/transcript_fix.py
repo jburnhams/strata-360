@@ -218,7 +218,7 @@ def decide(calls, accept=0.5, min_votes=3):
     return accepted, [k for k in undecided if tally[k]['votes'] / max(n, 1) >= 0.2], tally
 
 
-def ensemble_excerpt(folder, clip, tr, ch, au, ctx, cache, pool, thinking='low', min_calls=6, max_calls=18, accept=0.5, min_votes=3, patience=3, seed='1', log=print, progress=None, seeds=()):
+def ensemble_excerpt(folder, clip, tr, ch, au, ctx, cache, pool, thinking='low', min_calls=6, max_calls=18, accept=0.5, min_votes=3, patience=3, seed='1', log=print, progress=None, seeds=(), pair=False):
     """Keep asking a random model of `pool` about ONE excerpt until the answer is settled: at least `min_calls` checks, and the accepted fixes unchanged for the last `patience` checks, and no fix left
     with partial support (or `max_calls` is reached). Replies are cached per (model, k-th ask of that model), so a re-run replays the same sequence for free. A model that is over quota or busy is left
     alone for a while; when none can be asked, raises RetryLater (the stage retries later). Returns dict(accepted, calls, models, tally, stopped, undecided)."""
@@ -227,8 +227,11 @@ def ensemble_excerpt(folder, clip, tr, ch, au, ctx, cache, pool, thinking='low',
     rng = random.Random(f'{clip}:{ch["a0"]}:{seed}'); calls = list(seeds); used = {m: 0 for m in pool}; history = []; made = 0; errors = []
     while True:
         accepted, undecided, tally = decide(calls, accept, min_votes); history.append(tuple(sorted(accepted)))
-        if len(calls) >= min_calls and len(history) > patience and len(set(history[-(patience + 1):])) == 1 and not undecided: stopped = 'settled'; break
-        if len(calls) >= max_calls: stopped = 'max_calls'; break
+        if pair:                                                                                  # two checks; a third only when the first two differ (then a fix needs 2 of 3)
+            if len(calls) >= 2 and {_fkey(f) for f in calls[0][1] or []} == {_fkey(f) for f in calls[1][1] or []}: stopped = 'two agree'; break
+            if len(calls) >= 3: stopped = 'tiebreak'; break
+        elif len(calls) >= min_calls and len(history) > patience and len(set(history[-(patience + 1):])) == 1 and not undecided: stopped = 'settled'; break
+        if not pair and len(calls) >= max_calls: stopped = 'max_calls'; break
         ready = [m for m in pool if _DOWN.get(m, 0) < time.time()]
         if not ready: raise RetryLater('every model is over quota or busy for now (' + (errors[-1] if errors else 'waiting') + f'); {len(calls)} checks of this excerpt are done and kept', progress=made > 0)
         low = min(used[m] for m in ready); m = rng.choice([x for x in ready if used[x] == low])                      # a random model, the least used first: the mixture stays even
