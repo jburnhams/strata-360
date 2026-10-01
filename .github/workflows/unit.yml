@@ -13,7 +13,6 @@ concurrency:
 jobs:
   python:
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental == true }}     # Windows support is new: reported but not blocking yet
     strategy:
       fail-fast: false
       matrix:
@@ -24,7 +23,6 @@ jobs:
             python-version: '3.13'
           - os: windows-latest
             python-version: '3.13'
-            experimental: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
