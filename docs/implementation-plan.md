@@ -19,7 +19,13 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 5. **The voice-over does not drive the picture.** Today the order is plan, then script, then voice: the planner (`edit/chrono.py`) fixes every window in whole beats of a constant-tempo grid, the script is written into those windows, and `edit/voiceover.py` squeezes each spoken line into its window (synthetic lines sped up to 1.25x, recordings cut and flagged `over`). overview 17 steps 5 and 6 (measure the recording, then fit the picture around it) are not built, and cuts can only fall on a constant grid (`edit/music.py` assumes a fixed tempo), not on the music's actual beats to the millisecond.
 6. **No lens-quality data.** There is no `quality` stage, so `clear_nadir` (needed before showing a planet, a tunnel or a spin) is a guess from the VLM's "lens problems".
 
-**Debt worth paying while we are in there:** the README has grown to 210 KB with out-of-date passages (section 1 still lists "a GUI editor" as a non-goal; section numbers are out of order); the Python coverage floor is 38%.
+**Progress on the plan (1 Oct, branch `claude/coverage-and-rough-plan`):**
+- **A1** code part done (`strata360 coverage`, `/api/coverage`, progress panel); the Legends batch run is still to do.
+- **V1** to **V4** built and unit-tested; none is called from `strata360 script`, the project file or the app yet, so the film is still planned the old way (plan, then script, then squeeze). Next is **V5** (windows, beat tracker, cuts on the beat), then **V6** (sound placement and the timeline), which is also where the pieces get wired in.
+- None of V1 to V4 has been run on Legends or with the real aligner and Kokoro; the by-hand checks are listed under V3 and V4.
+- Unit coverage is 50% (floor raised from 39 to 47).
+
+**Debt worth paying while we are in there:** the README has grown to 210 KB with out-of-date passages (section 1 still lists "a GUI editor" as a non-goal; section numbers are out of order); the Python coverage floor was 38% (now 47%).
 
 ## Decisions this plan assumes (change them and the order changes)
 
@@ -199,7 +205,7 @@ The reference (kept in `scripts/overlay/`: `layout.xml` and the command line use
 - **E1.** Done 1 Oct: the README became `docs/overview.md`, the other Markdown files moved into `docs/`, and the README is now a short page of links. Still to do: remove passages in the overview contradicted by later work (section 1 non-goals, the two-proxy design, the free-order optimiser as the main path) and, if it keeps growing, split it into one file per area.
 - **E2.** Trim `progress.md` to findings and decisions; the build narrative is in git history.
 - **E3.** Done 1 Oct: the three `PROMPT_*.md` files are in `docs/prompts/`.
-- **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A).
+- **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A). 1 Oct: 39 to 47 after A1 and V1 to V4 (measured 50%).
 
 ## Later (parked until the film exists)
 - A generated (AI) backing track made to fit the finished cut: the film's length, its block boundaries as section changes, its energy curve, and beats placed on the cuts (the reverse of V5: the music fits the picture).

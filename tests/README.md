@@ -85,6 +85,11 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
 | `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
 | `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
+| `pipeline/coverage.py` | 100% | done: stage states, blocked decisions, CLI, API (`unit/test_coverage.py`) |
+| `edit/blocks.py` | 99% | done: allocation, dropping, dialogue padding, automatic length, overrides (`unit/test_blocks.py`) |
+| `edit/script.py` | 88% | partial: the per-block writer done (`unit/test_script_blocks.py`, scripted model); the beat-window writer and `segment_facts` todo |
+| `edit/vo_measure.py` | 93% | done: speech extent, status checks, single and multi-line recordings, `vo.json` reuse (`unit/test_vo_measure.py`, scripted aligner; the real aligner is a manual check) |
+| `edit/vo_fit.py` | 92% | done: block sizing, speed fallback, music placement, problems (`unit/test_vo_fit.py`); `respeak`/`fit_project` in `integration/test_voiceover.py` |
 | everything else | see `--cov-report=term-missing` | todo |
 
 ## Known issues in the existing suite
@@ -93,5 +98,3 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 - A `RuntimeWarning: overflow encountered in divide` from `render/photo.py:64` appears when the synthetic clip goes through exposure (a division by a zero scale on the synthetic lens). Possible product bug; not hidden here.
 - Several old files assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); `restore_globals` papers over a few of them. Convert them to `monkeypatch` when you touch them.
 - `test_workers.py` starts real processes and sleeps (about 5 s).
-| `pipeline/coverage.py` | covered | done: stage states, blocked decisions, CLI, API (`unit/test_coverage.py`) |
-| `edit/blocks.py` | covered | done: allocation, dropping, dialogue padding, auto length, overrides (`unit/test_blocks.py`) |
