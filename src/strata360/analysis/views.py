@@ -214,7 +214,7 @@ def focus_samples(clip_dir, osv):
     if _sources_fresh(cache, clip_dir):
         try:
             d = json.load(open(cache))
-            if d.get('schema') == 3: return d['samples']
+            if d.get('schema') == 5: return d['samples']
         except ValueError: pass
     idp = os.path.join(clip_dir, 'identity.json')
     if not os.path.exists(idp): return []
@@ -224,8 +224,8 @@ def focus_samples(clip_dir, osv):
         me = r.get('me')
         if not me: continue
         t = r['t_s']; hd = hdf(t)
-        out.append(dict(t=t, yaw=round((hd + me['yaw']) % 360.0, 1), pitch=round(me['pitch'], 1), height=me.get('height_deg'), who='you', speaking=_speaker_at(segs, t) == 'wearer'))
-    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=3, samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out
+        out.append(dict(t=t, yaw=round((hd + me['yaw']) % 360.0, 1), pitch=round(me['pitch'], 1), height=me.get('height_deg'), head=None if me.get('head_up') is None else round(me['pitch'] + me['head_up'], 1), who='you', speaking=_speaker_at(segs, t) == 'wearer'))
+    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=5, samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out
 
 
 def person_samples(clip_dir, osv):
@@ -236,7 +236,7 @@ def person_samples(clip_dir, osv):
     if _sources_fresh(cache, clip_dir):
         try:
             d = json.load(open(cache))
-            if d.get('schema') == 2 and d.get('follow') == [follow.SWITCH, follow.TOL_DEG, follow.TOL_PER_S]: return d['samples']
+            if d.get('schema') == 4 and d.get('follow') == [follow.SWITCH, follow.TOL_DEG, follow.TOL_PER_S]: return d['samples']
         except ValueError: pass
     idp = os.path.join(clip_dir, 'identity.json')
     if not os.path.exists(idp): return []
@@ -249,10 +249,10 @@ def person_samples(clip_dir, osv):
         for o in r.get('others', []):
             if not o.get('height_deg'): continue
             near_me = (me and follow._dyaw(o['yaw'], me['yaw']) < 20 and abs(o['pitch'] - me['pitch']) < 25) or (not me and last_me and t - last_me[0] < 6 and follow._dyaw(o['yaw'], last_me[1]) < 20)   # the wearer seen as "someone else"
-            if not near_me: c.append(dict(yaw=(hd + o['yaw']) % 360.0, pitch=o['pitch'], height_deg=o['height_deg'], face=bool(o.get('face'))))
+            if not near_me: c.append(dict(yaw=(hd + o['yaw']) % 360.0, pitch=o['pitch'], height_deg=o['height_deg'], head_up=o.get('head_up'), face=bool(o.get('face'))))
         frames.append(dict(t=t, cands=c))
     ch = follow.choose(frames); out = []
     for f, (j, pid) in zip(frames, ch):
         if j is None: continue
-        c = f['cands'][j]; out.append(dict(t=f['t'], yaw=round(c['yaw'], 1), pitch=round(c['pitch'], 1), height=c.get('height_deg'), who='other', speaking=_speaker_at(segs, f['t']) == 'other', person=pid))
-    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=2, follow=[follow.SWITCH, follow.TOL_DEG, follow.TOL_PER_S], samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out
+        c = f['cands'][j]; out.append(dict(t=f['t'], yaw=round(c['yaw'], 1), pitch=round(c['pitch'], 1), height=c.get('height_deg'), head=None if c.get('head_up') is None else round(c['pitch'] + c['head_up'], 1), who='other', speaking=_speaker_at(segs, f['t']) == 'other', person=pid))
+    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=4, follow=[follow.SWITCH, follow.TOL_DEG, follow.TOL_PER_S], samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out

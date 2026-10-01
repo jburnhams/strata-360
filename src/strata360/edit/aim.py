@@ -8,14 +8,14 @@ Vertical: the view is aimed so that the head is near the top of the frame and as
 Angles are degrees; yaw wraps."""
 import math
 
-BAND_YAW = 9.0; BAND_PITCH = 7.0          # half-widths of the dead band (degrees): the person can move this far from the centre before anything happens
+BAND_YAW = 9.0; BAND_PITCH = 3.5          # half-widths of the dead band (degrees): the person can move this far from the centre before anything happens
 SETTLE = 0.3                               # a pan ends when the person is within this fraction of the band
 HOLD_S = 0.5                               # outside the band this long before a pan starts (a flicker does nothing)
 PAN_DEG_S = 18.0                           # fastest pan
 PAN_TAU = 0.35                             # velocity eases towards the wanted one with this time constant (no sudden start)
 JUMP_DEG = 28.0; JUMP_AFTER_S = 0.3        # further than this, for this long: move once, fast
 JUMP_S = 0.5                               # duration of the jump (smoothstep)
-HEAD_MARGIN = 0.42                         # the head's top sits this fraction of the frame height above the frame centre (1.0 would put it at the very top edge... 0.5 is the edge)
+HEAD_MARGIN = 0.08                         # the top of the head stays at least this fraction of the frame height below the top edge: a hard requirement
 
 
 def wrap(a): return (a + 180.0) % 360.0 - 180.0
@@ -24,11 +24,14 @@ def wrap(a): return (a + 180.0) % 360.0 - 180.0
 def vfov_deg(hfov_deg, aspect=16 / 9): return math.degrees(2 * math.atan(math.tan(math.radians(hfov_deg) / 2) / aspect))
 
 
-def aim_pitch(pitch, height, vfov):
-    """Pitch (degrees) to aim at so the head is near the top of the frame. `pitch` is the centre of the person's box, `height` its height in degrees (None: 45), `vfov` the frame's vertical field of view.
-    Never aims more than half a body above or below the centre of the box."""
-    h = 45.0 if not height else float(height); top = pitch + h / 2
-    return min(max(top - HEAD_MARGIN * vfov, pitch - h / 2), pitch + h / 2)
+def aim_pitch(pitch, height, vfov, head_top=None):
+    """Pitch (degrees) to aim at: the whole head is in frame (a hard requirement), then as much of the body as fits. `pitch` is the centre of the person's box, `height` its height in degrees (None: 45),
+    `head_top` the pitch of the top of the head (from the face; else the top of the box), `vfov` the frame's vertical field of view.
+    The lowest aim that keeps the head in frame puts the top of the head just inside the top edge, with room for the camera to sit anywhere in its dead band (BAND_PITCH) without losing it; that shows the most
+    body below. When the whole body fits with room to spare, the box is centred instead."""
+    h = 45.0 if not height else float(height); top = head_top if head_top is not None else pitch + h / 2
+    lowest = top - (0.5 - HEAD_MARGIN) * vfov + BAND_PITCH
+    return max(lowest, pitch)
 
 
 class Follower:

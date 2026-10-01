@@ -1,14 +1,16 @@
 // The steady, debounced follower of src/strata360/edit/aim.py (keep the two in step): the camera holds while the person stays near the centre of the view, pans slowly when they drift out of the
 // dead band for a while, and moves once, quickly, when they go far. Angles in degrees; yaw wraps.
-const BAND_YAW = 9, BAND_PITCH = 7, SETTLE = 0.3, HOLD_S = 0.5, PAN_DEG_S = 18, PAN_TAU = 0.35, JUMP_DEG = 28, JUMP_AFTER_S = 0.3, JUMP_S = 0.5, HEAD_MARGIN = 0.42
+const BAND_YAW = 9, BAND_PITCH = 3.5, SETTLE = 0.3, HOLD_S = 0.5, PAN_DEG_S = 18, PAN_TAU = 0.35, JUMP_DEG = 28, JUMP_AFTER_S = 0.3, JUMP_S = 0.5, HEAD_MARGIN = 0.08
 const rad = (d: number) => (d * Math.PI) / 180
 export const wrapDeg = (a: number) => ((((a + 180) % 360) + 360) % 360) - 180
 export const vfovDeg = (hfov: number, aspect = 16 / 9) => (2 * Math.atan(Math.tan(rad(hfov) / 2) / aspect) * 180) / Math.PI
 
-/** Pitch (degrees) to aim at so the head is near the top of the frame: `pitch` is the centre of the person's box, `height` its height in degrees. */
-export function aimPitch(pitch: number, height: number | null | undefined, vfov: number) {
-  const h = height || 45, top = pitch + h / 2
-  return Math.min(Math.max(top - HEAD_MARGIN * vfov, pitch - h / 2), pitch + h / 2)
+/** Pitch (degrees) to aim at: the whole head is in frame (a hard requirement), then as much of the body as fits. `pitch` is the centre of the person's box, `height` its height in degrees, `headTop` the pitch of
+ *  the top of the head (from the face, else the top of the box). The lowest aim that keeps the head in frame puts the top of the head just inside the top edge, with room for the camera to sit anywhere in its
+ *  dead band; when the whole body fits with room to spare the box is centred instead. */
+export function aimPitch(pitch: number, height: number | null | undefined, vfov: number, headTop?: number | null) {
+  const h = height || 45, top = headTop ?? pitch + h / 2, lowest = top - (0.5 - HEAD_MARGIN) * vfov + BAND_PITCH
+  return Math.max(lowest, pitch)
 }
 
 export class Follower {

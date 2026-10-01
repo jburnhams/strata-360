@@ -19,7 +19,7 @@ void main(){
 }`
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-type Focus = { t: number; yaw: number; pitch: number; height?: number | null; who: 'you' | 'other'; speaking: boolean; person?: number }
+type Focus = { t: number; yaw: number; pitch: number; height?: number | null; head?: number | null; who: 'you' | 'other'; speaking: boolean; person?: number }
 type Aim = 'free' | 'heading' | 'you' | 'person'
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 
@@ -57,7 +57,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
     const a = focus[Math.max(lo, 0)], b = focus[Math.min(lo + 1, focus.length - 1)]
     if (Math.abs(a.t - time) > 2 && Math.abs(b.t - time) > 2) return null
     const w = b.t > a.t ? Math.min(Math.max((time - a.t) / (b.t - a.t), 0), 1) : 0, ay = (a.yaw * Math.PI) / 180, by = (b.yaw * Math.PI) / 180
-    return { yaw: ay + wrap(by - ay) * w, pitch: (((a.pitch + (b.pitch - a.pitch) * w) * Math.PI) / 180), height: a.height ?? b.height, who: (w < 0.5 ? a : b).who, speaking: (w < 0.5 ? a : b).speaking }
+    return { yaw: ay + wrap(by - ay) * w, pitch: (((a.pitch + (b.pitch - a.pitch) * w) * Math.PI) / 180), height: a.height ?? b.height, head: a.head ?? b.head, who: (w < 0.5 ? a : b).who, speaking: (w < 0.5 ? a : b).speaking }
   }, [youList, person])
 
   // WebGL: one full-screen triangle pair; the video frame is the texture, the shader turns each pixel into a ray into the sphere.
@@ -84,7 +84,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
       else if (s.aim === 'you' || s.aim === 'person') {
         const f = focusAt(now, s.aim)
         if (f) {                                                                                       // a steady follower: holds, pans slowly, or moves once when the person goes far; the head sits near the top of the frame
-          const ty = (f.yaw * 180) / Math.PI, tp = aimPitch((f.pitch * 180) / Math.PI, f.height, vfovDeg(s.fov, cv.width / cv.height))
+          const ty = (f.yaw * 180) / Math.PI, tp = aimPitch((f.pitch * 180) / Math.PI, f.height, vfovDeg(s.fov, cv.width / cv.height), f.head)
           if (!s.fol || s.folAim !== s.aim || Math.abs(now - s.lastT) > 1) { s.fol = new Follower(ty, tp); s.folAim = s.aim }
           const [fy, fp] = s.fol.step(ty, tp, dts); baseYaw = (fy * Math.PI) / 180; basePitch = (fp * Math.PI) / 180; follow = true; s.cur = baseYaw
         } else { s.fol = null; baseYaw = hd }

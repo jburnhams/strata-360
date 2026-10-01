@@ -172,7 +172,7 @@ def people(ctx):
     ctx.write('people.json', ctx.stamped(doc)); np.save(ctx.path('faces.npy'), emb); np.save(ctx.path('faces_thumbs.npy'), th)
 
 
-@stage('identity', 1, keys=('profile',), outputs=('identity.json',), deps=('people',),
+@stage('identity', 2, keys=('profile',), outputs=('identity.json',), deps=('people',),
        note='which detected person is the wearer (face profile from `who`), who else is in shot; needs profiles/<profile>.npz')
 def identity(ctx):
     import numpy as np, os
