@@ -145,7 +145,7 @@ def call_key(ch, audio_path, prompt, model, thinking, run):
 def usage_log_path(folder): return os.path.join(config.race_dir(folder), 'gemini_usage.jsonl')
 
 
-PRICES = {'gemini-3.1-pro-preview': (2.00, 12.00)}      # US$ per million tokens (input, output), paid tier, prompts up to 200k tokens; models not listed have no price here (free tier is free)
+PRICES = {'gemini-3.1-pro-preview': (2.00, 12.00), 'flash': (0.75, 3.75)}      # ('flash': any Flash model) US$ per million tokens (input, output), paid tier, prompts up to 200k tokens; models not listed have no price here (free tier is free)
 
 
 def usage_summary(folder):
@@ -158,7 +158,7 @@ def usage_summary(folder):
         try: r = json.loads(l)
         except ValueError: continue
         t = r.get('tokens') or {}; i = int(t.get('input') or 0); o = int(t.get('output') or 0); m = r.get('model') or '?'; paid = r.get('tier') == 'paid'
-        e = out['by_model'].setdefault(m, dict(calls=0, input=0, output=0, paid=0, cost_usd=0.0)); c = (i * PRICES[m][0] + o * PRICES[m][1]) / 1e6 if paid and m in PRICES else 0.0
+        e = out['by_model'].setdefault(m, dict(calls=0, input=0, output=0, paid=0, cost_usd=0.0)); pr = PRICES.get(m) or next((v for k, v in PRICES.items() if k in m), None); c = (i * pr[0] + o * pr[1]) / 1e6 if paid and pr else 0.0
         for d in (out, e): d['calls'] += 1; d['input'] += i; d['output'] += o; d['cost_usd'] += c
         if paid: out['paid_calls'] += 1; e['paid'] += 1
     out['cost_usd'] = round(out['cost_usd'], 4)
