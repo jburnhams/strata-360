@@ -255,6 +255,19 @@ def cmd_progress(a):
     if p['needs']: print('  waiting for you:', ', '.join(p['needs']))
 
 
+def cmd_coverage(a):
+    from strata360.pipeline.coverage import coverage
+    r = coverage(a.name)
+    if a.json: print(json.dumps(r)); return
+    print(f"{r['clips']} clips; default-stage artefacts present:")
+    for n in r['stages']: print(f"  {n:15s} {r['totals'][n]:3d}/{r['clips']}")
+    if r['complete']: print('nothing missing for the default stages'); return
+    print('missing:')
+    for m in r['missing']: print(f"  {m['clip']}  {m['stage']} ({m['state']})")
+    print('decisions blocked:')
+    for x, cs in r['blocked'].items(): print(f"  {x}: {len(cs)} clip(s)")
+
+
 def cmd_open(a):
     """The GUI's first screen in command form: pick a footage folder; the project (<folder>/strata360/) is created if needed, whatever is already done is kept, and the rest
     is processed. When everything is complete the next step is the results / export stage."""
@@ -426,6 +439,7 @@ def main():
     p = sub.add_parser('open', help='open a footage folder as a project: create it if new, continue whatever is unfinished (what the GUI does first)'); p.add_argument('name', metavar='FOLDER')
     p.add_argument('--languages'); p.add_argument('--gps', help='the race FIT/GPX'); p.add_argument('--no-run', action='store_true'); p.set_defaults(fn=cmd_open)
     p = sub.add_parser('progress', help='project state and per-stage progress (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_progress)
+    p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
     p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.add_argument('--reload', action='store_true', help='restart on code changes'); p.set_defaults(fn=cmd_serve)

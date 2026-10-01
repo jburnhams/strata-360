@@ -5,12 +5,14 @@ import { PanelSkeleton } from './Skeleton'
 import Phrase, { type Mode } from './Phrase'
 import PlayIcons from './PlayIcons'
 import Health from './Health'
+import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
 // The whole race as one running transcript: phrases grouped by clip in time order. Hover a phrase for the clip's details (picture, real time, who spoke); click to open the clip at that moment.
 export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder: string; clips: ClipInfo[]; tz: string; onOpen: (clip: string, t: number) => void }) {
+  const [overlay] = useThumbOverlay()
   const [ver, setVer] = useState(0)
   const data = usePoll(() => api.transcript(folder), 30000, [folder, ver])
   const fix = usePoll(() => api.transcriptFix(folder), 3000, [folder, ver])
@@ -66,7 +68,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
       </div>
       {tip && (() => { const c = info[tip.seg.clip], t = at(tip.seg); const left = Math.min(tip.x + 16, window.innerWidth - 300), top = Math.min(tip.y + 16, window.innerHeight - 260); return (
         <div className="pointer-events-none fixed z-40 w-72 overflow-hidden rounded-lg border border-stone-300 bg-white text-xs shadow-lg dark:border-stone-700 dark:bg-stone-900" style={{ left, top }}>
-          {c?.thumb && <img src={api.thumbUrl(folder, tip.seg.clip, c.thumb)} alt="" className="aspect-video w-full object-cover" />}
+          {c?.thumb && <img src={api.thumbUrl(folder, tip.seg.clip, thumbVersion(c, overlay), overlay)} alt="" className="aspect-video w-full object-cover" />}
           <div className="space-y-0.5 p-2">
             <div className="font-mono text-stone-500">{tip.seg.clip}</div>
             <div>{local(t)} <span className="text-stone-500">({t ? t.toISOString().slice(11, 19) : ''} UTC)</span></div>

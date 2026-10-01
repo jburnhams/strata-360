@@ -134,9 +134,12 @@ def duration(path):
 def _spoken(text): return re.sub(r'\s+', ' ', text.replace('—', ', ').replace('…', '...')).strip()
 
 
+def _name(seg): return f'{int(seg):03d}' if str(seg).isdigit() else str(seg)         # script lines are numbered; the lines of a block script have keys such as 003b0
+
+
 def synth_path(folder, seg, text, engine, voice, rate):
     h = hashlib.sha1(f'{engine}|{voice}|{rate}|{text}'.encode()).hexdigest()[:10]
-    return os.path.join(base(folder), 'synth', f'{int(seg):03d}-{h}.wav')
+    return os.path.join(base(folder), 'synth', f'{_name(seg)}-{h}.wav')
 
 
 def synth_line(folder, seg, text, engine, voice, rate):
@@ -148,7 +151,7 @@ def synth_line(folder, seg, text, engine, voice, rate):
     return p
 
 
-def recorded_path(folder, seg): return os.path.join(base(folder), 'recorded', f'{int(seg):03d}.wav')
+def recorded_path(folder, seg): return os.path.join(base(folder), 'recorded', f'{_name(seg)}.wav')
 
 
 def save_recording(folder, seg, raw_path):

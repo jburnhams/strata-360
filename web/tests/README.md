@@ -46,9 +46,18 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/FolderBrowser.tsx` | 100% | done |
 | `src/components/NoteBox.tsx` | 100% | done |
 | `src/components/Health.tsx` | 100% | done |
+| `src/components/MusicPanel.tsx` | 100% | done |
 | `src/components/ProjectProgress.tsx` | 100% | done |
 | `src/components/RedoDialog.tsx` | 100% | done |
 | `src/components/Phrase.tsx` | 100% | done (trivial branch misses) |
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/usePoll.ts` | 100% | done |
-| every other file in `src/` | 0% | todo |
+| `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
+| every other file in `src/` | 0% | todo
+| `src/components/Timeline.tsx` | 77.55% | partial (interactions and edge cases)
+| `src/components/Moments.tsx` | 100% | done |
+
+### Helpers Added
+
+* `makeEditResponse`, `makePlanSegment` in `factories.ts` to mock Timeline data.
+* `extraHandlers` in `handlers.ts` to support API calls specific to `Timeline` such as `/api/edit`, `/api/edit/propose` and `/api/edit/override`.

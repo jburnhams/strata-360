@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { Follower, aimPitch, vfovDeg } from '../aim'
+import { useThumbOverlay } from '../thumbOverlay'
 
 // Player for a clip's 360 preview (upright equirect video). The thumbnail is shown first; play loads the video. The picture is a flat window into the sphere that you can pan by dragging
 // (touch too) and zoom with the wheel or the slider. Four ways to aim: Free (stays where you put it), Heading (points where the runner is going, from the motion data), You (turns to the wearer) and Person
@@ -31,6 +32,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   const canvas = useRef<HTMLCanvasElement>(null)
   const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, fol: null as null | Follower, folAim: '' as string, lastT: 0, lastMs: 0, active: 0, gl: null as null | { draw: () => void }, raf: 0 })
   const [started, setStarted] = useState(false)
+  const [overlay] = useThumbOverlay()
   const [playing, setPlaying] = useState(false)
   const [t, setT] = useState(0)
   const [aim, setAim] = useState<Aim>('heading')
@@ -144,7 +146,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   return (
     <div className="overflow-hidden rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
       <div className="relative aspect-video w-full bg-black">
-        {thumbKind && !started && <img src={api.thumbUrl(folder, clip, thumbKind)} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+        {thumbKind && !started && <img src={api.thumbUrl(folder, clip, thumbKind + (overlay ? '+overlay' : ''), overlay)} alt="" className="absolute inset-0 h-full w-full object-cover" />}
         <video ref={video} src={started ? api.previewUrl(folder, clip) : undefined} muted={muted} playsInline preload="auto" crossOrigin="anonymous" className="hidden"
           onLoadedMetadata={e => { if (win) (e.target as HTMLVideoElement).currentTime = win.start }}
           onTimeUpdate={e => { const v = e.target as HTMLVideoElement; setT(v.currentTime); if (win && v.currentTime >= win.end) { v.pause(); v.currentTime = win.start } }} onPlay={() => { setPlaying(true); st.current.active = performance.now() }} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setErr('could not load the preview video')} />

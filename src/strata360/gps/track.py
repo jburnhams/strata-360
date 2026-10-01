@@ -1,7 +1,7 @@
 """The race GPS track (Garmin FIT or GPX) as arrays, cached as `.npz` next to the source, plus GPX export.
 
-The overlay tool reads FIT directly, so no conversion is needed for the map; this module exists for our own analysis (clock verification, position per clip, race
-progress) and to write a GPX where another tool needs one. Times are UTC seconds since the epoch. Semicircles (FIT) are converted to degrees."""
+The arrays drive our own analysis (clock verification, position per clip, race progress) and the overlay on the final film (overlay/series.py); `to_gpx` writes a GPX
+where another tool needs one. Times are UTC seconds since the epoch. Semicircles (FIT) are converted to degrees."""
 import os
 import numpy as np
 

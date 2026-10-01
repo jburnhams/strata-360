@@ -5,6 +5,7 @@
 # numpy is installed by the script and deliberately not listed here.
 scipy==1.16.3
 opencv-python==4.12.0.88
+pillow==12.3.0          # the race overlay: text (FreeType) and map tiles (overlay/)
 torch==2.9.1
 torchaudio==2.9.1
 faster-whisper==1.2.1

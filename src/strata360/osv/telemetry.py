@@ -11,7 +11,9 @@ def cache_dir():
 
 def _cached(osv, name, make):
     """The result of `make()` (a dict of numpy arrays) kept in an .npz next to nothing else: keyed by the file's path, size and modification time, so a changed file is read again."""
-    st = os.stat(osv); key = hashlib.sha1(f'{os.path.realpath(osv)}|{st.st_size}|{st.st_mtime_ns}|{name}|1'.encode()).hexdigest()[:20]; d = cache_dir(); path = os.path.join(d, f'{key}.npz')
+    try: st = os.stat(osv)
+    except OSError: return make()                                                                       # not a real file (a test, a pipe): nothing to key a cache on
+    key = hashlib.sha1(f'{os.path.realpath(osv)}|{st.st_size}|{st.st_mtime_ns}|{name}|1'.encode()).hexdigest()[:20]; d = cache_dir(); path = os.path.join(d, f'{key}.npz')
     try:
         with np.load(path) as z: return {k: z[k] for k in z.files}
     except (OSError, ValueError, KeyError): pass

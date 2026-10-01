@@ -123,3 +123,13 @@ describe('ProjectProgress', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 })
+
+describe('ProjectProgress coverage', () => {
+  it('lists the decisions blocked by missing data', async () => {
+    mockGet('/api/progress', makeProgress({ state: 'processing' }))
+    mockGet('/api/log', { lines: [] })
+    mockGet('/api/coverage', { clips: 2, stages: ['motion'], totals: { motion: 1 }, blocked: { 'steadiness, usable footage': ['a'] }, missing: [{ clip: 'b', stage: 'motion', state: 'missing' }], complete: false })
+    mount()
+    expect(await screen.findByText(/Data missing: 1 item · blocks 1 decision/)).toBeInTheDocument()
+  })
+})

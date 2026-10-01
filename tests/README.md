@@ -26,6 +26,7 @@ diff-cover coverage.xml --compare-branch origin/main    # after `--cov-report=xm
 | Fixture | What it gives you |
 | --- | --- |
 | `tmp_path`, `monkeypatch` | pytest built-ins. Use instead of `tempfile.mkdtemp()` and direct assignment such as `module.fn = lambda ...` (these leak into other tests). |
+| `overlay_fakes` (utils) | `race_track(...)` (a straight run as track arrays), `TileServer()` (a tile service in memory: pass as `Tiles(fetch=...)`; `.urls`, `.fail`), `T0`. |
 | `fake_urlopen` | Scripts `urllib.request.urlopen`: `fake_urlopen.reply({...}, http_error(429, {...}))`; assert on `fake_urlopen.calls` (`url`, `method`, `headers` lower-cased, `body` parsed from JSON). An unexpected request fails the test. |
 | `fake_popen` | `subprocess.Popen` replaced: nothing starts. `fake_popen.instances[i].cmd` / `.kw`. |
 | `fake_run` | `subprocess.run` / `check_output` replaced: `.calls`, `.returns['ffprobe'] = b'...'`, `.code = 1`. |
@@ -80,8 +81,17 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
 | `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |
-| `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `osv/*`, `edit/voiceover.py`, `pipeline/ingest.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
+| `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network |
+| `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
+| `pipeline/ingest.py` | 98% | done |
+| `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `edit/voiceover.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
+| `osv/*` | >= 91% | done |
 | `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
+| `pipeline/coverage.py` | 100% | done: stage states, blocked decisions, CLI, API (`unit/test_coverage.py`) |
+| `edit/blocks.py` | 99% | done: allocation, dropping, dialogue padding, automatic length, overrides (`unit/test_blocks.py`) |
+| `edit/script.py` | 88% | partial: the per-block writer done (`unit/test_script_blocks.py`, scripted model); the beat-window writer and `segment_facts` todo |
+| `edit/vo_measure.py` | 93% | done: speech extent, status checks, single and multi-line recordings, `vo.json` reuse (`unit/test_vo_measure.py`, scripted aligner; the real aligner is a manual check) |
+| `edit/vo_fit.py` | 92% | done: block sizing, speed fallback, music placement, problems (`unit/test_vo_fit.py`); `respeak`/`fit_project` in `integration/test_voiceover.py` |
 | everything else | see `--cov-report=term-missing` | todo |
 
 ## Known issues in the existing suite
