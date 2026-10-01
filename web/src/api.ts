@@ -21,8 +21,8 @@ export interface Meta {
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
 export interface WordEdit { orig: string; src: 'user' | 'gemini'; why?: string | null; user_text?: string | null; gemini_text?: string | null }
-export interface WordT { w: string; t0: number; t1: number; p?: number | null; e?: WordEdit }
-export interface Seg { si: number; words: WordT[]; clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
+export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit }
+export interface Seg { si: number; part?: number; play0?: number; play1?: number; words: WordT[]; clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface ScriptLine { says?: string[]; seg: number; film_start_s: number; seconds: number; clip: string; text: string; words: number; est_speak_s: number; budget_words: number }
 export interface ScriptDoc { file: string; title: string | null; provider?: string; model?: string; target_s: number; wpm: number; style?: string; lines: ScriptLine[]; total_words: number; total_speak_s: number; remaining_problems: { seg: number; problem: string }[]; seconds_llm?: number }
 export interface ScriptState { key_configured: boolean; providers: Record<string, { models: string[]; default: string; configured: boolean }>; models: string[]; llm: { provider: string; model: string }; running: boolean; last_exit: number | null; log: string; latest: ScriptDoc | null; scripts: number }
@@ -45,15 +45,16 @@ export interface MusicState { file: string | null; analysis: { bpm: number; offs
 export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
 export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
-export interface ClipInfo { id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
+export interface ClipInfo { audio_original?: boolean; audio_clean?: boolean; id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
 export interface PlacePoint { label: string; lat: number; lon: number; address: { display_name?: string; road?: string; county?: string; country?: string } | null; nearby: Near[] | null }
 export interface Places { covered: boolean; note?: string; points: PlacePoint[]; summary?: { places: string[]; road?: string; county?: string; country?: string; text: string } }
-export interface Line { si: number; words: WordT[]; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
+export interface Line { si: number; part?: number; play0?: number; play1?: number; words: WordT[]; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface Why { starts_because: string; ends_because?: string; steadiness: number; shake_dps: number; exposure_ok: number; scenic: number; lens_blocked: number; score: number; speech: boolean; chatter: number }
 export interface Candidate { id: string; kind?: 'span' | 'best' | 'speech' | 'person' | 'you' | 'scene'; view?: string; priority?: number; span?: number; start_s: number; end_s: number; start_utc: string; quality: number; energy: number; features: Record<string, number>; settings: string[]; people: number; why?: Why }
 export interface Unusable { start_s: number; end_s: number; usable: false; reasons: string[]; detail: string | null; starts_because: string; ends_because?: string; stats: Record<string, number | string | null> }
 export interface ClipDetail {
+  audio_files?: { original: boolean; clean: boolean }
   id: string; note: string; time: Record<string, string | number | boolean | null>; video: Record<string, any>; camera?: Record<string, string>
   motion: Record<string, number | null> | null; audio: { summary: any; segments: { label: string; t0_s: number; t1_s: number }[] } | null
   transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
@@ -96,6 +97,7 @@ export const api = {
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
+  clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean') => '/api/clip/audio?' + q({ folder, clip, kind }),
   editScript: (folder: string, texts: Record<string, string>) => call<{ saved: string | null; speaking: boolean }>('/api/script/edit', { folder, texts }),
   voiceoverUse: (folder: string, seg: number, use: 'synth' | 'recorded') => call<{ ok: boolean }>('/api/voiceover/use', { folder, seg, use }),
   voiceoverAudio: (folder: string, seg?: number, source?: string) => '/api/voiceover/audio?' + q(seg === undefined ? { folder } : { folder, seg: String(seg), source: source ?? 'synth' }),

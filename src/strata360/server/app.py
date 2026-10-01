@@ -185,11 +185,21 @@ def create_app(roots, token=None):
             if not c: continue
             mo = _j(d, 'motion.json'); cd = _j(d, 'candidates.json'); thumb = 'best' if os.path.exists(d + 'thumb.jpg') else 'quick' if os.path.exists(d + 'thumb_quick.jpg') else None
             out.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=round(c['video']['source_frames'] / c['video']['nominal_fps'], 1), has_note=bool(nt['clips'].get(c['clip_id'])),
-                            thumb=thumb, steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
+                            thumb=thumb, audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
     def word_view(s):                                                                    # the words of a phrase for the editable view: shown text, timing, and the correction (if any)
-        return [dict(w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {})) for w in (s.get('words') or [])]
+        return [dict(i=i, w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {})) for i, w in enumerate(s.get('words') or [])]
+
+    def phrase_parts(s, si, who, **extra):                                               # the displayed phrases of one segment: a long phrase comes in parts (only at sentence ends, every part over 5 s)
+        res = []; ps = TE.parts(s); whole = len(ps) == 1
+        for p in ps:
+            ws = [dict(i=w['i'], w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {})) for w in p['words']]
+            text = s['text'].strip() if (whole and not s.get('edited')) else ' '.join(w['w'].strip() for w in p['words'] if w['w'].strip())
+            en = s.get('text_en') if (whole or s.get('lang') != 'en') else text
+            if whole and s.get('lang') == 'en' and s.get('edited'): en = text
+            res.append(dict(si=si, part=len(res), words=ws, t0=p['t0'], t1=p['t1'], play0=p['play0'], play1=p['play1'], lang=s['lang'], text=text, text_en=en, who=who, **extra))
+        return res
 
     @api.post('/api/transcript/edit', dependencies=[Depends(auth)])
     def post_transcript_edit(body: dict):                                            # {folder, clip, seg, word, text}: your correction of one word; {action: 'clear'} drops it (the model's shows again)
@@ -230,7 +240,7 @@ def create_app(roots, token=None):
             sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
             for si, s in enumerate(tr['segments']):
                 if not s.get('text', '').strip(): continue
-                out.append(dict(clip=c['clip_id'], si=si, words=word_view(s), t0=round(s['t0'], 2), t1=round(s['t1'], 2), lang=s['lang'], text=s['text'].strip(), text_en=s.get('text_en'), flagged=bool(s.get('flags') or s.get('suspect')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))))
+                out.extend(phrase_parts(s, si, lab.get((round(s['t0'], 2), round(s['t1'], 2))), clip=c['clip_id'], flagged=bool(s.get('flags') or s.get('suspect'))))
         return dict(segments=out)
 
     @api.get('/api/meta', dependencies=[Depends(auth)])
@@ -251,6 +261,12 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404, 'the proxy video has not been made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
+    @api.get('/api/clip/audio')
+    def get_clip_audio(request: Request, folder: str, clip: str, kind: str = 'original'):  # the clip's stored sound: original (lossless) or cleaned (Range requests work); <audio> cannot send headers, so the cookie/query token authenticates
+        auth(request); f = folder_of(folder); name = 'audio_clean.flac' if kind == 'clean' else 'audio_original.flac'; p = os.path.join(_cd(f, clip), name)
+        if not os.path.exists(p): raise HTTPException(404, 'not made yet')
+        return FileResponse(p, media_type='audio/flac', headers={'Cache-Control': 'no-cache'})
+
     @api.get('/api/clip', dependencies=[Depends(auth)])
     def get_clip(folder: str, clip: str):                                                # everything known about one clip, for its detail view
         from strata360.pipeline import notes as N
@@ -258,10 +274,11 @@ def create_app(roots, token=None):
         mo = _j(d, 'motion.json'); out['motion'] = None if not mo else mo['summary']
         au = _j(d, 'audio.json'); out['audio'] = None if not au else dict(summary=au.get('summary'), segments=au.get('segments', [])[:40])
         tr = TE.load_effective(d); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
-        out['transcript'] = [dict(si=si, words=word_view(s), t0=s['t0'], t1=s['t1'], lang=s['lang'], text=s['text'], text_en=s.get('text_en'), flagged=bool(s.get('flags')), who=lab.get((round(s['t0'], 2), round(s['t1'], 2)))) for si, s in enumerate((tr or {}).get('segments', []))]
+        out['transcript'] = [x for si, s in enumerate((tr or {}).get('segments', [])) for x in phrase_parts(s, si, lab.get((round(s['t0'], 2), round(s['t1'], 2))), flagged=bool(s.get('flags')))]
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
+        out['audio_files'] = dict(original=os.path.exists(d + 'audio_original.flac'), clean=os.path.exists(d + 'audio_clean.flac'))
         mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
             from strata360.analysis.views import focus_samples, person_samples

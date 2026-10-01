@@ -21,7 +21,7 @@ DEFAULTS = {
     'llm': {'provider': 'vertex', 'model': 'gemini-3.1-pro-preview'},           # the voice-over script writer: Gemini Pro through a Google Cloud (Vertex AI) key in secrets.env; or 'gemini' (AI Studio key), 'anthropic', 'local' (mlx-lm)
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
     'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '16M', 'encoder': 'h264'},
-    'stages': ['ingest', 'motion', 'proxy', 'thumb', 'places', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
+    'stages': ['ingest', 'audio_extract', 'audio_clean', 'motion', 'proxy', 'thumb', 'places', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
 }
 
 
@@ -54,12 +54,17 @@ def track_path(name, cfg=None):
     return g if g and os.path.exists(g) else None
 
 
+ADDED_STAGES = [('audio_extract', 'ingest'), ('audio_clean', 'audio_extract')]
+
+
 def load(name):
     p = os.path.join(race_dir(name), 'race.json')
     if not os.path.exists(p): raise FileNotFoundError(f'no race {name!r}: run `strata360 init {name} --library PATH` first ({p})')
     cfg = copy.deepcopy(DEFAULTS)
     for k, v in json.load(open(p)).items():
         cfg[k] = {**cfg[k], **v} if isinstance(v, dict) and isinstance(cfg.get(k), dict) else v
+    for new, after in ADDED_STAGES:                                                       # stages added after a project was made join it, right after the one they follow
+        if new not in cfg['stages'] and after in cfg['stages']: cfg['stages'].insert(cfg['stages'].index(after) + 1, new)
     return cfg
 
 

@@ -40,6 +40,26 @@ def test_the_model_run_stores_suggestions_per_clip():
     r = TF.run(f, log=lambda *a: None); assert r == {'C1': 1} and len(seen) == 1 and '3:audio(0.50)' in seen[0] and 'Clip 1 (C1)' in seen[0]; assert TE.load_effective(d)['segments'][0]['words'][3]['w'] == 'out'
 
 
+def words_at(*items):
+    return [dict(w=w, t0=t0, t1=t1) for w, t0, t1 in items]
+
+
+def test_long_phrases_split_only_at_sentence_ends_and_every_part_is_over_five_seconds():
+    w = words_at(('One', 0, 1), ('two.', 1, 6.5), ('Three', 7, 8), ('four.', 8, 13), ('Five', 13.5, 14), ('six', 14, 16))                                     # 16 s: sentence ends after 6.5 s and 13 s
+    assert TE.split_points(w) == [(0, 2), (2, 4), (4, 6)] or TE.split_points(w) == [(0, 2), (2, 6)]                                                          # never a part of 5 s or less
+    for a, b in TE.split_points(w): assert w[b - 1]['t1'] - w[a]['t0'] > 5.0
+    assert TE.split_points(words_at(('a', 0, 4), ('b.', 4, 9.9))) == [(0, 2)]                                                                                # 9.9 s: left whole
+    assert TE.split_points(words_at(('a', 0, 3), ('b.', 3, 4), ('c', 4.2, 12))) == [(0, 3)]                                                                  # the only sentence end leaves 4 s before it: no split
+    assert TE.split_points(words_at(('a', 0, 6), ('b', 6, 12))) == [(0, 2)]                                                                                  # no sentence end at all: no split
+    assert TE.split_points(words_at(('a', 0, 2.5), ('b.', 2.5, 6), ('c', 6.5, 9), ('d.', 9, 14))) == [(0, 2), (2, 4)]                                         # 14 s: a 6 s part and an 7.5 s part
+
+
+def test_parts_carry_play_ranges_and_absolute_word_numbers_and_foreign_phrases_stay_whole():
+    seg = dict(t0=0.0, t1=16.0, lang='en', text='x', text_en='x', words=words_at(('One', 0, 1), ('two.', 1, 6.5), ('Three', 7, 8), ('four', 8, 16))); ps = TE.parts(seg)
+    assert len(ps) == 2 and [w['i'] for w in ps[1]['words']] == [2, 3] and ps[1]['play0'] == 6.9 and ps[1]['play1'] == 16.3
+    fr = dict(seg, lang='fr', text='bonjour', text_en='hello'); assert len(TE.parts(fr)) == 1
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for fn in fns:

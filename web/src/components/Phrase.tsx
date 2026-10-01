@@ -18,7 +18,7 @@ function Words({ ctx }: { ctx: WordCtx }) {
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => { if (open != null) input.current?.select() }, [open])
   const save = async (i: number, text: string | null) => { setOpen(undefined); await api.editWord(ctx.folder, ctx.clip, ctx.si, i, text); ctx.onSaved() }
-  return <>{ctx.words.map((w, i) => (
+  return <>{ctx.words.map((w, k) => { const i = w.i ?? k; return (
     <Fragment key={i}>
       <span className="relative inline-block">
         <span title={tip(w)} onClick={e => { e.stopPropagation(); setOpen(i) }}
@@ -36,7 +36,7 @@ function Words({ ctx }: { ctx: WordCtx }) {
             </span>
           </span>)}
       </span>{' '}
-    </Fragment>))}</>
+    </Fragment>) })}</>
 }
 
 export default function Phrase({ text, en, lang, mode, className = '', onText, word }: { text: string; en: string | null; lang: string; mode: Mode; className?: string; onText?: () => void; word?: WordCtx }) {

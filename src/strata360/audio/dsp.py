@@ -205,6 +205,29 @@ def dfn_denoise(x48, atten_lim_db=None):
     return y[0].numpy().astype(np.float32)
 
 
+def write_flac(path, x, sr=SR):
+    x = np.asarray(x, np.float32)
+    if x.ndim == 1: x = x[:, None]
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'f32le', '-ar', str(sr), '-ac', str(x.shape[1]), '-i', '-', '-c:a', 'flac', '-compression_level', '5', path], input=x.tobytes(), check=True)
+
+
+CLEAN_TARGET_LUFS = -14.0       # full-volume speech: louder than the camera's own level, which is usually low; what to use, and fades, are editing decisions
+
+
+def clean_for_playback(x, sr=SR, atten_lim_db=18.0, target_lufs=CLEAN_TARGET_LUFS):
+    """The clip's sound cleaned for listening and for the film (NOT for recognition: enhancement raised word error rate, see enhance_speech): rumble removed, DeepFilterNet3 with a capped
+    attenuation (so the crowd and the place stay, and artefacts stay small), a little speech EQ, speech-aware auto gain (quiet speech is lifted, pauses are not), then loudness normalised up to
+    `target_lufs` with a peak limiter: speech at full volume. x: (n,) or (n, ch) float32 at 48 kHz; returns mono 48 kHz."""
+    if x.ndim == 2: x = x.mean(1)
+    y = dfn_denoise(ffmpeg_filter(x, sr, 'highpass=f=80:poles=2')[:, 0], atten_lim_db)
+    y = ffmpeg_filter(y, sr, 'equalizer=f=250:t=q:w=1:g=-2,equalizer=f=3000:t=q:w=0.9:g=2,speechnorm=e=6:r=0.0005:l=1:t=0.02', out_channels=1)[:, 0]
+    for _ in range(3):                                                                    # normalise the loudness (the limiter takes some back, so correct again)
+        cur = integrated_lufs(np.repeat(y[:, None], 2, 1))
+        if not np.isfinite(cur) or abs(target_lufs - cur) < 0.4: break
+        y = ffmpeg_filter(y * 10 ** (float(np.clip(target_lufs - cur, -12, 30)) / 20), sr, 'alimiter=limit=0.89:attack=5:release=60:level=0', out_channels=1)[:, 0]
+    return ffmpeg_filter(y, sr, 'alimiter=limit=0.89:attack=5:release=60:level=0', out_channels=1)[:, 0]
+
+
 def mossformer_denoise(x48):
     """MossFormer2_SE_48K via ClearerVoice-Studio (2024-25 model). Runs in its own venv (.venv-cv, clearvoice pins numpy<2) as a subprocess."""
     import tempfile

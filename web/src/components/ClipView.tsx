@@ -3,6 +3,7 @@ import { api, type ClipDetail } from '../api'
 import NoteBox from './NoteBox'
 import RedoDialog from './RedoDialog'
 import Phrase, { type Mode } from './Phrase'
+import PlayIcons from './PlayIcons'
 import Moments from './Moments'
 import ClipPlayer from './ClipPlayer'
 import { PanelSkeleton, Skeleton } from './Skeleton'
@@ -71,6 +72,7 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
           <div key={i} id={`seg-${Math.round(l.t0 * 100)}`} className={`py-1 text-sm ${l.flagged ? 'opacity-50' : ''} ${focus != null && Math.abs(l.t0 - focus) < 0.05 ? 'rounded bg-emerald-100 px-1 dark:bg-emerald-950' : ''}`}>
             <span className="mr-2 font-mono text-xs text-stone-500">{fmt(l.t0)}</span>
             {l.who && <span className={`mr-2 rounded-full px-2 text-xs ${l.who === 'wearer' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{l.who === 'wearer' ? 'you' : 'other'}</span>}
+            <PlayIcons folder={folder} clip={clip} t0={l.play0 ?? l.t0} t1={l.play1 ?? l.t1} original={!!c.audio_files?.original} clean={!!c.audio_files?.clean} />
             <Phrase text={l.text} en={l.text_en} lang={l.lang} mode={mode} word={l.words?.length ? { folder, clip, si: l.si, words: l.words, onSaved: reload } : undefined} />
           </div>
         ))}

@@ -14,8 +14,8 @@ DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=2.0, busy_l
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
 STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=6.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
-                    places=0.3, identity=0.5, candidates=0.5)
-STAGE_MAX_CONCURRENT = dict(proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
+                    places=0.3, identity=0.5, candidates=0.5, audio_extract=0.5, audio_clean=2.0)
+STAGE_MAX_CONCURRENT = dict(audio_clean=1, proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
 
 
 def cfg_values(cfg):

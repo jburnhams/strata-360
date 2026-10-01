@@ -3,6 +3,7 @@ import { api, type ClipInfo, type Meta, type Seg } from '../api'
 import { usePoll } from '../usePoll'
 import { PanelSkeleton } from './Skeleton'
 import Phrase, { type Mode } from './Phrase'
+import PlayIcons from './PlayIcons'
 
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -53,6 +54,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
               {g.segs.map((s, i) => (
                 <span key={i} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}
                   className={`mr-1 rounded px-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-950 ${s.who === 'wearer' ? 'font-medium' : ''} ${s.flagged ? 'italic opacity-50' : ''}`}>
+                  <PlayIcons folder={folder} clip={s.clip} t0={s.play0 ?? s.t0} t1={s.play1 ?? s.t1} original={!!info[s.clip]?.audio_original} clean={!!info[s.clip]?.audio_clean} />
                   <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`cursor-pointer ${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} onText={() => onOpen(s.clip, s.t0)} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1) } : undefined} />
                 </span>
               ))}

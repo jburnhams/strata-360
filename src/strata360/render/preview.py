@@ -126,12 +126,20 @@ def has_audio(p):
     r = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', p], capture_output=True, text=True); return bool(r.stdout.strip())
 
 
+def audio_of(folder, clip):
+    """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none."""
+    d = os.path.join(config.race_dir(folder), 'clips', clip)
+    for n in ('audio_clean.flac', 'audio_original.flac'):
+        if os.path.exists(os.path.join(d, n)): return os.path.join(d, n)
+    p = proxy_of(folder, clip); return p if p and has_audio(p) else None
+
+
 def build_audio(folder, plan, out, total_s):
     """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track."""
     inputs = []; chains = []; n = 0
     for g in plan['segments']:
-        p = proxy_of(folder, g['clip']); d = g['dur_s']; gain = 1.0 if g.get('speech') else 0.25
-        if p and has_audio(p): inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
+        p = audio_of(folder, g['clip']); d = g['dur_s']; gain = 1.0 if g.get('speech') else 0.25
+        if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
         n += 1
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); chain = ';'.join(chains) + ';' + ''.join(f'[s{i}]' for i in range(n)) + f'concat=n={n}:v=0:a=1[nat]'

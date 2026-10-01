@@ -95,3 +95,34 @@ def set_gemini(d, suggestions, model=None):
         if not to or to == w['w'].strip() or (s.get('from') is not None and str(s['from']).strip() != w['w'].strip()): continue
         e = edits.setdefault(key(si, wi), dict(orig=w['w'], t0=tr['segments'][si]['t0'])); e['gemini'] = dict(text=to, why=str(s.get('why', ''))[:200], model=model, at=_now()); n += 1
     save(d, edits); return n
+
+
+# ---- long phrases are shown (and played) in parts ------------------------------------------------------------------------------------------------------------------------------------------------
+MAX_PHRASE_S = 10.0; MIN_PART_S = 5.0; PLAY_PAD = (0.1, 0.3)       # whisper's word times run about 0.15 s early: play a little before the first word and after the last
+SENTENCE_END = ('.', '?', '!', '…')
+CLOSERS = '"\')”’'                                                  # quotes and brackets that may follow the full stop
+
+
+def split_points(words, max_s=MAX_PHRASE_S, min_s=MIN_PART_S):
+    """Where to break a phrase of timed words into parts: only after a sentence end, and only if every resulting part is longer than `min_s` seconds; a phrase of `max_s` or less is left whole.
+    Returns the list of (first word, last word + 1) index ranges."""
+    n = len(words)
+    if not n or words[-1]['t1'] - words[0]['t0'] <= max_s: return [(0, n)]
+    cuts = []; start = 0
+    for k in range(n - 1):
+        w = words[k]['w'].strip().rstrip(CLOSERS)
+        if not w.endswith(SENTENCE_END): continue
+        if words[k]['t1'] - words[start]['t0'] > min_s and words[-1]['t1'] - words[k + 1]['t0'] > min_s: cuts.append(k + 1); start = k + 1
+    b = [0] + cuts + [n]; return [(b[i], b[i + 1]) for i in range(len(b) - 1)]
+
+
+def parts(seg):
+    """The pieces of one (corrected) transcript segment for display and playback: [{w0, w1, t0, t1, play0, play1, text, words}], words carrying their index `i` in the whole phrase. Phrases in another
+    language (their English translation is not word-aligned) are not split."""
+    ws = seg.get('words') or []
+    foreign = seg.get('lang', 'en') != 'en' and seg.get('text_en') and seg['text_en'].strip() != (seg.get('text') or '').strip()
+    rng = [(0, len(ws))] if (foreign or not ws) else split_points(ws); out = []
+    for a, b in rng:
+        w = ws[a:b]; t0 = w[0]['t0'] if w else seg['t0']; t1 = w[-1]['t1'] if w else seg['t1']
+        out.append(dict(w0=a, w1=b, t0=round(t0, 2), t1=round(t1, 2), play0=round(max(t0 - PLAY_PAD[0], 0.0), 2), play1=round(t1 + PLAY_PAD[1], 2), words=[dict(w, i=a + j) for j, w in enumerate(w)]))
+    return out

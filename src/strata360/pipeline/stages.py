@@ -58,29 +58,48 @@ def ingest(ctx):
     ctx.write('clip.json', ingest_clip(ctx.clip, ctx.cfg))
 
 
-@stage('audio', 1, outputs=('audio.json',), deps=('ingest',), note='levels, loudness, clipping, wind/speech/crowd/ambience labels (README 5.10)')
+def audio_src(ctx):
+    """The clip's sound as stored by the audio_extract stage (lossless, so the stages that read it need not open the big video file), else the video file itself: the same samples."""
+    p = ctx.path('audio_original.flac')
+    return p if os.path.exists(p) else ctx.clip.osv
+
+
+@stage('audio_extract', 1, outputs=('audio_original.flac',), deps=('ingest',), note='the clip\'s sound saved on its own, lossless: the original audio every later step and the player use')
+def audio_extract(ctx):
+    import subprocess
+    out = ctx.path('audio_original.flac')
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', ctx.clip.osv, '-vn', '-map', '0:a:0', '-c:a', 'flac', '-compression_level', '5', out + '.part.flac'], check=True); os.replace(out + '.part.flac', out)
+
+
+@stage('audio_clean', 1, outputs=('audio_clean.flac',), deps=('audio_extract',), note='the sound cleaned for listening and for the film (DeepFilterNet3, capped so the crowd and the place stay); the recogniser keeps using the original')
+def audio_clean(ctx):
+    from strata360.audio import dsp
+    y = dsp.clean_for_playback(dsp.load_audio(ctx.path('audio_original.flac'), 1)[:, 0]); out = ctx.path('audio_clean.flac'); dsp.write_flac(out + '.part.flac', y); os.replace(out + '.part.flac', out)
+
+
+@stage('audio', 1, outputs=('audio.json',), deps=('ingest',), soft_deps=('audio_extract',), note='levels, loudness, clipping, wind/speech/crowd/ambience labels (README 5.10)')
 def audio(ctx):
     from strata360.audio import dsp
-    an = dsp.analyse_array(dsp.load_audio(ctx.clip.osv))
+    an = dsp.analyse_array(dsp.load_audio(audio_src(ctx)))
     ctx.write('audio.json', ctx.stamped(dict(source=os.path.basename(ctx.clip.osv), **an)))
 
 
-@stage('transcribe', 1, keys=('languages', 'whisper_model'), outputs=('transcript.json',), deps=('ingest',),
+@stage('transcribe', 1, keys=('languages', 'whisper_model'), outputs=('transcript.json',), deps=('ingest',), soft_deps=('audio_extract',),
        note='multilingual transcript, per-segment language, English translation, hallucination flags (README 5.11)')
 def transcribe(ctx):
     from strata360.audio import dsp, speech
     m, tm = _whisper(ctx.cfg['whisper_model'])
-    x = dsp.load_audio(ctx.clip.osv, 1)[:, 0]; x16 = dsp.ffmpeg_filter(x, dsp.SR, 'anull', out_sr=16000)[:, 0]     # raw audio: enhancement lowers word accuracy (progress.md)
+    x = dsp.load_audio(audio_src(ctx), 1)[:, 0]; x16 = dsp.ffmpeg_filter(x, dsp.SR, 'anull', out_sr=16000)[:, 0]     # raw audio: enhancement lowers word accuracy (progress.md)
     segs = speech.transcribe_multilingual(x16, m, tm, ctx.cfg['languages'])
     ctx.write('transcript.json', ctx.stamped(dict(source=os.path.basename(ctx.clip.osv), model=ctx.cfg['whisper_model'], translate_model='opus-mt',
                                                    denoise='none', languages=ctx.cfg['languages'], segments=segs)))
 
 
-@stage('align', 1, keys=('align_languages',), outputs=('alignment.json',), deps=('transcribe',),
+@stage('align', 1, keys=('align_languages',), outputs=('alignment.json',), deps=('transcribe',), soft_deps=('audio_extract',),
        note='accurate word start/end and safe cut points (README 5.11); whisper word times are not used for edits')
 def align(ctx):
     from strata360.audio.align import align_transcript
-    ctx.write('alignment.json', ctx.stamped(align_transcript(ctx.clip.osv, ctx.read('transcript.json'), ctx.cfg['align_languages'])))
+    ctx.write('alignment.json', ctx.stamped(align_transcript(audio_src(ctx), ctx.read('transcript.json'), ctx.cfg['align_languages'])))
 
 
 @stage('exposure', 1, keys=('exposure_every_frames',), outputs=('exposure.json',), deps=('ingest',),
@@ -150,12 +169,12 @@ def scenes(ctx):
     ctx.write('scenes.json', ctx.stamped(analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['scenes_every_s'])))
 
 
-@stage('speakers', 1, outputs=('speakers.json', 'speakers.npy'), deps=('transcribe',),
+@stage('speakers', 1, outputs=('speakers.json', 'speakers.npy'), deps=('transcribe',), soft_deps=('audio_extract',),
        note='speaker embedding and level of every speech segment; labelled wearer/other once the wearer voice is known (`strata360 voice`)')
 def speakers(ctx):
     import numpy as np, os
     from strata360.analysis import voices
-    doc, emb = voices.analyse(ctx.clip.osv, ctx.read('transcript.json'), str(ctx.dir))
+    doc, emb = voices.analyse(audio_src(ctx), ctx.read('transcript.json'), str(ctx.dir))
     prof = os.path.join('profiles', ctx.cfg.get('profile', 'me') + '_voice.npz')
     if os.path.exists(prof) and len(emb):
         lab, sim = voices.label(emb, prof)
