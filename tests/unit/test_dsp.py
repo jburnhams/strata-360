@@ -178,7 +178,7 @@ def test_dfn_denoise(monkeypatch):
     import sys
     import types
     import numpy as np
-    from tests.utils.fakes import mock_torch, FakeTorchTensor
+    from fakes import mock_torch, FakeTorchTensor
     mock_torch(monkeypatch)
 
     fake_df = types.ModuleType('df')

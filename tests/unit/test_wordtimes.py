@@ -223,7 +223,7 @@ def test_force_align(monkeypatch):
 
 def test_load_and_emissions(monkeypatch):
     import numpy as np
-    from tests.utils.fakes import mock_torch, mock_transformers
+    from fakes import mock_torch, mock_transformers
     mock_torch(monkeypatch)
     mock_transformers(monkeypatch)
 

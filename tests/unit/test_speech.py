@@ -45,7 +45,7 @@ def test_translate_text(monkeypatch):
     assert speech.translate_text('bonjour', 'en') == 'bonjour'
 
     # Mock the internal cache _MT and torch.no_grad
-    from tests.utils.fakes import mock_torch, mock_transformers, FakeHuggingFaceTokenizer, FakeHuggingFaceModel
+    from fakes import mock_torch, mock_transformers, FakeHuggingFaceTokenizer, FakeHuggingFaceModel
     mock_torch(monkeypatch)
     mock_transformers(monkeypatch)
     monkeypatch.setattr(speech, '_MT', {'fr': (FakeHuggingFaceTokenizer(), FakeHuggingFaceModel())})
@@ -55,7 +55,7 @@ def test_translate_text(monkeypatch):
     assert res == 'BONJOUR_TRANSLATED'
 
 def test_translate_text_uncached(monkeypatch):
-    from tests.utils.fakes import mock_torch, mock_transformers
+    from fakes import mock_torch, mock_transformers
     mock_torch(monkeypatch)
     mock_transformers(monkeypatch)
 
