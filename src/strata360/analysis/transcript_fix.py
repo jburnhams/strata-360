@@ -145,7 +145,7 @@ def call_key(ch, audio_path, prompt, model, thinking, run):
 def usage_log_path(folder): return os.path.join(config.race_dir(folder), 'gemini_usage.jsonl')
 
 
-PRICES = {'gemini-3.1-pro-preview': (2.00, 12.00), 'flash': (0.75, 3.75)}      # ('flash': any Flash model) US$ per million tokens (input, output), paid tier, prompts up to 200k tokens; models not listed have no price here (free tier is free)
+PRICES = {'gemini-3.1-pro-preview': (2.00, 12.00), 'flash': (0.75, 3.75), 'transcribe': (2.00, 12.00)}      # ('flash', 'transcribe': any model with that in its name) US$ per million tokens (input, output), paid tier, prompts up to 200k tokens; models not listed have no price here (free tier is free)
 
 
 def usage_summary(folder):
