@@ -47,3 +47,15 @@ def make_tone(path, seconds=1.0, hz=440, rate=48000, channels=1):
 
 
 def duration(path): return float(ffprobe(path)['format']['duration'])
+
+def make_track(path, bpm=124.0, offset=1.3, seconds=64):
+    """Write a synthetic music track with a beat and varying energy for testing music analysis and mixing."""
+    import numpy as np, wave
+    sr = 22050; x = np.zeros(int(seconds * sr), np.float32); beat = 60.0 / bpm; k = 0
+    rng = np.random.default_rng(1)
+    while offset + k * beat < seconds - 0.3:
+        i = int((offset + k * beat) * sr); n = int(0.06 * sr); env = np.exp(-np.arange(n) / (0.012 * sr)); loud = 1.0 if seconds * 0.5 > offset + k * beat else 2.2       # louder second half
+        tone = np.sin(2 * np.pi * (60 if k % 4 == 0 else 900) * np.arange(n) / sr) * env * (1.0 if k % 4 == 0 else 0.5) * loud * 0.3           # a low thump on the bar line, a tick on the other beats
+        x[i:i + n] += tone + (rng.standard_normal(n) * 0.02 * env).astype(np.float32); k += 1
+    with wave.open(path, 'wb') as w: w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr); w.writeframes((np.clip(x, -1, 1) * 32767).astype(np.int16).tobytes())
+    return path
