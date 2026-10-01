@@ -486,3 +486,7 @@ By noise type (small, all SNRs): wind raw 0.14 → DeepFilterNet3 0.11 and MossF
 ## Transcript check: Pro, twice plus tiebreak (Oct 2026)
 - `transcript_check` default: Gemini 3.1 Pro (paid key) on 60-120 s speech-only excerpts, twice; a third check only when the two differ; a fix needs 2 votes (`pair`). Flash mixture and the transcription model alone were weaker (see config comments). `min_votes` is now passed through to the ensemble (it was silently 3).
 - Cost: `transcript_fix.usage_summary` prices paid-key calls (Pro $2/$12 per M tokens) from `gemini_usage.jsonl`; shown in the transcript panel. Clip 0023: 9 Pro calls, about $0.14.
+
+## Background track (opt-in `audio_background` stage, Oct 2026)
+- Speech taken out, the place kept: TIGER-DnR effects model (dialogue / effects / music separation). Tried first: original minus DeepFilterNet's speech: the classifier still scored the rest 0.41 speech (original 0.52). TIGER: speech score gone on a 5 s test, the classifier hears animals, a bicycle, hooves.
+- Speed: CPU about 6 s per second of audio; Apple GPU (STRATA_GPU=1) about 1 s per second. Output `audio_background.flac`; `audio_events` classifies it too (`background` windows) and `window_mix` uses it for the non-voice categories. Not yet run through the whole pipeline: only the model call was timed on a 5 s piece.
