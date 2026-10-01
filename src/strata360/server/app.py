@@ -11,7 +11,7 @@ import argparse, glob, json, os, secrets, subprocess, sys, threading, time
 
 from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod
-from strata360.analysis import transcript_edits as TE, transcript_fix as TF
+from strata360.analysis import thumbs as TH, transcript_edits as TE, transcript_fix as TF
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -184,8 +184,9 @@ def create_app(roots, token=None):
             c = _j(d, 'clip.json')
             if not c: continue
             mo = _j(d, 'motion.json'); cd = _j(d, 'candidates.json'); thumb = 'best' if os.path.exists(d + 'thumb.jpg') else 'quick' if os.path.exists(d + 'thumb_quick.jpg') else None
+            if thumb and TH.overlay_fresh(d): thumb += '+overlay'                                                     # the version also busts the browser cache when the overlay one appears
             out.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=round(c['video']['source_frames'] / c['video']['nominal_fps'], 1), has_note=bool(nt['clips'].get(c['clip_id'])),
-                            thumb=thumb, audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
+                            thumb=thumb and thumb.split('+')[0], thumb_overlay=bool(thumb and thumb.endswith('+overlay')), audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
     def word_view(s):                                                                    # the words of a phrase for the editable view: shown text, timing, and the correction (if any)
@@ -251,8 +252,9 @@ def create_app(roots, token=None):
         f = folder_of(folder); m = M.load(f); m['timezone'] = (config.load(f).get('timezone') if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else None) or 'Europe/Brussels'; return m
 
     @api.get('/api/thumb')
-    def get_thumb(request: Request, folder: str, clip: str):                              # the image itself: an <img> tag cannot send headers, so the cookie/query token is what authenticates it
-        auth(request); f = folder_of(folder); d = _cd(f, clip)
+    def get_thumb(request: Request, folder: str, clip: str, overlay: bool = False):       # the image itself: an <img> tag cannot send headers, so the cookie/query token is what authenticates it
+        auth(request); f = folder_of(folder); d = _cd(f, clip)                             # overlay=1: the version with the race overlay when it is up to date, else the plain one
+        if overlay and TH.overlay_fresh(d): return FileResponse(os.path.join(d, 'thumb_overlay.jpg'), media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
         for n in ('thumb.jpg', 'thumb_quick.jpg'):
             if os.path.exists(os.path.join(d, n)): return FileResponse(os.path.join(d, n), media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
         raise HTTPException(404, 'no thumbnail yet')
@@ -292,7 +294,7 @@ def create_app(roots, token=None):
         except Exception: out['focus'] = []; out['person'] = []
         out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
-        th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th; out['places'] = _j(d, 'places.json')
+        th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th and {**th, 'overlay': TH.overlay_fresh(d)}; out['places'] = _j(d, 'places.json')
         p = config.track_path(f, config.load(f))
         if p:
             import datetime as dt

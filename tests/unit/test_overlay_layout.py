@@ -2,7 +2,7 @@
 import json, os
 import numpy as np
 import pytest
-from overlay_fakes import T0, TileServer, race_track
+from overlay_fakes import T0, TileServer, race_track, tile_colour
 from strata360.edit import llm_remote as L
 from strata360.overlay import draw as D, for_project, layout as LY, tiles as TL
 from strata360.overlay.series import Series
@@ -39,7 +39,7 @@ def test_fmt(metric, v, s): assert LY.fmt(metric, v) == s
 
 class TestSettings:
     def test_defaults(self):
-        st = LY.settings(); assert st['elements'] == list(LY.ELEMENTS) and st['style'] == 'tf-outdoors' and st['map_opacity'] == 0.6
+        st = LY.settings(); assert st['elements'] == list(LY.ELEMENTS) and st['style'] is None and st['map_opacity'] == 0.6 and st['auto_zoom'] is True
 
     def test_unknown_element(self):
         with pytest.raises(ValueError, match='unknown overlay element.*speedo'): LY.settings({'elements': ['clock', 'speedo']})
@@ -120,6 +120,45 @@ class TestMaps:
         LY.Overlay(series, (1920, 1080), {'style': 'tf-outdoors', 'elements': ['clock', 'pace']}).patches(T0)
 
 
+class TestMapStyles:
+    def factory(self, made, tmp_path):
+        def make(style): made.append(style); return TL.Tiles(style, key='k', cache_dir=str(tmp_path / 't'), fetch=TileServer(512 if TL.STYLES[style]['retina'] else 256))
+        return make
+
+    def test_plain_overview_and_detailed_close_up(self, series, tmp_path, texts):
+        made = []; ov = LY.Overlay(series, (1920, 1080), {}, tiles=self.factory(made, tmp_path)); ov.patches(T0)
+        assert made == ['tf-landscape', 'tf-outdoors'] and texts.count('Maps © Thunderforest, data © OpenStreetMap contributors') == 1
+
+    def test_one_style_for_both(self, series, tmp_path):
+        made = []; LY.Overlay(series, (1920, 1080), {'style': 'tf-atlas'}, tiles=self.factory(made, tmp_path)); assert made == ['tf-atlas']
+
+    def test_per_map_style_and_one_credit_line_each(self, series, tmp_path, texts):
+        made = []; ov = LY.Overlay(series, (1920, 1080), {'layout': {'route_map': {'style': 'osm'}}}, tiles=self.factory(made, tmp_path)); ov.patches(T0)
+        assert made == ['osm', 'tf-outdoors'] and '© OpenStreetMap contributors' in texts and 'Maps © Thunderforest, data © OpenStreetMap contributors' in texts
+
+    def test_missing_key_for_the_default_styles(self, series):
+        with pytest.raises(TL.TileError, match='tf-landscape needs a key'): LY.Overlay(series, (1920, 1080), {})
+
+
+class TestLocalMap:
+    def test_centre_shows_the_tile_under_the_runner(self, series, tiles):
+        ov = overlay(series, tiles, elements=['local_map'], auto_zoom=False, local_zoom=14.3, map_opacity=1.0); t = T0 + 300
+        (X, Y, m), _ = ov.patches(t); wx, wy = TL.world(*series.position(t)); n = 2 ** 14; k = 2 ** 14.3; wx += 20 / k        # 20 px east of the runner, off the route line
+        assert tuple(m[128, 148, :3]) == tile_colour(14, int(wx * n / 256), int(wy * n / 256))
+
+    def test_pans_by_fractions_of_a_pixel(self, tiles):
+        ov = overlay(Series(race_track(n=900, speed=0.5)), tiles, elements=['local_map'], auto_zoom=False)    # walking: well under a pixel a frame
+        a = ov.patches(T0 + 300)[0][2].copy(); b = ov.patches(T0 + 300.04)[0][2]; assert not np.array_equal(a, b) and np.abs(a.astype(int) - b).max() < 60
+
+    def test_reused_while_standing_still(self, tiles):
+        tr = race_track(n=900); tr['lat'][400:500] = tr['lat'][400]; tr['dist'][400:500] = tr['dist'][400]
+        ov = overlay(Series(tr), tiles, elements=['local_map']); a = ov.patches(T0 + 420)[0][2]; assert ov.patches(T0 + 470)[0][2] is a
+
+    def test_follows_the_auto_zoom(self, series, tmp_path):
+        tiles = TL.Tiles('osm', cache_dir=str(tmp_path / 'plain'), fetch=TileServer(colour=(220, 220, 210))); on = overlay(series, tiles, elements=['local_map']).widgets[0]; off = overlay(series, tiles, elements=['local_map'], auto_zoom=False).widgets[0]
+        assert on.zoom_at(T0 + 450) == pytest.approx(13.1, abs=0.01) and off.zoom_at(T0 + 450) == 14 and off._zoom is None
+
+
 class TestDrawing:
     def test_apply_changes_only_where_the_overlay_is(self, series, tiles):
         f = np.full((1080, 1920, 3), 20000, np.uint16); out = overlay(series, tiles).apply(f, T0 + 100)
@@ -165,4 +204,4 @@ class TestFinalKey:
         p.write_json('race.json', {'overlay': {'enabled': False}}); assert len({k0, k1, k2, k3}) == 4 and self.key(p) == k0
 
     def test_signature_holds_the_merged_settings(self):
-        sig = json.loads(LY.signature({'scale': 2}, None)); assert sig[0]['scale'] == 2 and sig[0]['style'] == 'tf-outdoors' and sig[1] is None
+        sig = json.loads(LY.signature({'scale': 2}, None)); assert sig[0]['scale'] == 2 and sig[0]['local_zoom'] == 14 and sig[1] is None

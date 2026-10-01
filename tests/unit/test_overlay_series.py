@@ -69,6 +69,10 @@ class TestPosition:
         tr = race_track(n=50); tr['lat'][3] = np.nan; assert len(Series(tr).route_lat) == 49
 
 
+def test_track_shorter_than_the_smoothing_window():
+    v = Series(race_track(n=8)).at(T0 + 4); assert v['pace_s_km'] == pytest.approx(1000 / 3.0) and v['dist_m'] == pytest.approx(12.0)
+
+
 class TestErrors:
     def test_too_short(self):
         with pytest.raises(ValueError, match='fewer than two'): Series(race_track(n=1))

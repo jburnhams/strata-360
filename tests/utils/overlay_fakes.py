@@ -22,10 +22,11 @@ def tile_colour(z, x, y): return ((x * 37) % 256, (y * 53) % 256, (z * 11) % 256
 
 
 class TileServer:
-    """fetch(url) for overlay.tiles.Tiles: a solid tile coloured by its z/x/y (tile_colour), `size` px square. `.urls` lists what was asked for; `.fail` (an exception) is raised instead."""
-    def __init__(self, size=256): self.size, self.urls, self.fail = size, [], None
+    """fetch(url) for overlay.tiles.Tiles: a solid tile coloured by its z/x/y (tile_colour), or all one `colour`, `size` px square. `.urls` lists what was asked for; `.fail` (an exception)
+    is raised instead."""
+    def __init__(self, size=256, colour=None): self.size, self.colour, self.urls, self.fail = size, colour, [], None
 
     def __call__(self, url):
         self.urls.append(url)
         if self.fail is not None: raise self.fail
-        z, x, y = map(int, re.search(r'/(\d+)/(\d+)/(\d+)(?:@2x)?\.png', url).groups()); return png(tile_colour(z, x, y), self.size)
+        z, x, y = map(int, re.search(r'/(\d+)/(\d+)/(\d+)(?:@2x)?\.png', url).groups()); return png(self.colour or tile_colour(z, x, y), self.size)

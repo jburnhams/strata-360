@@ -1,5 +1,5 @@
 """The HTTP API (server/app.py) through FastAPI's TestClient: auth, path safety, browse, the last project, notes, log, clips and starting a project. No real worker starts (fake_popen)."""
-import os
+import json, os
 import pytest
 from projects import CLIP_ID
 
@@ -138,7 +138,16 @@ class TestLogAndClips:
         p.add_clip(CLIP_ID, source_frames=300, fps=30.0, motion={'summary': {'steady': 0.8}}, candidates={'summary': {'n': 3}})
         open(os.path.join(p.clip_dir(), 'thumb.jpg'), 'wb').write(b'x')
         [c] = client.get('/api/clips', params={'folder': p.folder}).json()['clips']
-        assert c == dict(id=CLIP_ID, start_utc='2026-02-21T12:00:07+00:00', duration_s=10.0, has_note=False, thumb='best', audio_original=False, audio_clean=False, steady=0.8, candidates=3)
+        assert c == dict(id=CLIP_ID, start_utc='2026-02-21T12:00:07+00:00', duration_s=10.0, has_note=False, thumb='best', thumb_overlay=False, audio_original=False, audio_clean=False, steady=0.8, candidates=3)
+
+    def test_overlay_thumbnail_when_it_matches_the_current_one(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID); d = p.clip_dir(); open(os.path.join(d, 'thumb.jpg'), 'wb').write(b'plain'); open(os.path.join(d, 'thumb_overlay.jpg'), 'wb').write(b'over')
+        json.dump(dict(source='thumb.jpg', source_mtime=os.path.getmtime(os.path.join(d, 'thumb.jpg'))), open(os.path.join(d, 'thumb_overlay.json'), 'w'))
+        get = lambda **kw: client.get('/api/thumb', params={'folder': p.folder, 'clip': CLIP_ID, **kw}).content
+        [c] = client.get('/api/clips', params={'folder': p.folder}).json()['clips']; assert c['thumb'] == 'best' and c['thumb_overlay'] is True
+        assert get(overlay=1) == b'over' and get() == b'plain'
+        os.utime(os.path.join(d, 'thumb.jpg'), (1, 1))                                                   # a newer thumbnail: the overlay one is out of date until the stage redoes it
+        [c] = client.get('/api/clips', params={'folder': p.folder}).json()['clips']; assert c['thumb_overlay'] is False and get(overlay=1) == b'plain'
 
     def test_a_clip_without_clip_json_is_skipped(self, client, project):
         os.makedirs(project.clip_dir('CAM_broken'))

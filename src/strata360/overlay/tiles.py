@@ -6,7 +6,7 @@ the exact scale.
 
 Fetching tiles sends the areas of the route to the tile service, so each tile is fetched once and kept under ~/.strata360/tiles/<style>/ (nothing else is written there: no key, no track). A style
 that needs a key reads it from the environment or the project's gitignored secrets.env (edit/llm_remote.secret), never from race.json, and the key never appears in an error or a log."""
-import io, math, os, urllib.error, urllib.request
+import collections, io, math, os, urllib.error, urllib.request
 import numpy as np
 from PIL import Image
 
@@ -24,6 +24,10 @@ class TileError(RuntimeError):
     pass
 
 
+class MissingKey(TileError):
+    pass
+
+
 def world(lat, lon):
     """(x, y) world pixels at zoom 0 of degrees lat/lon (scalars or arrays)."""
     lat = np.clip(np.asarray(lat, float), -85.0511, 85.0511); lr = np.radians(lat)
@@ -37,7 +41,8 @@ def needs_key(style): return bool(STYLES[style]['key'])
 
 
 class Tiles:
-    """Tiles of one style. `fetch(url) -> bytes` defaults to an HTTP GET; `offline` uses only the cache."""
+    """Tiles of one style. `fetch(url) -> bytes` defaults to an HTTP GET; `offline` uses only the cache. The last MEM tiles used are also kept in memory."""
+    MEM = 256
 
     def __init__(self, style='tf-outdoors', key=None, cache_dir=None, offline=False, fetch=None):
         if style not in STYLES: raise TileError(f'unknown map style {style!r}: one of {", ".join(sorted(STYLES))}')
@@ -45,13 +50,14 @@ class Tiles:
         if self.spec['key'] and not key:
             from strata360.edit.llm_remote import secret
             key = secret(self.spec['key'])
-        if self.spec['key'] and not key and not offline: raise TileError(f"the map style {style} needs a key: put {self.spec['key']}=... in secrets.env (it is never stored in the project)")
-        self.key = key; self.dir = os.path.join(cache_dir or cache_root(), style + ('@2x' if self.spec['retina'] else '')); self.fetch = fetch or _get; self.fetched = 0
+        if self.spec['key'] and not key and not offline: raise MissingKey(f"the map style {style} needs a key: put {self.spec['key']}=... in secrets.env (it is never stored in the project)")
+        self.key = key; self.dir = os.path.join(cache_dir or cache_root(), style + ('@2x' if self.spec['retina'] else '')); self.fetch = fetch or _get; self.fetched = 0; self._mem = collections.OrderedDict()
 
     def tile(self, z, x, y):
         """One tile as an RGB image (self.px square). x wraps round the world; rows above or below the map are blank."""
         n = 2 ** z; x %= n
         if not 0 <= y < n: return Image.new('RGB', (self.px, self.px), (200, 200, 200))
+        if (z, x, y) in self._mem: self._mem.move_to_end((z, x, y)); return self._mem[(z, x, y)]
         p = os.path.join(self.dir, str(z), str(x), f'{y}.png')
         if not os.path.exists(p):
             if self.offline: raise TileError(f'map tile {self.style} {z}/{x}/{y} is not in the cache and fetching is off')
@@ -62,8 +68,10 @@ class Tiles:
             try: Image.open(io.BytesIO(data)).verify()
             except Exception: raise TileError(f'map tile {self.style} {z}/{x}/{y}: not an image') from None
             os.makedirs(os.path.dirname(p), exist_ok=True); open(p + '.part', 'wb').write(data); os.replace(p + '.part', p); self.fetched += 1
-        im = Image.open(p).convert('RGB')
-        return im if im.size == (self.px, self.px) else im.resize((self.px, self.px), Image.LANCZOS)
+        im = Image.open(p).convert('RGB'); im = im if im.size == (self.px, self.px) else im.resize((self.px, self.px), Image.LANCZOS)
+        self._mem[(z, x, y)] = im
+        if len(self._mem) > self.MEM: self._mem.popitem(last=False)
+        return im
 
     def picture(self, cx, cy, k, w, h):
         """RGB image w x h centred on world point (cx, cy) at scale k. Picture pixel (u, v) shows world point (cx + (u - w/2) / k, cy + (v - h/2) / k)."""

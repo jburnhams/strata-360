@@ -19,6 +19,7 @@ def _resample(T, v, grid, max_gap_s):
 
 def _smooth(v, n):
     """Centred moving average over n samples, ignoring NaN (a sample stays NaN only if it was)."""
+    n = min(int(n), len(v))
     if n <= 1: return v.copy()
     ok = np.isfinite(v); k = np.ones(int(n)); s = np.convolve(np.where(ok, v, 0.0), k, 'same'); c = np.convolve(ok.astype(float), k, 'same')
     with np.errstate(invalid='ignore', divide='ignore'): out = s / c

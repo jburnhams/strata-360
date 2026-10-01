@@ -22,9 +22,9 @@ DEFAULTS = {
                          'patience': 3},          # Gemini Pro (paid key) checks each 60-120 s speech-only excerpt twice, a third time only when the two differ; a fix needs 2 votes (analysis/transcript_fix.py). mode 'transcribe': the transcription model alone; give a Flash 'pool' without 'pair' for the adaptive mixture. Opt-in stage `transcript_check`: paid API calls, every reply cached
     'llm': {'provider': 'gemini', 'model': 'gemini-3.1-pro-preview'},           # the voice-over script writer: Gemini Pro through a Google Cloud (Vertex AI) key in secrets.env; or 'gemini' (AI Studio key), 'anthropic', 'local' (mlx-lm)
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
-    'overlay': {'enabled': True, 'style': 'tf-outdoors'},   # the race overlay on the final film (overlay/layout.py: elements, layout, scale, fonts); map key THUNDERFOREST_API_KEY in secrets.env
+    'overlay': {'enabled': True},           # the race overlay on the final film and the thumbnails (overlay/layout.py: elements, layout, map styles, zoom, scale, fonts); map key THUNDERFOREST_API_KEY in secrets.env
     'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '16M', 'encoder': 'h264'},
-    'stages': ['ingest', 'audio_extract', 'audio_clean', 'audio_events', 'motion', 'proxy', 'thumb', 'places', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
+    'stages': ['ingest', 'audio_extract', 'audio_clean', 'audio_events', 'motion', 'proxy', 'thumb', 'places', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best', 'thumb_overlay'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
 }
 
 
@@ -57,7 +57,7 @@ def track_path(name, cfg=None):
     return g if g and os.path.exists(g) else None
 
 
-ADDED_STAGES = [('audio_extract', 'ingest'), ('audio_clean', 'audio_extract'), ('audio_events', 'audio_clean')]
+ADDED_STAGES = [('audio_extract', 'ingest'), ('audio_clean', 'audio_extract'), ('audio_events', 'audio_clean'), ('thumb_overlay', 'thumb_best')]
 
 
 def load(name):
