@@ -23,6 +23,7 @@ jobs:
         include:
           - os: windows-latest
     env:
+      STRATA_NO_RESOURCE_LIMITS: '1'          # the machine guards are for local machines; a CI runner is a VM of its own
       # CI VMs have no video hardware: use the software paths on every OS (the hardware paths are covered by tests/unit/test_hw.py)
       STRATA_HWACCEL: none
       STRATA_ENCODER: software

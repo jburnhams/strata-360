@@ -187,6 +187,7 @@ def verdict(max_gb=None, kill_load=None, kill_free_gb=None, rows=None):
 
 def watch(label, max_gb=None, on_abort=None):
     """Start the watchdog thread (see the module doc); returns the function that stops it. On a bad `verdict` it kills this process's whole tree and calls `on_abort(reason)` (default: say why on stderr and exit 75)."""
+    if _off(): return lambda: None                                                                 # the one switch (STRATA_NO_RESOURCE_LIMITS) turns every guard and watchdog off
     stop = threading.Event()
     def abort(reason):
         kill_tree()

@@ -12,6 +12,8 @@ concurrency:
 
 jobs:
   python:
+    env:
+      STRATA_NO_RESOURCE_LIMITS: '1'          # the machine guards are for local machines; a CI runner is a VM of its own
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
