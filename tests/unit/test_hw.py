@@ -44,5 +44,11 @@ def test_decode_acceleration_only_on_macos_unless_overridden(monkeypatch):
     monkeypatch.setattr(hw.sys, 'platform', 'darwin'); monkeypatch.setenv('STRATA_HWACCEL', 'none'); assert hw.hwaccel_args() == []
 
 
-def test_gpu_is_opt_in(monkeypatch):
-    assert hw.gpu_device() == 'cpu'
+def test_gpu_is_on_by_default_and_the_duty_cycle_leaves_gaps(monkeypatch):
+    monkeypatch.setenv('STRATA_GPU', '0'); assert hw.gpu_device() == 'cpu'                                   # the opt-out
+    monkeypatch.delenv('STRATA_GPU', raising=False); monkeypatch.setenv('STRATA_GPU_DUTY', '0.5'); slept = []
+    assert hw.gpu_pause(1.0, sleep=slept.append) == 1.0 and slept == [1.0]                                    # busy half the time: a gap as long as the work
+    assert hw.gpu_pause(10.0, sleep=slept.append) == 2.0                                                      # but never more than 2 s
+    monkeypatch.setenv('STRATA_GPU_DUTY', '1'); assert hw.gpu_pause(5.0, sleep=slept.append) == 0.0           # flat out when asked
+    calls = []; monkeypatch.setenv('STRATA_GPU_DUTY', '0.5'); monkeypatch.setattr(hw.time, 'sleep', calls.append)
+    f = hw.gpu_throttled(lambda x: x + 1, device='mps'); assert f(1) == 2 and len(calls) == 1                # a throttled call returns its result and pauses once

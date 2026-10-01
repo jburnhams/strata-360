@@ -22,6 +22,7 @@ import argparse, json, os, subprocess, sys, time
 import numpy as np, cv2
 from strata360.render import flat as r4
 from strata360 import hw
+from strata360.pipeline import guard
 from strata360.osv.telemetry import read_frames, video_pts
 
 
@@ -34,10 +35,10 @@ class EquirectRenderer(r4.Renderer):
         self.dE = np.stack([np.sin(lon) * np.cos(lat), np.cos(lon) * np.cos(lat), np.sin(lat)], -1).reshape(-1, 3)
 
     def maps(self, M, _unused, roll=0.0):
-        d = np.einsum('nj,ij->ni', self.dE, M)                                          # d_body = M d_E
+        d = np.einsum('nj,ij->ni', self.dE, M); self._dirs = d                          # d_body = M d_E; the carved seam is read per ray
         out = []
-        for L in (self.master, self.slave):
-            uu, vv, th = L.project(d)
+        for L, sign in ((self.master, 1), (self.slave, -1)):
+            uu, vv, th = L.project(d if self.warp is None else self.warp.apply(d, sign))      # the parallax warp moves each lens's sampling direction by half the disparity, in opposite ways (as flat.Renderer.maps)
             out.append((uu.reshape(self.gh, self.gw), vv.reshape(self.gh, self.gw), np.degrees(th).reshape(self.gh, self.gw)))
         return out
 
@@ -45,10 +46,14 @@ class EquirectRenderer(r4.Renderer):
 def decoder(osv, stream, every):
     cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))'", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
-    return subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
+    return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
 
 
-def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt', crf=24, frames_limit=0, progress=None):
+def make_proxy(*a, **k):
+    with guard.heavy('proxy render', 3.0): return _make_proxy(*a, **k)
+
+
+def _make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt', crf=24, frames_limit=0, progress=None):
     """encoder 'h264' (the pipeline default): H.264 from VideoToolbox with the clip's audio, one file for analysis AND the browser player; 'vt' HEVC / 'x265' for archival proxies."""
     """Render the canonical analysis proxy and its JSON sidecar (next to `out`, .json). Returns the sidecar dict."""
     W, H = map(int, size.split('x')); t0 = time.time()
@@ -60,7 +65,7 @@ def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt',
     dm, ds = decoder(osv, 1, every), decoder(osv, 0, every)
     venc = (hw.h264_args(bitrate) if encoder == 'h264' else hw.hevc_args(bitrate, tag=False) if encoder == 'vt' else ['-c:v', 'libx265', '-preset', 'medium', '-x265-params', f'crf={crf}:log-level=error'])
     final = out; out = out + '.video.mp4' if encoder == 'h264' else out
-    enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(nominal_fps), '-i', '-',
+    enc = guard.popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(nominal_fps), '-i', '-',
                             '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p'] + venc +
                            (['-movflags', '+faststart'] if encoder == 'h264' else ['-tag:v', 'hvc1', '-bsf:v', 'hevc_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0']) +
                            ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', out], stdin=subprocess.PIPE)
@@ -108,7 +113,7 @@ def make_preview(osv, out, size='2048x1024', bitrate='6M', progress=None, frames
     R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True; tel = read_frames(osv); pts = video_pts(osv, 0); idx = list(range(0, len(pts), every))
     if frames_limit: idx = idx[:frames_limit]
     dm, ds = decoder(osv, 1, every), decoder(osv, 0, every); tmp = out + '.video.mp4'
-    enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', '25', '-i', '-',
+    enc = guard.popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', '25', '-i', '-',
                             '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p', *hw.h264_args(bitrate), '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', '-movflags', '+faststart', tmp], stdin=subprocess.PIPE)
     frames = []
     for j, k in enumerate(idx):

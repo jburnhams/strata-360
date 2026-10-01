@@ -11,8 +11,8 @@
   - `pytest tests/unit --cov` runs the unit suite with coverage (random order via pytest-randomly; `-n auto` runs in parallel; `diff-cover` checks the lines a change touches).
   - `pytest tests/integration -n auto` runs the integration suite (needs ffmpeg with libx265).
   - `ruff check src tests` lints for syntax errors and undefined names.
-- Commands (web, from `web/`): `npm run test:unit`, `npm run test:integration`, `npm run test:coverage` (unit only, what counts), `npm run test:coverage:all` (unit + integration, informational), `npm run typecheck`, `npm run build`.
-- Code coverage is calculated from the unit suites only (Python `fail_under` in `pyproject.toml`, which only ratchets up).
+- Commands (web, from `web/`): `npm run test:unit`, `npm run test:integration`, `npm run test:coverage:gate` (unit + integration together, what CI gates on: floors in `web/coverage-floor.json`), `npm run test:coverage` (unit only, informational), `npm run test:coverage:all` (unit + integration, no gate), `npm run typecheck`, `npm run build`.
+- Python coverage is calculated from the unit suite only (`fail_under` in `pyproject.toml`). Web coverage is gated on unit + integration together (`web/coverage-floor.json`, read by `web/vitest.gate.config.ts`; most web tests are jsdom integration tests). Both floors only ratchet up.
 - New tests use pytest style (`def test_...` with `assert`; use the `monkeypatch`/`tmp_path` fixtures instead of patching globals by hand).
 - Cross-platform: ffmpeg hardware options (decode acceleration, encoders, GPU) come from `src/strata360/hw.py`, which picks VideoToolbox on macOS, NVENC on Windows when present, and software otherwise; never hard-code `videotoolbox` elsewhere. `STRATA_HWACCEL` and `STRATA_ENCODER=software` override it.
 - OS differences other than video hardware (file locks, process liveness and termination, priority, free memory, how to start the CLI) live in `src/strata360/oslib.py`; do not import `fcntl` or call `os.kill(pid, 0)` elsewhere (on Windows that kills the process).

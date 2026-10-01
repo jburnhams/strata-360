@@ -26,6 +26,17 @@ def _iso_add(start_utc, s):
     t0 = dt.datetime.fromisoformat(start_utc.replace('Z', '+00:00')); return (t0 + dt.timedelta(seconds=float(s))).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
 
+GRID_LOW_DETAIL = 0.002; GRID_LOW_CONTRAST = 0.015; GRID_BAD_FRAC = 0.5      # view-quality grid: a cell is "empty" below both (set from clips 0010, 0018, 0021: a misty field peaks at 0.31 of the frame empty, a truly empty second at 0.72); the whole frame is bad when more than this share of it is empty
+
+
+def low_fraction(vq):
+    """Per quality map (once a second) the share of the covered sphere (solid-angle weighted) in cells with both low detail and low contrast: a frame that is mist, a blocked lens or darkness all over has
+    most of its cells empty; a frame with a clear sky or a plain field only some. `vq` is `exposure.load_quality`."""
+    det, con = vq['detail'].astype(np.float32), vq['contrast'].astype(np.float32); ok = np.isfinite(det) & np.isfinite(con); gh = det.shape[1]
+    wlat = np.cos(np.radians(90.0 - (np.arange(gh) + 0.5) * 180.0 / gh))[None, :, None]; w = ok * wlat; low = ((det < GRID_LOW_DETAIL) & (con < GRID_LOW_CONTRAST)) * w
+    return low.sum((1, 2)) / np.maximum(w.sum((1, 2)), 1e-9)
+
+
 def timeline(d):
     """Per-second arrays for a clip folder: dict(n, steady, expo, speech, me, people, energy, scenic, blocked, setting, ...) plus the raw docs and a `missing` list."""
     sp_doc = _load(d, 'speakers.json'); clip = _load(d, 'clip.json'); mo = _load(d, 'motion.json'); ex = _load(d, 'exposure.json'); au = _load(d, 'audio.json'); tr = _load(d, 'transcript.json'); al = _load(d, 'alignment.json')
@@ -59,7 +70,14 @@ def timeline(d):
             canopy = at(ts, [1.0 if i.get('setting') in ('forest',) else 0.3 if i.get('setting') == 'trail' else 0.0 for i in fr], 0.0)
             open_ground = at(ts, [1.0 if i.get('setting') in ('field', 'road', 'mountain', 'town') else 0.3 for i in fr], 0.5)
             near = [int(np.argmin(np.abs(np.array(ts) - x))) for x in t]; setting = [fr[j].get('setting') for j in near]
-    return dict(n=n, t=t, dur=dur, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, people=people, scenic=scenic, blocked=blocked, canopy=canopy, open_ground=open_ground,
+    grid_low = np.zeros(n); vq = None
+    try:
+        from strata360.analysis.exposure import load_quality
+        vq = load_quality(d)
+    except ImportError: pass
+    if vq is not None and len(vq['t']):                                                               # a double check on "the lens is blocked or fogged": the vision model says so AND most of the sphere has no detail or contrast; if the picture as a whole still has something in it, the stretch stays usable
+        grid_low = at(vq['t'], low_fraction(vq), 0.0); hard = blocked > 0.5; blocked = np.where(hard & (grid_low > GRID_BAD_FRAC), blocked, np.where(hard, 0.4, blocked))
+    return dict(n=n, t=t, dur=dur, grid_low=grid_low, has_quality=vq is not None, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, people=people, scenic=scenic, blocked=blocked, canopy=canopy, open_ground=open_ground,
                 setting=setting, missing=missing, clip=clip, tr=tr, al=al, sc=sc, mo=mo)
 
 
@@ -91,14 +109,15 @@ def _inside(runs, spans, min_len):
 def build(d, thr=None):
     """Usable footage and the ways to see it.
 
-    Unusable means a real problem and nothing else: camera shake too violent, the lens blocked or fogged, or the picture badly exposed. Everything else is usable, and what to use of it is the
+    Unusable means a real problem and nothing else: camera shake too violent, the lens blocked or fogged (the vision model says so AND most of the whole sphere is empty of detail and contrast), or the picture badly exposed; but never while you are clearly talking (dialogue overrides it). Everything else is usable, and what to use of it is the
     optimiser's choice. So a clip has a few usable SPANS (the stretches between problems), and on top of each span overlapping candidates that are different ways to see the same footage:
       span    the whole usable stretch (framed ahead)             best    its steadiest, best-looking parts
       speech  you talking (dialogue: steady framing, cut on pauses)   person  others in view (framed on them)     you   you in view    scene   one setting of a stretch with several
     Candidates overlap freely; the planner never uses two overlapping stretches of one clip at once. `priority` ranks a clip's candidates by quality (1 = best)."""
     T = timeline(d); n = T['n']; clip = T['clip']
     q = np.clip(0.5 * T['steady'] + 0.2 * T['expo'] + 0.2 * T['scenic'] + 0.1 * (1 - T['blocked']), 0, 1) * (1 - 0.7 * T['blocked'])                           # per-second usefulness (a ranking, never a reason to drop footage)
-    shaky = T['steady'] < 0.1; blocked = T['blocked'] > 0.5; badexp = T['expo'] < 0.4; bad = shaky | blocked | badexp
+    dialogue = T['speech'] > 0.5                                                                                                        # you talking, clearly: worth keeping whatever the picture is doing (the voice is the point)
+    shaky = (T['steady'] < 0.1) & ~dialogue; blocked = (T['blocked'] > 0.5) & ~dialogue; badexp = (T['expo'] < 0.4) & ~dialogue; bad = shaky | blocked | badexp
     why_bad = ['too shaky' if shaky[i] else 'lens blocked or fogged' if blocked[i] else 'badly exposed' if badexp[i] else None for i in range(n)]
     detail = lambda i: f"too shaky ({T['shake'][i]:.0f} deg/s of camera shake; the limit is about 57)" if shaky[i] else 'lens blocked or fogged' if blocked[i] else 'badly exposed (blown out or crushed)'
     stats = lambda sl: dict(steadiness=round(float(T['steady'][sl].mean()), 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2), scenic=round(float(T['scenic'][sl].mean()), 2),

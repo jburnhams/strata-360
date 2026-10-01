@@ -5,7 +5,7 @@ everything that is not clear speech and not music, so wind, footsteps, nature an
 fell from 0.52 to nothing, and what it still heard was the place: animals, a bicycle, hooves.)
 
 The model code is not part of this repository: `ensure()` fetches it, at a pinned commit, into models/tiger-dnr/ (like the weights, which come from Hugging Face `JusperLee/TIGER-DnR`, 17 MB).
-Speed: 4 M parameters but heavy attention over 12 s windows: on the CPU about 6 s per second of audio, on the Apple GPU about 1 s per second (set STRATA_GPU=1: the pipeline keeps the GPU free by default).
+Speed: 4 M parameters but heavy attention over 12 s windows: on the CPU about 6 s per second of audio, on the Apple GPU about 1 s per second. The GPU is used by default (STRATA_GPU=0 for the CPU), in slices with gaps (hw.gpu_throttled) so the screen stays responsive.
 Windows of 12 s overlap by half, added together."""
 import os, subprocess, sys, types
 import numpy as np
@@ -31,11 +31,8 @@ def ensure(log=print):
 
 
 def _device():
-    import torch
-    if os.environ.get('STRATA_GPU') == '1':
-        if torch.cuda.is_available(): return 'cuda'
-        if torch.backends.mps.is_available(): return 'mps'
-    return 'cpu'
+    from strata360 import hw
+    return hw.gpu_device()                                                  # the GPU unless STRATA_GPU=0
 
 
 def load(log=print):
@@ -53,10 +50,17 @@ def load(log=print):
         F = torch.nn.functional; _ap = F.adaptive_avg_pool1d
         F.adaptive_avg_pool1d = lambda x, output_size: _ap(x.cpu(), output_size).to(x.device) if x.device.type == 'mps' and x.shape[-1] % output_size else _ap(x, output_size)
     model = m.TIGERDNR.from_pretrained(WEIGHTS, cache_dir=os.path.join(model_dir(), 'weights')).eval().to(dev)
+    from strata360 import hw
+    if dev != 'cpu': model.effect.forward = hw.gpu_throttled(model.effect.forward, dev)      # one 12 s window at a time, then a gap: the screen is never starved
     _M['model'], _M['dev'] = model, dev; log(f'TIGER-DnR loaded on {dev}'); return model, dev
 
 
 def separate(x48, log=print, progress=None):
+    from strata360.pipeline import guard
+    with guard.heavy('audio background separation', 1.2): return _separate(x48, log, progress)
+
+
+def _separate(x48, log=print, progress=None):
     """x48: mono float32 at 48 kHz -> the effects stem (everything but speech and music) as mono float32 at 48 kHz, the same length."""
     import torch
     from strata360.audio import dsp

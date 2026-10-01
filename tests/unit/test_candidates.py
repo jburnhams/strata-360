@@ -51,3 +51,10 @@ if __name__ == '__main__':
         try: f(); print('ok  ', f.__name__)
         except AssertionError as e: bad += 1; print('FAIL', f.__name__, e)
     print(f'{len(fns) - bad}/{len(fns)} passed'); sys.exit(bad)
+
+
+def test_clear_dialogue_overrides_unusable():
+    d = make(lambda x: 100.0 if 15 <= x < 25 else 5.0, speech=[(17, 23)], labels=['wearer']); r = C.build(d)                  # violent shake for 10 s, and you talk through the middle 6 s
+    un = [(m['start_s'], m['end_s']) for m in r['unusable']]
+    assert all(not (a < 23 and b > 17) for a, b in un), un                                                                       # the talking part is not reported unusable
+    assert any(a < 17 for a, b in un) or any(b > 23 for a, b in un)                                                              # the shaky parts around it still are
