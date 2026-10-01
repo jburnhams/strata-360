@@ -89,11 +89,15 @@ def set_gemini(d, suggestions, model=None):
         if not edits[k].get('user'): edits.pop(k)
     n = 0
     for s in suggestions:
-        try: si, wi = int(s['seg']), int(s['word']); w = tr['segments'][si]['words'][wi]
+        try: si, wi = int(s['seg']), int(s['word']); words = tr['segments'][si]['words']; wj = int(s.get('through', wi)); w = words[wi]
         except (KeyError, ValueError, IndexError, TypeError): continue
-        to = str(s.get('to', '')).strip()
-        if not to or to == w['w'].strip() or (s.get('from') is not None and str(s['from']).strip() != w['w'].strip()): continue
-        e = edits.setdefault(key(si, wi), dict(orig=w['w'], t0=tr['segments'][si]['t0'])); e['gemini'] = dict(text=to, why=str(s.get('why', ''))[:200], model=model, at=_now()); n += 1
+        if wj < wi or wj >= len(words): continue
+        to = str(s.get('to', '')).strip(); old = ' '.join(x['w'].strip() for x in words[wi:wj + 1])
+        if not to or to == old or (s.get('from') is not None and wi == wj and str(s['from']).strip() != w['w'].strip()): continue
+        for k, ww in enumerate(words[wi:wj + 1]):                                       # a run of words becomes one corrected text on the first word, the rest are hidden: every word keeps its timing
+            e = edits.setdefault(key(si, wi + k), dict(orig=ww['w'], t0=tr['segments'][si]['t0']))
+            e['gemini'] = dict(text=to if k == 0 else '', why=str(s.get('why', ''))[:200] + ('' if k == 0 else ' (part of the correction of the word before)'), model=model, at=_now(), votes=s.get('votes'))
+        n += 1
     save(d, edits); return n
 
 

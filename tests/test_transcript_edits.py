@@ -60,6 +60,38 @@ def test_parts_carry_play_ranges_and_absolute_word_numbers_and_foreign_phrases_s
     fr = dict(seg, lang='fr', text='bonjour', text_en='hello'); assert len(TE.parts(fr)) == 1
 
 
+def seg_words(t0, text):
+    out = []; t = t0
+    for w in text.split(): out.append(dict(w=w, t0=round(t, 2), t1=round(t + 0.4, 2), p=0.5)); t += 0.5
+    return dict(t0=t0, t1=t, lang='en', text=text, text_en=text, words=out)
+
+
+def test_excerpts_are_speech_only_30_to_60_seconds_cut_at_natural_pauses():
+    # phrases of 5 s every 5.5 s for 150 s (continuous speech), then a 10 s silence, then 12 s more
+    segs = [seg_words(i * 5.5, 'one two three four five six seven eight nine ten.' if i % 3 == 2 else 'one two three four five six seven eight nine ten') for i in range(27)]
+    last = segs[-1]['t1']; segs += [seg_words(last + 10, 'after the silence we carry on talking for a while longer. yes indeed it is so')]
+    for s in segs: s['t1'] = s['words'][-1]['t1']
+    ch = TF.chunks(dict(segments=segs), 400.0)
+    assert len(ch) >= 4 and all(c['t1'] - c['t0'] <= 60.0 + 1e-6 for c in ch) and ch[-1]['t0'] > last + 9 and sum(len(c['segs']) for c in ch) == len(segs)           # the silence is not sent; nothing lost
+    assert all(c['a1'] - c['a0'] <= 61.1 for c in ch) and all(abs((c['t0'] - c['a0']) - 0.5) < 1e-6 or c['a0'] == 0 for c in ch)                                    # half a second of padding
+    assert all(c['t1'] - c['t0'] >= 30.0 for c in ch[:-2]), [(c['t0'], c['t1']) for c in ch]                                                                    # pieces are 30-60 s (the last of a stretch may be shorter)
+    assert TF.chunks(dict(segments=[]), 10) == [] and len(TF.chunks(dict(segments=[seg_words(0, 'a b c')]), 10)) == 1
+
+
+def test_only_fixes_most_checks_agree_on_are_kept():
+    f = lambda w, to, th=None, why='x': dict(seg=0, word=w, to=to, why=why, **({'through': th} if th is not None else {}))
+    runs = [[f(1, 'sane.'), f(5, 'socks')], [f(1, 'sane.'), f(7, 'x')], [f(1, 'sane.'), f(5, 'socks'), f(2, 'a b', 3)]]
+    got = TF.vote(runs); assert [(g['word'], g['to'], g['votes']) for g in got] == [(1, 'sane.', 3), (5, 'socks', 2)] and '3 of 3' in got[0]['why']
+    assert TF.vote([[f(1, 'a')], [f(1, 'b')]]) == []                                                                                                              # no agreement: nothing
+    both = TF.vote([[f(1, 'x y', 2)], [f(1, 'x y', 2)], [f(2, 'z')], [f(2, 'z')]], 2); assert [(g['word'], g['through']) for g in both] == [(1, 2)]            # overlapping runs of words: one wins
+
+
+def test_a_run_of_words_becomes_one_correction_and_the_rest_are_hidden_with_timing_kept():
+    d = clip_dir(); n = TE.set_gemini(d, [dict(seg=0, word=2, through=3, to='been out', why='misheard')]); assert n == 1
+    s = TE.load_effective(d)['segments'][0]; assert [w['w'] for w in s['words']] == ['He', 'has', 'been out', '', 'there.'] and s['text'] == 'He has been out there.'
+    assert [(w['t0'], w['t1']) for w in s['words']] == [(0.0, 0.4), (0.5, 0.9), (1.0, 1.4), (1.5, 1.9), (2.0, 2.4)] and s['words'][3]['edit']['orig'] == 'audio'          # every word keeps its own timing
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for fn in fns:
