@@ -36,8 +36,8 @@ def test_the_model_run_stores_suggestions_per_clip():
     from strata360.pipeline import config
     f = tempfile.mkdtemp(); rd = config.race_dir(f); d = os.path.join(rd, 'clips', 'C1'); os.makedirs(d); src = clip_dir(); open(os.path.join(d, 'transcript.json'), 'w').write(open(os.path.join(src, 'transcript.json')).read())
     json.dump(dict(library=f, llm=dict(provider='vertex', model='m')), open(os.path.join(rd, 'race.json'), 'w'))
-    seen = []; SC.run_llm = lambda msgs, **kw: (seen.append(msgs[-1]['content']), dict(text='', parsed=dict(fixes=[dict(seg=0, word=3, **{'from': 'audio', 'to': 'out', 'why': 'x'})])))[1]
-    r = TF.run(f, log=lambda *a: None); assert r == {'C1': 1} and '3:audio(0.50)' in seen[0] and 'Clip C1' in seen[0]; assert TE.load_effective(d)['segments'][0]['words'][3]['w'] == 'out'
+    seen = []; SC.run_llm = lambda msgs, **kw: (seen.append(msgs[-1]['content']), dict(text='', parsed=dict(fixes=[dict(clip=1, seg=0, word=3, **{'from': 'audio', 'to': 'out', 'why': 'x'})])))[1]
+    r = TF.run(f, log=lambda *a: None); assert r == {'C1': 1} and len(seen) == 1 and '3:audio(0.50)' in seen[0] and 'Clip 1 (C1)' in seen[0]; assert TE.load_effective(d)['segments'][0]['words'][3]['w'] == 'out'
 
 
 if __name__ == '__main__':
