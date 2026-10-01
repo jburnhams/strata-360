@@ -22,8 +22,10 @@ export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
+export interface Script2State { draft: Record<string, unknown> | null; drafts: string[]; pins: Record<string, unknown>; running: boolean; last_exit: number | null; log: string[]; used: string[]; key_configured: boolean }
 export interface WordEdit { orig: string; src: 'user' | 'gemini'; why?: string | null; user_text?: string | null; gemini_text?: string | null }
-export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit }
+export type WordMark = 'must' | 'never'
+export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit; m?: WordMark }
 export interface Seg { si: number; part?: number; play0?: number; play1?: number; words: WordT[]; clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface ScriptLine { says?: string[]; seg: number; film_start_s: number; seconds: number; clip: string; text: string; words: number; est_speak_s: number; budget_words: number }
 export interface ScriptDoc { file: string; title: string | null; provider?: string; model?: string; target_s: number; wpm: number; style?: string; lines: ScriptLine[]; total_words: number; total_speak_s: number; remaining_problems: { seg: number; problem: string }[]; seconds_llm?: number }
@@ -100,6 +102,8 @@ export const api = {
   generateScript: (folder: string, o: { length: number; wpm?: number; style?: string; model?: string; provider?: string }) => call<{ started: boolean }>('/api/script/generate', { folder, ...o }),
   voiceover: (folder: string) => call<VoiceoverState>('/api/voiceover?' + q({ folder })),
   buildVoiceover: (folder: string, o: { engine?: string; voice?: string; rate?: number } = {}) => call<{ started: boolean }>('/api/voiceover/build', { folder, ...o }),
+  markWords: (folder: string, clip: string, spans: { seg: number; from: number; to: number }[], state: 'must' | 'never' | 'none') => call<{ ok: boolean; marked: number }>('/api/transcript/mark', { folder, clip, spans, state }),
+  script2: (folder: string) => call<Script2State>('/api/script2?' + q({ folder })),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),

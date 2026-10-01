@@ -723,9 +723,9 @@ def create_app(roots, token=None):
 
     @api.get('/api/script2', dependencies=[Depends(auth)])
     def get_script2(folder: str, name: str = ''):                                        # the whole-race script: the newest (or the named) draft, the list of drafts, your saved pins, whether a draft is being written, and the lines the draft plays (a white word is yellow when its line is in `used`)
-        from strata360.edit import script_draft as SD, script_pack as SP
-        f = folder_of(folder); rd = config.race_dir(f); j = SCRIPT2_JOBS.get(f); running = bool(j and j.poll() is None); doc = SD.load_draft(f, name or None); lp = os.path.join(SD._dir(f), 'job.log')
-        used = sorted(SD.used_line_ids(doc, SP.build(f))) if doc else []
+        from strata360.edit import script_draft as SD
+        f = folder_of(folder); j = SCRIPT2_JOBS.get(f); running = bool(j and j.poll() is None); doc = SD.load_draft(f, name or None); lp = os.path.join(SD._dir(f), 'job.log')
+        used = sorted({i for it in (doc or {}).get('items') or [] if it.get('type') == 'clip' for i in it.get('lines') or []})          # the lines the draft plays, as resolved when it was written (cheap: no pack is built here)
         return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, last_exit=(None if running or j is None else j.returncode), log=(open(lp).read().splitlines()[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
 
     def _llm_key(f):
