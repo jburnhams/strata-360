@@ -16,7 +16,7 @@ import json, os
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from strata360.pipeline import config
-from strata360.edit import techniques as TQ, aim as AIM
+from strata360.edit import techniques as TQ, aim as AIM, attention as AT
 
 FOLLOW = {'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold'}          # techniques that keep their subject in frame as it moves
 NO_SUBJECT = {'follow_runner', 'planet_fill', 'planet_globe', 'planet_fill_zoom_out', 'globe_shrink', 'tunnel_up', 'spin_roll'}
@@ -63,7 +63,8 @@ def clip_data(folder, clip):
     from strata360.analysis import views
     d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = cj['source_files']['osv']
     sp = os.path.join(d, 'speakers.json')
-    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [])
+    from strata360.analysis.exposure import load_quality
+    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d))
 
 
 def choose_subject(g, tech, data):
@@ -95,8 +96,10 @@ def resolve_segment(g, lib, data):
         elif len(ts) == 1: y = np.full(len(times), yw[0]); p = np.full(len(times), pt[0]); h = np.full(len(times), hh[0]); hdd = _head(abs_t, ts, hd)
         else: subject = 'heading'
     if subject not in ('person', 'you'):
-        look = heading(t0 + T / 2) if tech.id not in NO_SUBJECT else heading(t0)
-        path = TQ.instantiate(tech, T, rng, look_yaw=float(look)); path['subject'] = subject; path['why'] = why; return path
+        look = heading(t0 + T / 2) if tech.id not in NO_SUBJECT else heading(t0); att = None
+        if subject == 'heading' and tech.id not in NO_SUBJECT and data.get('quality') is not None:       # straight ahead, unless somewhere nearby clearly has more detail, contrast and colour (and the lens there is not the foggy one)
+            att = AT.best_yaw_offset(data['quality'], t0, t0 + T, float(look)); look = float(look) + att['offset_deg']
+        path = TQ.instantiate(tech, T, rng, look_yaw=float(look)); path['subject'] = subject; path['why'] = why + (f"; turned {att['offset_deg']:+.0f} deg: {att['why']}" if att and att['offset_deg'] else ''); return path
     look = float(np.degrees(y[0])); path = TQ.instantiate(tech, T, rng, look_yaw=look)
     if tech.id in FOLLOW:                                                   # the technique's own move (fov, slow drift) stays; the subject is followed: held while still, panned slowly when it drifts, one quick move when it goes far
         from strata360.render.camera import CameraPath

@@ -290,6 +290,11 @@ def create_app(roots, token=None):
             from strata360.analysis.views import focus_samples, person_samples
             out['focus'] = focus_samples(d, c['source_files']['osv']); out['person'] = person_samples(d, c['source_files']['osv'])
         except Exception: out['focus'] = []; out['person'] = []
+        try:                                                                              # the clearest view over time (the "Clarity" aim): from the view-quality maps of the exposure stage
+            from strata360.analysis.exposure import load_quality
+            from strata360.edit import attention as AT
+            vq = load_quality(d); out['clarity'] = AT.clarity_samples(vq) if vq is not None and len(vq['t']) else []
+        except Exception: out['clarity'] = []
         out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
         th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th; out['places'] = _j(d, 'places.json')
