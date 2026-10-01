@@ -1,3 +1,4 @@
+<!-- Reference only (1 Oct 2026): the overlay the user made before with gopro-dashboard-overlay, at 1920x1080. A guide to what strata360's overlay should show (docs/implementation-plan.md A2), not a file the pipeline must use as is. -->
 <layout>
     <composite x="200" y="24" name="date_and_time">
         <component type="datetime" x="0" y="0" format="%Y/%m/%d" size="32" align="right"/>
