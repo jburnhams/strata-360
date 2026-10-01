@@ -15,6 +15,9 @@ def label_of(clip_id):
     m = re.search(r'_(\d{4})_[A-Z]$', clip_id); return m.group(1) if m else clip_id[-6:]
 
 
+def label_of_id(line_id): return line_id.split('.')[0]
+
+
 def merge(iv, gap=1e-6):
     out = []
     for a, b in sorted(iv):

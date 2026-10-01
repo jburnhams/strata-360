@@ -18,6 +18,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
+SCRIPT2_JOBS = {}             # folder -> Popen of a running `strata360 script-draft`
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
 
@@ -719,6 +720,32 @@ def create_app(roots, token=None):
         except (KeyError, ValueError) as ex: raise HTTPException(400, str(ex))
         except O.Infeasible as ex: raise HTTPException(400, str(ex))
         return dict(edit=e)
+
+    @api.get('/api/script2', dependencies=[Depends(auth)])
+    def get_script2(folder: str, name: str = ''):                                        # the whole-race script: the newest (or the named) draft, the list of drafts, your saved pins, whether a draft is being written, and the lines the draft plays (a white word is yellow when its line is in `used`)
+        from strata360.edit import script_draft as SD, script_pack as SP
+        f = folder_of(folder); rd = config.race_dir(f); j = SCRIPT2_JOBS.get(f); running = bool(j and j.poll() is None); doc = SD.load_draft(f, name or None); lp = os.path.join(SD._dir(f), 'job.log')
+        used = sorted(SD.used_line_ids(doc, SP.build(f))) if doc else []
+        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, last_exit=(None if running or j is None else j.returncode), log=(open(lp).read().splitlines()[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
+
+    def _llm_key(f):
+        from strata360.edit import llm_remote
+        return llm_remote.key_configured('gemini')
+
+    @api.post('/api/script2/pins', dependencies=[Depends(auth)])
+    def post_script2_pins(body: dict):                                                   # {folder, include?, exclude?, vo?, vo_never?}: your own pins (the transcript marks and the notes' narration fields are added automatically when a draft is written)
+        from strata360.edit import script_draft as SD
+        f = folder_of(body.get('folder')); vo = body.get('vo') or []
+        if not isinstance(vo, list) or any(not isinstance(p, dict) or not str(p.get('text', '')).strip() or p.get('mode', 'anywhere') not in ('clip', 'ordered', 'anywhere') or (p.get('mode') == 'clip' and not p.get('clip')) for p in vo): raise HTTPException(400, 'vo: [{id, text, mode: clip | ordered | anywhere, clip? (for mode clip)}]')
+        return SD.save_pins(f, body)
+
+    @api.post('/api/script2/generate', dependencies=[Depends(auth)])
+    def post_script2_generate(body: dict):                                               # {folder, revise?, target_s?, wpm?, auto?}: write a new draft, or revise the newest one, in the background (about 1 to 3 minutes)
+        f = folder_of(body.get('folder')); j = SCRIPT2_JOBS.get(f)
+        if j and j.poll() is None: return dict(started=False, reason='a draft is already being written')
+        args = [*oslib.cli_command(), 'script-draft', f] + (['--revise'] if body.get('revise') else []) + (['--target-s', str(float(body['target_s']))] if body.get('target_s') else []) + (['--wpm', str(float(body['wpm']))] if body.get('wpm') else []) + (['--auto'] if body.get('auto') else [])
+        d = os.path.join(config.race_dir(f), 'script2'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'job.log'), 'wb')
+        SCRIPT2_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.get('/api/script', dependencies=[Depends(auth)])
     def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script

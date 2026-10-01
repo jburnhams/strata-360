@@ -179,3 +179,21 @@ class TestMarksAndNarrationNotes:
         client.post('/api/notes', json=dict(folder=f, kind='vo', text='In the clip.', clip=CLIP_ID)); n = client.get('/api/notes', params=dict(folder=f)).json()
         assert n['vo_must']['clips'] == {CLIP_ID: 'In the clip.'} and n['folder'] == '' and n['clips'] == {}                       # the ordinary notes are untouched
         client.post('/api/notes', json=dict(folder=f, kind='vo', text='  ', clip=CLIP_ID)); assert client.get('/api/notes', params=dict(folder=f)).json()['vo_must']['clips'] == {}
+
+
+class TestScript2:
+    def test_nothing_yet(self, client, project):
+        r = client.get('/api/script2', params=dict(folder=project.folder)).json()
+        assert r['draft'] is None and r['drafts'] == [] and r['running'] is False and r['pins'] == {} and r['used'] == []
+
+    def test_pins_are_validated_and_saved(self, client, project):
+        f = project.folder
+        assert client.post('/api/script2/pins', json=dict(folder=f, vo=[dict(id='v1', text='x', mode='clip')])).status_code == 400            # a clip pin needs its clip
+        assert client.post('/api/script2/pins', json=dict(folder=f, vo=[dict(id='v1', text='', mode='anywhere')])).status_code == 400
+        ok = client.post('/api/script2/pins', json=dict(folder=f, include=['0019.01'], vo=[dict(id='v1', text='Say this.', mode='anywhere')])); assert ok.status_code == 200
+        assert client.get('/api/script2', params=dict(folder=f)).json()['pins']['include'] == ['0019.01']
+
+    def test_generate_starts_a_background_draft_once(self, client, project, fake_popen):
+        f = project.folder; r = client.post('/api/script2/generate', json=dict(folder=f, revise=True, target_s=200, wpm=170, auto=True)); assert r.json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'script-draft' in cmd and '--revise' in cmd and '--target-s' in cmd and '200.0' in cmd and '--wpm' in cmd and '--auto' in cmd
+        assert client.get('/api/script2', params=dict(folder=f)).json()['running'] is True and client.post('/api/script2/generate', json=dict(folder=f)).json()['started'] is False

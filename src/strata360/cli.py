@@ -280,6 +280,25 @@ def cmd_plan_blocks(a):
     if r['clips_without_candidates']: print(f"{len(r['clips_without_candidates'])} clip(s) have no candidates yet and are not in the plan")
 
 
+def cmd_script_draft(a):
+    """Write (or, with --revise, revise) the whole-race script: the writer sees every clip, the notes, the transcript marks and the pins (edit/script_draft.py)."""
+    from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN, project as PJ
+    from strata360.pipeline import notes as N
+    cfg = config.load(a.name); pack = SP.build(a.name); notes = N.load(a.name); mus = None if a.auto else PJ.music_info(a.name, PJ.load(a.name)['settings'])
+    target, src = SD.length_guide(pack, (float(mus['duration_s']) - float(mus['offset_s'])) if mus else None, a.target_s); wpm = a.wpm or SD.narration_wpm(pack)
+    pins = PN.project_pins(notes, pack, SD.load_pins(a.name)); prev = SD.list_drafts(a.name)[-1] if a.revise and SD.list_drafts(a.name) else None; draft = SD.load_draft(a.name) if a.revise else None
+    if a.revise and not draft: sys.exit('there is no draft to revise yet: run script-draft without --revise first')
+    llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider') or 'gemini'; model = a.model or (llm.get('model') if llm.get('provider') == prov else None) or 'gemini-3.1-pro-preview'
+    print(f"{'revising' if draft else 'writing'} a {target:.0f} s script ({src}), narration at {wpm:.0f} wpm, {len(pack['clips'])} clips, {sum(1 for v in PN.marks(pins, pack).values())} marked line(s), {len(pins.get('vo') or [])} narration pin(s) [{prov} {model}]")
+    doc = SD.write(pack, target, wpm, pins, draft, retries=a.retries, model=model, provider=prov); doc.update(target_source=src, draft_of=prev); name = SD.save_draft(a.name, doc)
+    if a.json: print(json.dumps(doc, indent=1)); return
+    r = doc['report']; print(f"\n{doc.get('title') or '(untitled)'}: {r.get('total_s')} s of {target:.0f}  (runner {r.get('clip_s')} s, narration {r.get('vo_s')} s in {r.get('vo_words')} words, b-roll {r.get('broll_s')} s); {r.get('clips_used')} clips used, {r.get('clips_skipped')} skipped")
+    for i, it in enumerate(doc['items'], 1): print(f"  {i:2d} {it.get('type', '?'):5s} {str(it.get('clip')):5s} {it.get('seconds', 0):5.1f}s  " + (it.get('text') or it.get('why') or '')[:110])
+    for p_ in doc['problems']: print('problem:', p_)
+    for w in doc['warnings']: print('warning:', w)
+    print('saved script2/' + name)
+
+
 def cmd_coverage(a):
     from strata360.pipeline.coverage import coverage
     r = coverage(a.name)
@@ -465,6 +484,8 @@ def main():
     p.add_argument('--languages'); p.add_argument('--gps', help='the race FIT/GPX'); p.add_argument('--no-run', action='store_true'); p.set_defaults(fn=cmd_open)
     p = sub.add_parser('progress', help='project state and per-stage progress (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_progress)
     p = sub.add_parser('plan-blocks', help='the rough plan: one block per clip with its target length, usable footage and dialogue (the film length from --target-s, else the music track, else automatic)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--target-s', type=float, help='film length guide in seconds'); p.add_argument('--auto', action='store_true', help='ignore the music track: automatic length'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_plan_blocks)
+    p = sub.add_parser('script-draft', help='write or revise the whole-race script (clips, the runner\'s own lines and narration) with the LLM; --revise keeps the current draft and applies your marks and pins'); p.add_argument('name', metavar='FOLDER_OR_RACE')
+    p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
