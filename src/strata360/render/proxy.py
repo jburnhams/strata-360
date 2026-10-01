@@ -21,6 +21,7 @@ Usage: python make_proxy.py CAM.OSV proxy.mp4 [--size 3840x1920] [--every 2] [--
 import argparse, json, os, subprocess, sys, time
 import numpy as np, cv2
 from strata360.render import flat as r4
+from strata360 import hw
 from strata360.osv.telemetry import read_frames, video_pts
 
 
@@ -42,7 +43,7 @@ class EquirectRenderer(r4.Renderer):
 
 
 def decoder(osv, stream, every):
-    cmd = ['ffmpeg', '-v', 'error', '-hwaccel', 'videotoolbox', '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
+    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))'", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
     return subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
 
@@ -57,7 +58,7 @@ def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt',
     if frames_limit: idx = idx[:frames_limit]
     nominal_fps = 50.0 / every
     dm, ds = decoder(osv, 1, every), decoder(osv, 0, every)
-    venc = (['-c:v', 'h264_videotoolbox', '-profile:v', 'high', '-b:v', bitrate] if encoder == 'h264' else ['-c:v', 'hevc_videotoolbox', '-profile:v', 'main', '-b:v', bitrate] if encoder == 'vt' else ['-c:v', 'libx265', '-preset', 'medium', '-x265-params', f'crf={crf}:log-level=error'])
+    venc = (hw.h264_args(bitrate) if encoder == 'h264' else hw.hevc_args(bitrate, tag=False) if encoder == 'vt' else ['-c:v', 'libx265', '-preset', 'medium', '-x265-params', f'crf={crf}:log-level=error'])
     final = out; out = out + '.video.mp4' if encoder == 'h264' else out
     enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(nominal_fps), '-i', '-',
                             '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p'] + venc +
@@ -78,7 +79,7 @@ def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt',
     side = dict(schema_version=1, tool='strata360.make_proxy', source_file=os.path.basename(osv), proxy_file=os.path.basename(out),
                 projection='equirectangular', layout='standard: centre column = world +Y (DJI upright yaw datum), lon increases right, lat up',
                 frame='upright / world-locked: rotation applied per frame = B^T R(q)^T P^T (see progress.md); quaternion = telemetry row of source_frame',
-                size=[W, H], nominal_fps=nominal_fps, every_n_source_frames=every, codec=('h264_videotoolbox %s + aac' % bitrate) if encoder == 'h264' else ('hevc_videotoolbox %s' % bitrate) if encoder == 'vt' else ('x265 crf %d' % crf),
+                size=[W, H], nominal_fps=nominal_fps, every_n_source_frames=every, codec=('%s %s + aac' % (venc[1], bitrate)) if encoder == 'h264' else ('%s %s' % (venc[1], bitrate)) if encoder == 'vt' else ('x265 crf %d' % crf),
                 profile='main 8-bit hvc1, bt709 tv', seconds=round(time.time() - t0, 1),
                 time_note='t_s is clip-relative seconds from the source frame pts (authoritative; the mp4 timestamps are nominal and drift by up to '
                           '0.06 s around dropped source frames). UTC = clip.json start_utc + t_s.', frames=frames)
@@ -128,8 +129,7 @@ def make_preview(osv, out, size='2048x1024', bitrate='6M', progress=None, frames
 def make_preview_from_proxy(proxy_path, osv, out, size='2048x1024', bitrate='6M'):
     """The browser preview derived from the clip's proxy: rescale to 2048x1024, H.264 (plays in every browser), the clip's audio as AAC. Takes seconds, not a second render."""
     t0 = time.time(); side = json.load(open(os.path.splitext(proxy_path)[0] + '.json')); W, H = size.split('x')
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', proxy_path, '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-vf', f'scale={W}:{H}:flags=area,format=yuv420p', '-c:v', 'h264_videotoolbox', '-b:v', bitrate,
-                    '-profile:v', 'high', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', out], check=True)
+    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', proxy_path, '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-vf', f'scale={W}:{H}:flags=area,format=yuv420p', *hw.h264_args(bitrate), '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', out], check=True)
     fps = 50.0 / side['every_n_source_frames']
     info = dict(schema_version=1, projection='equirectangular', layout='centre column = world +Y (heading datum), lon increases right', size=[int(W), int(H)], fps=fps, from_proxy=os.path.basename(proxy_path),
                 frame_times_s=[f['t_s'] for f in side['frames']], seconds=round(time.time() - t0, 1), note='upright and world-locked; the viewer adds the runner heading (motion.json) to follow their direction')

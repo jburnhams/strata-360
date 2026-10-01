@@ -1,0 +1,12 @@
+# Light dependencies for the unit and integration suites (no torch, whisper or models). The CI workflows install exactly this.
+numpy>=2.2
+scipy>=1.14
+opencv-python-headless>=4.10
+pyyaml
+loguru
+fastapi
+uvicorn
+httpx
+pytest>=8
+pytest-cov>=5
+ruff

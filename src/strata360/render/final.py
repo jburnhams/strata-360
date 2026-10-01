@@ -61,7 +61,8 @@ class FinalSource:
 
 
 def encoder_args(bitrate):
-    if sys.platform == 'darwin': return ['-c:v', 'hevc_videotoolbox', '-profile:v', 'main10', '-b:v', bitrate, '-tag:v', 'hvc1', '-pix_fmt', 'p010le']
+    from strata360 import hw
+    if hw._hardware('hevc'): return hw.hevc_args(bitrate, main10=True)
     return ['-c:v', 'libx265', '-crf', '17', '-preset', 'medium', '-tag:v', 'hvc1', '-pix_fmt', 'yuv420p10le']
 
 

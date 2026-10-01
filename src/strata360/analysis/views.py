@@ -6,6 +6,7 @@ keeping them body-fixed means the wearer (on the selfie stick) is always in the 
 lens: 0 front, 60, 120, 180 = straight at the wearer (rear lens), 240, 300."""
 import json, os, subprocess, numpy as np, cv2
 from strata360.osv.calib import read_slots, Lens
+from strata360 import hw
 
 VIEW_YAWS = (0, 60, 120, 180, 240, 300)
 VIEW_PX = 1024
@@ -41,7 +42,7 @@ class Views:
 
 
 def decode(osv, stream, every):
-    cmd = ['ffmpeg', '-v', 'error', '-hwaccel', 'videotoolbox', '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
+    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))',scale={LENS_PX}:{LENS_PX}:flags=area", '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=LENS_PX * LENS_PX * 3 * 2); n = LENS_PX * LENS_PX * 3; k = 0
     while True:
