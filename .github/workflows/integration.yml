@@ -16,10 +16,14 @@ concurrency:
 jobs:
   python:
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental == true }}     # Windows support is new: reported but not blocking yet
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            experimental: true
     env:
       # CI VMs have no video hardware: use the software paths on every OS (the hardware paths are covered by tests/unit/test_hw.py)
       STRATA_HWACCEL: none
@@ -39,7 +43,11 @@ jobs:
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
       - name: Check ffmpeg has libx265
+        shell: bash
         run: ffmpeg -hide_banner -encoders | grep -q libx265
       - run: pip install -r requirements-test.txt
       - name: Integration tests (synthetic clip built with ffmpeg; no footage or models needed)
