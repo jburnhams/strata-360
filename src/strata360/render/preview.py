@@ -107,11 +107,8 @@ class PreviewSource:
 
 def encoder_args():
     """Hardware H.264 where there is one (cheap on the CPU, which the rest of the processing needs), else x264."""
-    try: enc = subprocess.run(['ffmpeg', '-v', 'quiet', '-encoders'], capture_output=True, text=True, timeout=20).stdout
-    except (OSError, subprocess.SubprocessError): enc = ''
-    if sys.platform == 'darwin' and 'h264_videotoolbox' in enc: return ['-c:v', 'h264_videotoolbox', '-b:v', '5M', '-realtime', '1']
-    if sys.platform == 'win32' and 'h264_nvenc' in enc: return ['-c:v', 'h264_nvenc', '-preset', 'p1', '-b:v', '5M']
-    return ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '26', '-threads', '2']
+    from strata360 import hw
+    return hw.live_h264_args()
 
 
 def card(w, h, text):

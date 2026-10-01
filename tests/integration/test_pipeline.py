@@ -1,13 +1,13 @@
-"""End-to-end test of the scripted pipeline (ingest, audio) on a synthetic OSV built with ffmpeg (tests/utils/synthetic_osv.py).
+"""End-to-end test of the scripted pipeline (ingest, audio, exposure) on a synthetic OSV built with ffmpeg (tests/utils/synthetic_osv.py).
 Needs ffmpeg and ffprobe, no real footage and no models. Run: pytest tests/integration/test_pipeline.py
-Exposure, transcription and alignment need real footage or models; run them by hand with the sample clip (README section 0)."""
+Transcription and alignment need models, so run them by hand (README section 0)."""
 import json, os, shutil, subprocess, sys
 import pytest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CLI = [sys.executable, '-m', 'strata360']
 CLIP = 'CAM_20260221120007_0019_D'
-STAGES = 'ingest,audio'
+STAGES = 'ingest,audio,exposure'
 
 
 def cli(env, *args, check=True):
@@ -36,7 +36,7 @@ def test_init_ignores_hidden_files_and_reports_others(race):
 def test_ingest_and_audio_facts(race):
     env, rd, _ = race
     r1 = cli(env, 'run', 't', '--stages', STAGES).stdout
-    assert 'FAILED' not in r1 and "'ok': 2" in r1, r1
+    assert 'FAILED' not in r1 and "'ok': 3" in r1, r1
     cdir = rd / 'clips' / CLIP
     clip = load(cdir / 'clip.json')
     assert clip['time']['start_utc'] == '2026-02-21T12:00:07Z' and clip['time']['utc_status'] == 'provisional', clip['time']
@@ -46,6 +46,7 @@ def test_ingest_and_audio_facts(race):
     assert clip['audio']['channels'] == 2 and abs(clip['duration_s'] - 1.2) < 0.05
     au = load(cdir / 'audio.json')
     assert au['summary']['integrated_lufs'] < 0 and au['utc_hash'] == clip['time']['utc_hash']
+    ex = load(cdir / 'exposure.json'); assert ex['clip_id'] == CLIP and ex['sampling']['n_samples'] > 0 and ex['utc_hash'] == clip['time']['utc_hash']
 
 
 def test_stale_header_is_detected(race):
@@ -66,7 +67,7 @@ def test_caching_and_clock_change(race):
     cdir = rd / 'clips' / CLIP; clip = load(cdir / 'clip.json')
     assert clip['time']['start_utc'] == '2026-02-21T11:00:07Z' and clip['time']['utc_status'] == 'definitive', clip['time']
     assert 'ingest: ok' in r and load(cdir / 'audio.json')['utc_hash'] == clip['time']['utc_hash']
-    assert "'ok': 2" in cli(env, 'run', 't', '--stages', STAGES, '--force').stdout
+    assert "'ok': 3" in cli(env, 'run', 't', '--stages', STAGES, '--force').stdout
 
 
 def test_status_and_report(race):

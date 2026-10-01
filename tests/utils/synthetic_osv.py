@@ -29,7 +29,7 @@ def _slot(i):
     """One 264-byte PanoDewarpParams slot: fx, fy, cx, cy, k1..k4, size, k5, occlusion polygons, extrinsic quaternion; padded to 264."""
     ident = i < 16                                                  # the real sample has 16 populated slots out of 24
     body = b''.join([f32(1, 1000.0 if ident else 0.0), f32(2, 1000.0 if ident else 0.0), f32(3, 960.0), f32(4, 960.0)]
-                    + [f32(5 + k, 0.0) for k in range(4)] + [f32(10, 1920.0), f32(11, 1920.0)])
+                    + [f32(5 + k, 0.0) for k in range(4)] + [f32(15, 0.0), f32(10, 1920.0), f32(11, 1920.0)])
     body += ld(22, struct.pack('<14f', *([0.0] * 14))) + ld(23, struct.pack('<14f', *([0.0] * 14)))
     body += ld(28, b''.join(f32(j + 1, v) for j, v in enumerate((1.0, 0.0, 0.0, 0.0))))
     return _pad_slot(body)

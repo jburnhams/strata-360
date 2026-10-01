@@ -15,6 +15,7 @@ Usage: python exposure_stats.py CAM.OSV exposure.json [--every 10]
 """
 import argparse, json, os, subprocess, sys, time
 import numpy as np, cv2
+from strata360 import hw
 from strata360.osv.calib import read_slots, Lens, quat_to_R, imu_offsets
 from strata360.osv.telemetry import read_frames, read_exposure, video_pts
 from strata360.render import photo as ph
@@ -27,7 +28,7 @@ SCHEMA_VERSION = 1
 
 def decode_stream(osv, stream, every):
     """Yield (frame_index, uint16 RGB (LENS_PX, LENS_PX, 3)) for every `every`-th decoded frame of one lens stream."""
-    cmd = ['ffmpeg', '-v', 'error', '-hwaccel', 'videotoolbox', '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
+    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))',scale={LENS_PX}:{LENS_PX}:flags=area", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=LENS_PX * LENS_PX * 6 * 4)
     n = LENS_PX * LENS_PX * 6; k = 0
