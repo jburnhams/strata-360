@@ -109,14 +109,15 @@ def _inside(runs, spans, min_len):
 def build(d, thr=None):
     """Usable footage and the ways to see it.
 
-    Unusable means a real problem and nothing else: camera shake too violent, the lens blocked or fogged, or the picture badly exposed. Everything else is usable, and what to use of it is the
+    Unusable means a real problem and nothing else: camera shake too violent, the lens blocked or fogged (the vision model says so AND most of the whole sphere is empty of detail and contrast), or the picture badly exposed; but never while you are clearly talking (dialogue overrides it). Everything else is usable, and what to use of it is the
     optimiser's choice. So a clip has a few usable SPANS (the stretches between problems), and on top of each span overlapping candidates that are different ways to see the same footage:
       span    the whole usable stretch (framed ahead)             best    its steadiest, best-looking parts
       speech  you talking (dialogue: steady framing, cut on pauses)   person  others in view (framed on them)     you   you in view    scene   one setting of a stretch with several
     Candidates overlap freely; the planner never uses two overlapping stretches of one clip at once. `priority` ranks a clip's candidates by quality (1 = best)."""
     T = timeline(d); n = T['n']; clip = T['clip']
     q = np.clip(0.5 * T['steady'] + 0.2 * T['expo'] + 0.2 * T['scenic'] + 0.1 * (1 - T['blocked']), 0, 1) * (1 - 0.7 * T['blocked'])                           # per-second usefulness (a ranking, never a reason to drop footage)
-    shaky = T['steady'] < 0.1; blocked = T['blocked'] > 0.5; badexp = T['expo'] < 0.4; bad = shaky | blocked | badexp
+    dialogue = T['speech'] > 0.5                                                                                                        # you talking, clearly: worth keeping whatever the picture is doing (the voice is the point)
+    shaky = (T['steady'] < 0.1) & ~dialogue; blocked = (T['blocked'] > 0.5) & ~dialogue; badexp = (T['expo'] < 0.4) & ~dialogue; bad = shaky | blocked | badexp
     why_bad = ['too shaky' if shaky[i] else 'lens blocked or fogged' if blocked[i] else 'badly exposed' if badexp[i] else None for i in range(n)]
     detail = lambda i: f"too shaky ({T['shake'][i]:.0f} deg/s of camera shake; the limit is about 57)" if shaky[i] else 'lens blocked or fogged' if blocked[i] else 'badly exposed (blown out or crushed)'
     stats = lambda sl: dict(steadiness=round(float(T['steady'][sl].mean()), 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2), scenic=round(float(T['scenic'][sl].mean()), 2),

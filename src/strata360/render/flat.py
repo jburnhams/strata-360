@@ -17,6 +17,7 @@ Usage:
 """
 import argparse, os, subprocess, sys, time
 import numpy as np, cv2
+from strata360.pipeline import guard
 from strata360.osv.calib import read_slots, Lens, quat_to_R, imu_offsets
 from strata360.osv.telemetry import read_frames, video_pts
 from strata360.render import photo as ph
@@ -257,7 +258,7 @@ class Renderer(Globe):
 def decoder(osv, stream, hw=True, ss=0.0):
     cmd = ['ffmpeg', '-v', 'error'] + (hwmod.hwaccel_args() if hw else []) + (['-ss', f'{ss:.4f}'] if ss > 0 else []) + \
           ['-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough', '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
-    return subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=LS * LS * BYTES * 2)
+    return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=LS * LS * BYTES * 2)
 
 
 def read_frame(p):
@@ -335,7 +336,7 @@ def main():
     for w in cam.path_warnings(rep): print('WARNING:', w, flush=True)
     video_tmp = a.out + '.video.mp4'
     dm, ds = decoder(a.osv, 1, ss=max(pts[k0] - 0.002, 0)), decoder(a.osv, 0, ss=max(pts[k0] - 0.002, 0))   # master = stream 1, slave = stream 0
-    enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(a.fps), '-i', '-',
+    enc = guard.popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(a.fps), '-i', '-',
                             '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',   # RGB code values -> BT.709 limited-range YCbCr
                             *hwmod.hevc_args(a.bitrate, main10=True),
                             '-bsf:v', 'hevc_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0',   # write BT.709 into the VUI

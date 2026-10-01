@@ -56,6 +56,11 @@ def load(log=print):
 
 
 def separate(x48, log=print, progress=None):
+    from strata360.pipeline import guard
+    with guard.heavy('audio background separation', 1.2): return _separate(x48, log, progress)
+
+
+def _separate(x48, log=print, progress=None):
     """x48: mono float32 at 48 kHz -> the effects stem (everything but speech and music) as mono float32 at 48 kHz, the same length."""
     import torch
     from strata360.audio import dsp

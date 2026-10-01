@@ -20,6 +20,7 @@ Usage: python exposure_stats.py CAM.OSV exposure.json [--every 10]
 import argparse, json, os, subprocess, sys, time
 import numpy as np, cv2
 from strata360 import hw
+from strata360.pipeline import guard
 from strata360.osv.calib import read_slots, Lens, quat_to_R, imu_offsets
 from strata360.osv.telemetry import read_frames, read_exposure, video_pts
 from strata360.render import photo as ph
@@ -36,7 +37,7 @@ def decode_stream(osv, stream, every):
     """Yield (frame_index, uint16 RGB (LENS_PX, LENS_PX, 3)) for every `every`-th decoded frame of one lens stream."""
     cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))',scale={LENS_PX}:{LENS_PX}:flags=area", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=LENS_PX * LENS_PX * 6 * 4)
+    p = guard.popen(cmd, stdout=subprocess.PIPE, bufsize=LENS_PX * LENS_PX * 6 * 4)
     n = LENS_PX * LENS_PX * 6; k = 0
     while True:
         buf = p.stdout.read(n)
@@ -153,7 +154,11 @@ def load_quality(clip_dir):
     except (OSError, ValueError): return None
 
 
-def analyse(osv, every=10, quality=None):
+def analyse(*a, **k):
+    with guard.heavy('exposure analysis', 2.0): return _analyse(*a, **k)
+
+
+def _analyse(osv, every=10, quality=None):
     """Exposure statistics for a clip (README 5.9): returns the exposure.json body. If `quality` is a list, the view-quality rows (one a second) are appended to it as (frame, t_s, grids, lens)."""
     a = argparse.Namespace(osv=osv, every=every)
     tel = read_frames(a.osv); exp = read_exposure(a.osv); pts = video_pts(a.osv, 0)

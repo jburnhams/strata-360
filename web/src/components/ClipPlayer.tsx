@@ -29,7 +29,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
 }) {
   const video = useRef<HTMLVideoElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
-  const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, fol: null as null | Follower, folAim: '' as string, lastT: 0, lastMs: 0, gl: null as null | { draw: () => void }, raf: 0 })
+  const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, fol: null as null | Follower, folAim: '' as string, lastT: 0, lastMs: 0, active: 0, gl: null as null | { draw: () => void }, raf: 0 })
   const [started, setStarted] = useState(false)
   const [playing, setPlaying] = useState(false)
   const [t, setT] = useState(0)
@@ -99,30 +99,38 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
     }
     st.current.gl = { draw }
-    const loop = () => { draw(); st.current.raf = requestAnimationFrame(loop) }
+    // Draw every frame only while something is happening (playing, dragging, zooming, a switch of aim, the follower still moving); when the picture is idle, and whenever the tab is hidden, a few checks a second: an
+    // open but untouched player must not use a CPU core (and the GPU) for ever.
+    const loop = () => {
+      const s = st.current, idle = v.paused && !drag.current && performance.now() - s.active > 1500 && Math.abs(v.currentTime - s.lastT) < 0.001      // a scrub moves the time: that wakes it
+      if (document.hidden || idle) { s.raf = window.setTimeout(loop, document.hidden ? 1000 : 250) as unknown as number; return }
+      draw(); s.raf = requestAnimationFrame(loop)
+    }
     loop()
-    return () => { cancelAnimationFrame(st.current.raf); st.current.gl = null }
+    return () => { cancelAnimationFrame(st.current.raf); clearTimeout(st.current.raf); st.current.gl = null }
   }, [started, headingAt, focusAt])
 
   // Switching mode keeps the picture where it is: the current aim becomes the manual offset, which then eases back for the automatic modes (Free keeps it).
   const changeAim = (next: Aim) => {
+    wake()
     const s = st.current, v = video.current, now = v?.currentTime ?? 0; const cur = s.yaw + (s.aim === 'free' ? 0 : s.cur)
     const base = next === 'free' ? 0 : next === 'heading' ? headingAt(now) : (focusAt(now, next)?.yaw ?? headingAt(now))
     s.yaw = wrap(cur - (next === 'free' ? 0 : base)); s.cur = base; s.fol = null; s.aim = next; s.decay = next === 'free' ? 0 : 45; setAim(next)
   }
   useEffect(() => { const id = setInterval(() => { const a = st.current.aim, f = a === 'you' || a === 'person' || a === 'clarity' ? focusAt(video.current?.currentTime ?? 0, a) : null; setShown(a === 'clarity' ? (f ? 'the clearest part of the picture' : 'no quality map for this clip yet (the exposure stage): following the heading') : a === 'you' || a === 'person' ? (f ? (a === 'you' ? (f.speaking ? 'you (speaking)' : 'you') : f.speaking ? 'another person (someone is speaking)' : 'another person') : a === 'you' ? 'you are not in view: following the heading' : 'nobody else in view: following the heading') : '') }, 500); return () => clearInterval(id) }, [focusAt, headingAt])
-  useEffect(() => { st.current.fov = fov }, [fov])
+  useEffect(() => { st.current.fov = fov; st.current.active = performance.now() }, [fov])
   useEffect(() => { setStarted(false); setPlaying(false); setT(0); setErr(undefined); st.current.yaw = 0; st.current.pitch = 0 }, [clip])
 
   const drag = useRef<{ x: number; y: number } | null>(null)
-  const onDown = (e: React.PointerEvent) => { drag.current = { x: e.clientX, y: e.clientY }; (e.target as HTMLElement).setPointerCapture(e.pointerId) }
+  const wake = () => { st.current.active = performance.now() }
+  const onDown = (e: React.PointerEvent) => { wake(); drag.current = { x: e.clientX, y: e.clientY }; (e.target as HTMLElement).setPointerCapture(e.pointerId) }
   const onMove = (e: React.PointerEvent) => {
     if (!drag.current) return
     const k = (st.current.fov * Math.PI) / 180 / (canvas.current?.clientWidth || 800)                                  // radians per pixel at the current zoom
     st.current.yaw -= (e.clientX - drag.current.x) * k; st.current.pitch = Math.max(-1.45, Math.min(1.45, st.current.pitch + (e.clientY - drag.current.y) * k)); drag.current = { x: e.clientX, y: e.clientY }
   }
-  const onWheel = (e: React.WheelEvent) => setFov(f => Math.max(40, Math.min(120, f + e.deltaY * 0.05)))
-  const reset = () => { st.current.yaw = 0; st.current.pitch = 0; st.current.decay = 0; setFov(100) }
+  const onWheel = (e: React.WheelEvent) => wake() ?? setFov(f => Math.max(40, Math.min(120, f + e.deltaY * 0.05)))
+  const reset = () => { wake(); st.current.yaw = 0; st.current.pitch = 0; st.current.decay = 0; setFov(100) }
 
   const play = async () => {
     const v = video.current; if (!v) return
@@ -139,7 +147,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
         {thumbKind && !started && <img src={api.thumbUrl(folder, clip, thumbKind)} alt="" className="absolute inset-0 h-full w-full object-cover" />}
         <video ref={video} src={started ? api.previewUrl(folder, clip) : undefined} muted={muted} playsInline preload="auto" crossOrigin="anonymous" className="hidden"
           onLoadedMetadata={e => { if (win) (e.target as HTMLVideoElement).currentTime = win.start }}
-          onTimeUpdate={e => { const v = e.target as HTMLVideoElement; setT(v.currentTime); if (win && v.currentTime >= win.end) { v.pause(); v.currentTime = win.start } }} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setErr('could not load the preview video')} />
+          onTimeUpdate={e => { const v = e.target as HTMLVideoElement; setT(v.currentTime); if (win && v.currentTime >= win.end) { v.pause(); v.currentTime = win.start } }} onPlay={() => { setPlaying(true); st.current.active = performance.now() }} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setErr('could not load the preview video')} />
         <canvas ref={canvas} className={`absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing ${started ? '' : 'hidden'}`}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={() => (drag.current = null)} onPointerCancel={() => (drag.current = null)} onWheel={onWheel} onDoubleClick={reset} />
         {!started && (
