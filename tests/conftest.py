@@ -1,5 +1,6 @@
 """Shared pytest configuration. Tests under tests/integration get the `integration` marker automatically."""
 import os, shutil, socket, pytest
+from strata360.pipeline import guard
 
 
 def pytest_collection_modifyitems(items):
@@ -121,3 +122,11 @@ def make_client(tmp_path, monkeypatch, fake_popen):
 
 @pytest.fixture
 def client(make_client): return make_client()
+
+
+@pytest.fixture(scope='session', autouse=True)
+def machine_watchdog():
+    """The test run (and every process it starts) is stopped, with a message, when the machine gets short of memory, starts swapping heavily or is overloaded: a run of the suite must never take the computer down.
+    STRATA_NO_WATCHDOG=1 turns it off."""
+    if os.environ.get('STRATA_NO_WATCHDOG'): yield; return
+    stop = guard.watch('the test run', max_gb=6.0); yield; stop()

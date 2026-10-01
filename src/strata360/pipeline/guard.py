@@ -5,12 +5,15 @@
   popen(cmd, ...)      subprocess.Popen for ffmpeg and friends: refuses to start another ffmpeg when `STRATA_MAX_FFMPEG` (6) are already running anywhere, and remembers the child so it is
                        killed when the job ends, fails or is interrupted (a render that crashed used to leave its decoders and encoder running for hours).
   heavy(label, gb)     the context manager that does both and then WATCHES the job: every few seconds it compares the machine's load and free memory (and this job's own memory) with the limits and, when
-                       they are passed, kills the job's processes and stops it with an explanation: `STRATA_KILL_LOAD` (load per CPU, default 1.5), `STRATA_KILL_FREE_GB` (0.8), `max_gb` (the job's cap).
+                       they are passed, kills the job's whole process tree and stops it with an explanation: `STRATA_KILL_LOAD` (load per CPU, default 1.5), `STRATA_KILL_FREE_GB` (1.5), `STRATA_KILL_SWAP_GB`
+                       (3), the system's memory-pressure level (macOS: warning or critical), `max_gb` (the job's cap). It polls every 2 s: memory runs out in seconds, not minutes.
+  watch(label)         the same watchdog without the start check, for things that are not one job (the test run).
+  panic()              kill every ffmpeg/ffprobe/pytest/strata360 process of this user except the server and this one (`./strata360 stop-all`).
 STRATA_NO_RESOURCE_LIMITS=1 turns all of it off (tests, CI). Limits can be set per call."""
 import atexit, contextlib, os, signal, subprocess, sys, threading, time
 from strata360.pipeline import resources as RS
 
-MAX_FFMPEG = 6; KILL_LOAD = 1.5; KILL_FREE_GB = 0.8; POLL_S = 5.0
+MAX_FFMPEG = 8; KILL_LOAD = 1.5; KILL_FREE_GB = 1.5; KILL_SWAP_GB = 3.0; POLL_S = 2.0; START_SWAP_GB = 1.5
 _CHILDREN = []; _LOCK = threading.Lock()
 
 
@@ -51,6 +54,20 @@ def top(rows=None, n=4, by='rss'):
     return '; '.join(f"{os.path.basename(r[5].split()[0])[:24]} pid {r[0]} {r[3]:.0f} MB {r[2]:.0f}% CPU up {r[4]}" for r in sorted(rows, key=key)[:n])
 
 
+def pressure_level():
+    """The system's memory-pressure level: 1 normal, 2 warning, 4 critical (macOS `kern.memorystatus_vm_pressure_level`); 1 where it cannot be read."""
+    try: return int(subprocess.run(['sysctl', '-n', 'kern.memorystatus_vm_pressure_level'], capture_output=True, text=True, timeout=5).stdout.strip() or 1)
+    except Exception: return 1
+
+
+def swap_used_gb():
+    """Swap in use, GB (macOS `vm.swapusage`); 0 where it cannot be read."""
+    try:
+        out = subprocess.run(['sysctl', '-n', 'vm.swapusage'], capture_output=True, text=True, timeout=5).stdout; used = out.split('used =')[1].split()[0]
+        return float(used[:-1]) / (1024.0 if used[-1] == 'M' else 1.0) if used[-1] in 'MG' else 0.0
+    except Exception: return 0.0
+
+
 def load_per_cpu():
     try: return os.getloadavg()[0] / (os.cpu_count() or 4)
     except OSError: return 0.0
@@ -62,6 +79,9 @@ def check(label, gb=1.0, cfg=None, max_ffmpeg=None):
     if _off(): return
     v = RS.cfg_values(cfg); need = float(gb) + float(v['reserve_gb']); free = RS.mem_available_gb(); problems = []; rows = None
     if free < need: rows = processes(); problems.append(f'only {free:.1f} GB of memory is free, {label} needs about {need:.1f} GB (including a {float(v["reserve_gb"]):.0f} GB reserve); biggest: {top(rows)}')
+    lvl = pressure_level(); sw = swap_used_gb()
+    if lvl >= 2: rows = rows or processes(); problems.append(f'the system reports memory pressure (level {lvl}); biggest: {top(rows)}')
+    elif sw > START_SWAP_GB: rows = rows or processes(); problems.append(f'{sw:.1f} GB of swap is in use already; biggest: {top(rows)}')
     lim = float(v['busy_load_fraction'])
     if load_per_cpu() > lim:
         rows = rows or processes(); problems.append(f'the machine is busy (load {os.getloadavg()[0]:.0f} on {os.cpu_count()} CPUs, limit {lim * (os.cpu_count() or 4):.0f}); busiest: {top(rows, by="cpu")}')
@@ -75,6 +95,7 @@ def popen(cmd, *a, **k):
     if not _off() and os.path.basename(str(cmd[0])) in ('ffmpeg', 'ffprobe'):
         cap = int(_env_f('STRATA_MAX_FFMPEG', MAX_FFMPEG)); ff = ffmpeg_processes()
         if len(ff) >= cap: raise ResourceBusy(f'not starting {os.path.basename(str(cmd[0]))}: {len(ff)} ffmpeg/ffprobe processes are already running (limit {cap}), pids {[r[0] for r in ff[:6]]}: pkill ffmpeg clears leftovers')
+    if os.path.basename(str(cmd[0])) == 'ffmpeg' and '-threads' not in cmd: cmd = [cmd[0], '-threads', str(int(RS.cfg_values(None)['threads']))] + list(cmd[1:])          # a decoder or encoder must not take every core
     p = subprocess.Popen(cmd, *a, **k)
     with _LOCK: _CHILDREN[:] = [c for c in _CHILDREN if c.poll() is None] + [p]
     return p
@@ -97,6 +118,36 @@ def kill_children():
 atexit.register(kill_children)
 
 
+def descendants(rows=None, root=None):
+    """pids of every process below `root` (default this process)."""
+    rows = rows if rows is not None else processes(); kids = {root or os.getpid()}; out = []; grew = True
+    while grew:
+        grew = False
+        for r in rows:
+            if r[1] in kids and r[0] not in kids: kids.add(r[0]); out.append(r[0]); grew = True
+    return out
+
+
+def kill_tree():
+    """Kill everything this process started, however deep (ffmpeg children, helper processes), then the registered children."""
+    for pid in descendants():
+        try: os.kill(pid, signal.SIGKILL)
+        except OSError: pass
+    kill_children()
+
+
+def panic(keep=()):
+    """Kill every ffmpeg/ffprobe/pytest/strata360 process of this user except the web server, this process and `keep`. Returns the pids killed."""
+    me = {os.getpid(), os.getppid(), *keep}; killed = []
+    for r in processes():
+        name = os.path.basename(r[5].split()[0]); cmd = r[5]
+        mine = name in ('ffmpeg', 'ffprobe') or 'pytest' in cmd or ('strata360' in cmd and ' serve' not in cmd and 'stop-all' not in cmd)
+        if mine and r[0] not in me:
+            try: os.kill(r[0], signal.SIGKILL); killed.append(r[0])
+            except OSError: pass
+    return killed
+
+
 def _own_tree_mb(rows):
     """Memory (MB) of this process and everything below it."""
     me = os.getpid(); kids = {me}; grew = True
@@ -110,6 +161,10 @@ def _own_tree_mb(rows):
 def verdict(max_gb=None, kill_load=None, kill_free_gb=None, rows=None):
     """None while the machine is fine, else why the job must stop (what the watchdog checks)."""
     kl = _env_f('STRATA_KILL_LOAD', KILL_LOAD) if kill_load is None else kill_load; kf = _env_f('STRATA_KILL_FREE_GB', KILL_FREE_GB) if kill_free_gb is None else kill_free_gb
+    lvl = pressure_level()
+    if lvl >= 2: return f'the system reports memory pressure (level {lvl})'
+    sw = swap_used_gb(); ks = _env_f('STRATA_KILL_SWAP_GB', KILL_SWAP_GB)
+    if sw > ks: return f'swap is filling up ({sw:.1f} GB used, limit {ks:.1f} GB)'
     if load_per_cpu() > kl: return f'the machine is overloaded (load {os.getloadavg()[0]:.0f} on {os.cpu_count()} CPUs, limit {kl * (os.cpu_count() or 4):.0f})'
     free = RS.mem_available_gb()
     if free < kf: return f'the machine is out of memory ({free:.1f} GB free, limit {kf:.1f} GB)'
@@ -119,29 +174,37 @@ def verdict(max_gb=None, kill_load=None, kill_free_gb=None, rows=None):
     return None
 
 
+def watch(label, max_gb=None, on_abort=None):
+    """Start the watchdog thread (see the module doc); returns the function that stops it. On a bad `verdict` it kills this process's whole tree and calls `on_abort(reason)` (default: say why on stderr and exit 75)."""
+    stop = threading.Event()
+    def abort(reason):
+        kill_tree()
+        if on_abort: on_abort(reason); return
+        msg = f'{label} stopped: {reason}. Its processes were killed so the machine stays usable; run it again when that clears.'
+        try:                                                                                        # a log that survives output capture (pytest) and a dead terminal
+            d = os.path.join(os.path.expanduser('~'), '.cache', 'strata360'); os.makedirs(d, exist_ok=True); open(os.path.join(d, 'abort.log'), 'a').write(time.strftime('%Y-%m-%d %H:%M:%S ') + msg + '\n')
+        except OSError: pass
+        print('\n' + msg, file=sys.__stderr__, flush=True); os._exit(75)
+    def run():
+        bad = 0
+        while not stop.wait(POLL_S):
+            why = verdict(max_gb); bad = bad + 1 if why else 0
+            if why and (bad >= 2 or 'critical' in why or 'level 4' in why): abort(why); return                  # two readings in a row (a momentary spike does not stop a job); a critical pressure level does at once
+    threading.Thread(target=run, daemon=True).start(); return stop.set
+
+
 @contextlib.contextmanager
 def heavy(label, gb=1.0, max_gb=None, cfg=None, on_abort=None):
-    """Around a heavy job: `check` first (ResourceBusy if there is no room), then a watchdog thread that stops the job (kills its processes, then `on_abort(reason)`, default: print the reason and exit 75)
-    when `verdict` says the machine is overloaded or short of memory or the job is over `max_gb` (default: three times `gb`). Its ffmpeg children are killed when the block ends, however it ends."""
+    """Around a heavy job: `check` first (ResourceBusy if there is no room), then the watchdog (`watch`; the job's cap defaults to three times `gb`). Its ffmpeg children are killed when the block ends, however it ends."""
     if _off(): yield; return
-    check(label, gb, cfg); stop = threading.Event(); cap = max_gb if max_gb is not None else 3.0 * float(gb)
-    def abort(reason):
-        kill_children()
-        if on_abort: on_abort(reason); return
-        print(f'\n{label} stopped: {reason}. Its processes were killed so the machine stays usable; run it again when that clears.', file=sys.stderr, flush=True); os._exit(75)
-    def watch():
-        while not stop.wait(POLL_S):
-            why = verdict(cap)
-            if why: abort(why); return
-    t = threading.Thread(target=watch, daemon=True); t.start()
-    old = {}
+    check(label, gb, cfg); stop = watch(label, max_gb if max_gb is not None else 3.0 * float(gb), on_abort); old = {}
     if threading.current_thread() is threading.main_thread():
         for sig in (signal.SIGTERM, signal.SIGINT):
-            try: old[sig] = signal.signal(sig, lambda s, f, sig=sig: (kill_children(), (old.get(sig) or signal.SIG_DFL) if False else None, sys.exit(128 + s)))
+            try: old[sig] = signal.signal(sig, lambda s_, f, sig=sig: (kill_tree(), sys.exit(128 + s_)))
             except (ValueError, OSError): pass
     try: yield
     finally:
-        stop.set(); kill_children()
+        stop(); kill_children()
         for sig, h in old.items():
             try: signal.signal(sig, h)
             except (ValueError, OSError): pass

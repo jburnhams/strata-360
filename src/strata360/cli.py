@@ -399,6 +399,11 @@ def cmd_render(a):
     sys.argv = ['render'] + a.args; flat.main()
 
 
+def cmd_stop_all(a):
+    from strata360.pipeline import guard
+    killed = guard.panic(); print(f'killed {len(killed)} processes' + (f': {killed[:20]}' if killed else '')); print(f'memory pressure level {guard.pressure_level()}, swap {guard.swap_used_gb():.1f} GB, load {os.getloadavg()[0]:.1f}')
+
+
 def main():
     ap = argparse.ArgumentParser(prog='strata360', description='Automatic editing pipeline for 360 race footage'); sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init', help='create a race from a folder of camera files'); p.add_argument('name'); p.add_argument('--library', required=True)
@@ -411,6 +416,7 @@ def main():
     p = sub.add_parser('show', help='summarise one clip'); p.add_argument('name'); p.add_argument('clip'); p.set_defaults(fn=cmd_show)
     p = sub.add_parser('report', help='race-level summary (report.json and report.md)'); p.add_argument('name'); p.set_defaults(fn=cmd_report)
     p = sub.add_parser('doctor', help='check the environment'); p.set_defaults(fn=cmd_doctor)
+    p = sub.add_parser('stop-all', help='emergency stop: kill every ffmpeg, ffprobe, pytest and strata360 process of this user (not the web server)'); p.set_defaults(fn=cmd_stop_all)
     p = sub.add_parser('fetch-models', help='download the models the default stages need'); p.add_argument('race', nargs='?'); p.set_defaults(fn=cmd_fetch_models)
     p = sub.add_parser('who', help='cluster the faces, show them, and save which one is you'); p.add_argument('name'); p.add_argument('--me', help='cluster number(s) that are you, comma separated: 101 or 101,103'); p.add_argument('--label', default='me'); p.add_argument('--auto', action='store_true', help='save the suggested wearer as the profile if the suggestion is confident'); p.set_defaults(fn=cmd_who)
     p = sub.add_parser('clock', help='camera clock: suggest an offset from running starts, or set it from an anchor (clip + moment + true time)'); p.add_argument('name')

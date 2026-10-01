@@ -9,6 +9,7 @@ taken over. The per-clip state file (`stages.json`) is updated under a file lock
 import atexit, datetime as dt, fnmatch, hashlib, json, os, time, traceback
 from contextlib import contextmanager
 from strata360 import oslib
+from strata360.pipeline import guard
 from strata360.pipeline import config, clips as clipmod, resources, retry
 from strata360.pipeline.stages import STAGES, ORDER, Ctx
 
@@ -283,7 +284,7 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
         resources.wait_for_headroom(name, cfg, None, L)                                                            # enough free memory and an idle-enough machine for this stage
         ctx = Ctx(c, cfg, clip_dir(race, c.id), L); os.makedirs(ctx.dir, exist_ok=True); clock_sig = _sha(cfg.get('camera_clock')); t0 = time.time()
         try:
-            st.fn(ctx)
+            with guard.heavy(name, resources.STAGE_MEM_GB.get(name, 1.0), max_gb=max(2.5 * resources.STAGE_MEM_GB.get(name, 1.0), 2.0)): st.fn(ctx)        # fails fast if there is no room; kills the item's whole process tree if the machine gets overloaded or short of memory
             if name == 'ingest':
                 from strata360.pipeline.ingest import restamp; n_re = restamp(ctx.dir)
                 if n_re: L(f'    re-stamped {n_re} artefacts with the new time')
