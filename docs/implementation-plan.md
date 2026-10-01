@@ -193,5 +193,10 @@ C2 after V4;  D1 after V5;  E runs alongside.
 Suggested sequence: A1, then the V milestone in order (V5 is the largest piece), with A2 to A4 in parallel; then A5 (the first real film: voice-over driven, cut on the beat, with overlay); then B1 and C1, C2, D1, and B2/B3 as A5's numbers require.
 
 ## Questions for you
-(D2, D3, D6, D7 and the docs move answered on 1 Oct.)
-1. Defaults in V4 and V5 to confirm: pause between lines 0.4 s, lead-in and lead-out 0.5 s per block, snapping tolerance half a beat, and when no beat fits, cut off the beat (reported) rather than hold the last frame; for D7, up to 8 s of music lost to an early fade, up to 4 s of silence before the music and 6 s after it.
+Answered on 1 Oct: D2, D3, D6, D7, the docs move, and the V4/V5/D7 defaults (0.4 s between lines, 0.5 s lead-in and lead-out, snapping up to half a beat, off-beat cut reported when no beat fits, up to 8 s of music lost to a fade, up to 4 s of silence before the music and 6 s after).
+
+Still open:
+1. **Overlay fork (A2):** may the plan change `jburnhams/gopro-dashboard-overlay` to add an overlay-only output with transparency, if it does not have one? And which layout should the film use (map only, or map plus pace, heart rate, altitude, clock)?
+2. **Every clip in the film (V1):** the planner currently gives every clip at least one window. With the voice-over driving, may a dull clip (no narration, nothing preferred) be dropped, or does every clip stay?
+3. **One track or several (D7, V5):** one song per film, or a sequence of tracks (with a crossfade or a cut on a bar between them)?
+4. **Render budget (B3):** is "a 4K film renders overnight on the Mac (about 8 hours)" the right bar for deciding on a GPU port?
