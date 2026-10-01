@@ -19,7 +19,13 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 5. **The voice-over does not drive the picture.** Today the order is plan, then script, then voice: the planner (`edit/chrono.py`) fixes every window in whole beats of a constant-tempo grid, the script is written into those windows, and `edit/voiceover.py` squeezes each spoken line into its window (synthetic lines sped up to 1.25x, recordings cut and flagged `over`). overview 17 steps 5 and 6 (measure the recording, then fit the picture around it) are not built, and cuts can only fall on a constant grid (`edit/music.py` assumes a fixed tempo), not on the music's actual beats to the millisecond.
 6. **No lens-quality data.** There is no `quality` stage, so `clear_nadir` (needed before showing a planet, a tunnel or a spin) is a guess from the VLM's "lens problems".
 
-**Debt worth paying while we are in there:** the README has grown to 210 KB with out-of-date passages (section 1 still lists "a GUI editor" as a non-goal; section numbers are out of order); the Python coverage floor is 38%.
+**Progress on the plan (1 Oct, branch `claude/coverage-and-rough-plan`):**
+- **A1** code part done (`strata360 coverage`, `/api/coverage`, progress panel); the Legends batch run is still to do.
+- **V1** to **V4** built and unit-tested; none is called from `strata360 script`, the project file or the app yet, so the film is still planned the old way (plan, then script, then squeeze). Next is **V5** (windows, beat tracker, cuts on the beat), then **V6** (sound placement and the timeline), which is also where the pieces get wired in.
+- None of V1 to V4 has been run on Legends or with the real aligner and Kokoro; the by-hand checks are listed under V3 and V4.
+- Unit coverage is 50% (floor raised from 39 to 47).
+
+**Debt worth paying while we are in there:** the README has grown to 210 KB with out-of-date passages (section 1 still lists "a GUI editor" as a non-goal; section numbers are out of order); the Python coverage floor was 38% (now 47%).
 
 ## Decisions this plan assumes (change them and the order changes)
 
@@ -40,7 +46,8 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 ### A1. Finish the Legends batch on current stage versions (S, mostly machine time)
 - Run every default stage to completion at its current version (proxy v6 for all 25 clips; scenes, speakers, candidates, thumb_best).
 - Add `strata360 coverage FOLDER [--json]` (overview 15.3): per clip, which section 15.1 artefacts exist and which decisions they unblock. Show it in the Overview's progress panel.
-- **Done when:** `progress` reports `complete` for Legends; `coverage` lists nothing missing for default stages. Unit test for `coverage` on a built project (`tests/utils` builders).
+- **Built (1 Oct):** `strata360 coverage FOLDER [--json]`, `/api/coverage` and a "Data missing" line in the progress panel (`pipeline/coverage.py`, `tests/unit/test_coverage.py`). **Still to do:** the batch run on Legends.
+- **Done when:** `progress` reports `complete` for Legends; `coverage` lists nothing missing for default stages.
 
 ## Milestone V: the voice-over cut (first cut; critical path after A1)
 
@@ -58,16 +65,19 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
 - **Which clips (D9):** a clip with no usable footage is dropped (and listed); every other clip gets a block of at least its minimum b-roll (one minimum window, 2 s, plus its dialogue if it has any). Only if the target cannot hold all the minimums are more clips dropped, lowest value first, each reported with the reason. This replaces today's "forced" unusable stretch in `edit/chrono.py`.
 - **Automatic length (D8, no music and no target):** each clip's block gets a natural length from its usable footage with diminishing returns (for example 2 s + 1.5 x sqrt(usable seconds), capped at its usable footage) plus its dialogue; the sum is the first guide for the script, and the script's measured length then sets the film (V4).
 - Locks, bans and per-clip weights (the existing overrides) apply at this level unchanged.
+- **Built (1 Oct):** `edit/blocks.py` (`plan_blocks`), `tests/unit/test_blocks.py`; `project.load_clips` also passes `alignment`. Not yet wired into `project.propose` or the GUI (V2 consumes it). The film target is passed in; choosing it from the music or a target length is left to the caller.
 - **Done when:** unit tests: every clip gets a block, blocks are in shooting order, a block's minimum is at least its dialogue plus padding, the targets sum to the film target; an unusable clip is dropped and reported while a merely dull one keeps a block; automatic length grows with usable footage and is reproducible.
 
 ### V2. Script written per block (S to M)
 - `edit/script.py`: the writer gets blocks instead of beat windows: per block its facts (as now), its seconds minus its dialogue, and a word budget from that; lines carry the `block` id (and an optional anchor: "before the dialogue" or "after it"). Blocks with dialogue keep a marked gap.
 - Keep `check()` and the one retry; budgets are now a guide, not a hard cut, because V4 re-sizes the blocks to what is actually spoken.
+- **Built (1 Oct):** `script.block_facts`, `build_block_messages`, `check_blocks`, `write_block_script` (lines carry `block` and `anchor`; the budget is soft: 1.3x plus 2 words before a retry, nothing is cut; the doc has per-block totals). Tests: `tests/unit/test_script_blocks.py` (scripted model, not HTTP). Not yet called from `strata360 script` or the app, which still use the beat-window path until V4 lands. Also fixed `words_in_window` failing when no clips folder is given.
 - **Done when:** fake-HTTP unit tests: lines map to blocks, a block's dialogue gap is never written over, the totals report words per block.
 
 ### V3. Measure the spoken voice-over (M)
 - `edit/voiceover.py` stops squeezing: each line is spoken (Kokoro) or recorded at its natural length (no tempo change, no cut), and its real duration is measured; for recordings, leading and trailing silence are trimmed by energy and the words are force-aligned to the line's text with the existing aligner (`audio/align.py`) to get word times and to catch a missing or repeated line.
 - Output `voiceover/vo.json` (overview 17.2): per line, take, natural duration, speech start and end inside the file, word times, alignment score, loudness. Recording a new take re-measures only that line.
+- **Built (1 Oct):** `edit/vo_measure.py`: `measure_take` (one file per line), `measure_recording` (one recording of several lines, split by aligning all words at once, with the pauses between), `measure_script` (speaks or takes the recording of each line of a block script at natural length, writes `voiceover/vo.json`, reuses unchanged lines so a new take re-measures only its line). Line statuses: `ok`, `short` (words missing), `long` (extra or repeated), `mismatch`, `silent`, `missing`. The aligner is injected (default wav2vec2). Tests: `tests/unit/test_vo_measure.py` (tone "speech" and scripted aligners), one integration test with the fake engine. The old squeeze path in `voiceover.build` stays until V4/V6 replace it. **Not yet checked:** the real aligner and Kokoro on a real recording (P5-33 by hand: loudness is RMS dBFS, not LUFS; the status limits assume about 150 wpm).
 - **Done when:** P5-33 on a synthetic recording (Kokoro reading a known text with inserted silences): line boundaries within 50 ms, a missing line reported.
 
 ### V4. Re-size blocks to the voice-over (M)
@@ -78,6 +88,8 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
   - **Music position is free within the flexibility.** The music's start in the film (an offset, possibly negative: starting part-way into the track) is chosen in V5 together with the cuts, so downbeats fall on the cuts that matter (block boundaries, the first dialogue, the last cut); the film may grow by a beat or two for this, never shrink below V.
   - **No music:** L = V, plus a short lead-in and lead-out; with a target length the extra or missing time is handled as for music (spread over the blocks, or reported), but more loosely, since there is no beat to land.
 - Lines get provisional start times in film time.
+- **Speed as a last resort (decided 1 Oct):** before a block's overflow is reported, its **synthetic** lines are played faster, one factor for the block, at most 1.25x as before (recordings are never changed). The line is spoken again at `rate x tempo` words a minute, not time-stretched, and measured; its `vo.json` entry gets `tempo_applied`, which counts against the limit on the next fit.
+- **Built (1 Oct):** `edit/vo_fit.py`: `fit` (blocks, lines, film length, music placement, problems with choices), `respeak`, `fit_project` (measure, fit, re-speak the sped lines, fit again). Tests: `tests/unit/test_vo_fit.py`, one integration test with a voice whose pace follows the rate. Not yet wired into `strata360 script`, the project file or the app. The music-only intro and outro are folded into the first and last block's lead-in and lead-out; V5 cuts the real windows. The dialogue is one gap of its total padded length per block (V5 places the real spans). `paragraph_after` on a script line gives the longer pause; nothing sets it yet.
 - **Done when:** unit tests: every line lies inside its own block; no line overlaps a dialogue span; the film has picture for every instant of the voice-over (P5-34); a reported overflow names the line and the clip; L is never below V; with a 90 s track and 60 s of voice-over and enough footage, L is 90 s (within a beat) and every block grew; with too little footage the music fades and the fade is within `fade_max_s` or reported; with a 60 s track and a 64 s voice-over, L is 64 s and the music's silence at start plus end is 4 s, each within its limit.
 
 ### V5. Windows inside blocks, then cuts on the beat (L, the heart of it)
@@ -193,7 +205,7 @@ The reference (kept in `scripts/overlay/`: `layout.xml` and the command line use
 - **E1.** Done 1 Oct: the README became `docs/overview.md`, the other Markdown files moved into `docs/`, and the README is now a short page of links. Still to do: remove passages in the overview contradicted by later work (section 1 non-goals, the two-proxy design, the free-order optimiser as the main path) and, if it keeps growing, split it into one file per area.
 - **E2.** Trim `progress.md` to findings and decisions; the build narrative is in git history.
 - **E3.** Done 1 Oct: the three `PROMPT_*.md` files are in `docs/prompts/`.
-- **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A).
+- **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A). 1 Oct: 39 to 47 after A1 and V1 to V4 (measured 50%).
 
 ## Later (parked until the film exists)
 - A generated (AI) backing track made to fit the finished cut: the film's length, its block boundaries as section changes, its energy curve, and beats placed on the cuts (the reverse of V5: the music fits the picture).

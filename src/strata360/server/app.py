@@ -161,6 +161,13 @@ def create_app(roots, token=None):
     @api.get('/api/progress', dependencies=[Depends(auth)])
     def get_progress(folder: str): return progress(folder_of(folder))
 
+    @api.get('/api/coverage', dependencies=[Depends(auth)])
+    def get_coverage(folder: str):
+        from strata360.pipeline.coverage import coverage
+        f = folder_of(folder)
+        if not os.path.exists(os.path.join(config.race_dir(f), 'race.json')): raise HTTPException(404, 'no project in this folder yet')
+        return coverage(f)
+
     @api.get('/api/log', dependencies=[Depends(auth)])
     def get_log(folder: str):
         p = os.path.join(config.race_dir(folder_of(folder)), 'run.log')

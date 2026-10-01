@@ -48,6 +48,8 @@ def load_clips(folder):
         cp = d + 'candidates.json'
         if not os.path.exists(cp): missing.append(cj['clip_id']); continue
         cd = json.load(open(cp)); clips.append(dict(id=cj['clip_id'], start_utc=cj['time']['start_utc'], duration_s=cj['video']['source_frames'] / cj['video']['nominal_fps'], candidates=cd['candidates'], unusable=cd.get('unusable') or []))
+        try: clips[-1]['alignment'] = json.load(open(d + 'alignment.json')).get('segments') or []         # exact speech spans for the rough plan (edit/blocks.py)
+        except (OSError, ValueError): pass
     return clips, missing
 
 

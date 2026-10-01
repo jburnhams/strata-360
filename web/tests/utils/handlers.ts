@@ -12,6 +12,7 @@ export const handlers = [
   http.post('/api/open', () => HttpResponse.json({ started: true })),
   http.get('/api/progress', () => HttpResponse.json(makeProgress())),
   http.get('/api/log', () => HttpResponse.json({ lines: [] })),
+  http.get('/api/coverage', () => HttpResponse.json({ clips: 0, stages: [], totals: {}, blocked: {}, missing: [], complete: true })),
   http.get('/api/state', () => HttpResponse.json(makeStateMatrix())),
   http.post('/api/run', () => HttpResponse.json({ started: true })),
   http.post('/api/stop', () => HttpResponse.json({ stopped: 1 })),
