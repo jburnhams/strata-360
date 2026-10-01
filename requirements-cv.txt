@@ -1,0 +1,2 @@
+# Isolated environment (.venv-cv) for the optional MossFormer2 speech enhancer: clearvoice pins numpy<2 and an old OpenCV.
+clearvoice==0.1.2

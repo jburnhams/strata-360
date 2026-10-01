@@ -1,0 +1,1 @@
+{"hevc10": {"input": [], "filter": "[0:v][1:v]overlay,format=p010le", "output": ["-vcodec", "hevc_videotoolbox", "-profile:v", "main10", "-b:v", "150M", "-tag:v", "hvc1", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]}}

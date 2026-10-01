@@ -1,0 +1,9 @@
+{
+  "ref": "world",
+  "comment": "Little planet spin that zooms out into a normal horizon view: stereographic projection (dist 1) looking straight down at 260 degrees, spinning a quarter turn, then blending to rectilinear (dist 0) and tilting up to the horizon.",
+  "keyframes": [
+    {"t": 0.0, "yaw":   0, "pitch": -90, "fov": 260, "dist": 1.0},
+    {"t": 2.2, "yaw": 120, "pitch": -90, "fov": 240, "dist": 1.0},
+    {"t": 4.8, "yaw": 150, "pitch":  -8, "fov":  95, "dist": 0.0}
+  ]
+}

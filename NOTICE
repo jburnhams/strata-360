@@ -1,0 +1,23 @@
+strata-360
+==========
+
+Portions of this project (spike/photo.py and the lens-weighting / occlusion / linear-light blending logic in
+spike/render4k.py, and the file-format notes in spike/osvcalib.py and spike/telemetry.py) are ports of ideas and
+algorithms described in, and read from the source of, OpenOSV:
+
+    OpenOSV, https://github.com/Kemerd/OpenOSV
+    Copyright 2026 The OpenOSV Contributors
+    Licensed under the Apache License, Version 2.0
+
+    Referenced files: include/osv/render/osv_kernel.h, include/osv/geom/Blend.h, include/osv/render/PhotoSeam.h,
+    include/osv/color/ColorMath.h, src/osv/render/SeamAnalysis.cpp, docs/GEOMETRY.md, docs/FORMAT.md, docs/COLOR.md.
+
+The code here is a from-scratch Python re-implementation (no OpenOSV source is copied verbatim); the constants,
+formulas and pipeline order follow OpenOSV. See progress.md for exactly what has and has not been ported.
+
+Local models used by the vision stages (downloaded into models/, gitignored):
+  - YOLO11 pose (Ultralytics, AGPL-3.0): person detection. Fine for personal, local use; check the licence before distributing a product.
+  - InsightFace buffalo_l (SCRFD + ArcFace): face detection and recognition. The pretrained weights are for NON-COMMERCIAL research use only.
+  - SpeechBrain ECAPA-TDNN (speechbrain/spkrec-ecapa-voxceleb, Apache-2.0): speaker embeddings.
+  - Kokoro-82M (hexgrad/Kokoro-82M, Apache-2.0) through kokoro-onnx (MIT): the voice-over voice (British male voices); model files from the kokoro-onnx v1.0 release, in models/kokoro.
+  - Qwen2.5-VL-3B-Instruct 4-bit (mlx-community, Qwen licence): scene description and tagging.

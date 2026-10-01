@@ -1,0 +1,10 @@
+{
+  "ref": "world",
+  "bg": "blur",
+  "comment": "Globe: the planet spins, shrinks from filling the frame to a small round ball on a blurred, darkened copy of itself, and holds. Use \"bg\": [0.05, 0.05, 0.10] for a solid colour instead.",
+  "keyframes": [
+    {"t": 0.0, "yaw":   0, "pitch": -90, "disc": 3.2},
+    {"t": 2.4, "yaw": 150, "pitch": -90, "disc": 0.46},
+    {"t": 4.8, "yaw": 330, "pitch": -90, "disc": 0.46}
+  ]
+}
