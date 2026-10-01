@@ -93,3 +93,5 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 - A `RuntimeWarning: overflow encountered in divide` from `render/photo.py:64` appears when the synthetic clip goes through exposure (a division by a zero scale on the synthetic lens). Possible product bug; not hidden here.
 - Several old files assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); `restore_globals` papers over a few of them. Convert them to `monkeypatch` when you touch them.
 - `test_workers.py` starts real processes and sleeps (about 5 s).
+| `pipeline/coverage.py` | covered | done: stage states, blocked decisions, CLI, API (`unit/test_coverage.py`) |
+| `edit/blocks.py` | covered | done: allocation, dropping, dialogue padding, auto length, overrides (`unit/test_blocks.py`) |

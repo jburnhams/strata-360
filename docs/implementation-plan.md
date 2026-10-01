@@ -40,7 +40,8 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 ### A1. Finish the Legends batch on current stage versions (S, mostly machine time)
 - Run every default stage to completion at its current version (proxy v6 for all 25 clips; scenes, speakers, candidates, thumb_best).
 - Add `strata360 coverage FOLDER [--json]` (overview 15.3): per clip, which section 15.1 artefacts exist and which decisions they unblock. Show it in the Overview's progress panel.
-- **Done when:** `progress` reports `complete` for Legends; `coverage` lists nothing missing for default stages. Unit test for `coverage` on a built project (`tests/utils` builders).
+- **Built (1 Oct):** `strata360 coverage FOLDER [--json]`, `/api/coverage` and a "Data missing" line in the progress panel (`pipeline/coverage.py`, `tests/unit/test_coverage.py`). **Still to do:** the batch run on Legends.
+- **Done when:** `progress` reports `complete` for Legends; `coverage` lists nothing missing for default stages.
 
 ## Milestone V: the voice-over cut (first cut; critical path after A1)
 
@@ -58,6 +59,7 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
 - **Which clips (D9):** a clip with no usable footage is dropped (and listed); every other clip gets a block of at least its minimum b-roll (one minimum window, 2 s, plus its dialogue if it has any). Only if the target cannot hold all the minimums are more clips dropped, lowest value first, each reported with the reason. This replaces today's "forced" unusable stretch in `edit/chrono.py`.
 - **Automatic length (D8, no music and no target):** each clip's block gets a natural length from its usable footage with diminishing returns (for example 2 s + 1.5 x sqrt(usable seconds), capped at its usable footage) plus its dialogue; the sum is the first guide for the script, and the script's measured length then sets the film (V4).
 - Locks, bans and per-clip weights (the existing overrides) apply at this level unchanged.
+- **Built (1 Oct):** `edit/blocks.py` (`plan_blocks`), `tests/unit/test_blocks.py`; `project.load_clips` also passes `alignment`. Not yet wired into `project.propose` or the GUI (V2 consumes it). The film target is passed in; choosing it from the music or a target length is left to the caller.
 - **Done when:** unit tests: every clip gets a block, blocks are in shooting order, a block's minimum is at least its dialogue plus padding, the targets sum to the film target; an unusable clip is dropped and reported while a merely dull one keeps a block; automatic length grows with usable footage and is reproducible.
 
 ### V2. Script written per block (S to M)
