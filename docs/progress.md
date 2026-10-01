@@ -1,6 +1,6 @@
 # Progress log
 
-Running notes on what was tried, what worked, and what we learned. Newest entries at the bottom of each section. See [README.md](README.md) for the plan. Spike scripts live in `spike/`.
+Running notes on what was tried, what worked, and what we learned. Newest entries at the bottom of each section. See [overview.md](overview.md) for the design and [implementation-plan.md](implementation-plan.md) for what comes next. (Entries before 1 Oct 2026 say "README" for what is now `overview.md`.) Spike scripts live in `spike/`.
 
 Conventions: **Learned** = a fact we now rely on. **Tried** = an experiment and its result. **Corrects README** = something in the README that was wrong and has been (or must be) fixed.
 
@@ -490,3 +490,10 @@ By noise type (small, all SNRs): wind raw 0.14 → DeepFilterNet3 0.11 and MossF
 ## Background track (opt-in `audio_background` stage, Oct 2026)
 - Speech taken out, the place kept: TIGER-DnR effects model (dialogue / effects / music separation). Tried first: original minus DeepFilterNet's speech: the classifier still scored the rest 0.41 speech (original 0.52). TIGER: speech score gone on a 5 s test, the classifier hears animals, a bicycle, hooves.
 - Speed: CPU about 6 s per second of audio; Apple GPU (STRATA_GPU=1) about 1 s per second. Output `audio_background.flac`; `audio_events` classifies it too (`background` windows) and `window_mix` uses it for the non-voice categories. Not yet run through the whole pipeline: only the model call was timed on a 5 s piece.
+
+## Race overlay: our own, the fork as a guide (1 Oct 2026)
+- Read the gopro-dashboard-overlay fork (jburnhams, branches on GitHub: `support-mp4-creation-datetime`, `support-fulltimeseries-journey`, `set-creation-datetime-on-output`, `add-mac-ffmpeg-profile`; `mp4-exact-start` is not pushed). **Learned:** it draws a picture every 0.1 s and lets ffmpeg hold it; with `--use-gpx-only` it cuts the track to the video's own span before working out speed (3 s look-back) and slope, so every window would start with wrong values; the moving map renders the whole route at zoom 14 on every run; layouts are fixed pixels for one frame size.
+- Built `src/strata360/overlay/` instead (implementation plan A2): the same elements as `scripts/overlay/layout.xml`, values smoothed once over the whole race and read at each frame's exact UTC, drawn at the film's size with Pillow (Inter font) and OpenCV lines, Thunderforest `@2x` tiles cached in `~/.strata360/tiles`. Hooked into `render/final.py` before transitions.
+- **Tried:** synthetic 2 h loop near Houffalize with OpenStreetMap tiles: 5 ms a frame at 1920 x 1080, 22 ms at 3840 x 2160 once tiles are cached (20 tiles for 1080, 81 for 4K on first use). Not yet run on Legends or through a real final render.
+- Then (same day): a plain style for the whole-route map and a detailed one for the close-up; automatic zoom for the close-up (`overlay/zoom.py`); sub-pixel panning (resampled from a cached larger map each frame); a `thumb_overlay` stage and an "Overlay on thumbnails" switch in the app. **Learned:** a fixed 1-pixel crop at 4K and walking pace would step the map once a second or so; resampling costs about 1 ms. Map labels grow up to 1.4x before the close-up switches to the next zoom's tiles; it is the price of zooming smoothly with pre-drawn tiles.
+- **Bug found while testing:** `series._smooth` failed on a track shorter than its window (21 s); fixed.

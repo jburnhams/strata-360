@@ -46,7 +46,7 @@ export interface MusicState { file: string | null; analysis: { bpm: number; offs
 export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
 export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
-export interface ClipInfo { audio_original?: boolean; audio_clean?: boolean; id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; steady: number | null; candidates: number | null }
+export interface ClipInfo { audio_original?: boolean; audio_clean?: boolean; id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; thumb_overlay?: boolean; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
 export interface PlacePoint { label: string; lat: number; lon: number; address: { display_name?: string; road?: string; county?: string; country?: string } | null; nearby: Near[] | null }
 export interface Places { covered: boolean; note?: string; points: PlacePoint[]; summary?: { places: string[]; road?: string; county?: string; country?: string; text: string } }
@@ -61,7 +61,7 @@ export interface ClipDetail {
   id: string; note: string; time: Record<string, string | number | boolean | null>; video: Record<string, any>; camera?: Record<string, string>
   motion: Record<string, number | null> | null; audio: { summary: any; segments: { label: string; t0_s: number; t1_s: number }[] } | null
   transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
-  places?: Places | null; exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string } | null; track?: Record<string, any>; track_text?: string
+  places?: Places | null; exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string; overlay?: boolean } | null; track?: Record<string, any>; track_text?: string
 }
 export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string> }
 
@@ -88,7 +88,7 @@ export const api = {
   },
   clip: (folder: string, clip: string) => call<ClipDetail>('/api/clip?' + q({ folder, clip })),
   previewUrl: (folder: string, clip: string) => '/api/preview?' + q({ folder, clip }),
-  thumbUrl: (folder: string, clip: string, v: string) => '/api/thumb?' + q({ folder, clip, v }),
+  thumbUrl: (folder: string, clip: string, v: string, overlay = false) => '/api/thumb?' + q({ folder, clip, v, ...(overlay ? { overlay: '1' } : {}) }),     // v: busts the browser cache when the picture changes
   meta: (folder: string) => call<Meta>('/api/meta?' + q({ folder })),
   saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
   transcript: (folder: string) => call<{ segments: Seg[] }>('/api/transcript?' + q({ folder })),

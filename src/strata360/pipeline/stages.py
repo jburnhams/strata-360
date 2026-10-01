@@ -105,7 +105,7 @@ def audio(ctx):
 def transcribe(ctx):
     from strata360.audio import dsp, speech
     m, tm = _whisper(ctx.cfg['whisper_model'])
-    x = dsp.load_audio(audio_src(ctx), 1)[:, 0]; x16 = dsp.ffmpeg_filter(x, dsp.SR, 'anull', out_sr=16000)[:, 0]     # raw audio: enhancement lowers word accuracy (progress.md)
+    x = dsp.load_audio(audio_src(ctx), 1)[:, 0]; x16 = dsp.ffmpeg_filter(x, dsp.SR, 'anull', out_sr=16000)[:, 0]     # raw audio: enhancement lowers word accuracy (docs/progress.md)
     segs = speech.transcribe_multilingual(x16, m, tm, ctx.cfg['languages'])
     ctx.write('transcript.json', ctx.stamped(dict(source=os.path.basename(ctx.clip.osv), model=ctx.cfg['whisper_model'], translate_model='opus-mt',
                                                    denoise='none', languages=ctx.cfg['languages'], segments=segs)))
@@ -161,12 +161,17 @@ def thumb(ctx):
 
 @stage('places', 2, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
        note='where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)')
-def places(ctx):
-    import os
-    from strata360.analysis.places import analyse
-    from strata360.gps import track
+def _track_file(ctx):
+    """The race track of the clip's project (track.fit / track.gpx in the project folder, or the older `gps` setting)."""
     root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = next((os.path.join(root, n) for n in ('track.fit', 'track.gpx') if os.path.exists(os.path.join(root, n))), None) or ctx.cfg.get('gps')
     if not tp or not os.path.exists(tp): raise RuntimeError('no race track (track.fit / track.gpx in the project folder): add it in the app, then redo this stage')
+    return root, tp
+
+
+def places(ctx):
+    from strata360.analysis.places import analyse
+    from strata360.gps import track
+    root, tp = _track_file(ctx)
     ctx.write('places.json', ctx.stamped(analyse(ctx.read('clip.json'), track.load(tp), os.path.join(root, 'cache', 'places'), ctx.cfg)))
     from strata360.analysis.places import rebuild_locations
     rebuild_locations(root)                                                        # the race-wide locations.json in the project folder
@@ -224,4 +229,9 @@ def thumb_best(ctx):
     best(ctx.clip.osv, str(ctx.dir))
 
 
+@stage('thumb_overlay', 1, keys=('overlay', 'timezone'), outputs=('thumb_overlay.jpg',), deps=('thumb',), soft_deps=('thumb_best',), needs_track=True,
+       note='the thumbnail with the race overlay as the film will show it (maps need the map key in secrets.env; without it the numbers only); the app shows it when its "overlay" switch is on')
+def thumb_overlay(ctx):
+    from strata360.analysis.thumbs import with_overlay
+    with_overlay(str(ctx.dir), ctx.cfg, _track_file(ctx)[1])
 

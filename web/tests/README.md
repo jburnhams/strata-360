@@ -39,12 +39,18 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | --- | --- | --- |
 | `src/api.ts` | 33.82% | partial: client contract tested through the `call` helper; most endpoint wrappers (URL builders, uploads, deletes) todo |
 | `src/App.tsx` | 77.77% | done (the effect's failure branch is the gap) |
+| `src/components/ClockPanel.tsx` | 100% | done |
+| `src/components/TrackPanel.tsx` | 88.46% | done (branches tested via interactions, some fallback cases left) |
+| `src/components/WhoPanel.tsx` | 100% | done |
+| `src/components/Workspace.tsx` | 100% | done |
 | `src/components/FolderBrowser.tsx` | 100% | done |
 | `src/components/NoteBox.tsx` | 100% | done |
 | `src/components/Health.tsx` | 100% | done |
+| `src/components/MusicPanel.tsx` | 100% | done |
 | `src/components/ProjectProgress.tsx` | 100% | done |
 | `src/components/RedoDialog.tsx` | 100% | done |
 | `src/components/Phrase.tsx` | 100% | done (trivial branch misses) |
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/usePoll.ts` | 100% | done |
+| `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
 | every other file in `src/` | 0% | todo |

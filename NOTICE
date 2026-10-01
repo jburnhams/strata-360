@@ -13,7 +13,7 @@ algorithms described in, and read from the source of, OpenOSV:
     include/osv/color/ColorMath.h, src/osv/render/SeamAnalysis.cpp, docs/GEOMETRY.md, docs/FORMAT.md, docs/COLOR.md.
 
 The code here is a from-scratch Python re-implementation (no OpenOSV source is copied verbatim); the constants,
-formulas and pipeline order follow OpenOSV. See progress.md for exactly what has and has not been ported.
+formulas and pipeline order follow OpenOSV. See docs/progress.md for exactly what has and has not been ported.
 
 Local models used by the vision stages (downloaded into models/, gitignored):
   - YOLO11 pose (Ultralytics, AGPL-3.0): person detection. Fine for personal, local use; check the licence before distributing a product.
@@ -25,3 +25,13 @@ Local models used by the vision stages (downloaded into models/, gitignored):
 TIGER-DnR (opt-in `audio_background` stage): Xu, Li, Chen, Hu, "TIGER: Time-frequency Interleaved Gain Extraction and Reconstruction for Efficient Speech Separation", ICLR 2025.
   Model code https://github.com/JusperLee/TIGER (MIT licence), fetched at a pinned commit into models/tiger-dnr/ at first use, not included in this repository;
   weights https://huggingface.co/JusperLee/TIGER-DnR (Apache-2.0), downloaded into models/tiger-dnr/weights.
+
+The race overlay (src/strata360/overlay/) is our own code. Its look follows the overlay the user made before with
+gopro-dashboard-overlay (https://github.com/time4tea/gopro-dashboard-overlay, GPL-3.0; scripts/overlay/layout.xml),
+which was read as a guide to what to show; no code or icons were copied from it. Its icons are drawn in code.
+
+Bundled font: Inter (src/strata360/overlay/fonts/), Copyright (c) 2016 The Inter Project Authors,
+SIL Open Font License 1.1 (src/strata360/overlay/fonts/OFL.txt).
+
+Map tiles are fetched at render time from the configured service (Thunderforest or OpenStreetMap) and credited on the
+film; they are cached locally under ~/.strata360/tiles and not distributed with this project.

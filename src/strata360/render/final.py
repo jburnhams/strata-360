@@ -9,7 +9,7 @@ stopped or crashed render continues where it left off. The pieces are joined wit
   <project>/final/<key>/film.mp4           the result
 
 Cost: 4K at 50 frames a second takes of the order of a second per frame on this kind of Mac; the preview (render/preview.py) is for judging the cut, this for delivering it."""
-import hashlib, json, os, shutil, subprocess, sys, time
+import datetime as dt, hashlib, json, os, shutil, subprocess, sys, time
 import numpy as np
 from strata360.pipeline import config
 from strata360.render import camera as cam, flat
@@ -22,13 +22,23 @@ def final_dir(folder, key): return os.path.join(config.race_dir(folder), 'final'
 
 def final_key(plan, size, fps, bitrate, folder):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
-    h = hashlib.sha1(json.dumps([plan['segments'], size, fps, bitrate], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode()); return h.hexdigest()[:10]
+    h = hashlib.sha1(json.dumps([plan['segments'], size, fps, bitrate], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
+    h.update(_overlay_sig(folder).encode()); return h.hexdigest()[:10]
+
+
+def _overlay_sig(folder):
+    """The overlay's part of the key (empty when it is off or there is no track, so films made before the overlay keep their key)."""
+    from strata360.overlay.layout import signature
+    try: cfg = config.load(folder)
+    except FileNotFoundError: return ''
+    st = cfg.get('overlay') or {}; track = config.track_path(folder, cfg)
+    return signature(st, track) if st.get('enabled', True) and track else ''
 
 
 class FinalSource:
     """Frames of the planned windows from the original OSV files (uint16 RGB code values, like flat.main)."""
-    def __init__(self, folder, segs, framing, W, H, fps, interp='cubic'):
-        self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp = folder, segs, framing, W, H, fps, interp; self.info = {}; self.done = 0
+    def __init__(self, folder, segs, framing, W, H, fps, interp='cubic', overlay=None):
+        self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp, self.overlay = folder, segs, framing, W, H, fps, interp, overlay; self.info = {}; self.done = 0
 
     def _clip(self, clip):
         if clip not in self.info:
@@ -42,6 +52,7 @@ class FinalSource:
         if m <= 0: return
         path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
         ks = np.clip(np.round(t_abs * ci['src_fps']).astype(int), 0, ci['n'] - 1); quat = ci['T']['quat']; Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
+        utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0            # the window's first frame on the race clock
         P = path.evaluate(times, Ms, self.fps); first = int(ks[0]); ss = max(first / ci['src_fps'] - 0.002, 0.0)
         dm, ds = flat.decoder(ci['osv'], 1, ss=ss), flat.decoder(ci['osv'], 0, ss=ss); k_dec = first - 1; last_seam = None; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
         try:
@@ -54,7 +65,8 @@ class FinalSource:
                 if k_dec != last_seam: R.update_seam(cur_m, cur_s); last_seam = k_dec                             # one seam per source frame
                 R.set_fov(P['fov'][i], P['dist'][i], P['disc'][i] if P['use_disc'] else None)
                 yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0); d = cam.direction(yaw, P['pitch'][i]); M = Ms[i]
-                yield R.render(cur_m, cur_s, d if P['ref'] == 'body' else M @ d, M @ ez, float(P['roll'][i]))
+                img = R.render(cur_m, cur_s, d if P['ref'] == 'body' else M @ d, M @ ez, float(P['roll'][i]))
+                yield img if self.overlay is None else self.overlay.apply(img, utc0 + times[i])           # before any transition blend, so a dissolve cross-fades the two overlays too
         finally:
             for p in (dm, ds):
                 p.kill(); p.wait()
@@ -86,7 +98,8 @@ def render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='10
     key = final_key(plan, list(size), fps, bitrate, folder); d = final_dir(folder, key); os.makedirs(d, exist_ok=True); segs = plan['segments']; ps = pieces(segs, fps); W, H = size
     total = sum(p['frames'] for p in ps); t0 = time.time(); done_frames = 0
     def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=done_frames, frames_total=total, pieces_done=sum(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
-    src = FinalSource(folder, segs, framing, W, H, fps); status('rendering')
+    from strata360.overlay import for_project
+    src = FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H))); status('rendering')
     for n, p in enumerate(ps):
         if limit_pieces is not None and n >= limit_pieces: break
         f = os.path.join(d, p['id'] + '.mov')

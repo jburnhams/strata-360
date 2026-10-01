@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type ClipInfo, type EditResponse, type PlanSegment } from '../api'
 import { PanelSkeleton } from './Skeleton'
 import WindowPlayer from './WindowPlayer'
+import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').slice(-9)
@@ -13,6 +14,7 @@ const colour = (g: { family: string; hero: boolean }) => `hsl(${hue(g.family)} $
 
 // The film as a chronological list of segments: what each clip contributes, with the technique that fits best, the script line, and the controls to change it.
 export default function Timeline({ folder, clips, onOpenClip }: { folder: string; clips: ClipInfo[]; onOpenClip: (clip: string) => void }) {
+  const [overlay] = useThumbOverlay()
   const [d, setD] = useState<EditResponse>()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string>()
@@ -75,7 +77,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
                     <tr key={g.id} ref={el => { rows.current[g.id] = el }} className={`border-t border-stone-200 align-top dark:border-stone-800 ${sel === g.id ? 'bg-emerald-50 dark:bg-emerald-950/30' : ''}`}>
                       <td className="p-2 font-mono text-xs text-stone-500">{mmss(g.film_start_s)}<br />{g.dur_s}s</td>
                       <td className="p-2"><div className="flex items-center gap-2">
-                        {c?.thumb ? <img loading="lazy" src={api.thumbUrl(folder, g.clip, c.thumb)} alt="" className="h-9 w-16 cursor-pointer rounded object-cover" onClick={() => setPlay(g)} /> : <div className="h-9 w-16 rounded bg-stone-200 dark:bg-stone-800" />}
+                        {c?.thumb ? <img loading="lazy" src={api.thumbUrl(folder, g.clip, thumbVersion(c, overlay), overlay)} alt="" className="h-9 w-16 cursor-pointer rounded object-cover" onClick={() => setPlay(g)} /> : <div className="h-9 w-16 rounded bg-stone-200 dark:bg-stone-800" />}
                         <button className="font-mono text-xs text-emerald-700 underline dark:text-emerald-400" onClick={() => onOpenClip(g.clip)}>{short(g.clip)}</button></div></td>
                       <td className="p-2 text-xs"><button className="underline" title="play this window" onClick={() => setPlay(g)}>▶ {mmss(g.clip_start_s)}–{mmss(g.clip_start_s + g.dur_s)}</button>{g.forced && <div className="text-amber-700">no usable moment</div>}{g.kind && g.kind !== 'span' && <div className="text-stone-500" title="the way of seeing this footage the window was cut from">{g.kind === 'speech' ? 'you talk' : g.kind}</div>}{g.speech && <div title="you speak">💬</div>}</td>
                       <td className="p-2"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: colour(g) }} />
