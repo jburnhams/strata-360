@@ -28,7 +28,7 @@ class Synthetic(SM.SeamCarver):
     """Bands made up instead of read from lens frames: lens A and B agree except in a block of columns, where they disagree for rows near the equator; coverage is full except a blind patch."""
     def __init__(self, blind=False, disagree=True, full=False):
         super().__init__(FakeLens(), FakeLens(), None, None); self.blind, self.disagree, self.full = blind, disagree, full
-    def band(self, img_m, img_s):
+    def band(self, img_m, img_s, warp=None):
         r = np.arange(SM.BAND_ROWS)[:, None]; c = np.arange(SM.BAND_COLS)[None, :]; A = np.full((SM.BAND_ROWS, SM.BAND_COLS), 0.4, np.float32) + 0.0 * c; B = A.copy()
         if self.disagree: B[40:56, 600:760] += 0.5                                                                                   # rows 40-56 are the equator (rows 48): a near object seen differently
         if self.full: B[:, 600:760] = 0.4 + 0.3 * np.sign(np.sin(c[:, 600:760] * 0.9 + r * 0.7))                                  # a different TEXTURE in every row: the lenses disagree structurally wherever the seam goes
