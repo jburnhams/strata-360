@@ -3,7 +3,7 @@
 macOS uses VideoToolbox, Windows uses NVENC when the build has it, and everything else (Linux, or anything missing) falls back to software
 (libx264 / libx265), so the pipeline runs anywhere ffmpeg does. Overrides: STRATA_ENCODER=software forces software encoding,
 STRATA_HWACCEL=none|<ffmpeg hwaccel name> sets the decode acceleration."""
-import functools, os, subprocess, sys
+import functools, os, subprocess, sys, time
 
 
 @functools.lru_cache(maxsize=None)
@@ -52,9 +52,41 @@ def live_h264_args():
     return ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '26', '-threads', '2']
 
 
+GPU_DUTY = 0.6          # the share of the time a GPU job may keep the GPU busy; the rest is left for the screen (STRATA_GPU_DUTY, 0.1 to 1)
+
+
 def gpu_device():
-    """torch device for optional GPU use (STRATA_GPU=1): Apple GPU, CUDA, else CPU."""
-    if os.environ.get('STRATA_GPU') != '1': return 'cpu'
-    import torch
-    if torch.backends.mps.is_available(): return 'mps'
-    return 'cuda' if torch.cuda.is_available() else 'cpu'
+    """torch device for the models: the Apple GPU (or CUDA) when there is one, else the CPU. On by default (STRATA_GPU=0 forces the CPU). macOS has no per-process GPU priority, so a GPU job stays polite by
+    working in short slices with gaps (`gpu_pause` / `gpu_throttled`, duty STRATA_GPU_DUTY) so the window server always gets its turn; its CPU side runs at the lowest priority as for every worker."""
+    if os.environ.get('STRATA_GPU') == '0': return 'cpu'
+    try:
+        import torch
+        if torch.backends.mps.is_available(): return 'mps'
+        return 'cuda' if torch.cuda.is_available() else 'cpu'
+    except Exception: return 'cpu'
+
+
+def gpu_duty():
+    try: return min(max(float(os.environ.get('STRATA_GPU_DUTY', GPU_DUTY)), 0.1), 1.0)
+    except ValueError: return GPU_DUTY
+
+
+def gpu_pause(worked_s, sleep=None):
+    """After a slice of GPU work that took `worked_s` seconds, leave the GPU alone for the rest of the duty cycle (worked * (1 - duty) / duty), at most 2 s. Returns the seconds slept."""
+    duty = gpu_duty(); gap = 0.0 if duty >= 1.0 else min(max(worked_s, 0.0) * (1.0 - duty) / duty, 2.0)
+    if gap > 0: (sleep or time.sleep)(gap)
+    return gap
+
+
+def gpu_throttled(fn, device=None):
+    """`fn` (a model's forward or predict) that waits for its GPU work to finish and then pauses for the duty cycle: the GPU is used in slices, never flat out."""
+    def run(*a, **k):
+        t0 = time.time(); out = fn(*a, **k); dev = device or gpu_device()
+        try:
+            import torch
+            if dev == 'mps': torch.mps.synchronize()
+            elif dev == 'cuda': torch.cuda.synchronize()
+        except Exception: pass
+        if dev != 'cpu': gpu_pause(time.time() - t0)
+        return out
+    return run

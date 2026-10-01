@@ -32,14 +32,14 @@ def main():
     ap.add_argument('--conf', type=float, default=0.3); ap.add_argument('--imgsz', type=int, default=1024)
     a = ap.parse_args(); M = os.path.abspath(a.models)
     import torch; from ultralytics import YOLO; from insightface.app import FaceAnalysis
-    from strata360 import hw; dev = hw.gpu_device()          # CPU by default: the GPU is what makes a desktop stutter
+    from strata360 import hw; dev = hw.gpu_device()          # the GPU unless STRATA_GPU=0; every frame is followed by a gap (hw.gpu_throttled) so the desktop does not stutter
     torch.set_num_threads(int(os.environ.get('OMP_NUM_THREADS', '2')))
-    yolo = YOLO(f'{M}/yolo11s-pose.pt'); fa = FaceAnalysis(name='buffalo_l', root=f'{M}/insightface', allowed_modules=['detection', 'recognition'], providers=['CPUExecutionProvider'])
+    yolo = YOLO(f'{M}/yolo11s-pose.pt'); predict = hw.gpu_throttled(yolo.predict, dev) if dev != 'cpu' else yolo.predict; fa = FaceAnalysis(name='buffalo_l', root=f'{M}/insightface', allowed_modules=['detection', 'recognition'], providers=['CPUExecutionProvider'])
     fa.prepare(ctx_id=-1, det_size=(640, 640))
     files = sorted(glob.glob(os.path.join(a.views, 's*_v*.jpg'))); pat = re.compile(r's(\d+)_v(\d+)\.jpg'); dets, embs, thumbs = [], [], []; t0 = time.time()
     for fn in files:
         k, v = map(int, pat.search(fn).groups()); img = cv2.imread(fn); px = img.shape[0]
-        res = yolo.predict(img, imgsz=a.imgsz, conf=a.conf, classes=[0], device=dev, verbose=False)[0]
+        res = predict(img, imgsz=a.imgsz, conf=a.conf, classes=[0], device=dev, verbose=False)[0]
         faces = fa.get(img)
         for fc in faces: fc._used = False
         for j in range(len(res.boxes)):

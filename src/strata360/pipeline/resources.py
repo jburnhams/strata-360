@@ -6,7 +6,7 @@ Rules (all applied by every worker, whoever started it):
   * only ONE worker runs unless there is plenty of free memory (default: at least 12 GB available for each extra worker) and the machine is not busy;
   * before starting an item a worker checks the memory that stage needs and waits while there is not enough, or while the machine is busy;
   * the heavy stages (the vision model, detectors, proxy rendering, speech recognition) never run twice at the same time: parallelism is only across different stages;
-  * the detectors use the CPU rather than the GPU by default, so the screen stays responsive (set STRATA_GPU=1 to allow the GPU).
+  * models use the GPU where it pays (STRATA_GPU=0 forces the CPU), in short slices with gaps (hw.gpu_throttled, duty STRATA_GPU_DUTY) so the screen stays responsive: macOS has no per-process GPU priority.
 The numbers can be changed in race.json under `resources`; STRATA_NO_RESOURCE_LIMITS=1 turns the waiting off (the integration tests set it: a CI runner with little free memory would otherwise wait for ever)."""
 import ctypes, ctypes.util, os, re, subprocess, time
 
