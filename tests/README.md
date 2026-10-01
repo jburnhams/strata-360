@@ -84,7 +84,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network |
 | `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
 | `pipeline/ingest.py` | 98% | done |
-| `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `osv/*`, `edit/voiceover.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
+| `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `edit/voiceover.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
+| `osv/*` | >= 91% | done |
 | `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
 | `pipeline/coverage.py` | 100% | done: stage states, blocked decisions, CLI, API (`unit/test_coverage.py`) |
 | `edit/blocks.py` | 99% | done: allocation, dropping, dialogue padding, automatic length, overrides (`unit/test_blocks.py`) |
