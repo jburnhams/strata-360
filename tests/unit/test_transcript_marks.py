@@ -51,6 +51,7 @@ def test_lines_are_split_where_the_mark_changes_and_only_there(clipdir):
     _, plain = pack_for(clipdir); assert [l['id'] for l in plain] == ['0019.00', '0019.01'] and all(l['mark'] is None for l in plain)
     TM.set_spans(clipdir, [(0, 2, 3)], 'never'); TM.set_spans(clipdir, [(0, 6, 6)], 'must'); _, lines = pack_for(clipdir)
     assert [(l['id'], l['text'], l['mark']) for l in lines] == [('0019.00.1', 'so we', None), ('0019.00.2', 'are doing', 'never'), ('0019.00.3', 'fine today', None), ('0019.00.4', 'really', 'must'), ('0019.01', 'it is wet', None)]
+    assert [(l['si'], l['w0'], l['w1']) for l in lines] == [(0, 0, 2), (0, 2, 4), (0, 4, 6), (0, 6, 7), (1, 0, 3)] and [(l['si'], l['w0'], l['w1']) for l in plain] == [(0, 0, 7), (1, 0, 3)]
     assert lines[1]['t0'] < lines[1]['t1'] and lines[0]['t1'] <= lines[2]['t0'] + 0.01 and abs(lines[1]['t0'] - 2.15) < 0.01          # times of the words inside the piece (+ the recogniser's 0.15 s lag)
 
 

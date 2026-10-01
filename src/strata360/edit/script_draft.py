@@ -136,15 +136,15 @@ def check(script, pack, target_s, wpm):
 
 
 def resolve(script, pack, wpm):
-    """Adds what the GUI shows to each item: `seconds` (recomputed), and for a clip item the `lines` it covers and their `text`. Returns the script."""
-    by = {l['id']: l for c in pack['clips'] for l in c['lines']}; ids = list(PN.index(pack))
+    """Adds what the GUI shows to each item: `seconds` (recomputed), and for a clip item the `lines` it covers, their `text` and `refs` (the words of the transcript they are: {clip, si, w0, w1}). Returns the script."""
+    by = {l['id']: l for c in pack['clips'] for l in c['lines']}; ids = list(PN.index(pack)); clip_of = {c['label']: c['clip'] for c in pack['clips']}
     for it in (script or {}).get('items') or []:
         if it.get('type') == 'vo': it['seconds'] = round(SP.words(it.get('text', '')) * 60.0 / wpm + VO_PAUSE_S, 1)
         elif it.get('type') == 'broll': it['seconds'] = round(float(it.get('seconds') or 0), 1)
         elif it.get('type') == 'clip':
             sp = span(it, pack)
             if sp:
-                cover = ids[ids.index(sp[0]):ids.index(sp[1]) + 1]; it['lines'] = cover; it['text'] = ' '.join(by[i]['text'] for i in cover); it['seconds'] = round(by[sp[1]]['t1'] - by[sp[0]]['t0'] + PAD_S, 1)
+                cover = ids[ids.index(sp[0]):ids.index(sp[1]) + 1]; it['lines'] = cover; it['text'] = ' '.join(by[i]['text'] for i in cover); it['refs'] = [dict(clip=clip_of[SP.label_of_id(i)], si=by[i].get('si'), w0=by[i].get('w0'), w1=by[i].get('w1')) for i in cover]; it['seconds'] = round(by[sp[1]]['t1'] - by[sp[0]]['t0'] + PAD_S, 1)
     return script
 
 

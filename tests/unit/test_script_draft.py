@@ -4,7 +4,7 @@ import pytest
 from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN
 
 
-def L(i, t0, t1, text): return dict(id=i, t0=t0, t1=t1, text=text, words=len(text.split()), lang='en', mark=None)
+def L(i, t0, t1, text): return dict(id=i, t0=t0, t1=t1, text=text, words=len(text.split()), lang='en', mark=None, si=int(i.split('.')[1]), w0=0, w1=len(text.split()))
 
 
 def clip(label, dur, usable, lines=()):
@@ -52,7 +52,7 @@ def test_the_request_has_the_target_pace_pins_and_the_current_draft():
 def test_a_valid_script_is_accepted_at_once_and_resolved_for_the_gui():
     chat = Chat(GOOD); d = SD.write(PACK, 25.6, 150, chat=chat, log=lambda m: None)
     assert len(chat.calls) == 1 and d['problems'] == [] and d['report']['clips_used'] == 3 and d['title'] == 'T' and d['revised'] is False
-    it = d['items']; assert it[0]['lines'] == ['0001.00', '0001.01'] and it[0]['text'].startswith('one two') and abs(it[0]['seconds'] - (10 - 2 + 0.18)) < 0.06 and it[2]['seconds'] > 0
+    it = d['items']; assert it[0]['refs'] == [dict(clip='C0001', si=0, w0=0, w1=8), dict(clip='C0001', si=1, w0=0, w1=3)] and it[0]['lines'] == ['0001.00', '0001.01'] and it[0]['text'].startswith('one two') and abs(it[0]['seconds'] - (10 - 2 + 0.18)) < 0.06 and it[2]['seconds'] > 0
     assert abs(d['report']['total_s'] - 25.6) < 0.2
 
 

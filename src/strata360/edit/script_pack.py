@@ -27,7 +27,7 @@ def merge(iv, gap=1e-6):
 
 
 def transcript_lines(cdir, label):
-    """The wearer's speech as lines [{id, t0, t1, text, words, lang, mark}] with exact times; flagged and empty segments are left out. A line is split wherever the user's mark changes (MUST USE, NEVER USE,
+    """The wearer's speech as lines [{id, t0, t1, text, words, lang, mark, si, w0, w1}] with exact times (`si` the segment, `w0`..`w1` the recognised words it covers, end exclusive); flagged and empty segments are left out. A line is split wherever the user's mark changes (MUST USE, NEVER USE,
     none; edit/../analysis/transcript_marks.py), so every line has one state: the pieces get ids `<clip>.<segment>.<n>`; an unsplit line is `<clip>.<segment>`. `mark` is 'must', 'never' or None."""
     from strata360.analysis import transcript_edits as TE, transcript_marks as TM
     if not os.path.exists(os.path.join(cdir, 'transcript.json')): return []
@@ -50,13 +50,13 @@ def transcript_lines(cdir, label):
         whole_t = (min(x['a0'] for x in w), max(x['a1'] for x in w)) if w else (s['t0'] + WHISPER_LAG_S, s['t1'] + WHISPER_LAG_S)
         if foreign or not ws or len(set(ms)) <= 1:                                       # one state: the whole line, as before
             state = 'never' if 'never' in ms else 'must' if 'must' in ms else None
-            out.append(dict(id=f'{label}.{si:02d}', t0=round(whole_t[0], 2), t1=round(whole_t[1], 2), text=text, words=words(text), lang=s.get('lang', 'en'), mark=state)); continue
+            out.append(dict(id=f'{label}.{si:02d}', t0=round(whole_t[0], 2), t1=round(whole_t[1], 2), text=text, words=words(text), lang=s.get('lang', 'en'), mark=state, si=si, w0=0, w1=len(ws))); continue
         groups = []; a = 0
         for k in range(1, len(ws) + 1):
             if k == len(ws) or ms[k] != ms[a]: groups.append((a, k, ms[a])); a = k
         for n, (a, b, state) in enumerate(groups, 1):
             t = ' '.join(x['w'].strip() for x in ws[a:b] if x['w'].strip()); t0, t1 = span(ws, aw, a, b)
-            out.append(dict(id=f'{label}.{si:02d}.{n}', t0=round(t0, 2), t1=round(t1, 2), text=t, words=words(t), lang=s.get('lang', 'en'), mark=state))
+            out.append(dict(id=f'{label}.{si:02d}.{n}', t0=round(t0, 2), t1=round(t1, 2), text=t, words=words(t), lang=s.get('lang', 'en'), mark=state, si=si, w0=a, w1=b))
     return out
 
 
