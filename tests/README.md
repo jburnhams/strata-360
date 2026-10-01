@@ -14,8 +14,9 @@ diff-cover coverage.xml --compare-branch origin/main    # after `--cov-report=xm
 
 ## Layout
 
-- `unit/`: fast, hermetic, no ffmpeg or models. Hermetic is enforced by `unit/conftest.py` (autouse): `~` and `STRATA_RACES` point into a tmp dir, API-key variables are removed, and any outbound network connection fails the test.
-- `integration/`: ffmpeg/ffprobe, the CLI, the full pipeline (uses the `synthetic_osv` fixture). Not part of the coverage gate.
+- `unit/`: fast, no ffmpeg or models.
+- `integration/`: real ffmpeg/ffprobe, the CLI, the pipeline, the HTTP API over real project files, the optimiser. Not part of the coverage gate. See "Integration tests" below.
+- Both suites are hermetic (autouse in `conftest.py`): `~` and `STRATA_RACES` point into a tmp dir outside `tmp_path`, API-key variables are removed, and any outbound (non-loopback) connection fails the test.
 - `utils/`: helpers importable by name in any test (`from fakes import ...`, `from projects import ...`; `tests/utils` is on `pythonpath`).
 - `conftest.py`: shared fixtures (below) and `restore_globals`, a safety net for old tests that assign module globals directly. Don't rely on it in new tests.
 - One test file per module (`edit/script.py` -> `unit/test_script.py`; add to the existing file if there is one).
@@ -31,7 +32,7 @@ diff-cover coverage.xml --compare-branch origin/main    # after `--cov-report=xm
 | `no_sleep` | `time.sleep` returns at once; `no_sleep.delays` lists the requested delays. |
 | `make_project`, `project` | On-disk project (`<footage>/strata360/...`): `make_project('trip', config=True, clips=[...])`, `project.add_clip(id, motion={...})`, `.write_json`, `.read_json`, `.path(...)`. `project` is ready-made with race.json and one clip. (`utils/projects.py`) |
 | `make_client`, `client` | FastAPI `TestClient` over `server.app.create_app` with roots in `tmp_path`, an isolated server state file and job tables, and workers faked (`fake_popen`). `make_client(roots=[...], token='x')` for other setups. |
-| `synthetic_osv` | (integration) a tiny real OSV clip built with ffmpeg. |
+| `synthetic_osv` | (integration) one tiny real OSV clip built with ffmpeg once per session; skips the test when ffmpeg/libx265 is missing. |
 
 ## Conventions
 
@@ -43,6 +44,29 @@ diff-cover coverage.xml --compare-branch origin/main    # after `--cov-report=xm
 - Never "fix" the code to make a test pass in a test-only change. A bug found while testing: write the test for the correct behaviour with `@pytest.mark.xfail(strict=True, reason='...')`, and list it in the PR.
 - `unit/test_fixtures.py` tests the doubles themselves: extend it when you extend a double.
 - Worked examples to copy: `unit/test_server_api.py` (TestClient, fixtures, parametrize), `unit/test_llm_remote.py` (an old script-style file converted: fake HTTP, key files, tiers), `unit/test_track.py` (numeric code with hypothesis and tmp files).
+
+## Integration tests
+
+Run real ffmpeg/ffprobe on tiny synthetic clips (`tests/utils/synthetic_osv.py`: a 60-frame, 128 px two-lens HEVC OSV with the DJI data tracks, built in ~0.2 s). No footage, no models, no network. In CI they run in parallel (`-n auto`); locally `pytest tests/integration -n auto` takes about 40 s (serial: about 2 min, mostly `test_edit.py`).
+
+| Fixture (`tests/integration/conftest.py`) | What it gives you |
+| --- | --- |
+| `cli` | `cli('run', folder, '--stages', 'ingest')` -> `Result(stdout, stderr, code, out)`, **in-process** (fast, and counted by coverage). Raises with the output on a non-zero exit unless `check=False`. |
+| `cli_subprocess` | The same through a real `python -m strata360` process: for the entry-point smoke test and anything that must not share this process's state. Slower (each call re-imports numpy/cv2). |
+| `library` | `library(n=2, name='trip')` -> a footage folder of `n` distinct clips (own file name and header time, 60 s apart) plus a hidden file and a `notes.txt` that must be ignored. |
+| `processed` | A private, writable copy of a 2-clip project that has been through ingest, audio and exposure (the model-free stages). The original is built **once per session** (`processed_template`, ~6 s); a copy is instant, with absolute paths rewritten. Prefer this to running stages in every test. |
+| `served` | `(client, folder)`: the HTTP API (`make_client`) over `processed`. |
+| `fake_engine` | A speech engine that "speaks" a tone, 0.1 s per word (no TTS model): the `edit.voiceover` module with `ENGINES` replaced (restored by `monkeypatch`). |
+
+Helpers in `tests/utils/library.py`: `make_library`, `copy_project`, `ffprobe`, `make_tone` (a sine WAV), `duration`.
+
+Conventions on top of the ones above:
+- **Decide whether it belongs here.** A test that needs ffmpeg, a real file layout, several modules together, or the CLI/HTTP boundary is an integration test. Pure logic on synthetic arrays belongs in `unit/` (and counts toward coverage), even if it is slow to run.
+- **Share expensive state, never mutate it.** Build once per session (or module) in a fixture, copy per test (see `processed`). Don't re-run a pipeline stage in each test to get its output; only run the stage in the test that is *about* running it.
+- Use `cli` in-process by default; assert on files the stage wrote (JSON facts, ffprobe of media), not just on printed text.
+- Fake only what needs a model or a network (the speech engine, `fake_urlopen`); everything else is real.
+- Keep each test under ~10 s and the whole suite parallel-safe (no fixed ports, no shared paths, no reliance on the working directory).
+- Anything that would need a downloaded model is not an integration test here; it is a manual check (README section 0) or marked `slow`.
 
 ## Coverage ledger (unit suite, line+branch; update the rows you change)
 
@@ -60,5 +84,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 
 ## Known issues in the existing suite
 
+- `integration/test_edit.py` (the optimiser on synthetic candidates, ~100 s) needs no ffmpeg: it is slow pure computation. Candidate to move to `unit/` with smaller inputs, or to mark `slow`.
+- `integration/test_server.py` and `test_music.py` are still script-style (`sys.path` hacks, `__main__` runners); `test_server.py` overlaps `unit/test_server_api.py`. Convert them to the fixtures above when touched.
+- A `RuntimeWarning: overflow encountered in divide` from `render/photo.py:64` appears when the synthetic clip goes through exposure (a division by a zero scale on the synthetic lens). Possible product bug; not hidden here.
 - Several old files assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); `restore_globals` papers over a few of them. Convert them to `monkeypatch` when you touch them.
 - `test_workers.py` starts real processes and sleeps (about 5 s).

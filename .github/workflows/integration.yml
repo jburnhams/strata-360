@@ -51,7 +51,7 @@ jobs:
         run: ffmpeg -hide_banner -encoders | grep -q libx265
       - run: pip install -r requirements-test.txt
       - name: Integration tests (synthetic clip built with ffmpeg; no footage or models needed)
-        run: pytest tests/integration
+        run: pytest tests/integration -n auto --durations=10
 
   web:
     runs-on: ubuntu-latest

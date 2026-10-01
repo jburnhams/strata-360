@@ -9,7 +9,7 @@
 - Web tests live in `web/tests/{unit,integration,utils}` (vitest; unit runs in node, integration in jsdom). Backend calls are mocked with msw; read `web/tests/README.md` before writing any.
 - Commands (Python, from the repo root; `pip install -r requirements-test.txt` is enough for the suites):
   - `pytest tests/unit --cov` runs the unit suite with coverage (random order via pytest-randomly; `-n auto` runs in parallel; `diff-cover` checks the lines a change touches).
-  - `pytest tests/integration` runs the integration suite (needs ffmpeg with libx265).
+  - `pytest tests/integration -n auto` runs the integration suite (needs ffmpeg with libx265).
   - `ruff check src tests` lints for syntax errors and undefined names.
 - Commands (web, from `web/`): `npm run test:unit`, `npm run test:integration`, `npm run test:coverage` (unit only, what counts), `npm run test:coverage:all` (unit + integration, informational), `npm run typecheck`, `npm run build`.
 - Code coverage is calculated from the unit suites only (Python `fail_under` in `pyproject.toml`, which only ratchets up).
