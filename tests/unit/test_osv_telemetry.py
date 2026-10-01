@@ -1,7 +1,7 @@
 import pytest
 import struct
 import numpy as np
-from tests.utils.osv import build_varint, encode_field
+from osv import build_varint, encode_field
 from strata360.osv.telemetry import read_frames, video_pts, read_exposure
 
 

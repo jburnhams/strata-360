@@ -1,7 +1,7 @@
 import pytest
 import struct
 import numpy as np
-from tests.utils.osv import build_varint, encode_field
+from osv import build_varint, encode_field
 from strata360.osv.calib import read_slots, quat_to_R, Lens, imu_offsets
 
 

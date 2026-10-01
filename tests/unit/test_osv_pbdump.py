@@ -1,7 +1,7 @@
 import struct
 import pytest
 from strata360.osv.pbdump import varint, parse, try_msg, show, first_packet, packets
-from tests.utils.osv import build_varint, encode_field
+from osv import build_varint, encode_field
 
 
 
