@@ -31,6 +31,7 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 | D4 | Rendering stays on the CPU (Python/OpenCV) for this round; a Metal port is only done if B3's measurement says the film cannot render overnight. | Keeps the biggest piece of work optional. |
 | D5 | Insta360, the MCP interface and face blur stay parked until the Legends film exists. | They are listed in Later. |
 | D6 | **Decided (1 Oct):** the first cut is **voice-over driven**. The spoken voice-over sets the rough length of each clip's part of the film (with each clip's usable and preferred content); the music then sets the **precise cut moments** (to the millisecond, then the nearest frame) on its beats, without ever cutting a clip's own speech short. | Puts milestone V on the critical path straight after A1, ahead of the rest of A. |
+| D7 | **Decided (1 Oct):** the **film length is the shorter of the voice-over and the music**, and never much longer than either. The voice-over length here is the fitted voice-over timeline (lines, the pauses between them, the clips' dialogue gaps, lead-in and lead-out: V4's sum). If the music is longer, the film ends with the voice-over plus at most a short musical ending (the music faded or cut at the next bar line, at most 1 bar or 4 s past the last line, whichever is shorter). If the voice-over is longer than the music by more than that, it does not fit: the script is brought back inside the music (V4). With no music the film is the voice-over timeline. | Replaces "the requested length" as the target of V1 to V5. |
 
 ## Milestone A: the film is deliverable (critical path)
 
@@ -51,9 +52,9 @@ rough plan (clip blocks)  ->  script per block  ->  voice-over spoken / recorded
 Terms: a **block** is one clip's continuous part of the film (the film stays chronological, so blocks are in shooting order); a block holds one or more **windows** (the existing plan segments: one view and technique each). Narration **lines** belong to blocks. A clip's **dialogue** (the wearer speaking on camera, the `speech` windows) is played in a gap between lines.
 
 ### V1. Rough plan: clip blocks and preferred content (M)
-- `edit/chrono.py` step 1 (`allocate`) already splits the film between clips; expose it as a planning level of its own, in seconds rather than beats: per clip a block with a target length, the usable stretches it may use, its **preferred content** (best candidates by kind and priority: `speech`, `you`, `person`, `scene`, `best`) and any dialogue it must carry (with its exact speech span from `alignment.json`, padded 60 ms before and 120 ms after, overview 16.4).
+- `edit/chrono.py` step 1 (`allocate`) already splits the film between clips; expose it as a planning level of its own, in seconds rather than beats: per clip a block with a target length (the film target is the music's usable length when a track is chosen, D7, else the requested length), the usable stretches it may use, its **preferred content** (best candidates by kind and priority: `speech`, `you`, `person`, `scene`, `best`) and any dialogue it must carry (with its exact speech span from `alignment.json`, padded 60 ms before and 120 ms after, overview 16.4).
 - Locks, bans and per-clip weights (the existing overrides) apply at this level unchanged.
-- **Done when:** unit tests: every clip gets a block, blocks are in shooting order, a block's minimum is at least its dialogue plus padding, and the targets sum to the requested length.
+- **Done when:** unit tests: every clip gets a block, blocks are in shooting order, a block's minimum is at least its dialogue plus padding, and the targets sum to the film target.
 
 ### V2. Script written per block (S to M)
 - `edit/script.py`: the writer gets blocks instead of beat windows: per block its facts (as now), its seconds minus its dialogue, and a word budget from that; lines carry the `block` id (and an optional anchor: "before the dialogue" or "after it"). Blocks with dialogue keep a marked gap.
@@ -67,8 +68,12 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
 
 ### V4. Re-size blocks to the voice-over (M)
 - New `edit/vo_fit.py`: each block's length = its lines' measured durations + the pauses between lines (default 0.4 s, after a paragraph 0.9 s) + its dialogue (padded) + lead-in and lead-out (default 0.5 s each, so a line never starts on a cut), never less than the block's minimum and never more than its usable footage (if it would be, the overflow is reported: "line 7 needs 9.2 s; clip 0012 has 6.5 s usable", with the choices to shorten the line, borrow from the next block, or allow a hold on the last frame).
-- The film length is now the sum of the blocks: the requested length becomes a target the script aims for, not a constraint. Lines get provisional start times in film time.
-- **Done when:** unit tests: every line lies inside its own block; no line overlaps a dialogue span; the film has picture for every instant of the voice-over (P5-34); a reported overflow names the line and the clip.
+- **Film length (D7).** The sum of the blocks is the voice-over timeline. Film length = min(voice-over timeline, music's usable length from its first downbeat), with a tolerance (`ending_s`, default the shorter of 1 bar and 4 s):
+  - **Music longer:** the film is the voice-over timeline; the music ends at the first bar line after the last line ends (within `ending_s`; the last block is stretched to reach it if its footage allows, else the music fades over the last bar). The last cut of the film lands on that bar line.
+  - **Voice-over longer by more than `ending_s`:** reported with the overrun in seconds, and the fix is chosen in order: tighten the pauses between lines (down to 0.25 s), shorten the over-budget lines (re-write just those blocks with a hard word budget: C2's per-block re-write, which this pulls forward), drop narration from the lowest-value blocks (their picture stays, shorter), or ask for a longer track. The script writer (V2) is already given the music's length as its target so this is the exception.
+  - **No music:** the film is the voice-over timeline.
+- Lines get provisional start times in film time.
+- **Done when:** unit tests: every line lies inside its own block; no line overlaps a dialogue span; the film has picture for every instant of the voice-over (P5-34); a reported overflow names the line and the clip; with a 60 s track and a 70 s voice-over the overrun is reported and resolved by the steps above to at most 60 s + `ending_s`; with a 90 s track and a 60 s voice-over the film ends on the first bar line after 60 s, at most `ending_s` later.
 
 ### V5. Windows inside blocks, then cuts on the beat (L, the heart of it)
 - **Windows.** Inside each block, cut windows from the preferred content as `cut_windows` does now (non-overlapping, 2 to 8 s, techniques by the existing beam search), but in seconds, not beats.
@@ -76,7 +81,7 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
 - **Snapping.** Every cut (between windows and between blocks) moves to a nearby beat, preferring downbeats and bar lines, within a tolerance (default: half a beat either way). Hard rules:
   1. a dialogue window always contains its whole speech span plus padding: a cut next to speech may only move **outwards** (earlier before it, later after it), never into it;
   2. a cut never falls inside a voice-over word, and a line keeps its lead-in (a cut under a line between its words is fine);
-  3. each window stays inside its technique's duration range and its clip's usable footage; total length changes only by what snapping adds or removes, and lines are re-timed with their block.
+  3. each window stays inside its technique's duration range and its clip's usable footage; snapping never pushes the film past the D7 limit (the final cut is the music's ending bar line); lines are re-timed with their block.
   If no beat satisfies the rules, the cut stays at the nearest safe point off the beat and is reported in the plan ("cut 14 is 120 ms off the beat: the dialogue in clip 0023 ends there").
 - **Milliseconds to frames.** The cut time is kept exact in the plan; the picture cuts on the nearest frame (within 10 ms at 50 fps, 8 ms at 60), the sound at the exact sample.
 - **Without music:** the same pass with no beat list, so cuts land on the voice-over's pauses and the safe cut points only.
@@ -186,6 +191,5 @@ C2 after V4;  D1 after V5;  E runs alongside.
 Suggested sequence: A1, then the V milestone in order (V5 is the largest piece), with A2 to A4 in parallel; then A5 (the first real film: voice-over driven, cut on the beat, with overlay); then B1 and C1, C2, D1, and B2/B3 as A5's numbers require.
 
 ## Questions for you
-(D2, D3, D6 and the docs move answered on 1 Oct.)
+(D2, D3, D6, D7 and the docs move answered on 1 Oct.)
 1. Defaults in V4 and V5 to confirm: pause between lines 0.4 s, lead-in and lead-out 0.5 s per block, snapping tolerance half a beat, and when no beat fits, cut off the beat (reported) rather than hold the last frame.
-2. Should the film length stay a hard target (shorten or drop lines to fit) or follow the voice-over (V4 as written)?
