@@ -52,14 +52,28 @@ def whisper_draft(folder, clip):
     return '\n'.join(f"[{s['t0']:.1f}s] {s['text'].strip()}" for s in tr['segments'] if s.get('text', '').strip())
 
 
+def parse_phrases(text):
+    """The phrases from the model's reply: strict JSON if it is, else every complete {...} phrase object found in it (a reply cut off or wrapped in text still gives what it said)."""
+    try:
+        d = json.loads(text)
+        if isinstance(d, dict) and isinstance(d.get('phrases'), list): return [p for p in d['phrases'] if isinstance(p, dict) and p.get('text')]
+        if isinstance(d, list): return [p for p in d if isinstance(p, dict) and p.get('text')]
+    except ValueError: pass
+    out = []
+    for m in re.finditer(r'\{[^{}]*"text"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}', text):
+        try: out.append(json.loads(m.group(0)))
+        except ValueError: continue
+    return out
+
+
 def transcribe(folder, clip, audio_path, with_draft=False, provider='vertex', model=None, extra_context=True):
     """One Gemini call; returns dict(phrases, text, seconds, tokens, raw)."""
     from strata360.edit import llm_remote as LR, script as SC
     data = base64.b64encode(open(audio_path, 'rb').read()).decode(); ctx = context(folder, clip) if extra_context else ''
     prompt = ('CONTEXT ABOUT THIS RECORDING:\n' + ctx if ctx else 'Transcribe this recording.') + ("\n\nA speech recogniser's DRAFT transcript (it makes mistakes; the audio decides):\n" + whisper_draft(folder, clip) if with_draft else '') + '\n\nTranscribe the audio now.'
     msgs = [dict(role='system', content=SYSTEM), dict(role='user', content=[dict(inlineData=dict(mimeType='audio/flac', data=data)), dict(text=prompt)])]
-    r = LR.chat(msgs, model or LR.PROVIDERS[provider]['default'], 16000, 0.1, timeout=600, provider=provider); parsed = SC._parse_json(r['text']); ph = (parsed or {}).get('phrases') if isinstance(parsed, dict) else None
-    return dict(phrases=ph or [], text=' '.join(p.get('text', '') for p in (ph or [])), seconds=r['seconds'], tokens=r.get('tokens'), model=r.get('model'), raw=r['text'][:300] if not ph else None)
+    r = LR.chat(msgs, model or LR.PROVIDERS[provider]['default'], 32000, 0.1, timeout=900, provider=provider, thinking='low'); ph = parse_phrases(r['text'])
+    return dict(phrases=ph, text=' '.join(p.get('text', '') for p in ph), seconds=r['seconds'], tokens=r.get('tokens'), model=r.get('model'), finish=r.get('finish'), raw=r['text'])
 
 
 # ---- comparing and turning into edits ----------------------------------------------------------------------------------------------------------------------------------------------------------

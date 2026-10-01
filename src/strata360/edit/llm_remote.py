@@ -76,7 +76,7 @@ def set_key(key, provider='anthropic'):
     v[name] = key; _write_vars(v); return True
 
 
-def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7, timeout=300, url=None, json_mode=True, provider='gemini'):
+def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7, timeout=300, url=None, json_mode=True, provider='gemini', thinking=None):
     """One Gemini request (generateContent). Same message list and result shape as `chat`. The key goes in a header, never in the URL, so it cannot end up in logs or error messages."""
     url = url or (VERTEX_URL if provider == 'vertex' else GEMINI_URL); key = api_key(provider)
     if provider == 'vertex' and not key: raise LLMError('no Google Cloud (Vertex) API key: put VERTEX_API_KEY in secrets.env, or run `strata360 set-key --provider vertex`, or paste it in the app (Script panel)')
@@ -85,6 +85,7 @@ def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7
     contents = [dict(role='model' if m['role'] == 'assistant' else 'user', parts=(m['content'] if isinstance(m['content'], list) else [dict(text=m['content'])])) for m in messages if m['role'] != 'system']      # a list of parts can carry audio: {inlineData: {mimeType, data}}
     gen = dict(temperature=float(temperature), maxOutputTokens=int(max(max_tokens, 4096)))
     if json_mode: gen['responseMimeType'] = 'application/json'
+    if thinking and model.startswith('gemini-3'): gen['thinkingConfig'] = dict(thinkingLevel=thinking)                     # 'low' keeps a reasoning model from spending the output budget on hidden thinking
     body = dict(contents=contents, generationConfig=gen)
     if system: body['systemInstruction'] = dict(parts=[dict(text=system)])
     last = None; t0 = time.time()
@@ -110,9 +111,9 @@ def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7
     raise LLMError(last or 'request failed')
 
 
-def chat(messages, model=DEFAULT_MODEL, max_tokens=3000, temperature=0.7, timeout=240, url=URL, provider='anthropic'):
+def chat(messages, model=DEFAULT_MODEL, max_tokens=3000, temperature=0.7, timeout=240, url=URL, provider='anthropic', thinking=None):
     """One request. `messages` in the OpenAI-style list (system / user / assistant); system turns are joined into the API's `system` field. Returns {text, seconds, tokens, model}."""
-    if provider in ('gemini', 'vertex'): return chat_gemini(messages, model if (model or '').startswith('gemini') else PROVIDERS[provider]['default'], max_tokens, temperature, timeout, provider=provider)
+    if provider in ('gemini', 'vertex'): return chat_gemini(messages, model if (model or '').startswith('gemini') else PROVIDERS[provider]['default'], max_tokens, temperature, timeout, provider=provider, thinking=thinking)
     key = api_key('anthropic')
     if not key: raise LLMError('no Anthropic API key: set ANTHROPIC_API_KEY, or run `strata360 set-key`, or paste it in the app (Script panel)')
     system = '\n\n'.join(m['content'] for m in messages if m['role'] == 'system'); turns = [dict(role=m['role'], content=m['content']) for m in messages if m['role'] != 'system']
