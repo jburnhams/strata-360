@@ -28,10 +28,12 @@ This turns the README's ideas (sections 10 to 18) and the open items in `progres
 | D1 | The first goal is **one finished Legends film with the map overlay**, not more analysis. | Puts the deliverable film (A, V) before more analysis. |
 | D2 | **Decided (1 Oct):** the delivered film is **one file**, but the map overlay is made **per input clip**: each window of the film is overlaid from its own clip's UTC span (the scheme the overlay fork already supports: `creation_time` = true start, exact UTC in the comment tag, `--video-time-start mp4-created`, branch `mp4-exact-start`), and the overlaid windows are joined into the film. A `timemap.csv` is written too, for checking and for anything else. | Resolves overview 12, open question 1. Shapes A2. |
 | D3 | **Decided (1 Oct):** the output frame rate **matches the source**, whatever it is (50 or 60 for the Osmo 360; 59.94 kept as the exact rational), with a GUI option to **halve it** (25 / 30) for a faster render. If clips in one film differ, the majority rate is used (overview 12) and the others are resampled. Delivery: 3840x2160, HEVC Main 10, stereo AAC at -14 LUFS integrated, -1 dBTP. | Fixes the render and audio acceptance numbers. |
-| D4 | Rendering stays on the CPU (Python/OpenCV) for this round; a Metal port is only done if B3's measurement says the film cannot render overnight. | Keeps the biggest piece of work optional. |
+| D4 | **Decided (1 Oct):** the **GPU is always preferred** for rendering (and the heavy per-pixel work in the proxy); the CPU path is kept only where its quality is noticeably better, which is measured, not assumed. | Makes the GPU renderer (B3) a planned milestone, not an option. |
 | D5 | Insta360, the MCP interface and face blur stay parked until the Legends film exists. | They are listed in Later. |
 | D6 | **Decided (1 Oct):** the first cut is **voice-over driven**. The spoken voice-over sets the rough length of each clip's part of the film (with each clip's usable and preferred content); the music then sets the **precise cut moments** (to the millisecond, then the nearest frame) on its beats, without ever cutting a clip's own speech short. | Puts milestone V on the critical path straight after A1, ahead of the rest of A. |
 | D7 | **Decided (1 Oct, revised):** the film is **never shorter than the voice-over**, and **ideally as long as the music**, with a little flexibility. The voice-over length is the fitted voice-over timeline (lines, the pauses between them, the clips' dialogue gaps, lead-in and lead-out: V4's sum). Film length L >= voice-over; the target is the music's length. Where they differ: the music can be faded out early, start after the film begins or end before it does (a short silence at the start or end of the film), and its start can be shifted against the picture so beats line up with the cuts. | Sets the film target for V1 to V5 and makes the music's position a variable of the fit. |
+| D8 | **Decided (1 Oct):** the film's length guide is **one of**: a single music track, a target length, or **neither**, in which case it is **automatic**: worked out from the usable footage and from how long the generated script runs, including the clips' own speech (transcript portions) it uses. Whichever it is, it is a guide; D7's flexibility applies. | Adds the auto-length rule to V1 and V2. |
+| D9 | **Decided (1 Oct):** a clip is **dropped only if it must be**: first because it has no usable footage; otherwise every clip gets at least some b-roll, using the framing variety (field of view, pans, little planets and other techniques) to make the most of it. Only if the film cannot hold every clip's minimum are clips dropped, unusable ones first, then the lowest-value ones, each reported. | Changes V1's allocation (today an unusable clip contributes a forced stretch). |
 
 ## Milestone A: the film is deliverable (critical path)
 
@@ -52,9 +54,11 @@ rough plan (clip blocks)  ->  script per block  ->  voice-over spoken / recorded
 Terms: a **block** is one clip's continuous part of the film (the film stays chronological, so blocks are in shooting order); a block holds one or more **windows** (the existing plan segments: one view and technique each). Narration **lines** belong to blocks. A clip's **dialogue** (the wearer speaking on camera, the `speech` windows) is played in a gap between lines.
 
 ### V1. Rough plan: clip blocks and preferred content (M)
-- `edit/chrono.py` step 1 (`allocate`) already splits the film between clips; expose it as a planning level of its own, in seconds rather than beats: per clip a block with a target length (the film target is the music's length when a track is chosen, D7, else the requested length), the usable stretches it may use, its **preferred content** (best candidates by kind and priority: `speech`, `you`, `person`, `scene`, `best`) and any dialogue it must carry (with its exact speech span from `alignment.json`, padded 60 ms before and 120 ms after, overview 16.4).
+- `edit/chrono.py` step 1 (`allocate`) already splits the film between clips; expose it as a planning level of its own, in seconds rather than beats: per clip a block with a target length (the film target, D8: the music's length when a track is chosen, else the target length when one is given, else automatic, below), the usable stretches it may use, its **preferred content** (best candidates by kind and priority: `speech`, `you`, `person`, `scene`, `best`) and any dialogue it must carry (with its exact speech span from `alignment.json`, padded 60 ms before and 120 ms after, overview 16.4).
+- **Which clips (D9):** a clip with no usable footage is dropped (and listed); every other clip gets a block of at least its minimum b-roll (one minimum window, 2 s, plus its dialogue if it has any). Only if the target cannot hold all the minimums are more clips dropped, lowest value first, each reported with the reason. This replaces today's "forced" unusable stretch in `edit/chrono.py`.
+- **Automatic length (D8, no music and no target):** each clip's block gets a natural length from its usable footage with diminishing returns (for example 2 s + 1.5 x sqrt(usable seconds), capped at its usable footage) plus its dialogue; the sum is the first guide for the script, and the script's measured length then sets the film (V4).
 - Locks, bans and per-clip weights (the existing overrides) apply at this level unchanged.
-- **Done when:** unit tests: every clip gets a block, blocks are in shooting order, a block's minimum is at least its dialogue plus padding, and the targets sum to the film target.
+- **Done when:** unit tests: every clip gets a block, blocks are in shooting order, a block's minimum is at least its dialogue plus padding, the targets sum to the film target; an unusable clip is dropped and reported while a merely dull one keeps a block; automatic length grows with usable footage and is reproducible.
 
 ### V2. Script written per block (S to M)
 - `edit/script.py`: the writer gets blocks instead of beat windows: per block its facts (as now), its seconds minus its dialogue, and a word budget from that; lines carry the `block` id (and an optional anchor: "before the dialogue" or "after it"). Blocks with dialogue keep a marked gap.
@@ -72,7 +76,7 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
   - **Music longer (M > V):** the extra M - V is spread over the blocks: longer holds and pauses inside each block's usable footage, extra windows from preferred content, and a music-only intro and outro (picture with no narration, up to a few bars each). If the footage cannot fill all of it, L = V + what can be filled and the music fades out over its last bar or at a section end; if more than `fade_max_s` of the music would be lost, the shortfall is reported (with which clips ran out of footage).
   - **Voice-over longer (M < V):** L = V. The music is placed inside the film with silence (or the clips' own sound) before and/or after it, split between start and end as the sync allows, each within its limit; beyond the limits the shortfall is reported with the options to pick a longer track, loop a section of the track at a bar line, or shorten the script (C2's per-block re-write, which this pulls forward). The script writer (V2) is given the music's length as its target, so this is the exception.
   - **Music position is free within the flexibility.** The music's start in the film (an offset, possibly negative: starting part-way into the track) is chosen in V5 together with the cuts, so downbeats fall on the cuts that matter (block boundaries, the first dialogue, the last cut); the film may grow by a beat or two for this, never shrink below V.
-  - **No music:** L = V.
+  - **No music:** L = V, plus a short lead-in and lead-out; with a target length the extra or missing time is handled as for music (spread over the blocks, or reported), but more loosely, since there is no beat to land.
 - Lines get provisional start times in film time.
 - **Done when:** unit tests: every line lies inside its own block; no line overlaps a dialogue span; the film has picture for every instant of the voice-over (P5-34); a reported overflow names the line and the clip; L is never below V; with a 90 s track and 60 s of voice-over and enough footage, L is 90 s (within a beat) and every block grew; with too little footage the music fades and the fade is within `fade_max_s` or reported; with a 60 s track and a 64 s voice-over, L is 64 s and the music's silence at start plus end is 4 s, each within its limit.
 
@@ -100,9 +104,9 @@ Terms: a **block** is one clip's continuous part of the film (the film stays chr
 How it works: every window of the plan comes from one input clip, so its UTC span is known exactly. The overlay is rendered for each window separately against the route, and the windows are then joined (with their transitions) into the single delivered file.
 - **Source frame rate (D3).** `render/final.py` takes the rate from the clips (`clip.json` `video.nominal_fps`, as a rational), not the fixed 50; a `half_rate` setting (Final film panel: "Half frame rate (faster)") renders every other source frame. The preview, the time map, the overlay and the audio all use the same rate. Mixed rates: the majority rate, others resampled by nearest source frame (the renderer already maps output times to source frames).
 - **Time map.** New `render/timemap.py`: from the plan and the pieces of `render/film.py`, write `<final>/timemap.json` and `timemap.csv`: per window, film in/out frame, clip, source in/out time, UTC in/out (rational), and the transition regions with both clips' UTC.
-- **Overlay layer per window.** For each window (plus its transition handles, so a dissolve has overlay on both sides), run the overlay tool against the race track over that window's UTC span and produce an **overlay-only layer with alpha** at the film's size and rate. To check first: whether the fork can render an overlay-only output with transparency (its overlay-only generate mode with an alpha codec such as ProRes 4444 or PNG-in-MOV); if not, add that to the fork. Fallback if alpha is not possible: render each window's picture piece as a tagged MP4 (`creation_time` + exact UTC comment, as `flat.py --start-utc` does), overlay onto it directly, and join those (costs one extra encode of the picture).
+- **Overlay layer per window.** For each window (plus its transition handles, so a dissolve has overlay on both sides), run the overlay tool against the race track over that window's UTC span and produce **transparent PNG frames** at the film's size and rate (the fork can already output just the overlay as PNGs). Each window's frames are written to a cache folder and read by the compositor; if PNG writing is slow, ask the fork for a frame stride or a single-file alpha format later.
 - **Composite and join.** `render/final.py` composites each window's layer onto its picture piece before encoding (one encode, no extra generation loss), cross-fading the two layers inside a dissolve or dip just like the picture, then joins the pieces into `film.mp4` as today. The overlay layers are cached per window (key: UTC span, size, rate, overlay layout, track file signature), so re-planning only redoes changed windows.
-- **Settings.** Overlay layout (the overlay tool's layout file), on/off, and position, in `race.json` `overlay` and the Final film panel; the overlay tool's location in `~/.strata360/server.json` (it lives in its own virtual environment, `.venv-overlay`). `doctor` checks it.
+- **Settings.** Overlay layout (the overlay tool's layout file: the user's existing configuration, to be supplied; until then a minimal map-only layout for tests), on/off, and position, in `race.json` `overlay` and the Final film panel; the overlay tool's location in `~/.strata360/server.json` (it lives in its own virtual environment, `.venv-overlay`). `doctor` checks it.
 - **Done when:** integration test on the synthetic OSV with a synthetic GPX and a stub overlay command (writes a layer whose pixels encode the UTC it was asked for): a two-window plan with a dissolve renders one file in which each window shows its own clip's UTC to within one frame, the dissolve blends both, and the frame rate equals the source's (and half of it with `half_rate`). Time-map maths unit-tested (monotonic, every output frame covered once). One real check on Legends: the overlay's position marker matches the place seen on screen at three known points (the start line, an aid station, a village sign).
 
 ### A3. Final sound mix (M)
@@ -125,19 +129,22 @@ How it works: every window of the plan comes from one input clip, so its UTC spa
 - Record what looks wrong (seams, grade, framing, sound) as issues; they feed milestone C.
 - **Done when:** a finished film with overlay exists, and `progress.md` has the timings and the list of defects.
 
-## Milestone B: rendering is fast enough to iterate (M to L, depends on A5's numbers)
+## Milestone B: rendering is fast enough to iterate (GPU first)
 
 ### B1. Parallel pieces (S)
 - `render/final.py` pieces are independent; let up to `resources.max_workers` processes take pieces using the same claim files as the batch (`pipeline/runner.py`), at low priority.
 - **Done when:** two workers on the synthetic OSV produce byte-identical pieces to one worker; resource limits respected (`tests/unit/test_resources.py` pattern).
 
-### B2. Cheaper frames (M)
+### B2. Cheaper frames (M; the savings apply to the GPU path too)
 - Skip the second lens when the view lies inside one lens (most `dialogue_hold` and `selfie_hold` windows).
 - Decode only the needed range of each lens stream; YUV in, convert after the remap.
 - **Done when:** a benchmark script (`scripts/bench_render.py`) reports frames per second for hold, pan, planet on clip 0019; a measured gain is recorded; output differs from before by less than 1 code value at 10-bit outside the skipped lens.
 
-### B3. Decide on a GPU port (decision, S)
-- If A5 plus B1 and B2 still put a 120 s film over about 8 hours, plan a Metal (or wgpu) kernel for the per-pixel remap as a separate milestone; otherwise park it.
+### B3. GPU renderer (L)
+- The per-pixel work (fisheye remap of both lenses, seam blend, parallax warp, globe compositing, overlay compositing, colour conversion) moves to the GPU, with the GPU chosen like the video hardware in `src/strata360/hw.py`: Apple GPU on macOS, CUDA on Windows/Linux when present, CPU otherwise. Start with PyTorch (`grid_sample`, already in `.venv-vision` with MPS and CUDA) for the remap and blends, so one code path serves both; a hand-written Metal kernel only if that is too slow.
+- Decode straight to GPU memory where the platform allows; keep 16-bit (or float) through the render.
+- **Quality gate (D4):** a comparison script renders the same frames on CPU and GPU (hold, pan, planet, globe, a seam with a hand near it) and reports the difference (max and mean in 10-bit code values, PSNR, and a sharpness measure). GPU is the default; a technique stays on the CPU only if the GPU result is noticeably worse, and the reason is recorded in `progress.md`.
+- **Done when:** the comparison passes on the synthetic OSV in CI (CPU-only runners compare the torch-on-CPU path with the OpenCV path), and on the Mac the GPU render of the A5 film is measured against the CPU one.
 
 ## Milestone C: the edit is trustworthy
 
@@ -173,6 +180,7 @@ How it works: every window of the plan comes from one input clip, so its UTC spa
 - **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A).
 
 ## Later (parked until the film exists)
+- A generated (AI) backing track made to fit the finished cut: the film's length, its block boundaries as section changes, its energy curve, and beats placed on the cuts (the reverse of V5: the music fits the picture).
 - Insta360 adapter (needs sample `.insv` files; overview 12 questions 2 and 10).
 - MCP / conversational interface (Phase 9).
 - Face blur for other runners and spectators (overview 12 question 7).
@@ -185,18 +193,17 @@ How it works: every window of the plan comes from one input clip, so its UTC spa
 
 ```
 A1 ─> V1 ─> V2 ─> V3 ─> V4 ─> V5 ─> V6 ─┐
-A2, A3, A4 (independent, alongside V) ───┼─> A5 ─> B1 ─> B2 ─> B3
+A2, A3, A4 (independent, alongside V) ───┼─> A5 ─> B1 ─> B3 (GPU) ─> B2
                                           └─> C1 ─> (hero shots safe)
 C2 after V4;  D1 after V5;  E runs alongside.
 ```
 
-Suggested sequence: A1, then the V milestone in order (V5 is the largest piece), with A2 to A4 in parallel; then A5 (the first real film: voice-over driven, cut on the beat, with overlay); then B1 and C1, C2, D1, and B2/B3 as A5's numbers require.
+Suggested sequence: A1, then the V milestone in order (V5 is the largest piece), with A2 to A4 in parallel; then A5 (the first real film: voice-over driven, cut on the beat, with overlay); then B1 and C1, C2, D1, with the GPU renderer (B3) straight after B1 (A5's CPU render is the quality reference it is compared against), then B2.
 
 ## Questions for you
 Answered on 1 Oct: D2, D3, D6, D7, the docs move, and the V4/V5/D7 defaults (0.4 s between lines, 0.5 s lead-in and lead-out, snapping up to half a beat, off-beat cut reported when no beat fits, up to 8 s of music lost to a fade, up to 4 s of silence before the music and 6 s after).
 
+Answered on 1 Oct as well: the overlay fork outputs transparent PNGs (A2); clips are dropped only if they must be (D9); one track, a target length, or automatic length (D8); GPU preferred (D4).
+
 Still open:
-1. **Overlay fork (A2):** may the plan change `jburnhams/gopro-dashboard-overlay` to add an overlay-only output with transparency, if it does not have one? And which layout should the film use (map only, or map plus pace, heart rate, altitude, clock)?
-2. **Every clip in the film (V1):** the planner currently gives every clip at least one window. With the voice-over driving, may a dull clip (no narration, nothing preferred) be dropped, or does every clip stay?
-3. **One track or several (D7, V5):** one song per film, or a sequence of tracks (with a crossfade or a cut on a bar between them)?
-4. **Render budget (B3):** is "a 4K film renders overnight on the Mac (about 8 hours)" the right bar for deciding on a GPU port?
+1. **Overlay configuration (A2):** the layout you have used before (you will find it); until then tests use a map-only stand-in.
