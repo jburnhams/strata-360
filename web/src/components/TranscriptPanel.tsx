@@ -4,6 +4,7 @@ import { usePoll } from '../usePoll'
 import { PanelSkeleton } from './Skeleton'
 import Phrase, { type Mode } from './Phrase'
 import PlayIcons from './PlayIcons'
+import Health from './Health'
 
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -37,7 +38,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
         <span className="flex items-center gap-2 text-xs text-stone-500">
           <button disabled={running} title="sends the words (and your notes) to Gemini, which suggests substitutions for obvious recognition errors; they show highlighted and you can change any of them" className="rounded border border-stone-300 px-2 py-0.5 text-stone-700 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300"
             onClick={async () => { setFixErr(undefined); try { await api.suggestTranscript(folder) } catch (e) { setFixErr((e as Error).message) } setVer(v => v + 1) }}>{running ? `asking Gemini… ${fix?.done ?? 0}/${fix?.total ?? '…'}` : 'suggest corrections (Gemini)'}</button>
-          {fix?.state === 'done' && <span>{fix.fixes} suggested</span>}{fix?.state === 'error' && <span className="text-red-600">{fix.error}</span>}{fixErr && <span className="text-red-600">{fixErr}</span>}
+          {fix?.state === 'done' && <span>{fix.fixes} suggested</span>}{!!fix?.calls_made && fix.state !== 'running' && <span title="new Gemini calls made, and tokens used by them">{fix.calls_made} calls ({Math.round(((fix.tokens?.input ?? 0) + (fix.tokens?.output ?? 0)) / 1000)}k tokens){fix.calls_reused ? `, ${fix.calls_reused} reused` : ''}</span>}{fix?.state === 'error' && <span className="text-red-600">{fix.error}</span>}{fixErr && <span className="text-red-600">{fixErr}</span>}
           <span><span className="rounded bg-amber-200 px-1 dark:bg-amber-500/30">Gemini</span> <span className="rounded bg-sky-200 px-1 dark:bg-sky-500/30">you</span> hover for the original, click a word to edit</span></span>
         <span className="flex items-center gap-3 text-stone-500">{data.segments.length} phrases
           <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown" className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
@@ -45,6 +46,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
           <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'you')} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
             <option value="all">everyone</option><option value="you">only you</option></select></span>
       </div>
+      <div className="mb-2"><Health h={fix?.health} /></div>
       {groups.length === 0 && <p className="text-sm text-stone-500">{filter === 'you' ? 'No phrases labelled as you yet (voices are labelled by the speakers stage).' : 'No speech recognised yet.'}</p>}
       <div className="space-y-3 text-sm leading-relaxed">
         {groups.map((g, gi) => (

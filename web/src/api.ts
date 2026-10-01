@@ -1,7 +1,8 @@
 // Typed client for the FastAPI server (src/strata360/server/app.py). Same-origin; the token (if any) travels as a cookie.
 export interface BrowseEntry { name: string; path: string; kind: 'dir'; is_project: boolean }
 export interface Browse { path: string; parent: string | null; footage_here: number; is_project: boolean; can_create: boolean; entries: BrowseEntry[] }
-export interface Stage { waiting?: string | null; running?: { clip: string; pid: number }[]; name: string; done: number; total: number; seconds_per_clip: number | null; eta_s: number | null; note: string }
+export interface StageHealth { retrying: number; failed: number; attempts: number; retries: number; last_error: string | null; next_try_in_s: number | null; sleep_s?: number | null; last_success_ago_s: number | null }
+export interface Stage { retry?: StageHealth | null; waiting?: string | null; running?: { clip: string; pid: number }[]; name: string; done: number; total: number; seconds_per_clip: number | null; eta_s: number | null; note: string }
 export type ProjectState = 'new' | 'processing' | 'needs_input' | 'complete'
 export interface Progress {
   state: ProjectState; folder: string; project: string; clips?: number; footage_gb?: number; percent?: number; eta_s?: number
@@ -98,7 +99,7 @@ export const api = {
   buildVoiceover: (folder: string, o: { engine?: string; voice?: string; rate?: number } = {}) => call<{ started: boolean }>('/api/voiceover/build', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
-  transcriptFix: (folder: string) => call<{ state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
+  transcriptFix: (folder: string) => call<{ health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
   clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean') => '/api/clip/audio?' + q({ folder, clip, kind }),
   editScript: (folder: string, texts: Record<string, string>) => call<{ saved: string | null; speaking: boolean }>('/api/script/edit', { folder, texts }),
   voiceoverUse: (folder: string, seg: number, use: 'synth' | 'recorded') => call<{ ok: boolean }>('/api/voiceover/use', { folder, seg, use }),

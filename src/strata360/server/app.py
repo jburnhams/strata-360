@@ -214,22 +214,24 @@ def create_app(roots, token=None):
         return dict(ok=True)
 
     @api.post('/api/transcript/suggest', dependencies=[Depends(auth)])
-    def post_transcript_suggest(body: dict):                                         # {folder}: ask the language model for corrections (a background job; the words are sent to the model provider, like the script)
-        f = folder_of(body.get('folder')); sp = os.path.join(config.race_dir(f), 'transcript_fix.json')
-        try:
-            st = json.load(open(sp))
-            if st.get('state') == 'running' and alive(st.get('pid')): return dict(started=False)
-        except (OSError, ValueError): pass
-        rd = config.race_dir(f); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'transcript_fix.log'), 'ab')
-        subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'transcript-fix', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+    def post_transcript_suggest(body: dict):                                         # {folder}: run the audio check of the transcript (stage `transcript_check`: paid Gemini calls, every reply cached, clips already done are skipped)
+        f = folder_of(body.get('folder')); return dict(started=start_job(f, ('run', '--stages', 'transcript_check')))
 
     @api.get('/api/transcript/suggest', dependencies=[Depends(auth)])
-    def get_transcript_suggest(folder: str):
-        f = folder_of(folder)
-        try: st = json.load(open(os.path.join(config.race_dir(f), 'transcript_fix.json')))
-        except (OSError, ValueError): return dict(state='none')
-        if st.get('state') == 'running' and not alive(st.get('pid')): st['state'] = 'error'; st['error'] = st.get('error') or 'stopped'
-        return st
+    def get_transcript_suggest(folder: str):                                         # progress of the audio check: clips done of those with speech, corrections stored, and what the API calls used
+        from strata360.pipeline import runner
+        f = folder_of(folder); rd = config.race_dir(f); total = done = fixes = made = reused = tin = tout = 0; err = None
+        for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
+            tr = _j(d, 'transcript.json')
+            if not tr or not any(s.get('words') and s.get('text', '').strip() for s in tr['segments']): continue
+            total += 1; cid = os.path.basename(d.rstrip('/')); st = runner.load_state(f, cid).get('transcript_check', {})
+            if st.get('status') == 'ok':
+                done += 1; r = _j(d, 'transcript_check.json') or {}; fixes += r.get('stored', 0); made += (r.get('calls') or {}).get('made', 0); reused += (r.get('calls') or {}).get('reused', 0)
+                tin += (r.get('tokens') or {}).get('input', 0); tout += (r.get('tokens') or {}).get('output', 0)
+            elif st.get('status') == 'failed': err = st.get('error') or 'failed'
+        running = any(s_ == 'transcript_check' for _, s_, _ in runner.active_items(f))
+        health = runner.stage_health(f).get('transcript_check')
+        return dict(state='running' if running else ('done' if total and done == total else ('error' if err else 'none')), health=health, done=done, total=total, fixes=fixes, calls_made=made, calls_reused=reused, tokens=dict(input=tin, output=tout), error=err)
 
     @api.get('/api/transcript', dependencies=[Depends(auth)])
     def get_transcript(folder: str):                                                     # every recognised phrase of every clip, in clip order: the overview's running transcript

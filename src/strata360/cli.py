@@ -49,6 +49,7 @@ def _state_symbol(race, cfg, clip, name, state):
     st = STAGES[name]; s = state.get(name)
     if not s: return '-'
     if s['status'] == 'failed': return 'FAIL'
+    if s['status'] == 'retry': return 'retry'
     deps = {d: state.get(d, {}).get('key') for d in st.deps}
     if name == 'ingest':                                             # its key is frozen (a clock change re-times, it does not invalidate): stale only when the clock changed since it ran
         return 'ok' if s.get('clock') == runner._sha(cfg.get('camera_clock')) and s.get('fp', clip.fingerprint) == clip.fingerprint else 'stale'
@@ -217,14 +218,14 @@ def project_progress(name):
     rd = config.race_dir(name)
     if not os.path.exists(os.path.join(rd, 'race.json')):
         return dict(state='new', folder=str(name), project=rd)
-    cfg = config.load(name); cl, other = clipmod.discover(cfg['library']); names = [n for n in ORDER if n in cfg['stages']]; stages = []; done_all = 0; total_all = 0; eta = 0.0
+    cfg = config.load(name); cl, other = clipmod.discover(cfg['library']); names = [n for n in ORDER if n in cfg['stages']]; stages = []; done_all = 0; total_all = 0; eta = 0.0; health = runner.stage_health(name)
     for n in names:
         done = 0; secs = []
         for c in cl:
             st = runner.load_state(name, c.id); sym = _state_symbol(name, cfg, c, n, st); done += sym == 'ok'
             if sym == 'ok' and st.get(n, {}).get('seconds'): secs.append(st[n]['seconds'])
         per = float(np.mean(secs)) if secs else None; left = (len(cl) - done) * per if per else None; eta += left or 0.0
-        stages.append(dict(name=n, running=[dict(clip=c_, pid=p_) for c_, s_, p_ in runner.active_items(name_) if s_ == n], waiting=('the race track' if (STAGES[n].needs_track and config.track_path(name_, cfg) is None) else None), done=int(done), total=len(cl), seconds_per_clip=None if per is None else round(per, 1), eta_s=None if left is None else round(left), note=STAGES[n].note)); done_all += done; total_all += len(cl)
+        stages.append(dict(name=n, retry=health.get(n), running=[dict(clip=c_, pid=p_) for c_, s_, p_ in runner.active_items(name_) if s_ == n], waiting=('the race track' if (STAGES[n].needs_track and config.track_path(name_, cfg) is None) else None), done=int(done), total=len(cl), seconds_per_clip=None if per is None else round(per, 1), eta_s=None if left is None else round(left), note=STAGES[n].note)); done_all += done; total_all += len(cl)
     needs = []
     tr_missing = config.track_path(name, cfg) is None and any(STAGES[n].needs_track for n in names)
     if tr_missing: needs.append('race_track')
@@ -300,7 +301,7 @@ def cmd_transcript_fix(a):
     status('running')
     try:
         if a.text_only: r = TF.run(a.name, clips=a.clip, provider=a.provider, model=a.model, progress=lambda i, n, k: status('running', i, n, k))
-        else: r = TF.run_audio(a.name, clips=a.clip, provider=a.provider, model=a.model, runs=a.checks, thinking=a.thinking, progress=lambda i, n, k: status('running', i, n, k))
+        else: r = TF.run_audio(a.name, clips=a.clip, provider=a.provider, model=a.model, runs=a.checks, thinking=a.thinking)
     except Exception as e: status('error', error=f'{type(e).__name__}: {e}'); raise
     status('done', len(r), len(r), sum(r.values())); print(f'{sum(r.values())} suggested corrections in {len(r)} clips')
 

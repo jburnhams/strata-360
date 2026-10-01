@@ -1,7 +1,7 @@
 """Ask a language model for corrections to the recognised words: obvious recognition errors (a word that makes no sense where a similar-sounding one does), using what the project knows: the title,
 the notes you wrote, the place names on the route, the neighbouring phrases and the recogniser's confidence in each word. The model only SUGGESTS word substitutions; they are stored as model
 corrections (analysis/transcript_edits.py) that show highlighted and that you can overrule word by word."""
-import glob, json, os
+import glob, hashlib, json, os
 from strata360.pipeline import config
 from strata360.analysis import transcript_edits as TE
 
@@ -133,15 +133,38 @@ def excerpt_prompt(ctx, tr, ch):
     return f"{ctx}\n\nThis audio excerpt is {ch['a0']:.1f}-{ch['a1']:.1f} s of the recording.\nDRAFT transcript:\n" + '\n'.join(rows) + '\n\nListen and answer with the fixes.'
 
 
-def check_chunk(folder, clip, tr, ch, audio_path, ctx, provider='vertex', model=None, thinking='low', log=None):
-    """One request for one excerpt: returns (fixes, info). The audio is the excerpt of `audio_path`, mono 16 kHz FLAC."""
-    import base64, subprocess
+PROMPT_VERSION = 1       # bump when SYSTEM_AUDIO or the excerpt prompt changes: cached replies are for one prompt
+
+
+def call_key(ch, audio_path, prompt, model, thinking, run):
+    """Identity of one request: the prompt text and version, the model, thinking level, which of the repeated checks it is, and the audio excerpt (file, size, time, range)."""
+    st = os.stat(audio_path); h = hashlib.sha1(json.dumps([PROMPT_VERSION, model, thinking, run, ch['a0'], ch['a1'], os.path.basename(audio_path), st.st_size, int(st.st_mtime), prompt], sort_keys=True).encode()).hexdigest()[:16]
+    return h
+
+
+def usage_log_path(folder): return os.path.join(config.race_dir(folder), 'gemini_usage.jsonl')
+
+
+def check_chunk(folder, clip, tr, ch, audio_path, ctx, provider='vertex', model=None, thinking='low', run=0, cache_dir=None, log=None):
+    """One request for one excerpt: returns (fixes, info). The audio is the excerpt of `audio_path`, mono 16 kHz FLAC. Every reply is kept on disk (`cache_dir`): asking the same thing again costs
+    nothing, whatever is changed afterwards (voting rules, which fixes are applied); each NEW call is logged with its token counts in <project>/gemini_usage.jsonl."""
+    import base64, subprocess, time
     from strata360.edit import llm_remote as LR, script as SC
+    model = model or LR.PROVIDERS[provider]['default']; prompt = excerpt_prompt(ctx, tr, ch); key = call_key(ch, audio_path, prompt, model, thinking, run); cp = os.path.join(cache_dir, key + '.json') if cache_dir else None
+    if cp and os.path.exists(cp):
+        try:
+            c = json.load(open(cp)); return c['fixes'], dict(c['info'], cached=True)
+        except (OSError, ValueError, KeyError): pass
     raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f"{ch['a0']:.2f}", '-t', f"{ch['a1'] - ch['a0']:.2f}", '-i', audio_path, '-ac', '1', '-ar', '16000', '-c:a', 'flac', '-f', 'flac', '-'], capture_output=True, check=True).stdout
-    msgs = [dict(role='system', content=SYSTEM_AUDIO), dict(role='user', content=[dict(inlineData=dict(mimeType='audio/flac', data=base64.b64encode(raw).decode())), dict(text=excerpt_prompt(ctx, tr, ch))])]
-    r = LR.chat(msgs, model or LR.PROVIDERS[provider]['default'], 16000, 0.1, timeout=600, provider=provider, thinking=thinking); parsed = SC._parse_json(r['text'])
-    fixes = (parsed or {}).get('fixes') if isinstance(parsed, dict) else None
-    return fixes or [], dict(seconds=r['seconds'], tokens=r.get('tokens'), finish=r.get('finish'), audio_kb=round(len(raw) / 1024), parsed=isinstance(parsed, dict))
+    msgs = [dict(role='system', content=SYSTEM_AUDIO), dict(role='user', content=[dict(inlineData=dict(mimeType='audio/flac', data=base64.b64encode(raw).decode())), dict(text=prompt)])]
+    r = LR.chat(msgs, model, 16000, 0.1, timeout=600, provider=provider, thinking=thinking); parsed = SC._parse_json(r['text'])
+    fixes = (parsed or {}).get('fixes') if isinstance(parsed, dict) else None; fixes = fixes or []
+    info = dict(seconds=r['seconds'], tokens=r.get('tokens'), finish=r.get('finish'), audio_kb=round(len(raw) / 1024), parsed=isinstance(parsed, dict), cached=False)
+    if cp and isinstance(parsed, dict):                                                    # a reply that could not be read is not kept: it is worth asking again
+        os.makedirs(cache_dir, exist_ok=True); json.dump(dict(key=key, clip=clip, excerpt=[ch['a0'], ch['a1']], model=model, thinking=thinking, run=run, prompt_version=PROMPT_VERSION, fixes=fixes, info=info, raw=r['text'], at=time.time()), open(cp + '.tmp', 'w'), indent=1); os.replace(cp + '.tmp', cp)
+    try: open(usage_log_path(folder), 'a').write(json.dumps(dict(at=time.time(), clip=clip, model=model, thinking=thinking, run=run, tokens=r.get('tokens'), seconds=r['seconds'], audio_kb=info['audio_kb'])) + '\n')
+    except OSError: pass
+    return fixes, info
 
 
 # ---- the full pass: every excerpt checked several times, only fixes the checks agree on are kept ---------------------------------------------------------------------------------------------
@@ -166,33 +189,46 @@ def vote(runs, min_votes=2):
     return sorted(out, key=lambda f: (f['seg'], f['word']))
 
 
-def run_audio(folder, clips=None, provider=None, model=None, runs=3, min_votes=2, thinking='low', workers=4, progress=None, log=print):
-    """Check the transcript of every clip with speech against its (cleaned) audio, excerpt by excerpt, `runs` times each, and store the fixes the checks agree on as Gemini corrections.
-    Returns {clip: number stored}."""
+def check_clip(folder, clip, runs=3, min_votes=2, thinking='low', provider=None, model=None, workers=4, progress=None, log=print):
+    """The whole audio check of ONE clip: its speech-only excerpts, each checked `runs` times (replies cached on disk, so only calls never made before are paid for), the fixes at least `min_votes`
+    checks agree on stored as Gemini corrections. Returns a document for the stage's output: settings, per-excerpt results, kept corrections, and how many calls were made or reused."""
     from concurrent.futures import ThreadPoolExecutor
     from strata360.edit import llm_remote as LR
     from strata360.analysis import transcribe_gemini as TG
     cfg = config.load(folder); llm = cfg.get('llm', {}); provider = provider or llm.get('provider', 'vertex'); model = model or llm.get('model') or LR.PROVIDERS[provider]['default']
-    dirs = sorted(glob.glob(os.path.join(config.race_dir(folder), 'clips', '*', ''))); dirs = [d for d in dirs if os.path.exists(d + 'transcript.json') and (not clips or any(c in os.path.basename(d.rstrip('/')) for c in clips))]
-    plan = []; ctxs = {}                                                                 # (clip, dir, transcript, audio file, excerpt)
-    for d in dirs:
-        clip = os.path.basename(d.rstrip('/')); tr = json.load(open(d + 'transcript.json')); cj = json.load(open(d + 'clip.json')); dur = cj['video']['source_frames'] / cj['video']['nominal_fps']
-        au = next((d + n for n in ('audio_clean.flac', 'audio_original.flac') if os.path.exists(d + n)), None)
-        if au is None: log(f'{clip}: no stored audio yet, skipped'); continue
-        for ch in chunks(tr, dur): plan.append((clip, d, tr, au, ch))
-    jobs = [(i, r) for i in range(len(plan)) for r in range(runs)]; results = {i: [] for i in range(len(plan))}; done = [0]
+    d = os.path.join(config.race_dir(folder), 'clips', clip); tr = json.load(open(os.path.join(d, 'transcript.json'))); cj = json.load(open(os.path.join(d, 'clip.json'))); dur = cj['video']['source_frames'] / cj['video']['nominal_fps']
+    au = next((os.path.join(d, n) for n in ('audio_clean.flac', 'audio_original.flac') if os.path.exists(os.path.join(d, n))), None)
+    if au is None: raise RuntimeError('the clip has no stored audio yet (the audio_extract stage)')
+    chs = chunks(tr, dur); doc = dict(settings=dict(runs=runs, min_votes=min_votes, thinking=thinking, model=model, prompt_version=PROMPT_VERSION, audio=os.path.basename(au)), excerpts=[], kept=[], calls=dict(made=0, reused=0), tokens=dict(input=0, output=0))
+    if not chs: TE.set_gemini(d, [], model=model); return doc
+    ctx = TG.context(folder, clip); cache = os.path.join(d, 'gemini_checks'); jobs = [(i, r) for i in range(len(chs)) for r in range(runs)]; res = {i: [None] * runs for i in range(len(chs))}; n = [0]
     def one(job):
-        i, r = job; clip, d, tr, au, ch = plan[i]
-        if clip not in ctxs: ctxs[clip] = TG.context(folder, clip)
-        try: fx, _ = check_chunk(folder, clip, tr, ch, au, ctxs[clip], provider=provider, model=model, thinking=thinking)
-        except Exception as e: log(f'{clip} excerpt {i}: {type(e).__name__}: {e}'); fx = []
-        results[i].append(fx); done[0] += 1; progress and progress(done[0], len(jobs), 0)
+        i, r = job
+        try: fx, info = check_chunk(folder, clip, tr, chs[i], au, ctx, provider=provider, model=model, thinking=thinking, run=r, cache_dir=cache)
+        except Exception as e: log(f'{clip} excerpt {i} check {r}: {type(e).__name__}: {e}'); fx, info = None, dict(error=str(e), retryable=getattr(e, 'retryable', False), exc=e)
+        res[i][r] = (fx, info); n[0] += 1; progress and progress(n[0], len(jobs))
     with ThreadPoolExecutor(workers) as ex: list(ex.map(one, jobs))
-    by_clip = {}
-    for i, (clip, d, tr, au, ch) in enumerate(plan):
-        good = [f for f in vote(results[i], min_votes) if f['seg'] in ch['segs']]; by_clip.setdefault(clip, (d, []))[1].extend(good)
+    bad = [x[1] for i in res for x in res[i] if x and x[0] is None]; fresh = sum(1 for i in res for x in res[i] if x and x[0] is not None and not x[1].get('cached'))
+    if bad:                                                                                 # a failed check is never replaced by a smaller vote: nothing is stored until all checks have been made
+        fatal = [b for b in bad if not b.get('retryable')]
+        if fatal: raise fatal[0]['exc']
+        from strata360.pipeline.retry import RetryLater
+        raise RetryLater(f"{len(bad)} of {len(jobs)} Gemini checks failed for now ({str(bad[0].get('error'))[:120]}); {len(jobs) - len(bad)} are done and kept", progress=fresh > 0)
+    for i, ch in enumerate(chs):
+        got = [x for x in res[i] if x and x[0] is not None]; kept = [f for f in vote([x[0] for x in got], min_votes) if f['seg'] in ch['segs']]
+        for _, info in got:
+            doc['calls']['reused' if info.get('cached') else 'made'] += 1
+            for k in ('input', 'output'): doc['tokens'][k] += int(((info.get('tokens') or {}).get(k)) or 0) if not info.get('cached') else 0
+        doc['excerpts'].append(dict(segs=[ch['segs'][0], ch['segs'][-1]], audio=[ch['a0'], ch['a1']], checks=len(got), failed=runs - len(got), kept=len(kept))); doc['kept'].extend(kept)
+    if all(not [x for x in res[i] if x and x[0] is not None] for i in range(len(chs))): raise RuntimeError('every check failed (see the log): nothing stored')
+    doc['stored'] = TE.set_gemini(d, doc['kept'], model=f'{model} (audio, {runs} checks)'); return doc
+
+
+def run_audio(folder, clips=None, **kw):
+    """check_clip for every clip with speech (CLI helper); returns {clip: corrections stored}."""
     out = {}
-    for d in dirs:
+    for d in sorted(glob.glob(os.path.join(config.race_dir(folder), 'clips', '*', ''))):
         clip = os.path.basename(d.rstrip('/'))
-        if clip in by_clip: out[clip] = TE.set_gemini(d, by_clip[clip][1], model=f'{model} (audio, {runs} checks)'); log(f'{clip}: {out[clip]} correction(s)')
+        if not os.path.exists(d + 'transcript.json') or (clips and not any(c in clip for c in clips)): continue
+        out[clip] = check_clip(folder, clip, **kw).get('stored', 0)
     return out

@@ -19,7 +19,12 @@ VERTEX_MODELS = ['gemini-3.1-pro-preview', 'gemini-3.8-flash', 'gemini-2.5-pro']
 PROVIDERS = dict(vertex=dict(models=VERTEX_MODELS, default='gemini-3.1-pro-preview', env=('VERTEX_API_KEY', 'GOOGLE_CLOUD_API_KEY')), gemini=dict(models=GEMINI_MODELS, default=GEMINI_DEFAULT, env=('GEMINI_API_KEY', 'GOOGLE_API_KEY')), anthropic=dict(models=MODELS, default=DEFAULT_MODEL, env=('ANTHROPIC_API_KEY',)))
 
 
-class LLMError(Exception): pass
+class LLMError(Exception):
+    retryable = False                  # a rejected key, a bad request: trying again will not help
+
+
+class LLMBusy(LLMError):
+    retryable = True                   # overloaded or unreachable service: worth trying again later
 
 
 def _key_file(provider):
@@ -89,7 +94,8 @@ def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7
     body = dict(contents=contents, generationConfig=gen)
     if system: body['systemInstruction'] = dict(parts=[dict(text=system)])
     last = None; t0 = time.time()
-    for attempt in range(4):
+    attempts = 3                                                                          # a few quick tries here; a stage that needs more retries itself (pipeline/retry.py), with its progress shown
+    for attempt in range(attempts):
         req = urllib.request.Request(url.format(model=model), data=json.dumps(body).encode(), headers={'x-goog-api-key': key, 'content-type': 'application/json'})
         try:
             r = json.loads(urllib.request.urlopen(req, timeout=timeout).read().decode())
@@ -104,11 +110,11 @@ def chat_gemini(messages, model=GEMINI_DEFAULT, max_tokens=8192, temperature=0.7
             last = f'HTTP {e.code}: {msg}'
             if e.code in (400, 401, 403) and ('api key' in msg.lower() or e.code in (401, 403)): raise LLMError(f'the Gemini API key was rejected ({e.code}): check it')
             if e.code in (400, 404): raise LLMError(last)
-            if e.code in (429, 500, 502, 503, 504): time.sleep(2 * (attempt + 1) ** 2); continue
+            if e.code in (429, 500, 502, 503, 504): time.sleep(min(2 * (attempt + 1) ** 2, 45)); continue
             raise LLMError(last)
         except (urllib.error.URLError, TimeoutError) as e:
             last = f'network error: {getattr(e, "reason", e)}'; time.sleep(2 * (attempt + 1))
-    raise LLMError(last or 'request failed')
+    raise LLMBusy(last or 'request failed')
 
 
 def chat(messages, model=DEFAULT_MODEL, max_tokens=3000, temperature=0.7, timeout=240, url=URL, provider='anthropic', thinking=None):

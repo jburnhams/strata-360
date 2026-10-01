@@ -18,6 +18,7 @@ DEFAULTS = {
     'people_every_frames': 50,
     'profile': 'me',
     'scenes_every_s': 5.0,
+    'transcript_check': {'runs': 3, 'min_votes': 2, 'thinking': 'low'},          # the audio check of the transcript (opt-in stage `transcript_check`: it makes paid API calls; replies are cached per call)
     'llm': {'provider': 'vertex', 'model': 'gemini-3.1-pro-preview'},           # the voice-over script writer: Gemini Pro through a Google Cloud (Vertex AI) key in secrets.env; or 'gemini' (AI Studio key), 'anthropic', 'local' (mlx-lm)
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
     'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '16M', 'encoder': 'h264'},
@@ -64,7 +65,7 @@ def load(name):
     for k, v in json.load(open(p)).items():
         cfg[k] = {**cfg[k], **v} if isinstance(v, dict) and isinstance(cfg.get(k), dict) else v
     for new, after in ADDED_STAGES:                                                       # stages added after a project was made join it, right after the one they follow
-        if new not in cfg['stages'] and after in cfg['stages']: cfg['stages'].insert(cfg['stages'].index(after) + 1, new)
+        if 'transcribe' in cfg['stages'] and new not in cfg['stages'] and after in cfg['stages']: cfg['stages'].insert(cfg['stages'].index(after) + 1, new)
     return cfg
 
 

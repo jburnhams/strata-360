@@ -8,7 +8,7 @@ taken over. The per-clip state file (`stages.json`) is updated under a file lock
 `clear` removes the recorded status of a stage (and, by default, of every stage that depends on it) so it will be processed again."""
 import atexit, datetime as dt, fcntl, fnmatch, hashlib, json, os, time, traceback
 from contextlib import contextmanager
-from strata360.pipeline import config, clips as clipmod, resources
+from strata360.pipeline import config, clips as clipmod, resources, retry
 from strata360.pipeline.stages import STAGES, ORDER, Ctx
 
 
@@ -186,9 +186,33 @@ def item_states(race):
         state = load_state(race, c.id); row = {}
         for n in names:
             e = state.get(n); done, _, blocked = _cached(race, STAGES[n], c, cfg, state, clip_dir(race, c.id))
-            row[n] = 'active' if (c.id, n) in act else None if e is None else 'failed' if e.get('status') == 'failed' else 'ok' if done else 'stale'
+            row[n] = 'active' if (c.id, n) in act else None if e is None else 'failed' if e.get('status') == 'failed' else 'retry' if e.get('status') == 'retry' else 'ok' if done else 'stale'
         out[c.id] = row
     return dict(stages=names, clips=out, dependents={n: dependents(n) for n in names})
+
+
+def stage_health(race):
+    """How each stage is doing, for the app: {stage: {retrying, attempts, retries, last_error, next_try_in_s, last_success_ago_s, failed}} for stages that have items waiting to be retried or failed.
+    `retrying` is how many items are failing right now; `last_success_ago_s` is the time since the last item of that stage finished."""
+    cfg = config.load(race); cl, _ = discover(race, cfg); now = time.time(); out = {}
+    for c in cl:
+        for name, e in load_state(race, c.id).items():
+            if name not in STAGES or not isinstance(e, dict): continue
+            h = out.setdefault(name, dict(retrying=0, failed=0, attempts=0, retries=STAGES[name].retries, last_error=None, next_try_in_s=None, sleep_s=None, last_success_at=None, _err_at=0))
+            if e.get('status') == 'ok' and e.get('at'):
+                try: ts = dt.datetime.fromisoformat(e['at']).timestamp()
+                except ValueError: continue
+                h['last_success_at'] = max(h['last_success_at'] or 0, ts)
+            elif e.get('status') == 'retry':
+                h['retrying'] += 1; h['attempts'] = max(h['attempts'], int(e.get('attempts', 0))); nt = e.get('next_try_at')
+                if nt and (h['next_try_in_s'] is None or max(nt - now, 0) < h['next_try_in_s']): h['next_try_in_s'] = round(max(nt - now, 0)); h['sleep_s'] = round(e.get('wait_s') or 0)       # the item that comes back first: its backoff and what is left of it
+                if e.get('last_attempt_at', 0) >= h['_err_at']: h['_err_at'] = e.get('last_attempt_at', 0); h['last_error'] = e.get('last_error') or e.get('error')
+            elif e.get('status') == 'failed': h['failed'] += 1; h['last_error'] = h['last_error'] or e.get('error')
+    res = {}
+    for name, h in out.items():
+        if not (h['retrying'] or h['failed']): continue
+        h['last_success_ago_s'] = None if not h['last_success_at'] else round(now - h['last_success_at']); h.pop('last_success_at'); h.pop('_err_at'); res[name] = h
+    return res
 
 
 def discover(race, cfg):
@@ -206,7 +230,7 @@ def track_signature(race, cfg):
     return _sha([h.hexdigest(), cfg.get('camera_clock', {}).get('utc_offset_hours'), cfg.get('camera_clock', {}).get('offset_seconds'), cfg.get('camera_clock', {}).get('drift_s_per_day'), cfg.get('camera_clock', {}).get('drift_ref_camera_time')])
 
 
-def _cached(race, st, c, cfg, state, ctx_dir):
+def _cached(race, st, c, cfg, state, ctx_dir, active=None):
     """(is_done, key, blocked_by) for one item given the clip's state."""
     deps = {d: state.get(d, {}) for d in st.deps}; bad = [d for d, v in deps.items() if v.get('status') != 'ok']
     extra = None
@@ -218,7 +242,7 @@ def _cached(race, st, c, cfg, state, ctx_dir):
     if st.name == 'ingest' and cur.get('key') and cur.get('version') == st.version and cur.get('fp', c.fingerprint) == c.fingerprint: key = cur['key']    # frozen identity: a clock change re-times, it does not invalidate clip-relative stages
     done = cur.get('status') == 'ok' and cur.get('key') == key and all(os.path.exists(os.path.join(ctx_dir, o)) for o in st.outputs) and (st.name != 'ingest' or cur.get('clock') == clock_sig)
     if not done and st.soft_deps:                                                                       # a NEW item waits for its soft dependencies (they are not in the key, so finished work stays valid)
-        wait = [d for d in st.soft_deps if d in cfg.get('stages', []) and state.get(d, {}).get('status') != 'ok']
+        wait = [d for d in st.soft_deps if d in cfg.get('stages', []) and (active is None or d in active) and state.get(d, {}).get('status') != 'ok']       # only for stages this worker is also running
         if wait: return False, key, wait
     return done, key, []
 
@@ -240,24 +264,29 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
 
     result = {}; tried = set(); L(f'worker started: {len(cl)} clips, stages {names}')
     while max_items is None or len(result) < max_items:
-        picked = None
+        picked = None; waiting = []                                                                       # waiting: when items that failed for now may be tried again
         for name in names:
             st = STAGES[name]
             for n, c in enumerate(cl, 1):
                 if (c.id, name) in tried: continue
                 cap = resources.STAGE_MAX_CONCURRENT.get(name)
                 if cap and _stage_count(race, name) >= cap: break                                               # a heavy stage runs once at a time: look at the next stage
-                state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id))
+                state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id), names)
                 if done or blocked: continue
+                cur = state.get(name) or {}
+                if cur.get('status') == 'retry' and cur.get('next_try_at', 0) > time.time(): waiting.append(cur['next_try_at']); continue       # failed for now: not before its time
                 if not claim(race, c.id, name): continue
                 if cap:                                                                                         # two workers may have claimed at the same moment: the earlier claims win
                     mine = sorted(active_claims(race), key=lambda x: (x[3], x[2])); mine = [x for x in mine if x[1] == name]
                     if not any(x[0] == c.id and x[2] == os.getpid() for x in mine[:cap]): release(race, c.id, name); continue
-                state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id))      # someone may have finished it between the look and the claim
+                state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id), names)      # someone may have finished it between the look and the claim
                 if done or blocked: release(race, c.id, name); continue
                 picked = (n, c, st, key); break
             if picked: break
-        if not picked: break
+        if not picked:
+            if waiting and max_items is None:                                                              # items are waiting to be retried: this worker stays and tries them when their time comes
+                time.sleep(min(max(min(waiting) - time.time(), 0.0), 5.0)); continue
+            break
         n, c, st, key = picked; name = st.name; tried.add((c.id, name))
         resources.wait_for_headroom(name, cfg, None, L)                                                            # enough free memory and an idle-enough machine for this stage
         ctx = Ctx(c, cfg, clip_dir(race, c.id), L); os.makedirs(ctx.dir, exist_ok=True); clock_sig = _sha(cfg.get('camera_clock')); t0 = time.time()
@@ -269,9 +298,17 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
             update_state(race, c.id, name, dict(status='ok', key=key, version=st.version, clock=clock_sig, fp=c.fingerprint, seconds=round(time.time() - t0, 1), at=dt.datetime.now().isoformat(timespec='seconds')))
             result[(c.id, name)] = 'ok'; L(f'[{n}/{len(cl)}] {c.id} {name}: ok ({time.time() - t0:.1f} s)')
         except Exception as e:
-            update_state(race, c.id, name, dict(status='failed', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=''.join(traceback.format_exception_only(type(e), e)).strip(), trace=traceback.format_exc()[-1500:]))
-            result[(c.id, name)] = 'failed'; L(f'[{n}/{len(cl)}] {c.id} {name}: FAILED {e!r}')
-            if fail_fast: release(race, c.id, name); raise
+            if fail_fast:
+                update_state(race, c.id, name, dict(status='failed', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=''.join(traceback.format_exception_only(type(e), e)).strip(), trace=traceback.format_exc()[-1500:]))
+                result[(c.id, name)] = 'failed'; release(race, c.id, name); raise
+            prev = load_state(race, c.id).get(name) or {}; kind, ent = retry.next_state(prev if prev.get('status') == 'retry' else None, e, getattr(e, 'retryable', True), getattr(e, 'progress', False), st.retries)
+            err = ''.join(traceback.format_exception_only(type(e), e)).strip()
+            if kind == 'retry':
+                update_state(race, c.id, name, dict(status='retry', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=err, **ent)); tried.discard((c.id, name)); result[(c.id, name)] = 'retry'
+                L(f"[{n}/{len(cl)}] {c.id} {name}: failed for now ({err[:160]}); retry {ent['attempts']} of {st.retries} after a {ent['wait_s']:.0f} s sleep")
+            else:
+                update_state(race, c.id, name, dict(status='failed', key=key, version=st.version, seconds=round(time.time() - t0, 1), error=err, trace=traceback.format_exc()[-1500:], **ent)); result[(c.id, name)] = 'failed'
+                why = 'not retryable' if not getattr(e, 'retryable', True) else 'after %d tries' % ent['attempts']; L(f'[{n}/{len(cl)}] {c.id} {name}: FAILED ({why}) {e!r}')
         finally:
             release(race, c.id, name)
     if not workers(race) or workers(race) == [os.getpid()]:

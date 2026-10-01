@@ -20,12 +20,13 @@ class Stage:
     default: bool = True      # part of the default `run`
     note: str = ''
     soft_deps: tuple = ()      # stages whose output is used when present and waited for before a NEW item starts (they do not enter the key: finished results stay valid)
+    retries: int = 2           # how many times a failed item is tried again (waiting longer each time; see pipeline/retry.py) before it counts as failed
     needs_track: bool = False  # uses the race GPS track: waits until one is set, and is redone when the track or the clip-to-track time alignment changes
 
 
-def stage(name, version, keys=(), deps=(), outputs=(), default=True, note='', needs_track=False, soft_deps=()):
+def stage(name, version, keys=(), deps=(), outputs=(), default=True, note='', needs_track=False, soft_deps=(), retries=2):
     def deco(fn):
-        STAGES[name] = Stage(name, version, fn, tuple(keys), tuple(deps), tuple(outputs), default, note, tuple(soft_deps), needs_track); ORDER.append(name); return fn
+        STAGES[name] = Stage(name, version, fn, tuple(keys), tuple(deps), tuple(outputs), default, note, tuple(soft_deps), retries, needs_track); ORDER.append(name); return fn
     return deco
 
 
@@ -106,6 +107,14 @@ def transcribe(ctx):
 def align(ctx):
     from strata360.audio.align import align_transcript
     ctx.write('alignment.json', ctx.stamped(align_transcript(audio_src(ctx), ctx.read('transcript.json'), ctx.cfg['align_languages'])))
+
+
+@stage('transcript_check', 1, keys=('transcript_check',), outputs=('transcript_check.json',), deps=('transcribe', 'audio_clean'), default=False, retries=100,
+       note='checks the transcript against the cleaned audio with Gemini (speech-only excerpts of 30-60 s, several checks each, only fixes they agree on are kept) and stores them as corrections. Paid API calls: opt-in, every reply is cached on disk')
+def transcript_check(ctx):
+    from strata360.analysis import transcript_fix as TF
+    c = ctx.cfg.get('transcript_check') or {}
+    ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), thinking=c.get('thinking', 'low'), log=ctx.log)))
 
 
 @stage('exposure', 1, keys=('exposure_every_frames',), outputs=('exposure.json',), deps=('ingest',),

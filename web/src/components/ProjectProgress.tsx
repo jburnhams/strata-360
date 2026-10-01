@@ -3,6 +3,7 @@ import { usePoll } from '../usePoll'
 import { useState } from 'react'
 import RedoDialog from './RedoDialog'
 import { PanelSkeleton } from './Skeleton'
+import Health from './Health'
 
 const NEEDS: Record<string, string> = { wearer_profile: 'choose which face is you', camera_clock: 'confirm the camera clock', race_track: 'add the race track (a Garmin .fit or a .gpx): the places stage is paused until then' }
 const LABEL: Record<string, string> = { new: 'New', processing: 'Processing…', needs_input: 'Waiting for you', complete: 'Complete' }
@@ -27,6 +28,7 @@ export default function ProjectProgress({ folder }: { folder: string }) {
             <span title={s.note}>{s.name}{s.waiting && <span className="ml-1 text-xs text-amber-600" title={`paused: waiting for ${s.waiting}`}>⏸</span>}</span><Bar pct={(100 * s.done) / Math.max(s.total, 1)} />
             <span className="text-stone-500">{s.done}/{s.total}{mins(s.eta_s)} <button className="ml-1 underline" onClick={() => setRedo(s.name)}>redo</button></span>
           </div>
+          <Health h={s.retry} className="ml-[122px]" />
           {!!s.running?.length && (
             <div className="mt-1 flex flex-wrap gap-1.5 pl-[122px]">
               {s.running.map(r => (
