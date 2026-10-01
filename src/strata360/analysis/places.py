@@ -6,7 +6,8 @@ Data comes from OpenStreetMap through two public web services (the only stage th
 Both endpoints are configurable (`places` in race.json) so a self-hosted server can replace them. The public services ask for at most one request per second and an identifying User-Agent, so
 all workers share one rate limiter (a lock file in the project's cache) and every answer is cached on disk by rounded position (about 11 m), so a repeat costs nothing.
 Clips outside the race track (before the start, after the finish) get no positions and say so."""
-import datetime as dt, fcntl, hashlib, json, math, os, time, urllib.parse, urllib.request
+import datetime as dt, hashlib, json, math, os, time, urllib.parse, urllib.request
+from strata360 import oslib
 
 SCHEMA_VERSION = 1
 UA = 'strata360-personal-race-film/0.1 (local tool; reverse geocoding of my own race track)'
@@ -15,13 +16,10 @@ MIN_GAP_S = 1.1
 
 def _throttle(cache_dir):
     os.makedirs(cache_dir, exist_ok=True); p = os.path.join(cache_dir, '.last')
-    with open(p, 'a+') as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            f.seek(0); last = float(f.read().strip() or 0); wait = last + MIN_GAP_S - time.time()
-            if wait > 0: time.sleep(wait)
-            f.seek(0); f.truncate(); f.write(str(time.time())); f.flush()
-        finally: fcntl.flock(f, fcntl.LOCK_UN)
+    with open(p, 'a+') as f, oslib.file_lock(f):
+        f.seek(0); last = float(f.read().strip() or 0); wait = last + MIN_GAP_S - time.time()
+        if wait > 0: time.sleep(wait)
+        f.seek(0); f.truncate(); f.write(str(time.time())); f.flush()
 
 
 def _get(url, cache_dir, key, data=None, timeout=40):

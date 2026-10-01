@@ -1,5 +1,6 @@
 """Resource guards: extra workers only with lots of free memory, lowest priority, heavy stages one at a time. Run: .venv/bin/python tests/test_resources.py"""
 import os, subprocess, sys, tempfile
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src'))
 from strata360.pipeline import resources as R, runner, config
 
@@ -28,6 +29,7 @@ def test_heavy_stages_have_a_concurrency_cap_and_light_ones_do_not():
     assert runner.claim(f, 'B', 'scenes')                                                                                            # claims themselves do not enforce the cap (the worker loop does)
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='nice values do not exist on Windows (oslib.lower_priority uses a priority class; see test_oslib)')
 def test_low_priority_really_lowers_the_niceness():
     code = "import sys; sys.path.insert(0, %r); import os; from strata360.pipeline import resources as R; R.low_priority(); print(os.nice(0), os.environ['OMP_NUM_THREADS'])" % os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src')
     out = subprocess.run([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True).stdout.split(); assert out[1] == '2', out

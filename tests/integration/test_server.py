@@ -1,5 +1,6 @@
 """Server path safety and project-folder convention. Run: .venv/bin/python tests/test_server.py"""
 import os, sys, tempfile
+import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src'))
 from strata360.server import app
 from strata360.pipeline import config
@@ -8,7 +9,9 @@ from strata360.pipeline import config
 def make():
     base = os.path.realpath(tempfile.mkdtemp()); root = os.path.join(base, 'home'); out = os.path.join(base, 'outside')
     os.makedirs(os.path.join(root, 'race1')); os.makedirs(out); open(os.path.join(out, 'secret.txt'), 'w').write('x')
-    open(os.path.join(root, 'race1', 'CAM_20260101000000_0001_D.OSV'), 'wb').write(b'x'); os.symlink(out, os.path.join(root, 'escape'))
+    open(os.path.join(root, 'race1', 'CAM_20260101000000_0001_D.OSV'), 'wb').write(b'x')
+    try: os.symlink(out, os.path.join(root, 'escape'))
+    except OSError: pytest.skip('cannot create symlinks here (Windows without the privilege)')
     return root, out
 
 

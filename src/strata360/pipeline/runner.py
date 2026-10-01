@@ -6,8 +6,9 @@ is left. The first worker therefore loops through everything; a worker started l
 taken over. The per-clip state file (`stages.json`) is updated under a file lock so workers finishing different stages of one clip never overwrite each other.
 
 `clear` removes the recorded status of a stage (and, by default, of every stage that depends on it) so it will be processed again."""
-import atexit, datetime as dt, fcntl, fnmatch, hashlib, json, os, time, traceback
+import atexit, datetime as dt, fnmatch, hashlib, json, os, time, traceback
 from contextlib import contextmanager
+from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod, resources, retry
 from strata360.pipeline.stages import STAGES, ORDER, Ctx
 
@@ -39,10 +40,8 @@ def save_state(race, clip_id, state):
 @contextmanager
 def state_lock(race, clip_id):
     d = clip_dir(race, clip_id); os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, '.state.lock'), 'w') as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try: yield
-        finally: fcntl.flock(f, fcntl.LOCK_UN)
+    with open(os.path.join(d, '.state.lock'), 'a+') as f, oslib.file_lock(f):
+        yield
 
 
 def update_state(race, clip_id, name, entry):
@@ -55,9 +54,7 @@ def update_state(race, clip_id, name, entry):
 
 # ---- claims and workers ------------------------------------------------------------------------------------------------------------------------------------------------
 def _alive(pid):
-    try: os.kill(int(pid), 0); return True
-    except (ProcessLookupError, ValueError): return False
-    except PermissionError: return True
+    return oslib.pid_alive(pid)
 
 
 def _claims(race): return os.path.join(config.race_dir(race), '.claims')
@@ -115,12 +112,7 @@ def active_items(race):
 
 def kill_tree(pid, sig=15):
     """Signal a worker and every process it started (a stage may have launched ffmpeg or a model process); errors are ignored."""
-    import subprocess
-    try: kids = subprocess.run(['pgrep', '-P', str(pid)], stdout=subprocess.PIPE, text=True).stdout.split()
-    except OSError: kids = []
-    for k in kids: kill_tree(int(k), sig)
-    try: os.kill(int(pid), sig)
-    except OSError: pass
+    oslib.kill_tree(pid, sig)
 
 
 def runnable_count(race):

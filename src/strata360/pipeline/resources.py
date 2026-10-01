@@ -8,7 +8,8 @@ Rules (all applied by every worker, whoever started it):
   * the heavy stages (the vision model, detectors, proxy rendering, speech recognition) never run twice at the same time: parallelism is only across different stages;
   * the detectors use the CPU rather than the GPU by default, so the screen stays responsive (set STRATA_GPU=1 to allow the GPU).
 The numbers can be changed in race.json under `resources`; STRATA_NO_RESOURCE_LIMITS=1 turns the waiting off (the integration tests set it: a CI runner with little free memory would otherwise wait for ever)."""
-import ctypes, ctypes.util, os, re, subprocess, time
+import ctypes, ctypes.util, os, re, subprocess, sys, time
+from strata360 import oslib
 
 DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
@@ -24,6 +25,9 @@ def cfg_values(cfg):
 
 def mem_available_gb():
     """Memory that can be used without swapping, in GB: free + inactive + speculative + purgeable pages (macOS `vm_stat`); falls back to /proc/meminfo, else a large number."""
+    if oslib.WIN:
+        try: return oslib.windows_available_gb()
+        except Exception: return 1e3
     try:
         out = subprocess.run(['vm_stat'], stdout=subprocess.PIPE, text=True, timeout=5).stdout
         page = int(re.search(r'page size of (\d+) bytes', out).group(1)); n = lambda k: int(re.search(rf'{k}:\s+(\d+)', out).group(1))
@@ -35,8 +39,8 @@ def mem_available_gb():
 
 def busy(cfg=None):
     """True when the 1-minute load average is above the allowed share of the CPUs."""
-    try: return os.getloadavg()[0] > (os.cpu_count() or 4) * cfg_values(cfg)['busy_load_fraction']
-    except OSError: return False
+    load = oslib.load_average()
+    return load is not None and load > (os.cpu_count() or 4) * cfg_values(cfg)['busy_load_fraction']
 
 
 def may_start_extra_worker(n_running, cfg=None):
@@ -53,11 +57,11 @@ def may_start_extra_worker(n_running, cfg=None):
 def low_priority(cfg=None):
     """Lowest priority for this process and everything it starts. Call once at the start of a worker."""
     v = cfg_values(cfg); n = str(int(v['threads']))
-    try: os.nice(19)
-    except OSError: pass
-    try:                                                                                              # macOS: the background task class (PRIO_DARWIN_PROCESS = 4, PRIO_DARWIN_BG = 0x1000)
-        libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True); libc.setpriority(4, 0, 0x1000)
-    except Exception: pass
+    oslib.lower_priority(19)
+    if sys.platform == 'darwin':
+        try:                                                                                          # macOS: the background task class (PRIO_DARWIN_PROCESS = 4, PRIO_DARWIN_BG = 0x1000)
+            libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True); libc.setpriority(4, 0, 0x1000)
+        except Exception: pass
     for k in ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS'): os.environ.setdefault(k, n)
     try:
         import cv2; cv2.setNumThreads(int(n))
