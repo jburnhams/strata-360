@@ -78,7 +78,7 @@ def make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt',
         os.remove(out); out = final
     side = dict(schema_version=1, tool='strata360.make_proxy', source_file=os.path.basename(osv), proxy_file=os.path.basename(out),
                 projection='equirectangular', layout='standard: centre column = world +Y (DJI upright yaw datum), lon increases right, lat up',
-                frame='upright / world-locked: rotation applied per frame = B^T R(q)^T P^T (see progress.md); quaternion = telemetry row of source_frame',
+                frame='upright / world-locked: rotation applied per frame = B^T R(q)^T P^T (see docs/progress.md); quaternion = telemetry row of source_frame',
                 size=[W, H], nominal_fps=nominal_fps, every_n_source_frames=every, codec=('%s %s + aac' % (venc[1], bitrate)) if encoder == 'h264' else ('%s %s' % (venc[1], bitrate)) if encoder == 'vt' else ('x265 crf %d' % crf),
                 profile='main 8-bit hvc1, bt709 tv', seconds=round(time.time() - t0, 1),
                 time_note='t_s is clip-relative seconds from the source frame pts (authoritative; the mp4 timestamps are nominal and drift by up to '

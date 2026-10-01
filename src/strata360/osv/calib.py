@@ -40,7 +40,7 @@ _DATA = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'data')
 
 
 def imu_offsets():
-    """(P, B): constant matrices tying the IMU quaternion to DJI's upright frame and to the lens body frame (Osmo 360; fitted in M0, see progress.md)."""
+    """(P, B): constant matrices tying the IMU quaternion to DJI's upright frame and to the lens body frame (Osmo 360; fitted in M0, see docs/progress.md)."""
     return np.load(_os.path.join(_DATA, 'osmo360_imu_offsets.npy'))
 
 
