@@ -66,12 +66,13 @@ def seg_words(t0, text):
     return dict(t0=t0, t1=t, lang='en', text=text, text_en=text, words=out)
 
 
-def test_excerpts_are_speech_only_30_to_60_seconds_cut_at_natural_pauses():
+def test_excerpts_are_speech_only_cut_at_natural_pauses_with_the_limits_given_and_one_to_two_minutes_by_default():
     # phrases of 5 s every 5.5 s for 150 s (continuous speech), then a 10 s silence, then 12 s more
     segs = [seg_words(i * 5.5, 'one two three four five six seven eight nine ten.' if i % 3 == 2 else 'one two three four five six seven eight nine ten') for i in range(27)]
     last = segs[-1]['t1']; segs += [seg_words(last + 10, 'after the silence we carry on talking for a while longer. yes indeed it is so')]
     for s in segs: s['t1'] = s['words'][-1]['t1']
-    ch = TF.chunks(dict(segments=segs), 400.0)
+    ch = TF.chunks(dict(segments=segs), 400.0, min_s=30.0, max_s=60.0)
+    d = TF.chunks(dict(segments=segs), 400.0); assert all(c['t1'] - c['t0'] <= 120.0 + 1e-6 for c in d) and d[0]['t1'] - d[0]['t0'] >= 60.0 and len(d) < len(ch)             # the default: 60-120 s a request
     assert len(ch) >= 4 and all(c['t1'] - c['t0'] <= 60.0 + 1e-6 for c in ch) and ch[-1]['t0'] > last + 9 and sum(len(c['segs']) for c in ch) == len(segs)           # the silence is not sent; nothing lost
     assert all(c['a1'] - c['a0'] <= 61.1 for c in ch) and all(abs((c['t0'] - c['a0']) - 0.5) < 1e-6 or c['a0'] == 0 for c in ch)                                    # half a second of padding
     assert all(c['t1'] - c['t0'] >= 30.0 for c in ch[:-2]), [(c['t0'], c['t1']) for c in ch]                                                                    # pieces are 30-60 s (the last of a stretch may be shorter)
