@@ -92,6 +92,62 @@ def test_a_run_of_words_becomes_one_correction_and_the_rest_are_hidden_with_timi
     assert [(w['t0'], w['t1']) for w in s['words']] == [(0.0, 0.4), (0.5, 0.9), (1.0, 1.4), (1.5, 1.9), (2.0, 2.4)] and s['words'][3]['edit']['orig'] == 'audio'          # every word keeps its own timing
 
 
+def _fx(w, to='x', th=None): return dict(seg=0, word=w, to=to, **({'through': th} if th is not None else {}))
+
+
+def test_decide_accepts_fixes_most_checks_agree_on_and_keeps_partial_support_undecided():
+    calls = [('a', [_fx(1, 'sane'), _fx(5, 'maybe')]), ('b', [_fx(1, 'sane')]), ('c', [_fx(1, 'sane'), _fx(5, 'maybe'), _fx(9, 'once')]), ('d', [_fx(1, 'sane')]), ('e', [_fx(1, 'sane')]), ('f', [])]
+    acc, und, tally = TF.decide(calls); assert acc == [(0, 1, 1, 'sane')] and tally[(0, 1, 1, 'sane')]['votes'] == 5 and len(tally[(0, 1, 1, 'sane')]['models']) == 5
+    assert und == [(0, 5, 5, 'maybe')]                                                                  # 2 of 6: some support, not enough yet
+    assert (0, 9, 9, 'once') not in und                                                                 # 1 of 6: too little support to keep waiting for
+
+
+def test_the_ensemble_stops_when_settled_spreads_over_models_and_replays_from_the_cache():
+    import random
+    pool = ['gemini:m1', 'gemini:m2', 'gemini:m3']; seen = []; tr = dict(segments=[seg_words(0, 'a b c d e f g h')]); ch = dict(segs=[0], a0=0.0, a1=5.0)
+    def fake(folder, clip, tr, ch, au, ctx, provider='x', model=None, thinking='low', run=0, cache_dir=None, log=None):
+        seen.append((model, run)); return [_fx(1, 'sane')] + ([_fx(4, 'noise%d' % (len(seen) % 5))] if len(seen) % 2 else []), dict(cached=False)                # one stable fix, one that keeps changing
+    old = TF.check_chunk; TF.check_chunk = fake; TF._DOWN.clear()
+    try:
+        r = TF.ensemble_excerpt('f', 'c', tr, ch, 'au', '', None, pool, min_calls=6, max_calls=18, patience=3, log=lambda *a: None)
+    finally: TF.check_chunk = old
+    assert r['stopped'] == 'settled' and 6 <= r['calls'] <= 12 and [(a['word'], a['to']) for a in r['accepted']] == [(1, 'sane')], r
+    assert max(r['models'].values()) - min(r['models'].values()) <= 1 and set(r['models']) == set(pool)                       # an even mixture of the models
+    assert all((m.split(':')[1], k) in seen for m, n in r['models'].items() for k in range(n)) and len({s for s in seen}) == len(seen)       # each model's k-th ask is a separate cacheable call
+
+
+def test_the_ensemble_stops_at_the_cap_when_answers_never_settle_and_skips_models_that_are_down():
+    pool = ['gemini:ok', 'gemini:busy', 'gemini:gone']; tr = dict(segments=[seg_words(0, 'a b c d e f g h')]); ch = dict(segs=[0], a0=0.0, a1=5.0); n = [0]
+    class Busy(Exception): retryable = True
+    class Gone(Exception): retryable = False
+    def fake(folder, clip, tr, ch, au, ctx, provider='x', model=None, thinking='low', run=0, cache_dir=None, log=None):
+        if model == 'busy': raise Busy('HTTP 429 quota')
+        if model == 'gone': raise Gone('HTTP 404 no longer available')
+        n[0] += 1; return ([_fx(1, 'q')] if n[0] % 5 in (1, 2) else []), dict(cached=False)                                   # a fix in 40% of the checks: never accepted, never dropped: it does not settle
+    old = TF.check_chunk; TF.check_chunk = fake; TF._DOWN.clear()
+    try: r = TF.ensemble_excerpt('f', 'c', tr, ch, 'au', '', None, pool, min_calls=4, max_calls=9, log=lambda *a: None)
+    finally: TF.check_chunk = old
+    assert r['stopped'] == 'max_calls' and r['calls'] == 9 and r['models'] == {'gemini:ok': 9} and r['accepted'] == [] and r['undecided']
+    TF._DOWN.clear(); n[0] = 0; old = TF.check_chunk; TF.check_chunk = lambda *a, **k: ([], dict(cached=False))
+    try: r2 = TF.ensemble_excerpt('f', 'c', tr, ch, 'au', '', None, ['gemini:ok'], min_calls=4, max_calls=9, log=lambda *a: None)
+    finally: TF.check_chunk = old
+    assert r2['stopped'] == 'settled' and r2['calls'] == 4 and r2['accepted'] == []                                       # nothing to fix, consistently: settled at once
+
+
+def test_when_every_model_is_busy_the_stage_is_asked_to_retry_and_what_was_done_counts_as_progress():
+    from strata360.pipeline.retry import RetryLater
+    pool = ['gemini:a', 'gemini:b']; tr = dict(segments=[seg_words(0, 'a b c d')]); ch = dict(segs=[0], a0=0.0, a1=5.0); n = [0]
+    class Busy(Exception): retryable = True
+    def fake(folder, clip, tr, ch, au, ctx, provider='x', model=None, thinking='low', run=0, cache_dir=None, log=None):
+        n[0] += 1
+        if n[0] > 2: raise Busy('503')
+        return [_fx(1, 'q')], dict(cached=False)
+    old = TF.check_chunk; TF.check_chunk = fake; TF._DOWN.clear()
+    try: TF.ensemble_excerpt('f', 'c', tr, ch, 'au', '', None, pool, min_calls=6, log=lambda *a: None); assert False
+    except RetryLater as e: assert e.progress and 'done and kept' in str(e)
+    finally: TF.check_chunk = old; TF._DOWN.clear()
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for fn in fns:

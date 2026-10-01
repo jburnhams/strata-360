@@ -189,7 +189,63 @@ def vote(runs, min_votes=2):
     return sorted(out, key=lambda f: (f['seg'], f['word']))
 
 
-def check_clip(folder, clip, runs=3, min_votes=2, thinking='low', provider=None, model=None, workers=4, progress=None, log=print):
+POOL = ['gemini:gemini-3.8-flash', 'gemini:gemini-3.7-flash', 'gemini:gemini-3.6-flash', 'gemini:gemini-3.5-flash', 'gemini:gemini-3-flash-preview']       # free-key models; 'vertex:gemini-3.1-pro-preview' (paid) can be added
+_DOWN = {}                                                                                   # model -> time until which it is not asked (quota or overload), shared by the excerpts of a run
+
+
+def _fkey(f):
+    return (int(f['seg']), int(f['word']), int(f.get('through', f['word'])), ' '.join(str(f['to']).split()).lower())
+
+
+def decide(calls, accept=0.5, min_votes=3):
+    """What a set of checks (each a list of fixes) settles. Returns (accepted, undecided, tally): a fix is ACCEPTED when at least `min_votes` checks and at least `accept` of all checks gave it (when
+    several replacements of the same words compete, the one with most votes; overlapping fixes: the one with most votes); UNDECIDED when it has some support but not enough yet; `tally` maps
+    each fix to (votes, models that gave it)."""
+    n = len(calls); tally = {}
+    for model, fixes in calls:
+        seen = set()
+        for f in fixes or []:
+            try: k = _fkey(f)
+            except (KeyError, ValueError, TypeError): continue
+            if k in seen: continue
+            seen.add(k); e = tally.setdefault(k, dict(votes=0, models=set(), why=[], frm=f.get('from'), to=' '.join(str(f['to']).split()))); e['votes'] += 1; e['models'].add(model)
+            if f.get('why'): e['why'].append(str(f['why']))
+    accepted = []; taken = set(); undecided = []
+    for k, e in sorted(tally.items(), key=lambda kv: (-kv[1]['votes'], kv[0])):
+        words = {(k[0], w) for w in range(k[1], k[2] + 1)}
+        if e['votes'] >= min_votes and e['votes'] / max(n, 1) >= accept and not (words & taken): accepted.append(k); taken |= words
+        elif e['votes'] >= 1 and not (words & taken): undecided.append(k)
+    return accepted, [k for k in undecided if tally[k]['votes'] / max(n, 1) >= 0.2], tally
+
+
+def ensemble_excerpt(folder, clip, tr, ch, au, ctx, cache, pool, thinking='low', min_calls=6, max_calls=18, accept=0.5, min_votes=3, patience=3, seed='1', log=print, progress=None):
+    """Keep asking a random model of `pool` about ONE excerpt until the answer is settled: at least `min_calls` checks, and the accepted fixes unchanged for the last `patience` checks, and no fix left
+    with partial support (or `max_calls` is reached). Replies are cached per (model, k-th ask of that model), so a re-run replays the same sequence for free. A model that is over quota or busy is left
+    alone for a while; when none can be asked, raises RetryLater (the stage retries later). Returns dict(accepted, calls, models, tally, stopped, undecided)."""
+    import random, time
+    from strata360.pipeline.retry import RetryLater
+    rng = random.Random(f'{clip}:{ch["a0"]}:{seed}'); calls = []; used = {m: 0 for m in pool}; history = []; made = 0; errors = []
+    while True:
+        accepted, undecided, tally = decide(calls, accept, min_votes); history.append(tuple(sorted(accepted)))
+        if len(calls) >= min_calls and len(history) > patience and len(set(history[-(patience + 1):])) == 1 and not undecided: stopped = 'settled'; break
+        if len(calls) >= max_calls: stopped = 'max_calls'; break
+        ready = [m for m in pool if _DOWN.get(m, 0) < time.time()]
+        if not ready: raise RetryLater('every model is over quota or busy for now (' + (errors[-1] if errors else 'waiting') + f'); {len(calls)} checks of this excerpt are done and kept', progress=made > 0)
+        low = min(used[m] for m in ready); m = rng.choice([x for x in ready if used[x] == low])                      # a random model, the least used first: the mixture stays even
+        prov, model = m.split(':', 1) if ':' in m else ('gemini', m)
+        try: fx, info = check_chunk(folder, clip, tr, ch, au, ctx, provider=prov, model=model, thinking=thinking, run=used[m], cache_dir=cache)
+        except Exception as e:
+            msg = str(e)[:140]; errors.append(msg); log(f'{clip} {model}: {type(e).__name__}: {msg}')
+            if getattr(e, 'retryable', False): _DOWN[m] = time.time() + 90                                           # busy or over quota: not for a minute and a half
+            else: _DOWN[m] = time.time() + 3600; log(f'{model} will not be used for an hour (not available to this key)')
+            continue
+        used[m] += 1; calls.append((m, fx)); made += 0 if info.get('cached') else 1; progress and progress(len(calls), max_calls)
+    return dict(accepted=[dict(seg=k[0], word=k[1], through=k[2], to=tally[k]['to'], **{'from': tally[k]['frm']}, votes=tally[k]['votes'], models=len(tally[k]['models']), checks=len(calls),
+                              why=(tally[k]['why'][0] if tally[k]['why'] else 'misheard') + f" (Gemini, from the audio: {tally[k]['votes']} of {len(calls)} checks agree, {len(tally[k]['models'])} different models)") for k in accepted],
+                calls=len(calls), models={m: used[m] for m in pool if used[m]}, stopped=stopped, undecided=[dict(seg=k[0], word=k[1], through=k[2], to=tally[k]['to'], votes=tally[k]['votes']) for k in undecided], new_calls=made)
+
+
+def check_clip(folder, clip, runs=3, min_votes=2, thinking='low', provider=None, model=None, workers=4, progress=None, log=print, pool=None, **ens):
     """The whole audio check of ONE clip: its speech-only excerpts, each checked `runs` times (replies cached on disk, so only calls never made before are paid for), the fixes at least `min_votes`
     checks agree on stored as Gemini corrections. Returns a document for the stage's output: settings, per-excerpt results, kept corrections, and how many calls were made or reused."""
     from concurrent.futures import ThreadPoolExecutor
@@ -199,7 +255,9 @@ def check_clip(folder, clip, runs=3, min_votes=2, thinking='low', provider=None,
     d = os.path.join(config.race_dir(folder), 'clips', clip); tr = json.load(open(os.path.join(d, 'transcript.json'))); cj = json.load(open(os.path.join(d, 'clip.json'))); dur = cj['video']['source_frames'] / cj['video']['nominal_fps']
     au = next((os.path.join(d, n) for n in ('audio_clean.flac', 'audio_original.flac') if os.path.exists(os.path.join(d, n))), None)
     if au is None: raise RuntimeError('the clip has no stored audio yet (the audio_extract stage)')
-    chs = chunks(tr, dur); doc = dict(settings=dict(runs=runs, min_votes=min_votes, thinking=thinking, model=model, prompt_version=PROMPT_VERSION, audio=os.path.basename(au)), excerpts=[], kept=[], calls=dict(made=0, reused=0), tokens=dict(input=0, output=0))
+    chs = chunks(tr, dur)
+    if pool: return check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, **ens)
+    doc = dict(settings=dict(runs=runs, min_votes=min_votes, thinking=thinking, model=model, prompt_version=PROMPT_VERSION, audio=os.path.basename(au)), excerpts=[], kept=[], calls=dict(made=0, reused=0), tokens=dict(input=0, output=0))
     if not chs: TE.set_gemini(d, [], model=model); return doc
     ctx = TG.context(folder, clip); cache = os.path.join(d, 'gemini_checks'); jobs = [(i, r) for i in range(len(chs)) for r in range(runs)]; res = {i: [None] * runs for i in range(len(chs))}; n = [0]
     def one(job):
@@ -232,3 +290,24 @@ def run_audio(folder, clips=None, **kw):
         if not os.path.exists(d + 'transcript.json') or (clips and not any(c in clip for c in clips)): continue
         out[clip] = check_clip(folder, clip, **kw).get('stored', 0)
     return out
+
+
+def check_clip_ensemble(folder, clip, tr, chs, au, d, pool, thinking, workers, progress, log, **ens):
+    """The adaptive version of check_clip: every excerpt is checked by a random mixture of the models in `pool` until its answer is settled (see ensemble_excerpt)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from strata360.analysis import transcribe_gemini as TG
+    doc = dict(settings=dict(pool=pool, thinking=thinking, prompt_version=PROMPT_VERSION, audio=os.path.basename(au), **{k: v for k, v in ens.items()}), excerpts=[], kept=[], calls=dict(made=0, reused=0), tokens=dict(input=0, output=0))
+    if not chs: TE.set_gemini(d, [], model='ensemble'); return doc
+    ctx = TG.context(folder, clip); cache = os.path.join(d, 'gemini_checks'); res = [None] * len(chs); errs = []
+    def one(i):
+        try: res[i] = ensemble_excerpt(folder, clip, tr, chs[i], au, ctx, cache, pool, thinking=thinking, log=log, **ens)
+        except Exception as e: errs.append(e)
+    with ThreadPoolExecutor(min(workers, len(chs))) as ex: list(ex.map(one, range(len(chs))))
+    for i, r in enumerate(res):
+        if r: doc['excerpts'].append(dict(segs=[chs[i]['segs'][0], chs[i]['segs'][-1]], checks=r['calls'], models=r['models'], stopped=r['stopped'], kept=len(r['accepted']), undecided=r['undecided'])); doc['kept'].extend(r['accepted']); doc['calls']['made'] += r['new_calls']; doc['calls']['reused'] += r['calls'] - r['new_calls']
+    if errs:                                                                              # some excerpt could not be settled for now: nothing is stored until all are; what was asked is cached
+        from strata360.pipeline.retry import RetryLater
+        fatal = [e for e in errs if not isinstance(e, RetryLater)]
+        if fatal: raise fatal[0]
+        raise RetryLater(str(errs[0]), progress=any(getattr(e, 'progress', False) for e in errs) or doc['calls']['made'] > 0)
+    doc['stored'] = TE.set_gemini(d, doc['kept'], model=f'ensemble of {len(pool)} models'); return doc
