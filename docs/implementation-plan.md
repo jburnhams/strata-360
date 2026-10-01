@@ -106,7 +106,20 @@ How it works: every window of the plan comes from one input clip, so its UTC spa
 - **Time map.** New `render/timemap.py`: from the plan and the pieces of `render/film.py`, write `<final>/timemap.json` and `timemap.csv`: per window, film in/out frame, clip, source in/out time, UTC in/out (rational), and the transition regions with both clips' UTC.
 - **Overlay layer per window.** For each window (plus its transition handles, so a dissolve has overlay on both sides), run the overlay tool against the race track over that window's UTC span and produce **transparent PNG frames** at the film's size and rate (the fork can already output just the overlay as PNGs). Each window's frames are written to a cache folder and read by the compositor; if PNG writing is slow, ask the fork for a frame stride or a single-file alpha format later.
 - **Composite and join.** `render/final.py` composites each window's layer onto its picture piece before encoding (one encode, no extra generation loss), cross-fading the two layers inside a dissolve or dip just like the picture, then joins the pieces into `film.mp4` as today. The overlay layers are cached per window (key: UTC span, size, rate, overlay layout, track file signature), so re-planning only redoes changed windows.
-- **Settings.** Overlay layout (the overlay tool's layout file: the user's existing configuration, to be supplied; until then a minimal map-only layout for tests), on/off, and position, in `race.json` `overlay` and the Final film panel; the overlay tool's location in `~/.strata360/server.json` (it lives in its own virtual environment, `.venv-overlay`). `doctor` checks it.
+- **The user's overlay, as run today** (1 Oct), per clip MP4, from the fork's checkout with its own virtual environment:
+  ```
+  python3 bin/gopro-dashboard.py --font trebuc.ttf --gpx track.fit --gpx-merge OVERWRITE --profile mac \
+      --map-style tf-outdoors --map-api-key $THUNDERFOREST_API_KEY --use-gpx-only \
+      --layout xml --layout-xml layout.xml --full-timeseries-journey --video-time-start mp4-created IN.mp4 OUT.mp4
+  ```
+  The layout is in the repo as `scripts/overlay/layout.xml`: date and time (top left), distance in km, pace (min/km), slope %, altitude, heart rate, the whole-race journey map (top right, 256 px, 60% opacity) and a moving map below it (zoom 14, red outline). Notes for A2:
+  - **4K.** The layout is drawn for 1920x1080 (its right-hand items sit at x 1900, its bottom row at y 980). For the 3840x2160 film, generate a scaled copy (every `x`, `y`, `size`, `width`, `height`, `corner_radius` and `cr` doubled) rather than upscaling the PNGs, so the text stays sharp; `layout_scale` in `race.json` for other sizes.
+  - **Times per window.** Today the tool finds the time from the input MP4 (`--video-time-start mp4-created`). For PNG output per window, either give it a stand-in MP4 per window (a few kilobytes: black, the window's duration and rate, `creation_time` and the exact-UTC comment set, as `flat.py --start-utc` writes) so nothing in the fork changes, or add explicit start and end UTC arguments to the fork. Start with the stand-in.
+  - **Track.** `--gpx` is the project's race track (`<project>/track.fit`); `--gpx-merge OVERWRITE` and `--full-timeseries-journey` (fork branch) as above, so the journey map shows the whole race while each window shows its own position.
+  - **Map key and tiles.** The Thunderforest key (`tf-outdoors`) is a secret: it goes in the gitignored `secrets.env` as `THUNDERFOREST_API_KEY` (same rules as the language-model keys: environment first, never in the repo, the project or a log), and is passed to the tool from there. Map tiles are fetched from Thunderforest for the areas the route passes through: like `places`, this sends location information off the machine; tiles are cached (`--cache-dir`) so each area is fetched once.
+  - **Fonts and icons.** `trebuc.ttf` (Trebuchet MS, present on macOS) with a fallback to the fork's default font elsewhere; the icons (`mountain.png`, `heartbeat.png`, `slope-triangle.png`) come with the fork.
+  - `--profile mac` and `--debug-metadata` only matter for the tool's own video encode and logging; with PNG output they are dropped.
+- **Settings.** Overlay layout file (default `scripts/overlay/layout.xml`), on/off, font, map style, in `race.json` `overlay` and the Final film panel; the fork's location in `~/.strata360/server.json` (it lives in its own virtual environment). `doctor` checks the fork, its environment, the font and that a map key is set.
 - **Done when:** integration test on the synthetic OSV with a synthetic GPX and a stub overlay command (writes a layer whose pixels encode the UTC it was asked for): a two-window plan with a dissolve renders one file in which each window shows its own clip's UTC to within one frame, the dissolve blends both, and the frame rate equals the source's (and half of it with `half_rate`). Time-map maths unit-tested (monotonic, every output frame covered once). One real check on Legends: the overlay's position marker matches the place seen on screen at three known points (the start line, an aid station, a village sign).
 
 ### A3. Final sound mix (M)
@@ -203,7 +216,7 @@ Suggested sequence: A1, then the V milestone in order (V5 is the largest piece),
 ## Questions for you
 Answered on 1 Oct: D2, D3, D6, D7, the docs move, and the V4/V5/D7 defaults (0.4 s between lines, 0.5 s lead-in and lead-out, snapping up to half a beat, off-beat cut reported when no beat fits, up to 8 s of music lost to a fade, up to 4 s of silence before the music and 6 s after).
 
-Answered on 1 Oct as well: the overlay fork outputs transparent PNGs (A2); clips are dropped only if they must be (D9); one track, a target length, or automatic length (D8); GPU preferred (D4).
+Answered on 1 Oct as well: the overlay fork outputs transparent PNGs, and its layout and command line (A2); clips are dropped only if they must be (D9); one track, a target length, or automatic length (D8); GPU preferred (D4).
 
 Still open:
-1. **Overlay configuration (A2):** the layout you have used before (you will find it); until then tests use a map-only stand-in.
+None; the overlay configuration arrived on 1 Oct (A2).
