@@ -46,6 +46,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/FolderBrowser.tsx` | 100% | done |
 | `src/components/NoteBox.tsx` | 100% | done |
 | `src/components/Health.tsx` | 100% | done |
+| `src/components/MusicPanel.tsx` | 100% | done |
 | `src/components/ProjectProgress.tsx` | 100% | done |
 | `src/components/RedoDialog.tsx` | 100% | done |
 | `src/components/Phrase.tsx` | 100% | done (trivial branch misses) |
