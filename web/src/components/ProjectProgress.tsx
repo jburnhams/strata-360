@@ -15,6 +15,7 @@ const Bar = ({ pct }: { pct: number }) => (
 export default function ProjectProgress({ folder }: { folder: string }) {
   const p = usePoll<Progress>(() => api.progress(folder), 2000, [folder])
   const [redo, setRedo] = useState<string | null | undefined>(undefined) // undefined = closed, null = all stages, string = that stage
+  const cov = usePoll(() => api.coverage(folder).catch(() => null), 10000, [folder])
   const log = usePoll(() => api.log(folder), 3000, [folder])
   if (!p) return <PanelSkeleton title="Progress" rows={6} />
   const mins = (s?: number | null) => (s ? ` · ${Math.round(s / 60)} min` : '')
@@ -41,6 +42,12 @@ export default function ProjectProgress({ folder }: { folder: string }) {
           )}
         </div>
       ))}
+      {cov && !cov.complete && (
+        <details className="mt-3 text-sm">
+          <summary className="cursor-pointer">Data missing: {cov.missing.length} item{cov.missing.length === 1 ? '' : 's'} · blocks {Object.keys(cov.blocked).length} decision{Object.keys(cov.blocked).length === 1 ? '' : 's'}</summary>
+          <ul className="mt-1 list-disc pl-5 text-stone-500">{Object.entries(cov.blocked).map(([d, cs]) => <li key={d}>{d}: {cs.length} clip{cs.length === 1 ? '' : 's'}</li>)}</ul>
+        </details>
+      )}
       {!!p.needs?.length && <p className="mt-3 text-sm text-stone-500">To do: {p.needs.map(n => NEEDS[n] ?? n).join(', ')}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
         {p.state === 'complete' && <button className="rounded-lg bg-emerald-700 px-4 py-2 text-white">Go to results and export</button>}

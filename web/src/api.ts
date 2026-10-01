@@ -8,6 +8,7 @@ export interface Progress {
   state: ProjectState; folder: string; project: string; clips?: number; footage_gb?: number; percent?: number; eta_s?: number
   stages?: Stage[]; needs?: string[]; running?: boolean; job_running: boolean; has_gps?: boolean; workers?: number; max_workers?: number; can_add_worker?: boolean; add_worker_reason?: string; runnable?: number; worker_list?: { pid: number; clip: string | null; stage: string | null }[]; active?: { clip: string; stage: string }[]
 }
+export interface Coverage { clips: number; stages: string[]; totals: Record<string, number>; blocked: Record<string, string[]>; missing: { clip: string; stage: string; state: string }[]; complete: boolean }
 export type ItemStatus = 'ok' | 'failed' | 'active' | 'stale' | null
 export interface StateMatrix { stages: string[]; clips: Record<string, Record<string, ItemStatus>>; dependents: Record<string, string[]> }
 
@@ -78,6 +79,7 @@ export const api = {
   roots: () => call<{ roots: string[] }>('/api/roots'),
   browse: (path?: string) => call<Browse>('/api/browse' + (path ? '?' + q({ path }) : '')),
   progress: (folder: string) => call<Progress>('/api/progress?' + q({ folder })),
+  coverage: (folder: string) => call<Coverage>('/api/coverage?' + q({ folder })),
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
   track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
   uploadTrack: async (folder: string, file: File) => {
