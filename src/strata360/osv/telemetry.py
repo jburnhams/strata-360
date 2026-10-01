@@ -1,10 +1,33 @@
 """Per-frame telemetry from an OSV: quaternion attitude, timestamps, accel, ISO/shutter."""
-import struct, numpy as np
+import hashlib, os, struct, tempfile, numpy as np
 from strata360.osv.pbdump import parse, packets
+
+
+def cache_dir():
+    """Where the parsed telemetry of each OSV is kept (reading it means reading the whole multi-gigabyte file from the drive: about 30 s a clip, in every stage that opens the clip). STRATA_CACHE, else ~/.cache/strata360."""
+    d = os.environ.get('STRATA_CACHE') or os.path.join(os.path.expanduser('~'), '.cache', 'strata360')
+    return os.path.join(d, 'telemetry') if os.access(os.path.dirname(d) or '.', os.W_OK) or os.path.isdir(d) else os.path.join(tempfile.gettempdir(), 'strata360-telemetry')
+
+
+def _cached(osv, name, make):
+    """The result of `make()` (a dict of numpy arrays) kept in an .npz next to nothing else: keyed by the file's path, size and modification time, so a changed file is read again."""
+    st = os.stat(osv); key = hashlib.sha1(f'{os.path.realpath(osv)}|{st.st_size}|{st.st_mtime_ns}|{name}|1'.encode()).hexdigest()[:20]; d = cache_dir(); path = os.path.join(d, f'{key}.npz')
+    try:
+        with np.load(path) as z: return {k: z[k] for k in z.files}
+    except (OSError, ValueError, KeyError): pass
+    out = make()
+    try:
+        os.makedirs(d, exist_ok=True); tmp = path + f'.{os.getpid()}.tmp.npz'; np.savez(tmp, **out); os.replace(tmp, path)
+    except OSError: pass
+    return out
 
 def read_frames(osv, djmd_stream=3):
     """Returns dict of arrays, one row per djmd packet (= per video frame):
-       ts_us (device microseconds), quat (N,4) fields 1..4 in stored order, acc (N,3)."""
+       ts_us (device microseconds), quat (N,4) fields 1..4 in stored order, acc (N,3). Cached on disk (see `_cached`)."""
+    return _cached(osv, f'frames{djmd_stream}', lambda: _read_frames(osv, djmd_stream))
+
+
+def _read_frames(osv, djmd_stream=3):
     ts, q, acc = [], [], []
     for pk in packets(osv, djmd_stream):
         fm = [v for f, w, v in parse(pk) if f == 3][0]
@@ -18,6 +41,13 @@ def read_frames(osv, djmd_stream=3):
     return dict(ts_us=np.array(ts, np.int64), quat=np.array(q), acc=np.array(acc))
 
 def video_pts(osv, stream=0):
+    """Presentation times (seconds, sorted) of the video frames. The first video track comes from the MP4 index (a few milliseconds; identical to the packet scan, checked on two clips); anything else, or
+    a file the index reader cannot handle, from an ffprobe packet scan (reads the whole file: about 80 s for a 3 GB clip)."""
+    if stream == 0:
+        try:
+            from strata360.osv import mp4
+            return mp4.video_sample_times(osv)
+        except Exception: pass
     import subprocess
     out = subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', f'v:{stream}', '-show_entries',
                                    'packet=pts_time', '-of', 'csv=p=0', osv]).split()
@@ -25,6 +55,14 @@ def video_pts(osv, stream=0):
 
 
 def read_exposure(osv):
+    """Per-frame exposure (cached on disk, see `_cached`)."""
+    flat = _cached(osv, 'exposure', lambda: {f'{n}__{k}': v for n, d in _read_exposure(osv).items() for k, v in d.items()})
+    out = {}
+    for key, v in flat.items(): n, k = key.split('__', 1); out.setdefault(n, {})[k] = v
+    return out
+
+
+def _read_exposure(osv):
     """Per-frame exposure of each djmd track (stream 3 and 4): ISO, shutter denominator, colour temperature.
     FrameMeta.2: field 3 = ISO (f32), field 4 = message whose varint (after a small tag) is the shutter denominator,
     field 6 = colour temperature (K)."""
