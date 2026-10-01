@@ -224,7 +224,7 @@ def create_app(roots, token=None):
         for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
             tr = _j(d, 'transcript.json')
             if not tr or not any(s.get('words') and s.get('text', '').strip() for s in tr['segments']): continue
-            total += 1; cid = os.path.basename(d.rstrip('/')); st = runner.load_state(f, cid).get('transcript_check', {})
+            total += 1; cid = os.path.basename(d.rstrip('/\\')); st = runner.load_state(f, cid).get('transcript_check', {})
             if st.get('status') == 'ok':
                 done += 1; r = _j(d, 'transcript_check.json') or {}; fixes += r.get('stored', 0); made += (r.get('calls') or {}).get('made', 0); reused += (r.get('calls') or {}).get('reused', 0)
                 tin += (r.get('tokens') or {}).get('input', 0); tout += (r.get('tokens') or {}).get('output', 0)

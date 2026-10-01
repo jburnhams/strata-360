@@ -55,12 +55,12 @@ def run(folder, clips=None, provider=None, model=None, progress=None, log=print)
     from strata360.edit import script as SC, llm_remote as LR
     from strata360.pipeline import notes as N
     cfg = config.load(folder); llm = cfg.get('llm', {}); provider = provider or llm.get('provider', 'vertex'); model = model or llm.get('model') or LR.PROVIDERS[provider]['default']
-    dirs = sorted(glob.glob(os.path.join(config.race_dir(folder), 'clips', '*', ''))); dirs = [d for d in dirs if os.path.exists(d + 'transcript.json') and (not clips or any(c in os.path.basename(d.rstrip('/')) for c in clips))]
+    dirs = sorted(glob.glob(os.path.join(config.race_dir(folder), 'clips', '*', ''))); dirs = [d for d in dirs if os.path.exists(d + 'transcript.json') and (not clips or any(c in os.path.basename(d.rstrip('/\\')) for c in clips))]
     try: nt = N.load(folder)
     except Exception: nt = {'clips': {}}
     items = []                                                                          # (clip id, dir)
     for d in dirs:
-        clip = os.path.basename(d.rstrip('/')); tr = json.load(open(d + 'transcript.json'))
+        clip = os.path.basename(d.rstrip('/\\')); tr = json.load(open(d + 'transcript.json'))
         if any(s.get('words') and s.get('text', '').strip() for s in tr['segments']): items.append((clip, d, tr))
     batches = []; cur = []; cw = 0
     for clip, d, tr in items:
@@ -286,7 +286,7 @@ def run_audio(folder, clips=None, **kw):
     """check_clip for every clip with speech (CLI helper); returns {clip: corrections stored}."""
     out = {}
     for d in sorted(glob.glob(os.path.join(config.race_dir(folder), 'clips', '*', ''))):
-        clip = os.path.basename(d.rstrip('/'))
+        clip = os.path.basename(d.rstrip('/\\'))
         if not os.path.exists(d + 'transcript.json') or (clips and not any(c in clip for c in clips)): continue
         out[clip] = check_clip(folder, clip, **kw).get('stored', 0)
     return out

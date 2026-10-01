@@ -1,5 +1,5 @@
 """Overview of the race track for the GUI: a simplified polyline for a map, and the main statistics."""
-import datetime as dt
+import datetime as dt, os
 import numpy as np
 from strata360.gps import track
 
@@ -24,7 +24,7 @@ def overview(path, points=400):
     lat, lon = tr['lat'][ok], tr['lon'][ok]; idx = np.unique(np.linspace(0, len(lat) - 1, points).astype(int))
     up, down = ascent_descent(tr['alt']); sp = tr['speed']; mv = np.isfinite(sp) & (sp > 0.5); dist = float(np.nanmax(tr['dist'])) if np.isfinite(tr['dist']).any() else None
     dt_ = np.diff(T); gaps = int((dt_ > 10).sum()); hr = tr['hr'][np.isfinite(tr['hr'])]
-    return dict(present=True, file=path.split('/')[-1], samples=int(len(T)), start_utc=_iso(T[0]), end_utc=_iso(T[-1]), duration_h=round(float((T[-1] - T[0]) / 3600.0), 2),
+    return dict(present=True, file=os.path.basename(path), samples=int(len(T)), start_utc=_iso(T[0]), end_utc=_iso(T[-1]), duration_h=round(float((T[-1] - T[0]) / 3600.0), 2),
                 moving_h=round(float(mv.sum() / 3600.0), 2), distance_km=None if dist is None else round(dist / 1000.0, 1), ascent_m=round(up), descent_m=round(down),
                 avg_speed_kmh=None if not mv.any() else round(float(np.mean(sp[mv])) * 3.6, 1), avg_pace_min_km=None if not mv.any() else round(1000.0 / float(np.mean(sp[mv])) / 60.0, 2),
                 max_altitude_m=None if not np.isfinite(tr['alt']).any() else round(float(np.nanmax(tr['alt']))), min_altitude_m=None if not np.isfinite(tr['alt']).any() else round(float(np.nanmin(tr['alt']))),
