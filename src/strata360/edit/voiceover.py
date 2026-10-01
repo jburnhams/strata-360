@@ -267,8 +267,8 @@ def newest_script(folder):
 
 
 def alive(pid):
-    try: os.kill(int(pid), 0); return True
-    except (OSError, TypeError, ValueError): return False
+    from strata360 import oslib
+    return oslib.pid_alive(pid)
 
 
 def running(folder):

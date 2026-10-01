@@ -105,7 +105,7 @@ def audio(ctx):
 def transcribe(ctx):
     from strata360.audio import dsp, speech
     m, tm = _whisper(ctx.cfg['whisper_model'])
-    x = dsp.load_audio(audio_src(ctx), 1)[:, 0]; x16 = dsp.ffmpeg_filter(x, dsp.SR, 'anull', out_sr=16000)[:, 0]     # raw audio: enhancement lowers word accuracy (progress.md)
+    x = dsp.load_audio(audio_src(ctx), 1)[:, 0]; x16 = dsp.ffmpeg_filter(x, dsp.SR, 'anull', out_sr=16000)[:, 0]     # raw audio: enhancement lowers word accuracy (docs/progress.md)
     segs = speech.transcribe_multilingual(x16, m, tm, ctx.cfg['languages'])
     ctx.write('transcript.json', ctx.stamped(dict(source=os.path.basename(ctx.clip.osv), model=ctx.cfg['whisper_model'], translate_model='opus-mt',
                                                    denoise='none', languages=ctx.cfg['languages'], segments=segs)))

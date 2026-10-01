@@ -191,8 +191,7 @@ def main():
     from strata360.edit import framing as FR, project as PJ
     ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--px', type=int, default=960); ap.add_argument('--force', action='store_true', help='render again even if this plan was already rendered'); a = ap.parse_args()
     cv2.setNumThreads(2)
-    try: os.nice(10)                                                                          # started by the user and waited for: a little above the background processing, well below the desktop
-    except (OSError, AttributeError): pass
+    from strata360 import oslib; oslib.lower_priority(10)                                                                          # started by the user and waited for: a little above the background processing, well below the desktop
     edit = PJ.load(a.folder); plan = edit.get('plan')
     if not plan: sys.exit('no plan yet')
     fr = {k: v for k, v in FR.resolve(a.folder, plan).items()}

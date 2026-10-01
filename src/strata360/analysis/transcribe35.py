@@ -27,7 +27,7 @@ def items(folder, clips=None):
     """Everything with speech, in clip order: [{clip, dir, tr, audio, chunks}]."""
     out = []
     for d in sorted(__import__('glob').glob(os.path.join(config.race_dir(folder), 'clips', '*', ''))):
-        clip = os.path.basename(d.rstrip('/'))
+        clip = os.path.basename(d.rstrip('/\\'))
         if clips and not any(c in clip for c in clips): continue
         if not os.path.exists(d + 'transcript.json') or not os.path.exists(d + 'clip.json'): continue
         au = next((d + n for n in ('audio_clean.flac', 'audio_original.flac') if os.path.exists(d + n)), None)
@@ -125,14 +125,13 @@ def load(clip_dir, tr):
 
 def ensure(folder, clip, log=print):
     """Make sure the batch pass has been made for this clip: when its file is missing, ALL clips lacking one are transcribed together (big requests), once, whichever clip asks first."""
-    import fcntl
+    from strata360 import oslib
     cd = os.path.join(config.race_dir(folder), 'clips', clip)
     if not os.path.exists(cd + '/transcript.json'): return
     tr = json.load(open(cd + '/transcript.json'))
     if load(cd, tr) is not None: return
     lock = os.path.join(config.race_dir(folder), 'transcribe35.lock'); os.makedirs(os.path.dirname(lock), exist_ok=True)
-    with open(lock, 'w') as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+    with open(lock, 'a+') as f, oslib.file_lock(f):
         if load(cd, tr) is None: run(folder, None, log=log, only_missing=True)
 
 

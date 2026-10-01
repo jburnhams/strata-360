@@ -21,6 +21,8 @@ jobs:
         include:
           - os: macos-latest
             python-version: '3.13'
+          - os: windows-latest
+            python-version: '3.13'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,5 +58,7 @@ jobs:
       - run: npm run typecheck
       - name: Unit tests with coverage (unit project only)
         run: npm run test:coverage
+      - name: Coverage including the jsdom component tests (informational)
+        run: npm run test:coverage:all -- --coverage.reporter=text --coverage.reporter=json-summary
       - name: Build
         run: npm run build

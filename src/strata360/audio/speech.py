@@ -6,7 +6,7 @@
   3. each chunk is transcribed in its detected language (with word timestamps and confidence)
   4. every non-English segment is translated to English with a dedicated translation model (Helsinki-NLP OPUS-MT, fr/nl/de -> en),
      applied to the native transcript; the original text is always kept. (Whisper's own "translate" task was tried first and is
-     unreliable: it summarises and drifts on noisy speech, see progress.md.)
+     unreliable: it summarises and drifts on noisy speech, see docs/progress.md.)
 Output (transcript.json body): segments [{t0, t1, lang, lang_prob, lang_scores, text, text_en, avg_logprob, no_speech, words:[{w,t0,t1,p}]}].
 All times are clip-relative seconds. Everything runs locally; nothing is uploaded.
 

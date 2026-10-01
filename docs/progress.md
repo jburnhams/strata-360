@@ -1,6 +1,6 @@
 # Progress log
 
-Running notes on what was tried, what worked, and what we learned. Newest entries at the bottom of each section. See [README.md](README.md) for the plan. Spike scripts live in `spike/`.
+Running notes on what was tried, what worked, and what we learned. Newest entries at the bottom of each section. See [overview.md](overview.md) for the design and [implementation-plan.md](implementation-plan.md) for what comes next. (Entries before 1 Oct 2026 say "README" for what is now `overview.md`.) Spike scripts live in `spike/`.
 
 Conventions: **Learned** = a fact we now rely on. **Tried** = an experiment and its result. **Corrects README** = something in the README that was wrong and has been (or must be) fixed.
 

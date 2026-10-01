@@ -20,6 +20,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
     env:
       # CI VMs have no video hardware: use the software paths on every OS (the hardware paths are covered by tests/unit/test_hw.py)
       STRATA_HWACCEL: none
@@ -39,11 +41,15 @@ jobs:
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - name: Install ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
       - name: Check ffmpeg has libx265
+        shell: bash
         run: ffmpeg -hide_banner -encoders | grep -q libx265
       - run: pip install -r requirements-test.txt
       - name: Integration tests (synthetic clip built with ffmpeg; no footage or models needed)
-        run: pytest tests/integration
+        run: pytest tests/integration -n auto --durations=10
 
   web:
     runs-on: ubuntu-latest

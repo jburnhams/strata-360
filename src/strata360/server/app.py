@@ -9,6 +9,7 @@ Built on FastAPI (interactive API docs at /api/docs). Security model: the server
 API (JSON):  GET /api/roots, /api/browse?path=, /api/progress?folder=, /api/log?folder=;  POST /api/open {folder, languages?, gps?}, /api/run {folder}, /api/stop {folder}."""
 import argparse, glob, json, os, secrets, subprocess, sys, threading, time
 
+from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod
 from strata360.analysis import transcript_edits as TE, transcript_fix as TF
 
@@ -92,8 +93,7 @@ def last_project(roots):
 
 def alive(pid):
     """Is that process still running (jobs outlive a restart of the server, so their own pid is recorded in their status)."""
-    try: os.kill(int(pid), 0); return True
-    except (OSError, TypeError, ValueError): return False
+    return oslib.pid_alive(pid)
 
 
 def start_job(folder, args=('open',)):
@@ -106,7 +106,7 @@ def start_job(folder, args=('open',)):
         ok, why = resources.may_start_extra_worker(len(runner.workers(folder)), cfg)
         if not ok: return False
         rd = config.race_dir(folder); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'server_job.log'), 'ab')
-        live.append(subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), args[0], folder, *args[1:]], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True)); return True
+        live.append(subprocess.Popen([*oslib.cli_command(), args[0], folder, *args[1:]], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True)); return True
 
 
 def progress(folder):
@@ -224,7 +224,7 @@ def create_app(roots, token=None):
         for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
             tr = _j(d, 'transcript.json')
             if not tr or not any(s.get('words') and s.get('text', '').strip() for s in tr['segments']): continue
-            total += 1; cid = os.path.basename(d.rstrip('/')); st = runner.load_state(f, cid).get('transcript_check', {})
+            total += 1; cid = os.path.basename(d.rstrip('/\\')); st = runner.load_state(f, cid).get('transcript_check', {})
             if st.get('status') == 'ok':
                 done += 1; r = _j(d, 'transcript_check.json') or {}; fixes += r.get('stored', 0); made += (r.get('calls') or {}).get('made', 0); reused += (r.get('calls') or {}).get('reused', 0)
                 tin += (r.get('tokens') or {}).get('input', 0); tout += (r.get('tokens') or {}).get('output', 0)
@@ -335,7 +335,7 @@ def create_app(roots, token=None):
         from strata360.edit import voiceover as VO
         if VO.running(f): return False
         rd = config.race_dir(f); os.makedirs(os.path.join(rd, 'voiceover'), exist_ok=True); log = open(os.path.join(rd, 'voiceover', 'job.log'), 'ab')
-        subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'voiceover', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return True
+        subprocess.Popen([*oslib.cli_command(), 'voiceover', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return True
 
     @api.post('/api/script/edit', dependencies=[Depends(auth)])
     def post_script_edit(body: dict):                                                    # {folder, texts: {seg: new text}}: saved as a new script version, then spoken at once
@@ -442,7 +442,7 @@ def create_app(roots, token=None):
         f = folder_of(body.get('folder'))
         if job_pid(f, FILM_JOBS, film_status_path): return dict(started=False)
         rd = config.race_dir(f); os.makedirs(rd, exist_ok=True); log = open(os.path.join(rd, 'film_job.log'), 'wb')
-        FILM_JOBS[f] = subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'film', f] + (['--force'] if body.get('force') else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+        FILM_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'film', f] + (['--force'] if body.get('force') else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.post('/api/film/stop', dependencies=[Depends(auth)])
     def post_film_stop(body: dict):
@@ -505,7 +505,7 @@ def create_app(roots, token=None):
         if body.get('fps') in (25, 25.0, 30, 30.0, 50, 50.0): s['fps'] = float(body['fps'])
         d = os.path.join(config.race_dir(f), 'final'); os.makedirs(d, exist_ok=True); json.dump(s, open(os.path.join(d, 'settings.json'), 'w'))
         log = open(os.path.join(d, 'final_job.log'), 'wb')
-        FINAL_JOBS[f] = subprocess.Popen([os.path.join(ROOT_DIR, 'strata360'), 'final', f, '--size', s['size'], '--fps', str(s['fps']), '--bitrate', s['bitrate']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+        FINAL_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'final', f, '--size', s['size'], '--fps', str(s['fps']), '--bitrate', s['bitrate']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.post('/api/final/stop', dependencies=[Depends(auth)])
     def post_final_stop(body: dict):
@@ -705,7 +705,7 @@ def create_app(roots, token=None):
     def post_generate(body: dict):                                                       # {folder, length, wpm?, style?, model?}: runs `strata360 script` in the background
         f = folder_of(body.get('folder')); j = SCRIPT_JOBS.get(f)
         if j and j.poll() is None: return dict(started=False)
-        args = [os.path.join(ROOT_DIR, 'strata360'), 'script', f, '--length', str(float(body.get('length') or 90))]
+        args = [*oslib.cli_command(), 'script', f, '--length', str(float(body.get('length') or 90))]
         if body.get('wpm'): args += ['--wpm', str(float(body['wpm']))]
         if body.get('style'): args += ['--style', str(body['style'])[:400]]
         from strata360.edit import llm_remote as LR

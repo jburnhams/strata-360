@@ -110,8 +110,7 @@ def main():
     from strata360.edit import framing as FR, project as PJ
     ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--size', default='3840x2160'); ap.add_argument('--fps', type=float, default=50.0); ap.add_argument('--bitrate', default='100M')
     ap.add_argument('--pieces', type=int, help='render only the first N pieces (a trial; nothing is assembled)'); ap.add_argument('--out'); a = ap.parse_args()
-    try: os.nice(19)
-    except (OSError, AttributeError): pass
+    from strata360 import oslib; oslib.lower_priority(19)
     plan = PJ.load(a.folder).get('plan')
     if not plan: sys.exit('no plan yet')
     W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan)

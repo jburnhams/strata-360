@@ -31,12 +31,12 @@ def test_stale_edits_are_ignored_when_the_transcript_changes():
     out, stale = TE.apply(tr, TE.load(d)); assert stale == ['0:3'] and out['segments'][0]['words'][3]['w'] == 'something'
 
 
-def test_the_model_run_stores_suggestions_per_clip():
+def test_the_model_run_stores_suggestions_per_clip(monkeypatch):
     from strata360.edit import script as SC
     from strata360.pipeline import config
     f = tempfile.mkdtemp(); rd = config.race_dir(f); d = os.path.join(rd, 'clips', 'C1'); os.makedirs(d); src = clip_dir(); open(os.path.join(d, 'transcript.json'), 'w').write(open(os.path.join(src, 'transcript.json')).read())
     json.dump(dict(library=f, llm=dict(provider='vertex', model='m')), open(os.path.join(rd, 'race.json'), 'w'))
-    seen = []; SC.run_llm = lambda msgs, **kw: (seen.append(msgs[-1]['content']), dict(text='', parsed=dict(fixes=[dict(clip=1, seg=0, word=3, **{'from': 'audio', 'to': 'out', 'why': 'x'})])))[1]
+    seen = []; monkeypatch.setattr(SC, 'run_llm', lambda msgs, **kw: (seen.append(msgs[-1]['content']), dict(text='', parsed=dict(fixes=[dict(clip=1, seg=0, word=3, **{'from': 'audio', 'to': 'out', 'why': 'x'})])))[1])
     r = TF.run(f, log=lambda *a: None); assert r == {'C1': 1} and len(seen) == 1 and '3:audio(0.50)' in seen[0] and 'Clip 1 (C1)' in seen[0]; assert TE.load_effective(d)['segments'][0]['words'][3]['w'] == 'out'
 
 
