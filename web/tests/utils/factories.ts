@@ -42,3 +42,17 @@ export const makeScriptDraft = (o: Partial<import('../../src/api').ScriptDraft> 
     { type: 'clip', clip: '0023', from: '0023.00', to: '0023.00', lines: ['0023.00'], text: 'we are fine', seconds: 3.2, refs: [{ clip: 'CAM_20260222130830_0023_D', si: 0, w0: 0, w1: 3 }] },
     { type: 'broll', clip: '0024', seconds: 5, why: 'a foggy trail' },
   ], ...o })
+
+export const makeTrackLine = (o: Partial<import('../../src/api').TrackLine> = {}): import('../../src/api').TrackLine => {
+  const n = 20; return { lat: Array.from({ length: n }, (_, i) => 50 + i * 0.01), lon: Array.from({ length: n }, (_, i) => 5 + i * 0.015), t: Array.from({ length: n }, (_, i) => i * 400), ...o }
+}
+export const makeTrackSeries = (o: Partial<import('../../src/api').TrackSeries> = {}): import('../../src/api').TrackSeries => {
+  const n = 40; return {
+    points: n, start_utc: '2026-02-22T18:00:00Z', end_utc: '2026-02-23T04:00:00Z', duration_s: 36000, distance_km: 75.6,
+    t: Array.from({ length: n }, (_, i) => i * 900), km: Array.from({ length: n }, (_, i) => i * 2), alt: Array.from({ length: n }, (_, i) => 300 + 100 * Math.sin(i / 5)), alt_lo: Array.from({ length: n }, (_, i) => 290 + 100 * Math.sin(i / 5)), alt_hi: Array.from({ length: n }, (_, i) => 310 + 100 * Math.sin(i / 5)),
+    pace: Array.from({ length: n }, (_, i) => (i >= 12 && i < 16 ? null : 5.5 + (i % 7) * 0.4)), moving: Array.from({ length: n }, (_, i) => (i >= 12 && i < 16 ? 0 : 1)), hr: Array.from({ length: n }, () => 140), ...o }
+}
+export const makeTrackClip = (o: Partial<import('../../src/api').TrackClip> = {}): import('../../src/api').TrackClip => ({
+  id: 'CAM_20260222190000_0023_D', label: '0023', start_utc: '2026-02-22T19:00:00Z', end_utc: '2026-02-22T19:03:35Z', duration_s: 215, covered: true, used: true, used_s: 16.5, moments: 7, usable_s: 117, scene: { settings: ['trail'], weather: ['fog'] },
+  t_mid: 3600, t0: 3500, t1: 3700, lat: 50.09, lon: 5.135, stretch: [[50.089, 5.134], [50.091, 5.136]],
+  facts: { local: 'Sun 22 Feb 20:01', daylight: 'night', elapsed_h: 1.0, distance_km: 12.3, percent: 16, pace_min_km: 5.75, gradient_pct: 4, altitude_m: 569, heart_rate: 141, text: 'x' }, ...o })

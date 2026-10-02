@@ -45,7 +45,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
           <div className="space-y-4">
             <FilmDetails folder={folder} />
             <ProjectProgress folder={folder} />
-            <TrackPanel folder={folder} />
+            <TrackPanel folder={folder} tz={meta?.timezone ?? 'Europe/Brussels'} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
             <MusicPanel folder={folder} />
             <ClockPanel folder={folder} />
             <WhoPanel folder={folder} />

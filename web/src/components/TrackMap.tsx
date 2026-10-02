@@ -1,0 +1,73 @@
+import { useEffect, useRef } from 'react'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+import type { TrackClip, TrackLine } from '../api'
+import { nearestIndex } from '../trackMath'
+
+const GREEN = '#16a34a', GREY = '#78716c'
+const canvasOk = () => { try { return !!document.createElement('canvas').getContext('2d') } catch { return false } }       // the canvas renderer is quicker for a long line; without a 2D context (some test environments) Leaflet draws SVG
+const DETAIL_ZOOM_STEPS = 1.5          // this far in from the first view the map asks for the track in more detail
+
+// The race on a Leaflet map (no background tiles: the offline default is the track on a plain ground). Zoom with the buttons, the wheel, a double click or touch; drag to pan; the arrows button resets the view.
+// Every clip has a marker at the middle of its stretch of track (the stretch is drawn thick; green = the newest script draft plays it), hover for its card, click to open it. Zooming in fetches the track for the
+// part in view in more detail. Hovering the track moves the cursor shared with the charts.
+export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, onOpenClip, fetchDetail }: {
+  base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
+  onOpenClip: (id: string) => void; fetchDetail: (bbox: [number, number, number, number]) => Promise<TrackLine>
+}) {
+  const el = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.CircleMarker | null>(null), detail = useRef<L.Polyline | null>(null)
+  const props = useRef({ base, onCursor, onHoverClip, onOpenClip, fetchDetail }); props.current = { base, onCursor, onHoverClip, onOpenClip, fetchDetail }   // handlers read the latest props without rebuilding the map
+
+  useEffect(() => {
+    if (!el.current || !base.lat.length) return
+    const canvas = canvasOk(); const m = L.map(el.current, { preferCanvas: canvas, ...(canvas ? {} : { renderer: L.svg() }), attributionControl: false, zoomSnap: 0.5, minZoom: 1 }); map.current = m
+    const pts = base.lat.map((la, i) => [la, base.lon[i]] as [number, number]); const line = L.polyline(pts, { color: '#15803d', weight: 2.5, opacity: 0.9 }).addTo(m)
+    m.fitBounds(line.getBounds(), { padding: [20, 20] }); const home = m.getBounds(); const z0 = m.getZoom(); layer.current = L.layerGroup().addTo(m)
+    line.on('mousemove', (e: L.LeafletMouseEvent) => {                                         // the nearest point of the track to the mouse
+      const b = props.current.base; let best = 0, bd = Infinity
+      for (let i = 0; i < b.lat.length; i++) { const d = (b.lat[i] - e.latlng.lat) ** 2 + ((b.lon[i] - e.latlng.lng) * Math.cos((e.latlng.lat * Math.PI) / 180)) ** 2; if (d < bd) { bd = d; best = i } }
+      props.current.onCursor(b.t[best])
+    }); line.on('mouseout', () => props.current.onCursor(null))
+    const Reset = L.Control.extend({ onAdd() { const a = L.DomUtil.create('a', 'leaflet-bar leaflet-control') as HTMLAnchorElement; a.href = '#'; a.title = 'Reset the view'; a.setAttribute('role', 'button'); a.setAttribute('aria-label', 'Reset the view'); a.style.cssText = 'width:30px;height:30px;line-height:30px;text-align:center;background:white;color:#333;font-size:16px;text-decoration:none'; a.textContent = '⤢'
+      L.DomEvent.on(a, 'click', (ev: Event) => { L.DomEvent.preventDefault(ev); m.fitBounds(home) }); L.DomEvent.disableClickPropagation(a); return a } })
+    new Reset({ position: 'topleft' }).addTo(m)
+    let timer: number | undefined
+    const more = () => {                                                                        // zoomed in: the track in view in more detail, replacing the coarse line there
+      window.clearTimeout(timer)
+      timer = window.setTimeout(async () => {
+        if (!map.current) return
+        if (m.getZoom() < z0 + DETAIL_ZOOM_STEPS) { detail.current?.remove(); detail.current = null; return }
+        const b = m.getBounds().pad(0.25)
+        try {
+          const d = await props.current.fetchDetail([b.getSouth(), b.getWest(), b.getNorth(), b.getEast()]); if (!map.current) return
+          detail.current?.remove(); detail.current = L.polyline(d.lat.map((la, i) => [la, d.lon[i]] as [number, number]), { color: '#15803d', weight: 3, opacity: 1, interactive: false }).addTo(m)
+        } catch { /* the coarse line stays */ }
+      }, 250)
+    }
+    m.on('moveend', more)
+    return () => { window.clearTimeout(timer); m.remove(); map.current = null; layer.current = null; dot.current = null; detail.current = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base])
+
+  useEffect(() => {                                                                             // the clips: the stretch each covers, and a marker with the clip number
+    const g = layer.current; if (!g) return; g.clearLayers()
+    for (const c of clips) {
+      if (!c.covered || c.lat == null || c.lon == null) continue
+      const col = c.used ? GREEN : GREY
+      if (c.stretch && c.stretch.length > 1) L.polyline(c.stretch, { color: col, weight: 6, opacity: 0.85, interactive: false }).addTo(g)
+      const icon = L.divIcon({ className: '', html: `<div style="background:${col};color:#fff;border:1.5px solid #fff;border-radius:10px;font:600 10px/18px ui-monospace,monospace;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.45)">${c.label}</div>`, iconSize: [38, 20], iconAnchor: [19, 10] })
+      const mk = L.marker([c.lat, c.lon], { icon, title: `Clip ${c.label}`, keyboard: true }).addTo(g)
+      mk.on('mouseover', (e: L.LeafletMouseEvent) => props.current.onHoverClip(c, e.originalEvent.clientX, e.originalEvent.clientY)); mk.on('mousemove', (e: L.LeafletMouseEvent) => props.current.onHoverClip(c, e.originalEvent.clientX, e.originalEvent.clientY))
+      mk.on('mouseout', () => props.current.onHoverClip(null)); mk.on('click', () => props.current.onOpenClip(c.id))
+    }
+  }, [clips, base])
+
+  useEffect(() => {                                                                             // the cursor shared with the charts
+    const m = map.current; if (!m) return
+    if (cursor == null) { dot.current?.remove(); dot.current = null; return }
+    const i = nearestIndex(base.t, cursor), ll: [number, number] = [base.lat[i], base.lon[i]]
+    if (dot.current) dot.current.setLatLng(ll); else dot.current = L.circleMarker(ll, { radius: 6, color: '#fff', weight: 2, fillColor: '#f59e0b', fillOpacity: 1, interactive: false }).addTo(m)
+  }, [cursor, base])
+
+  return <div ref={el} className="h-[420px] w-full rounded-lg bg-stone-100 dark:bg-stone-950" role="application" aria-label="Race map" />
+}

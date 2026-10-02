@@ -17,6 +17,13 @@ export interface TrackOverview {
   ascent_m?: number; descent_m?: number; avg_speed_kmh?: number | null; avg_pace_min_km?: number | null; max_altitude_m?: number | null; min_altitude_m?: number | null
   avg_hr?: number | null; max_hr?: number | null; gaps_over_10s?: number; bbox?: [number, number, number, number]; line?: [number, number][]
 }
+export interface TrackSeries { points: number; start_utc: string; end_utc: string; duration_s: number; distance_km: number | null; t: number[]; km: (number | null)[]; alt: (number | null)[]; alt_lo: (number | null)[]; alt_hi: (number | null)[]; pace: (number | null)[]; moving: number[]; hr: (number | null)[] }
+export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
+export interface TrackClipFacts { local: string; daylight: string | null; elapsed_h: number | null; distance_km: number | null; percent: number | null; pace_min_km: number | null; gradient_pct: number | null; altitude_m: number | null; heart_rate: number | null; text: string }
+export interface TrackClip {
+  id: string; label: string; start_utc: string; end_utc: string; duration_s: number; covered: boolean; used: boolean; used_s: number; moments?: number | null; usable_s?: number | null; scene?: { settings: string[]; weather: string[] }
+  t_mid?: number; t0?: number; t1?: number; lat?: number; lon?: number; stretch?: [number, number][]; facts?: TrackClipFacts
+}
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
@@ -92,6 +99,9 @@ export const api = {
   progress: (folder: string) => call<Progress>('/api/progress?' + q({ folder })),
   coverage: (folder: string) => call<Coverage>('/api/coverage?' + q({ folder })),
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
+  trackSeries: (folder: string, points = 2000) => call<TrackSeries>('/api/track/series?' + q({ folder, points: String(points) })),
+  trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000) => call<TrackLine>('/api/track/line?' + q(bbox ? { folder, bbox: bbox.join(','), limit: String(limit) } : { folder, limit: String(limit) })),
+  trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
   track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
   uploadTrack: async (folder: string, file: File) => {
     const r = await fetch('/api/track?' + q({ folder, filename: file.name }), { method: 'POST', body: file })
