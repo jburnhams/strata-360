@@ -103,13 +103,13 @@ def test_sizes_are_16_9_and_a_multiple_of_640():
 
 
 def test_the_mbgl_command_renders_the_planned_view_at_the_pixel_ratio(series, tmp_path, monkeypatch):
-    monkeypatch.setattr(hw.sys, 'platform', 'darwin'); monkeypatch.delenv('STRATA_MBGL_BACKEND', raising=False); c = clip(series, size=(3840, 2160), tmp=tmp_path); cmd = c.args(3, 'style.json', 'f.png'); a = lambda f: cmd[cmd.index(f) + 1]
+    monkeypatch.setattr(hw.sys, 'platform', 'darwin'); monkeypatch.delenv('STRATA_MBGL_BACKEND', raising=False); c = clip(series, size=(3840, 2160), tmp=tmp_path, sharp=False); cmd = c.args(3, 'style.json', 'f.png'); a = lambda f: cmd[cmd.index(f) + 1]
     assert cmd[0] == '/fake/mbgl-render' and '--backend=metal' in cmd and (a('-w'), a('-h'), a('-r')) == ('1280', '820', '3') and float(a('-z')) == pytest.approx(c.cam['zoom'][3], abs=1e-3)
     assert float(a('-y')) == pytest.approx(c.cam['lat'][3], abs=1e-5) and float(a('-b')) == pytest.approx(c.cam['bearing'][3], abs=0.01) and a('-c') == str(tmp_path / 'c.db')
 
 
-def test_sharp_tiles_render_the_full_size_at_a_higher_zoom(series, tmp_path):
-    c = clip(series, size=(3840, 2160), tmp=tmp_path, sharp=True); cmd = c.args(3, 's', 'f'); a = lambda f: cmd[cmd.index(f) + 1]
+def test_sharp_tiles_are_the_default_and_render_the_full_size_at_a_higher_zoom(series, tmp_path):
+    c = clip(series, size=(3840, 2160), tmp=tmp_path); cmd = c.args(3, 's', 'f'); a = lambda f: cmd[cmd.index(f) + 1]
     assert (a('-w'), a('-h'), a('-r')) == ('3840', '2460', '1') and float(a('-z')) == pytest.approx(c.cam['zoom'][3] + np.log2(3.0), abs=1e-3)
 
 

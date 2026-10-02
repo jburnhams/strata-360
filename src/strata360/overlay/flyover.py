@@ -7,7 +7,7 @@ The same interface as overlay/mapclip.py's `MapClip`, so the render, the film an
 (`mbgl-render`, the terrain branch: build steps in docs/terrain-flyover.md), run once per frame from a shared tile cache. The camera is planned first, in pure numpy (docs/terrain-flyover.md, "What the camera does"):
 keyframes over film time (route km, zoom, pitch: zoom in and tilt up when the runner is slow on the screen, wide and steep when fast), the heading fitted so that the route stays on the screen, little turning
 (smoothed and dead-banded) and the look-at point moving instead. The camera is worked out for a 1280 x 720 picture and rendered at any 16:9 size that is a multiple of 640 wide (4K = 3840 x 2160): the
-same view, drawn with 3x the pixels. `sharp=True` asks for finer map tiles at larger sizes (zoom raised by log2 of the scale) instead of enlarging the 720p tiles."""
+same view, drawn with 3x the pixels. `sharp` (the default) asks for finer map tiles at larger sizes (zoom raised by log2 of the scale) instead of enlarging the 720p tiles (`sharp=False`: the look of the approved 720p clips, softer at 4K)."""
 import json, math, os, shutil, subprocess, sys, tempfile
 
 import numpy as np, cv2
@@ -219,7 +219,7 @@ def check_size(size):
 
 
 class FlyoverClip:
-    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=False, mbgl=None, cache=CACHE, camera=None):
+    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=True, mbgl=None, cache=CACHE, camera=None):
         if not t1 > t0: raise ValueError('the stretch has no length')
         check_size(size)
         if imagery not in IMAGERY: raise ValueError(f'imagery: one of {", ".join(IMAGERY)}')

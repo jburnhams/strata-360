@@ -1,6 +1,6 @@
 # 3D terrain flyover (plan item N2): what was built and learned, 2 Oct 2026
 
-Status: **productionised (2 Oct)**: the approved prototype camera is now `src/strata360/overlay/flyover.py` (`FlyoverClip`, the same interface as the 2D `MapClip`), a gap kind `flyover` in `edit/synthetic.py` (4K by default), `strata360 gap-clip --kind flyover`, `kind` on the gaps API and a **2D map / 3D flyover (4K)** dropdown for each gap in the Gaps panel. It enters the film as a synthetic clip exactly as the map clip does. Unit tests cover the camera maths, the style, the `mbgl-render` command line and the frames (with `mbgl-render` faked). **Not yet run end to end here:** this session had no `mbgl-render` (no Mac), so the real 4K render, its speed and its look are unchecked; see "4K" below. The prototype script (`scripts/flyover/render.py`, presets and `--shots`) was removed: it is in git history (commit 9ca0208), and its camera is the module's `plan_camera`.
+Status: **productionised (2 Oct)**: the approved prototype camera is now `src/strata360/overlay/flyover.py` (`FlyoverClip`, the same interface as the 2D `MapClip`), a gap kind `flyover` in `edit/synthetic.py` (4K by default), `strata360 gap-clip --kind flyover`, `kind` on the gaps API and a **2D map / 3D flyover (4K)** dropdown for each gap in the Gaps panel. It enters the film as a synthetic clip exactly as the map clip does. Unit tests cover the camera maths, the style, the `mbgl-render` command line and the frames (with `mbgl-render` faked). **Run on both platforms:** macOS/Metal (the user's M4) and Linux/OpenGL (built and run in a cloud container on Mesa's software renderer, 2 Oct: real terrain frames at 720p and 4K, and a 4K H.264 clip through `MapClip.render`); Windows not yet tried; see "4K" below. The prototype script (`scripts/flyover/render.py`, presets and `--shots`) was removed: it is in git history (commit 9ca0208), and its camera is the module's `plan_camera`.
 
 ## Decision: MapLibre Native, not MapLibre GL JS in a browser
 
@@ -18,13 +18,25 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMLN_WITH_METAL=ON -DMLN_WIT
 nice -n 19 ninja -C build -j2 mbgl-render        # about 45 minutes at that priority; linker warnings about macOS 27 vs 14.3 are harmless
 ```
 
+### Build (Linux, OpenGL; verified 2 Oct on Ubuntu 24.04, 4 cores, about 8 minutes)
+
+```
+sudo apt-get install -y cmake ninja-build clang pkg-config xvfb libcurl4-openssl-dev libglfw3-dev libuv1-dev libpng-dev libicu-dev libjpeg-dev libwebp-dev libegl1-mesa-dev libgl1-mesa-dri libgl1-mesa-dev libopengl-dev
+git clone --depth 1 --branch feature/terrain-3d --recurse-submodules --shallow-submodules https://github.com/maplibre/maplibre-native.git ~/Code/maplibre-native-terrain
+cd ~/Code/maplibre-native-terrain
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DMLN_WITH_OPENGL=ON -DMLN_WITH_WERROR=OFF -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+ninja -C build -j4 mbgl-render
+```
+
+With no display (a server, a container) run the CLI under `xvfb-run -a strata360 gap-clip ...`: the GL context needs an X display; with no GPU, Mesa's llvmpipe draws it in software (about 3 s a 4K frame with 720p-scale tiles, about 8 s with `--sharp` tiles on 4 cores; a GPU is far faster). Set `MBGL_RENDER` to the binary if it is not under `~/Code/maplibre-native-terrain/build/bin/`.
+
 The binary is `build/bin/mbgl-render` (`MBGL_RENDER` overrides the path). Tiles are cached in `~/.strata360/flyover-cache.db`.
 
 ## Running it
 
 ```
 strata360 gap-clip RACE --gap G03 --kind flyover                      # 4K (3840x2160), 30 fps, esri imagery, default length for the gap
-strata360 gap-clip RACE --gap G03 --kind flyover --seconds 20 --size 1920x1080 --imagery topo --sharp
+strata360 gap-clip RACE --gap G03 --kind flyover --seconds 20 --size 1920x1080 --imagery topo --no-sharp
 ```
 
 or choose *3D flyover (4K)* in the dropdown beside a gap in the race view's Gaps panel and press Generate. `mbgl-render` is found from `MBGL_RENDER`, then the PATH, then `~/Code/maplibre-native-terrain/build/bin/mbgl-render`; without it the command stops with the build pointer and the panel greys the option (`GET /api/gaps` says `flyover.available`). `STRATA_MBGL_BACKEND=metal|opengl|vulkan` overrides the backend (`hw.mbgl_backend()`: Metal on macOS, OpenGL elsewhere, **untested off the Mac**). Tiles are cached in `~/.strata360/flyover-cache.db`.
@@ -37,10 +49,10 @@ Cost (measured at 1280x720 on the M4 in the prototype): about 0.4 s a frame, run
 
 The camera is always planned for a 1280x720 picture. Sizes are 16:9 and a multiple of 640 wide (1280x720, 1920x1080, 2560x1440, 3840x2160). Two ways to draw the same view at 4K:
 
-- **Default: pixel ratio.** `mbgl-render -r 3` draws the 1280x(820) view with 3x the pixels. The framing, tile choice and near-camera behaviour are exactly the approved 720p ones; the imagery is the same detail, enlarged, so it is softer than a native 4K picture.
-- **`--sharp`:** `-r 1` at 3840x2460 with the zoom raised by log2(3), so finer imagery and terrain tiles are used (Esri goes to zoom 19; the line widths are scaled to match). Same ground in view, real 4K detail. Untested on the draft branch: closer-in tiles may show more of its near-camera holes (see Limits), so try it on a short clip first.
+- **Default, `sharp`:** `-r 1` at 3840x2460 with the zoom raised by log2(3), so finer imagery and terrain tiles are used (Esri goes to zoom 19; the line widths are scaled to match). The same ground is in view with real 4K detail. Checked 2 Oct on an Alpine test route: same framing as the pixel-ratio render, visibly crisper (paths, lake edges; Laplacian variance 1.8x), and no new holes in the frame compared.
+- **`--no-sharp`: pixel ratio.** `mbgl-render -r 3` draws the 1280x(820) view with 3x the pixels: the approved 720p framing and tile choice, the imagery enlarged and so softer. About 2.5x faster.
 
-Either way each picture is rendered 820 px tall at 720p scale and the bottom 100 px cropped (the missing-tile wedge). Expect a 4K frame to cost several times the 720p 0.4 s (nine times the pixels; **unmeasured**), so a 30 s clip at 30 fps (900 frames) is likely tens of minutes. The clip is encoded at 12 Mbit/s per 1080p worth of pixels (48 Mbit/s at 4K) with the hardware H.264 encoder where there is one. The film's final render scales a generated clip to the film's size (`render/synthetic.py`).
+Either way each picture is rendered 820 px tall at 720p scale and the bottom 100 px cropped (the missing-tile wedge). Measured on the 4-core CPU-only container (llvmpipe): 720p about 1.8 s a frame, 4K about 3 s (`--no-sharp`) or 8 s (sharp); the M4 on Metal and a GPU will be faster (unmeasured at 4K). A 30 s clip at 30 fps (900 frames) is then about 2 hours of software rendering here. The first frames also fetch tiles. The clip is encoded at 12 Mbit/s per 1080p worth of pixels (48 Mbit/s at 4K) with the hardware H.264 encoder where there is one. The film's final render scales a generated clip to the film's size (`render/synthetic.py`).
 
 ## What the camera does, and why (each step was a user comment on a rendered clip)
 
@@ -59,7 +71,7 @@ Measured on the approved clips (closest the route gets to a side or the bottom, 
 ## Limits and open items
 
 - **Draft branch gaps** (its own list): symbols, circles and lines are not elevated correctly, 3D buildings are not started, tiles covering more than one terrain tile are not supported, `coveringTiles()` ignores terrain, performance was only tested in static mode. Our use (draped raster, a draped line and a draped polygon, static renders) avoids them, but the near-camera holes remain, hence the crop and the pitch limits.
-- **Not done:** the route line fills in progressively (it is drawn whole); a persistent render process (the per-frame start-up is part of the 0.4 s); a real 4K run (speed, `--sharp` against the default); a run on a stretch with another shape of route (a night section, a gap with a long stop); the Wallonia orthophotos; hairpin handling in the close pass; the elevation strip of the map clip is not drawn on the flyover; an end-to-end test of the `gap-clip --kind flyover` command (the pieces are unit tested).
+- **Not done:** the route line fills in progressively (it is drawn whole); a persistent render process (the per-frame start-up is part of the 0.4 s); 4K timing on the M4; a run on a stretch with another shape of route (a night section, a gap with a long stop); the Wallonia orthophotos; hairpin handling in the close pass; the elevation strip of the map clip is not drawn on the flyover; an end-to-end test of the `gap-clip --kind flyover` command (the pieces are unit tested).
 - **Python 3.13 under pyenv here prints `ValueError: unsupported hash type blake2b/blake2s` at start-up** (hashlib built without OpenSSL); harmless for these scripts.
 - **Imagery licence:** unread for Esri World Imagery (what Komoot uses), Sentinel-2 and the Wallonia orthophotos; needed before any film that is shared.
 
