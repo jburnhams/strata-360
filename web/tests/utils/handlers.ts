@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse } from './factories'
+import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse, makeFilmState, makeFinalState } from './factories'
 
 // Default happy-path handlers, one per endpoint. Only the endpoints the tests so far need are here: when a test hits an endpoint that is missing,
 // msw fails it loudly (onUnhandledFrame: 'error'), so add the handler here (with a factory in factories.ts) rather than inline in the test.
@@ -23,6 +23,7 @@ export const handlers = [
   http.post('/api/transcript/edit', () => HttpResponse.json({ ok: true })),
   http.get('/api/clips', () => HttpResponse.json({ clips: [makeClipInfo()] })),
   http.get('/api/meta', () => HttpResponse.json(makeMeta())),
+  http.post('/api/meta', async ({ request }) => HttpResponse.json(makeMeta(await request.json() as any))),
   http.get('/api/clock', () => HttpResponse.json(makeClockState())),
   http.post('/api/clock', () => HttpResponse.json({ clock: makeClockState(), retimed: 1 })),
   http.get('/api/clock/suggest', () => HttpResponse.json({ current: 0, suggestions: [] })),
@@ -35,5 +36,11 @@ export const handlers = [
   http.delete('/api/music', () => HttpResponse.json({ ok: true })),
   http.get('/api/edit', () => HttpResponse.json(makeEditResponse())),
   http.post('/api/edit/propose', () => HttpResponse.json({ edit: makeEditResponse().edit })),
-  http.post('/api/edit/override', () => HttpResponse.json({ edit: makeEditResponse().edit }))
+  http.post('/api/edit/override', () => HttpResponse.json({ edit: makeEditResponse().edit })),
+  http.get('/api/film', () => HttpResponse.json(makeFilmState())),
+  http.post('/api/film/start', () => HttpResponse.json({ started: true })),
+  http.post('/api/film/stop', () => HttpResponse.json({ ok: true })),
+  http.get('/api/final', () => HttpResponse.json(makeFinalState())),
+  http.post('/api/final/start', () => HttpResponse.json({ started: true })),
+  http.post('/api/final/stop', () => HttpResponse.json({ ok: true }))
 ]
