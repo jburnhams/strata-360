@@ -61,7 +61,7 @@ def test_the_film_renders_a_pan_as_the_end_of_the_first_shot_then_the_start_of_t
     segs = [dict(a, film_start_s=0.0, transition=dict(type='cut', beats=0, dur_s=0.0)), dict(b, film_start_s=4.0, transition=tr)]; ps = FI.pieces(segs, fps)
     kinds = [p['kind'] for p in ps]; assert kinds == ['plain', 'pan', 'plain'] and sum(p['frames'] for p in ps) == 80 and ps[1]['frames'] == 2 * round(tr['dur_s'] * fps / 2)
     src = FakeSource(); out = []; total = FI.compose(segs, src, fps, out.append); assert total == 80 and len(out) == 80; hout = ps[1]['hout']
-    first, second = [c for c in src.calls if c[3] is not None]; assert (first[0], first[1], first[2]) == (0, 40 - hout, 40) and (second[0], second[1], second[2]) == (1, 0, hout) and first[3].shape == (hout, 3) and second[3].shape == (hout, 3)
+    first, second = [c for c in src.calls if c[3] is not None]; assert (first[0], first[1], first[2]) == (0, 40 - hout, 40) and (second[0], second[1], second[2]) == (1, 0, hout) and first[3].shape == (hout, 4) and second[3].shape == (hout, 4)
     assert abs(first[3][0][0]) < 2.0 and np.all(np.diff(first[3][:, 0]) >= -1e-9) and first[3][-1][0] < 30.0 and second[3][0][0] > -30.0 and abs(second[3][-1][0]) < 2.0 and np.all(np.diff(second[3][:, 0]) >= -1e-9)      # the first half moves towards the second's pose, the second half arrives
     mid = first[3][-1][0] + 0.0; assert 8.0 < mid < 24.0 and second[3][0][0] < 0 and mid - second[3][0][0] == pytest.approx(30.0, abs=6.0)                                                          # the two halves meet where the camera has done about half the glide (yaw offsets of opposite signs)
     assert second[3][-1][1] == pytest.approx(0.0, abs=1.0) and first[3][-1][2] > 3.0                                                                                                            # pitch and field of view glide too
@@ -97,9 +97,27 @@ def test_the_previews_pose_offsets_are_degrees_added_to_the_cameras_radians(monk
     sg = dict(id='w0', clip='c', clip_start_s=1.0, dur_s=2.0); src = PV.PreviewSource('x', [sg], {'w0': path(0.0, fov=90.0)}, 64, 32, 64); src.V = Recorder()
     src.info['c'] = dict(proxy='p.mp4', side=dict(frames=[dict(t_s=0.04 * i, source_frame=i) for i in range(100)], size=[64, 32]), ts=None, stab=None); monkeypatch.setattr(PV.guard, 'popen', lambda *a, **k: Dec())
     list(src.frames(0, 0, 3)); base = list(src.V.dirs); src.V.dirs.clear(); src.V.fov.clear()
-    list(src.frames(0, 0, 3, pose_extra=np.array([[10.0, 5.0, 20.0]] * 3))); assert np.allclose(src.V.fov, 110.0) and np.allclose(src.V.dirs[0], cam.direction(np.radians(10.0), np.radians(5.0))) and np.allclose(base[0], cam.direction(0.0, 0.0))
+    list(src.frames(0, 0, 3, pose_extra=np.array([[10.0, 5.0, 20.0, 0.0]] * 3))); assert np.allclose(src.V.fov, 110.0) and np.allclose(src.V.dirs[0], cam.direction(np.radians(10.0), np.radians(5.0))) and np.allclose(base[0], cam.direction(0.0, 0.0))
 
 
-def test_a_globe_shot_never_glides():
-    a = dict(path(0.0), keyframes=[dict(t=0, yaw=0.0, pitch=-90, disc=3.2), dict(t=2, yaw=90.0, pitch=-90, disc=0.5)])
-    assert PN.plan(seg(0.0, 2.0), seg(2.0, 2.0), a, path(0.0))[0] is None
+def globe_path(): return dict(ref='world', bg='blur', subject='heading', keyframes=[dict(t=0, yaw=0.0, pitch=-90, disc=3.2), dict(t=4.0, yaw=90.0, pitch=-90, disc=0.46)])
+
+
+def test_a_globe_shot_glides_to_and_from_a_flat_one_as_a_globe_all_the_way():
+    tr, why = PN.plan(seg(0, 0.0), seg(1, 4.0), globe_path(), path(0.0, pitch=-10.0)); assert tr and tr['globe'] and tr['dur_s'] <= 1.4
+    first, second = FI.pan_extras(tr, 120, 15, 30.0)
+    assert first.shape == (15, 4) and (first[:, 3] > 0).all() and (second[:, 3] > 0).all()
+    assert first[0, 3] < 1.0 and abs(second[-1, 3] - 4.0) < 0.7                                              # a small planet at first, the flat 90 degree view's equivalent radius (4) at the end
+    assert PN.plan(seg(0, 0.0), seg(1, 4.0), path(0.0, pitch=-10.0), globe_path())[0]['globe']
+    assert PN.plan(seg(0, 0.0), seg(1, 4.0), dict(globe_path(), keyframes=[dict(t=0, yaw=0.0, pitch=-90, disc=3.2), dict(t=4.0, yaw=250.0, pitch=-90, disc=0.46)]), path(0.0, pitch=60.0))[0] is None
+    flat = FI.pan_extras(PN.plan(seg(0, 0.0), seg(1, 4.0), path(0.0), path(20.0))[0], 120, 15, 30.0); assert (flat[0][:, 3] == 0).all()
+
+
+def test_a_glide_whose_middle_shows_mostly_sky_is_refused_and_a_good_one_keeps_its_score():
+    good = lambda y, p, f, t: 0.6
+    sky = lambda y, p, f, t: 0.6 if abs(y) < 1 or abs(y - 20) < 1 else 0.05                     # the ends look fine, everything between is sky
+    a, b = path(0.0, pitch=0.0), path(20.0, pitch=0.0)
+    tr, why = PN.plan(seg(0, 0.0), seg(1, 4.0), a, b, good); assert tr and tr['look'] == 0.6
+    assert PN.plan(seg(0, 0.0), seg(1, 4.0), a, b, sky)[0] is None and 'poor views' in PN.plan(seg(0, 0.0), seg(1, 4.0), a, b, sky)[1]
+    assert PN.plan(seg(0, 0.0), seg(1, 4.0), globe_path(), path(0.0, pitch=-10.0), lambda y, p, f, t: 0.02 if abs(p + 50) < 30 else 0.5)[0] is None            # a globe glide is judged the same way
+    assert PN.plan(seg(0, 0.0), seg(1, 4.0), a, b, lambda *x: None)[0]                                                                                      # no grid for the clip: not judged

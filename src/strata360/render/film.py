@@ -51,14 +51,16 @@ def pieces(segs, fps):
 
 
 def pan_extras(tr, n, hout, fps):
-    """(first, second): the (hout, 3) yaw, pitch and field-of-view offsets (degrees) for the last `hout` frames of the first window and the first `hout` frames of the second, that make the camera glide from the first shot's pose to the second's through the cut (edit/pans.py):
-    at progress u over the whole transition the camera is the first shot's pose (held at its last pose past its end) plus smoothstep(u) of the way to the second's (held at its first pose before its start)."""
+    """(first, second): the (hout, 4) yaw, pitch and field-of-view offsets (degrees) and the globe radius (0: none) for the last `hout` frames of the first window and the first `hout` frames of the second, that make the camera glide from the first shot's pose to the second's through the cut (edit/pans.py):
+    at progress u over the whole transition the camera is the first shot's pose (held at its last pose past its end) plus smoothstep(u) of the way to the second's (held at its first pose before its start). Between a globe and a flat shot the view is a globe all through (radius 1 / z, z the share of the view shown, glided the same way)."""
     from strata360.edit import pans as PN
-    first = np.zeros((hout, 3)); second = np.zeros((hout, 3)); A_end = PN.pose_at(tr['a_kf'], tr['a_dur']); B_start = PN.pose_at(tr['b_kf'], 0.0)
+    first = np.zeros((hout, 4)); second = np.zeros((hout, 4)); A_end = PN.pose_at(tr['a_kf'], tr['a_dur']); B_start = PN.pose_at(tr['b_kf'], 0.0); globe = bool(tr.get('globe'))
     for j in range(2 * hout):
         s = PN.smooth((j + 0.5) / (2 * hout))
-        if j < hout: A = PN.pose_at(tr['a_kf'], (n - hout + j) / fps); first[j] = (s * float(PN.wrap(B_start[0] - A[0])), s * (B_start[1] - A[1]), s * (B_start[2] - A[2]))
-        else: B = PN.pose_at(tr['b_kf'], (j - hout) / fps); second[j - hout] = ((1 - s) * float(PN.wrap(A_end[0] - B[0])), (1 - s) * (A_end[1] - B[1]), (1 - s) * (A_end[2] - B[2]))
+        if j < hout:
+            A = PN.pose_at(tr['a_kf'], (n - hout + j) / fps); first[j] = (s * float(PN.wrap(B_start[0] - A[0])), s * (B_start[1] - A[1]), 0.0 if globe else s * (B_start[2] - A[2]), 1.0 / (A[3] + s * (B_start[3] - A[3])) if globe else 0.0)
+        else:
+            B = PN.pose_at(tr['b_kf'], (j - hout) / fps); second[j - hout] = ((1 - s) * float(PN.wrap(A_end[0] - B[0])), (1 - s) * (A_end[1] - B[1]), 0.0 if globe else (1 - s) * (A_end[2] - B[2]), 1.0 / (B[3] + (1 - s) * (A_end[3] - B[3])) if globe else 0.0)
     return first, second
 
 
