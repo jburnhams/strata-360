@@ -18,12 +18,25 @@ def default_seconds(duration_s):
     return round(min(max(6.0 + 6.0 * math.log2(1.0 + duration_s / 3600.0), 6.0), 45.0), 1)
 
 
+SHORT_S = 5.0                 # a clip shorter than this is a 2D map: a flyover has no time to show the land
+DRAMATIC_RELIEF_M, FLAT_RELIEF_M, SHORT_KM = 900.0, 300.0, 10.0
+
+
+def choose_kind(gap, seconds, last=None):
+    """How the planner draws a gap, so that the script only says that there is one and for how long: a 3D flyover where the land is the story (a big climb or descent: ascent plus descent of 900 m or more), a 2D map for a short clip (under 5 s), a short hop (under 10 km) or flat ground (under 300 m of relief); in between
+    it alternates with the kind chosen just before (`last`), so the film has both. 2D maps are the cheap, quick change of picture; flyovers cost minutes of machine time each."""
+    relief = float(gap.get('ascent_m') or 0) + float(gap.get('descent_m') or 0); km = float(gap.get('distance_km') or 0)
+    if seconds < SHORT_S or km < SHORT_KM or relief < FLAT_RELIEF_M: return 'map'
+    if relief >= DRAMATIC_RELIEF_M: return 'flyover'
+    return 'map' if last == 'flyover' else 'flyover'
+
+
 def key_of(c):
     blob = json.dumps([c['kind'], c['t0'], c['t1'], round(c['seconds'], 2), c['fps'], c.get('style') or {}] + ([c['size']] if c.get('size') else []), sort_keys=True)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=None, t1=None, id=None, size=None, approved=True):
+def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=None, t1=None, id=None, size=None, approved=True, by='planner'):
     """The clip for a gap (or for a stretch of it: `t0` and `t1` in epoch seconds), by length in the film or by speed-up (not both; neither gives the default)."""
     if kind not in KINDS: raise ValueError(f'kind: one of {KINDS}')
     if seconds is not None and speedup is not None: raise ValueError('give the length in the film or the speed-up, not both')
@@ -43,6 +56,7 @@ def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=N
         if w < 320 or h < 180: raise ValueError('size: at least 320x180')
         c['size'] = f'{w}x{h}'
     c['approved'] = bool(approved)                                                              # kept for older plans: no clip waits for approval any more
+    c['by'] = by                                                                                  # who chose its kind: the planner (it may change it) or the user (it stays)
     c['key'] = key_of(dict(c, t0=round(a), t1=round(b))); return c
 
 

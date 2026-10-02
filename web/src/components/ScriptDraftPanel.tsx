@@ -131,7 +131,7 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
                       </>))}
                       {it.type === 'clip' && (words(it).some(Boolean) ? words(it) : <span>{it.text}</span>)}
                       {it.type === 'broll' && <span className="text-stone-500">{it.why}</span>}
-                      {it.type === 'gap' && <span className="text-stone-500">{it.kind === 'flyover' ? '3D flyover' : '2D map'}, {it.seconds} s: {it.why}</span>}
+                      {it.type === 'gap' && <span className="text-stone-500">gap clip, {it.seconds} s: {it.why}</span>}
                       {it.view && <span className="ml-2 text-xs text-stone-500">{it.view} view of you</span>}
                       {it.anchor && <span className="ml-2 text-xs text-stone-500" title={it.anchor.why}>anchored at {it.anchor.film_s} s</span>}
                       {diff.added.has(i) && <span className="ml-2 rounded bg-emerald-200 px-1 text-xs text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100">new</span>}

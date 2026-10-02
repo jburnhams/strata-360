@@ -911,7 +911,7 @@ def create_app(roots, token=None):
             except ValueError: raise HTTPException(400, 'from/to: epoch seconds or an ISO time')
         t0, t1 = when(body.get('from')), when(body.get('to')); cid = body.get('id') or (gap['id'] if t0 is None and t1 is None else None)
         if not cid: raise HTTPException(400, 'a stretch of a gap needs an id')
-        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid, kind=body.get('kind') or 'map', size=body.get('size'))
+        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid, kind=body.get('kind') or 'map', size=body.get('size'), by='user')
         except ValueError as e: raise HTTPException(400, str(e))
         return SY.upsert(f, clip)
 

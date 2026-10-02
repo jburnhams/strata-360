@@ -165,8 +165,12 @@ def swap_for_glides(folder, segs, lib, protect=(), log=None):
     def ok(a, b, fa, fb):
         res, why = plan(a, b, fa, fb, lambda y, p_, f, t: look(a, y, p_, f, t)); return res is not None                                                                                           # (two shots that look the same way count as failing: a different shot is better)
     def free(g): return not (g.get('synthetic') or g['id'] in protect or g.get('locked') or g.get('fixed'))
-    for g in segs:
-        if not g.get('synthetic'): fr[g['id']] = frame(g)
+    try:
+        for g in segs:
+            if not g.get('synthetic'): fr[g['id']] = frame(g)
+    except (KeyError, OSError, ValueError) as e:                                                    # the clips' framing data is missing or unreadable: the swapping is only an improvement of the plan, so say so and leave the plan as it is
+        if log: log(f'shots not swapped for glides: the framing of a clip could not be made ({type(e).__name__}: {e})')
+        return []
     for k in range(1, len(segs)):
         p, g = segs[k - 1], segs[k]
         if not _contiguous(p, g) or ok(p, g, fr[p['id']], fr[g['id']]): continue

@@ -17,14 +17,14 @@ describe('ScriptDraftPanel', () => {
     expect((await screen.findByText(/It is Sunday afternoon/)).closest('[data-vo]')).toHaveAttribute('title', 'based on: Sun 22 Feb 14:04')
   })
 
-  it('shows a gap item with its kind, length, reason and anchor', async () => {
+  it('shows a gap item with its length, reason and anchor (the planner picks how it is drawn)', async () => {
     mockGet('/api/script2', makeScript2State({ drafts: ['d1.json'], draft: makeScriptDraft({ items: [
-      { type: 'gap', clip: 'G03', kind: 'flyover', seconds: 14, why: 'the long night climb', anchor: { film_s: 100, why: 'the chorus' } },
-      { type: 'gap', clip: 'G04', kind: 'map', seconds: 8, why: 'a quiet hour' },
+      { type: 'gap', clip: 'G03', seconds: 14, why: 'the long night climb', anchor: { film_s: 100, why: 'the chorus' } },
+      { type: 'gap', clip: 'G04', seconds: 8, why: 'a quiet hour' },
       { type: 'clip', clip: '0023', from: '0023.00', to: '0023.01', view: 'close' }] }) }))
     setup(<ScriptDraftPanel folder="/data" />)
-    expect(await screen.findByText(/3D flyover, 14 s: the long night climb/)).toBeInTheDocument()
-    expect(screen.getByText(/2D map, 8 s: a quiet hour/)).toBeInTheDocument(); expect(screen.getByText('anchored at 100 s')).toBeInTheDocument(); expect(screen.getAllByText('gap')).toHaveLength(2); expect(screen.getByText('close view of you')).toBeInTheDocument()
+    expect(await screen.findByText(/gap clip, 14 s: the long night climb/)).toBeInTheDocument()
+    expect(screen.getByText(/gap clip, 8 s: a quiet hour/)).toBeInTheDocument(); expect(screen.getByText('anchored at 100 s')).toBeInTheDocument(); expect(screen.getAllByText('gap')).toHaveLength(2); expect(screen.getByText('close view of you')).toBeInTheDocument()
   })
 
   it('offers to write a first draft when there is none', async () => {

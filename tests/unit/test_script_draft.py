@@ -114,7 +114,7 @@ def test_a_gap_item_counts_in_the_film_and_is_never_asked_to_be_used():
 def test_gap_items_that_are_not_valid_are_sent_back_with_the_reason():
     base = [clipitem('0001', '0001.00', '0001.01')]; tail = [broll('0002', 6), clipitem('0003', '0003.00', '0003.00')]
     bad = lambda *its: SD.check(dict(items=base + list(its) + tail, skipped=[]), DPACK, 40, 150)[1]
-    assert any('gap kind must be one of map, flyover, not 3d' in p for p in bad(gap('G01', '3d'))) and any('plays for 2 to 45 seconds, not 90' in p for p in bad(gap('G01', 'map', 90)))
+    assert not any('kind' in p for p in bad(gap('G01', '3d'))) and any('plays for 2 to 45 seconds, not 90' in p for p in bad(gap('G01', 'map', 90)))
     assert any('0002 is a camera clip, not a gap' in p for p in bad(gap('0002'))) and any('is a gap with no words: use a gap item' in p for p in bad(clipitem('G01', '0001.00', '0001.01')))
     assert any('an anchor is' in p for p in bad(gap('G01', 'map', 12, anchor='at the chorus'))) and not any('anchor' in p for p in bad(gap('G01', 'map', 12, anchor=dict(film_s=16, why='x'))))
 
@@ -132,7 +132,7 @@ def test_notes_say_when_an_anchor_cannot_be_met_but_say_nothing_about_narration_
 def test_the_request_carries_the_music_and_the_gap_choices_and_the_prompt_explains_gap_items_and_anchors():
     msgs, text = SD.build_messages(DPACK, 245, 150); sys_, user = msgs[0]['content'], msgs[1]['content']
     assert 'THE MUSIC (times are FILM seconds' in user and 'Sung (en): 30-60 s' in user and '=== CLIP G01' in user and 'NO FOOTAGE: a gap of 1.0 h' in user and '"type": "gap"' in user and '"anchor"' in user
-    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'the default' in sys_ and 'must approve' not in sys_ and 'the few that matter' not in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 11 and 'paraphrase freely' in sys_
+    assert '"gap": a generated clip' in sys_ and 'do NOT choose how it is drawn' in sys_ and '"kind": "map"' not in sys_ and 'must approve' not in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 12 and 'paraphrase freely' in sys_
 
 
 def test_with_the_tempo_known_every_item_counts_in_whole_beats_so_the_writers_total_matches_the_plan():
@@ -175,7 +175,7 @@ def test_a_view_is_only_for_clip_and_broll_items_of_a_clip_that_has_it():
 
 
 def test_the_prompt_explains_the_views_of_you():
-    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 11
+    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 12
 
 
 def test_a_reply_with_raw_newlines_inside_strings_is_still_read():

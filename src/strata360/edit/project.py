@@ -110,9 +110,9 @@ def serialise(segs, clips, music, lib, locked_wids=()):
 
 def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
     """Plan, in synthetic.json, the generated clip every item of the draft that uses a gap needs, so that it can be rendered afterwards (rendering is its own step, started from the Gaps panel):
-      a `gap` item       the kind and length it names;
-      a `broll` item     its length, in the kind already planned for the gap (else the 2D map);
-      a `vo` item        narration over the gap: the clip is at least as long as the narration needs (its lead-in, the spoken length from `voice_s` or the words at `wpm`, its tail), in the planned kind (else the map).
+      a `gap` item       the length it names; HOW it is drawn (2D map or 3D flyover) is the planner's choice (`synthetic.choose_kind`), not the script's, except that a clip already rendered, or one you made by hand, keeps its kind;
+      a `broll` item     its length, in the kind already planned for the gap (else the planner's choice);
+      a `vo` item        narration over the gap: the clip is at least as long as the narration needs (its lead-in, the spoken length from `voice_s` or the words at `wpm`, its tail), in the planned kind (else the planner's choice).
     A clip already planned for the same kind and long enough is left as it is; one of another kind or too short is planned again (a render of the old one no longer matches. Returns the clips planned."""
     from strata360.edit import script_plan as SPL, synthetic as SY
     from strata360.gps import gaps as GP, track
@@ -121,18 +121,22 @@ def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
     if not items: return []
     cfg = config.load(folder); tp = config.track_path(folder, cfg); tz = cfg.get('timezone', 'Europe/Brussels')
     if not tp: raise O.Infeasible('the script uses gaps but there is no race track')
-    gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}
+    gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}; last = None
+    def kind_of(old, gap, sec):
+        """A rendered clip and one you made keep their kind; otherwise the planner chooses (and remembers the last choice for the variety)."""
+        nonlocal last
+        k = old['kind'] if old and (old.get('by') == 'user' or old.get('exists') or old.get('file')) else SY.choose_kind(gap, sec, last); last = k; return k
     for n, it in items:
         gid = norm_label(it.get('clip', ''))
         if gid not in gaps: log(f'item {n + 1}: no such gap {gid}; skipped'); continue
-        old = docs.get(gid); kind = (it.get('kind') if it['type'] == 'gap' else None) or (old['kind'] if old else 'map')
+        old = docs.get(gid)
         if it['type'] == 'vo':
             text = (it.get('text') or '').strip(); speak = voice_s.get(n); speak = len(text.split()) * 60.0 / wpm if speak is None else speak
-            need = round(SPL.LEAD_S + speak + SPL.TAIL_S, 2)
+            need = round(SPL.LEAD_S + speak + SPL.TAIL_S, 2); kind = kind_of(old, gaps[gid], max(need, SY.MIN_SECONDS))
             if old and old['kind'] == kind and old['seconds'] >= need - 0.05: continue
             sec = max(need, old['seconds'] if old and old['kind'] == kind else SY.default_seconds(gaps[gid]['duration_s']))
         else:
-            sec = round(float(it.get('seconds') or 0), 2)
+            sec = round(float(it.get('seconds') or 0), 2); kind = kind_of(old, gaps[gid], sec)
             if old and old['kind'] == kind and abs(old['seconds'] - sec) < 0.05: continue
         try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind)
         except ValueError as e: log(f'item {n + 1}: {gid}: {e}; skipped'); continue
@@ -150,7 +154,7 @@ def sync_gap_clips(folder, specs, log=print):
     if not todo: return []
     cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []
     for sp in todo:
-        old = docs.get(sp['clip']); kind = old['kind'] if old else 'map'; sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
+        old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0); kind = old['kind'] if old else SY.choose_kind(gaps[sp['clip']], sec)
         clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
     return made
 
