@@ -299,6 +299,20 @@ def cmd_script_draft(a):
     print('saved script2/' + name)
 
 
+def cmd_script_plan(a):
+    """Make the film's plan from the newest whole-race script draft (the beat planner's plan is replaced), and with --voice speak the narration and mix it onto the film."""
+    from strata360.edit import project as PJ, optimise as O, voiceover as VO
+    try: edit = PJ.plan_from_script(a.name, a.draft)
+    except O.Infeasible as e: sys.exit(str(e))
+    p = edit['plan']; segs = p['segments']; roles = {}
+    for g in segs: roles[g['role']] = roles.get(g['role'], 0) + g['dur_s']
+    print(f"plan from {p['script']}: {len(segs)} windows from {p['clips_in_plan']} clips, {p['film']['length_s']:.1f} s ({p['film']['bpm']:.0f} bpm); " + ', '.join(f'{k} {v:.0f} s' for k, v in sorted(roles.items())))
+    for w in p['warnings']: print('warning:', w)
+    if a.voice:
+        try: VO.build(a.name); print('voice-over spoken and placed')
+        except Exception as e: print(f'voice-over not made: {e}')
+
+
 def cmd_coverage(a):
     from strata360.pipeline.coverage import coverage
     r = coverage(a.name)
@@ -486,6 +500,7 @@ def main():
     p = sub.add_parser('plan-blocks', help='the rough plan: one block per clip with its target length, usable footage and dialogue (the film length from --target-s, else the music track, else automatic)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--target-s', type=float, help='film length guide in seconds'); p.add_argument('--auto', action='store_true', help='ignore the music track: automatic length'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_plan_blocks)
     p = sub.add_parser('script-draft', help='write or revise the whole-race script (clips, the runner\'s own lines and narration) with the LLM; --revise keeps the current draft and applies your marks and pins'); p.add_argument('name', metavar='FOLDER_OR_RACE')
     p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
+    p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)

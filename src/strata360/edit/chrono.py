@@ -247,6 +247,13 @@ def plan(clips, lib, music, st=None):
     for w in windows:                                                                                     # a window on the wearer talking is dialogue, whichever candidate it was cut from
         a, b = w.abs_start, w.abs_start + w.beats * beat_s; w.speech = bool(w.cand.speech) or sum(max(0.0, min(b, y) - max(a, x)) for x, y in speech_iv[w.clip_index]) >= 0.25 * (b - a)
     if rebalance(windows, B, beat_s, st) != B: raise O.Infeasible('could not fit the windows into the film length: too little usable footage in some clips')
+    return assign_techniques(windows, clips, lib, music, st, rng, warnings)
+
+# --------------------------------------------------------------------------------------------------------------------------------------------- 3. techniques
+def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
+    """The beam search over an ordered list of windows for each window's technique; shared by the beat planner (`plan`) and the script planner (edit/script_plan.py). `windows` are in film order (their
+    beats add up to `B`, default the music's); returns the ordered list of Seg."""
+    beat_s = music.beat_s; B = B or music.beats
     ids = [t for t in lib if t not in st.bans_techs]; beams = [dict(score=0.0, true=0.0, seq=[], uses={}, secs={}, hero=0.0)]
     starts = []; pos = 0
     for w in windows: starts.append(pos); pos += w.beats
@@ -261,6 +268,7 @@ def plan(clips, lib, music, st=None):
             if t.beats == 'bar' and w.beats % music.bar_beats: continue
             f = O.fit(c, t)
             if f is None and w.forced and tid in ('hold_wide', 'follow_runner', 'selfie_hold'): f = 0.2          # a clip with no usable moment still gets a plain shot of its best stretch
+            if f is None and w.speech and tid in ('dialogue_hold', 'selfie_hold'): f = 0.2                    # the script plays these lines: a dialogue shot is allowed whatever the footage's own features say
             if f is None: continue
             sig = max((t.dmax - t.dmin) / 3.0, 0.4); durfit = math.exp(-0.5 * ((d - t.dideal) / sig) ** 2); scale = d ** st.dur_power
             base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en))
@@ -304,6 +312,7 @@ def plan(clips, lib, music, st=None):
         sg = Seg(start=starts[k], beats=w.beats, cand=orig, tech=lib[tid], in_s=round(cs - orig.start_s, 3), clip_index=w.clip_index, clip_start_s=cs, variant_seed=int(rng.integers(0, 2 ** 31 - 1)), forced=w.forced)
         sg._beat_s = beat_s; sg.parts = dict(wid=wids[k], speech=bool(getattr(w, 'speech', False)), options=[dict(tech=o[0], score=round(o[1], 3)) for o in options[k]], fixed=w.fixed, warnings=warnings if k == 0 else []); out.append(sg)
     return out
+
 
 
 OVERLAP_TOL_S = 2e-3      # window starts are stored to the millisecond, and a real tempo's beat is not a whole number of ms, so back-to-back windows can 'overlap' by up to 1 ms

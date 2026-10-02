@@ -132,9 +132,12 @@ def window_gain(folder, g):
     return 10 ** (SE.window_mix(doc, g['clip_start_s'], g['clip_start_s'] + g['dur_s'], bool(g.get('speech')))['gain_db'] / 20.0)
 
 
-def audio_of(folder, clip):
-    """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none."""
+def audio_of(folder, clip, role=None):
+    """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none. In a plan made from the script (windows have a `role`) the clip's voice is
+    heard ONLY in dialogue windows (role 'clip', the lines the script plays); narration and b-roll windows use the speech-free background track (audio_background.flac) or, until that exists, no sound of their own."""
     d = os.path.join(config.race_dir(folder), 'clips', clip)
+    if role in ('vo', 'broll'):
+        b = os.path.join(d, 'audio_background.flac'); return b if os.path.exists(b) else None
     for n in ('audio_clean.flac', 'audio_original.flac'):
         if os.path.exists(os.path.join(d, n)): return os.path.join(d, n)
     p = proxy_of(folder, clip); return p if p and has_audio(p) else None
@@ -144,7 +147,7 @@ def build_audio(folder, plan, out, total_s):
     """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track."""
     inputs = []; chains = []; n = 0
     for g in plan['segments']:
-        p = audio_of(folder, g['clip']); d = g['dur_s']; gain = window_gain(folder, g)
+        p = audio_of(folder, g['clip'], g.get('role')); d = g['dur_s']; gain = window_gain(folder, g)
         if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
         n += 1
