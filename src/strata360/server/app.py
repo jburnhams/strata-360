@@ -19,6 +19,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
+GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
 PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
 SCRIPT2_JOBS = {}             # folder -> Popen of a running `strata360 script-draft`
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
@@ -800,6 +801,73 @@ def create_app(roots, token=None):
         args = [*oslib.cli_command(), 'script-plan', f, '--voice'] + (['--draft', os.path.basename(str(body['draft']))] if body.get('draft') else [])
         d = os.path.join(config.race_dir(f), 'script2'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'plan.log'), 'wb')
         PLAN_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    def gap_rows(f):
+        """The gaps between clips on the track with the generated clip planned for each (and for stretches of them), whether it is rendering, and its progress."""
+        from strata360.gps import gaps as GP
+        from strata360.edit import synthetic as SY
+        cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.find_gaps(GP.load_spans(f), loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
+        job = GAP_JOBS.get(f); running = job[0] if job and job[1].poll() is None else None
+        def prog(cid):
+            try: tail = open(os.path.join(rd, 'synthetic', cid + '.log')).read().strip().splitlines()[-1]; return tail
+            except (OSError, IndexError): return ''
+        for c in docs: c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
+        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]
+        return gaps
+
+    def loaded_raw_track(f):
+        from strata360.gps import track
+        cfg = config.load(f); p = config.track_path(f, cfg)
+        if not p: raise HTTPException(404, 'there is no race track yet')
+        return track.load(p)
+
+    @api.get('/api/gaps', dependencies=[Depends(auth)])
+    def get_gaps(folder: str):                                                           # the stretches of the race with no clip, each with its generated map clips
+        f = folder_of(folder); return dict(gaps=gap_rows(f))
+
+    @api.post('/api/gaps/clip', dependencies=[Depends(auth)])
+    def post_gap_clip(body: dict):                                                       # {folder, gap, seconds? | speedup?, from?, to?, id?}: plan a generated map clip for a gap (or a stretch of it); rendering is a separate step
+        import datetime as dt
+        from strata360.edit import synthetic as SY
+        f = folder_of(body.get('folder')); gap = next((g for g in gap_rows(f) if g['id'] == body.get('gap')), None)
+        if gap is None: raise HTTPException(404, 'no such gap')
+        def when(x):
+            if x in (None, ''): return None
+            try: return float(x) if isinstance(x, (int, float)) else dt.datetime.fromisoformat(str(x).replace('Z', '+00:00')).timestamp()
+            except ValueError: raise HTTPException(400, 'from/to: epoch seconds or an ISO time')
+        t0, t1 = when(body.get('from')), when(body.get('to')); cid = body.get('id') or (gap['id'] if t0 is None and t1 is None else None)
+        if not cid: raise HTTPException(400, 'a stretch of a gap needs an id')
+        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid)
+        except ValueError as e: raise HTTPException(400, str(e))
+        return SY.upsert(f, clip)
+
+    @api.post('/api/gaps/render', dependencies=[Depends(auth)])
+    def post_gap_render(body: dict):                                                     # {folder, id}: render a planned generated clip in the background (`strata360 gap-clip --clip`)
+        from strata360.edit import synthetic as SY
+        f = folder_of(body.get('folder')); cid = str(body.get('id') or '')
+        if not any(c['id'] == cid for c in SY.load(f)['clips']): raise HTTPException(404, 'no such planned clip')
+        job = GAP_JOBS.get(f)
+        if job and job[1].poll() is None: return dict(started=False, reason=f'{job[0]} is already being rendered')
+        d = os.path.join(config.race_dir(f), 'synthetic'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, cid + '.log'), 'wb')
+        GAP_JOBS[f] = (cid, subprocess.Popen([*oslib.cli_command(), 'gap-clip', f, '--clip', cid], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True)); return dict(started=True)
+
+    @api.delete('/api/gaps/clip', dependencies=[Depends(auth)])
+    def delete_gap_clip(folder: str, id: str):                                           # forget a planned clip and its video
+        from strata360.edit import synthetic as SY
+        f = folder_of(folder); doc = SY.load(f); c = next((c for c in doc['clips'] if c['id'] == id), None)
+        if c is None: raise HTTPException(404, 'no such planned clip')
+        job = GAP_JOBS.get(f)
+        if job and job[1].poll() is None and job[0] == id: raise HTTPException(409, 'it is being rendered')
+        SY.remove(f, id); p = os.path.join(config.race_dir(f), c.get('file') or '-')
+        if c.get('file') and os.path.exists(p): os.remove(p)
+        return dict(removed=True)
+
+    @api.get('/api/gaps/video')
+    def get_gap_video(request: Request, folder: str, id: str):                           # the rendered video (Range requests are handled; <video> cannot send headers, so the cookie authenticates)
+        from strata360.edit import synthetic as SY
+        auth(request); f = folder_of(folder); c = next((c for c in SY.load(f)['clips'] if c['id'] == id), None); p = os.path.join(config.race_dir(f), (c or {}).get('file') or '-')
+        if not c or not os.path.exists(p): raise HTTPException(404, 'that clip has not been rendered yet')
+        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/script', dependencies=[Depends(auth)])
     def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script

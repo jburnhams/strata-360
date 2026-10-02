@@ -242,3 +242,34 @@ class TestRaceMapData:
         r = client.get('/api/track/clips', params=dict(folder=project.folder)).json(); by = {c['label']: c for c in r['clips']}; assert r['has_draft'] is True
         a, b = by['0001'], by['0002']; assert a['covered'] and a['used'] is True and a['used_s'] == 16.5 and a['lat'] > 50.0 and len(a['stretch']) >= 2 and a['facts']['local']
         assert b['covered'] is False and b['used'] is False and 'lat' not in b                                         # before the track starts: listed, not placed
+
+
+class TestGapClipsApi(TestRaceMapData):
+    def with_gap(self, project):
+        self.put_track(project); project.add_clip('CAM_20260222190000_0001_D', start_utc=self.iso(0), source_frames=9000, fps=30.0); project.add_clip('CAM_20260222190000_0002_D', start_utc=self.iso(5000), source_frames=3600, fps=30.0)
+
+    def test_the_gaps_are_listed_with_their_default_length_and_no_clips_yet(self, client, project):
+        self.with_gap(project); g = client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps']
+        assert [x['id'] for x in g] == ['G01'] and 4000 < g[0]['duration_s'] < 4800 and g[0]['clips'] == [] and 6 <= g[0]['default_seconds'] <= 45
+
+    def test_planning_a_clip_for_a_gap_or_a_stretch_of_it(self, client, project):
+        self.with_gap(project); f = project.folder; r = client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10)).json()
+        assert r['id'] == 'G01' and r['seconds'] == 10.0 and r['status'] == 'planned' and client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['id'] == 'G01'
+        g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]; a = g['t0'] + 600
+        assert client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', **{'from': a, 'to': a + 1200})).status_code == 400                                  # a stretch needs its own id
+        s = client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', id='G01b', speedup=100, **{'from': a, 'to': a + 1200})).json(); assert s['id'] == 'G01b' and s['seconds'] == 12.0
+        assert client.post('/api/gaps/clip', json=dict(folder=f, gap='G09')).status_code == 404 and client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=0.5)).status_code == 400
+
+    def test_rendering_starts_a_background_job_once_and_a_missing_clip_is_refused(self, client, project, fake_popen):
+        self.with_gap(project); f = project.folder; client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10))
+        assert client.post('/api/gaps/render', json=dict(folder=f, id='nope')).status_code == 404
+        assert client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True); cmd = fake_popen.instances[-1].cmd; assert 'gap-clip' in cmd and cmd[cmd.index('--clip') + 1] == 'G01'
+        g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert g['rendering'] is True and client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json()['started'] is False
+
+    def test_a_rendered_clip_can_be_played_and_removed(self, client, project):
+        from strata360.edit import synthetic as SY
+        self.with_gap(project); f = project.folder; c = client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10)).json(); assert client.get('/api/gaps/video', params=dict(folder=f, id='G01')).status_code == 404
+        os.makedirs(os.path.join(project.race_dir, 'synthetic'), exist_ok=True); open(os.path.join(project.race_dir, 'synthetic', 'G01.mp4'), 'wb').write(b'x' * 10)
+        doc = SY.load(f); doc['clips'][0].update(status='ready', file='synthetic/G01.mp4'); SY.save(f, doc)
+        assert client.get('/api/gaps/video', params=dict(folder=f, id='G01')).content == b'x' * 10 and client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['exists'] is True
+        assert client.delete('/api/gaps/clip', params=dict(folder=f, id='G01')).json() == dict(removed=True) and not os.path.exists(os.path.join(project.race_dir, 'synthetic', 'G01.mp4')) and SY.load(f)['clips'] == [] and c
