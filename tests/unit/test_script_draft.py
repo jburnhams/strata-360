@@ -176,3 +176,8 @@ def test_a_view_is_only_for_clip_and_broll_items_of_a_clip_that_has_it():
 
 def test_the_prompt_explains_the_views_of_you():
     sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 9
+
+
+def test_a_reply_with_raw_newlines_inside_strings_is_still_read():
+    raw = '{"title": "T", "story": "two\nlines", "items": [], "skipped": []}'
+    assert SD.parse(raw)['story'] == 'two\nlines' and SD.parse('```json\n' + raw + '\n```')['title'] == 'T' and SD.parse('no json here') is None

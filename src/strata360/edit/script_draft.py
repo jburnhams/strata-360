@@ -95,8 +95,9 @@ def build_messages(pack, target_s, wpm, pins=None, draft=None):
 def parse(text):
     m = re.search(r'\{.*\}', text or '', re.S)
     for cand in ((m.group(0), re.sub(r',\s*([}\]])', r'\1', m.group(0))) if m else ()):
-        try: return json.loads(cand)
-        except ValueError: pass
+        for strict in (True, False):                                                                       # (strict=False lets a string hold a raw newline or tab, which models sometimes write)
+            try: return json.loads(cand, strict=strict)
+            except ValueError: pass
     return None
 
 
