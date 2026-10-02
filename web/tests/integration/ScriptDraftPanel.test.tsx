@@ -10,6 +10,15 @@ const word = (i: number, w: string, m?: 'must' | 'never') => ({ i, w, t0: i, t1:
 const transcript = (m1?: 'must' | 'never') => ({ segments: [makeSeg({ si: 0, clip: CLIP, text: 'we are fine', words: [word(0, 'we', m1), word(1, 'are'), word(2, 'fine')] }), makeSeg({ si: 1, clip: CLIP, text: 'not used', words: [word(0, 'not'), word(1, 'used')] })] })
 
 describe('ScriptDraftPanel', () => {
+  it('shows a gap item with its kind, length, reason and anchor', async () => {
+    mockGet('/api/script2', makeScript2State({ drafts: ['d1.json'], draft: makeScriptDraft({ items: [
+      { type: 'gap', clip: 'G03', kind: 'flyover', seconds: 14, why: 'the long night climb', anchor: { film_s: 100, why: 'the chorus' } },
+      { type: 'gap', clip: 'G04', kind: 'map', seconds: 8, why: 'a quiet hour' }] }) }))
+    setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByText(/3D flyover \(needs your approval\), 14 s: the long night climb/)).toBeInTheDocument()
+    expect(screen.getByText(/2D map, 8 s: a quiet hour/)).toBeInTheDocument(); expect(screen.getByText('anchored at 100 s')).toBeInTheDocument(); expect(screen.getAllByText('gap')).toHaveLength(2)
+  })
+
   it('offers to write a first draft when there is none', async () => {
     const seen = recordRequests('/api/script2/generate')
     const { user } = setup(<ScriptDraftPanel folder="/data" />)

@@ -41,3 +41,14 @@ def test_final_pictures_are_16_bit_and_preview_ones_bgr(video):
     p = video.replace('v.mp4', 'red.mp4'); sp.run(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '64x36', '-r', '10', '-i', '-', '-c:v', 'libx264', '-crf', '8', '-pix_fmt', 'yuv444p', p], input=img.tobytes() * 5, check=True)
     rgb = next(SYN.frames(p, 0.0, 0, 1, 10.0, 64, 36, 'rgb')); bgr = next(SYN.frames(p, 0.0, 0, 1, 10.0, 64, 36, 'bgr'))
     assert rgb[18, 32, 0] > 200 > rgb[18, 32, 2] and bgr[18, 32, 2] > 200 > bgr[18, 32, 0]
+
+
+def test_a_clip_not_rendered_yet_shows_a_card_so_the_film_still_plays(tmp_path):
+    out = list(SYN.frames(str(tmp_path / 'G01.mp4'), 0.0, 0, 5, 10.0, 64, 36)); assert len(out) == 5 and out[0].shape == (36, 64, 3) and out[0].dtype == np.uint8 and out[0].max() > 100                      # grey with a line of text
+    w = next(SYN.frames(str(tmp_path / 'G01.mp4'), 0.0, 0, 1, 10.0, 64, 36, 'rgb', np.uint16)); assert w.dtype == np.uint16 and w.max() > 255 * 100
+
+
+def test_a_synthetic_clip_keeps_its_approval_when_planned_again_with_the_same_key(tmp_path, monkeypatch):
+    from strata360.edit import synthetic as SY
+    gap = dict(id='G01', t0=1_771_754_000.0, t1=1_771_754_000.0 + 3600); monkeypatch.setattr(SY, 'load', lambda f: doc); monkeypatch.setattr(SY, 'save', lambda f, d: d.update(saved=True)); doc = dict(clips=[dict(SY.make(gap, seconds=8, kind='flyover', approved=False), approved=True, status='ready')])
+    again = SY.upsert('x', SY.make(gap, seconds=8, kind='flyover', approved=False)); assert again['approved'] is True and again['status'] == 'ready'

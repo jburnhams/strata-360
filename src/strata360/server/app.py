@@ -885,11 +885,20 @@ def create_app(roots, token=None):
         except ValueError as e: raise HTTPException(400, str(e))
         return SY.upsert(f, clip)
 
+    @api.post('/api/gaps/approve', dependencies=[Depends(auth)])
+    def post_gap_approve(body: dict):                                                    # {folder, id}: approve a clip the script planned (a 3D flyover is not rendered until you do)
+        from strata360.edit import synthetic as SY
+        f = folder_of(body.get('folder')); doc = SY.load(f); c = next((c for c in doc['clips'] if c['id'] == body.get('id')), None)
+        if c is None: raise HTTPException(404, 'no such planned clip')
+        c['approved'] = True; SY.save(f, doc); return c
+
     @api.post('/api/gaps/render', dependencies=[Depends(auth)])
     def post_gap_render(body: dict):                                                     # {folder, id}: render a planned generated clip in the background (`strata360 gap-clip --clip`)
         from strata360.edit import synthetic as SY
         f = folder_of(body.get('folder')); cid = str(body.get('id') or '')
-        if not any(c['id'] == cid for c in SY.load(f)['clips']): raise HTTPException(404, 'no such planned clip')
+        c = next((c for c in SY.load(f)['clips'] if c['id'] == cid), None)
+        if c is None: raise HTTPException(404, 'no such planned clip')
+        if c.get('approved') is False: raise HTTPException(409, f"{cid} was planned by the script and is not approved yet: approve it first (a {c['kind']} render takes machine time)")
         job = GAP_JOBS.get(f)
         if job and job[1].poll() is None: return dict(started=False, reason=f'{job[0]} is already being rendered')
         d = os.path.join(config.race_dir(f), 'synthetic'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, cid + '.log'), 'wb')

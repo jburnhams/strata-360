@@ -25,7 +25,7 @@ export interface TrackClip {
   t_mid?: number; t0?: number; t1?: number; lat?: number; lon?: number; stretch?: [number, number][]; facts?: TrackClipFacts
 }
 export type GapKind = 'map' | 'flyover'
-export interface GapClip { id: string; gap: string; kind: GapKind | string; size?: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; error?: string; file?: string }
+export interface GapClip { id: string; gap: string; kind: GapKind | string; size?: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; error?: string; approved?: boolean; file?: string }
 export interface Gap {
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
@@ -42,7 +42,7 @@ export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
-export interface ScriptItem { type: 'vo' | 'clip' | 'broll'; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
+export interface ScriptItem { type: 'vo' | 'clip' | 'broll' | 'gap'; kind?: GapKind | string; anchor?: { film_s: number; why?: string }; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
 export interface ScriptDraft {
   title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
   problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null
@@ -121,6 +121,7 @@ export const api = {
   planGapClip: (folder: string, gap: string, seconds: number, kind: GapKind = 'map') => call<GapClip>('/api/gaps/clip', { folder, gap, seconds, kind }),
   renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
   deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),
+  approveGapClip: (folder: string, id: string) => call<GapClip>('/api/gaps/approve', { folder, id }),
   gapVideoUrl: (folder: string, id: string) => '/api/gaps/video?' + q({ folder, id }),
   track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
   uploadTrack: async (folder: string, file: File) => {

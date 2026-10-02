@@ -21,6 +21,7 @@ LEAD_S = 0.2                 # a narration line starts this long after its windo
 TAIL_S = 0.3                 # and its window runs this long after it ends
 MAX_DIALOGUE_S = 20.0        # the longest dialogue technique (dialogue_hold)
 MAX_PICTURE_S = CH.MAX_SEG_S
+MAX_GAP_S = 45.0             # the longest a gap item plays (script_pack.MAX_GAP_S)
 
 
 def seg_id(clip, text):
@@ -41,8 +42,9 @@ def pieces(draft, pack, voice_s, wpm):
         if c.get('synthetic'):                                                                          # a generated clip: its whole length, picture only; narration may run over it
             if it['type'] == 'clip': warn.append(f"item {n + 1}: {c['label']} has no words; skipped"); continue
             text = (it.get('text') or '').strip() if it['type'] == 'vo' else ''; d = voice_s.get(n); est = d is None; d = estimated_s(text, wpm) if est else d
-            sec = c['duration_s'] if it['type'] == 'vo' else min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), c['duration_s'])
-            out.append(dict(base, kind='synthetic', role=it['type'], text=text, speak_s=d if text else 0.0, estimated=est and bool(text), seconds=max(sec, LEAD_S + d + TAIL_S if text else 0.0), seg=seg_id(c['clip'], text) if text else None)); continue
+            if it['type'] == 'gap': sec = min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), MAX_GAP_S)             # a gap item names its own length (the clip is made to it)
+            else: sec = c['duration_s'] if it['type'] == 'vo' else min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), c['duration_s'])
+            out.append(dict(base, kind='synthetic', role='broll' if it['type'] == 'gap' else it['type'], gap_kind=it.get('kind') if it['type'] == 'gap' else None, text=text, speak_s=d if text else 0.0, estimated=est and bool(text), seconds=max(sec, LEAD_S + d + TAIL_S if text else 0.0), seg=seg_id(c['clip'], text) if text else None)); continue
         if it['type'] == 'clip':
             ls = [lines[i] for i in it.get('lines') or [] if i in lines]
             if not ls: warn.append(f'item {n + 1}: no transcript lines; skipped'); continue

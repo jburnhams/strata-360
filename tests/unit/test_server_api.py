@@ -274,6 +274,15 @@ class TestGapClipsApi(TestRaceMapData):
         assert client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True); cmd = fake_popen.instances[-1].cmd; assert 'gap-clip' in cmd and cmd[cmd.index('--clip') + 1] == 'G01'
         g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert g['rendering'] is True and client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json()['started'] is False
 
+    def test_a_clip_the_script_planned_is_not_rendered_until_it_is_approved(self, client, project, fake_popen):
+        from strata360.edit import synthetic as SY
+        self.with_gap(project); f = project.folder; g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]
+        SY.upsert(f, SY.make(g, seconds=10, kind='flyover', approved=False)); c = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert c['approved'] is False
+        r = client.post('/api/gaps/render', json=dict(folder=f, id='G01')); assert r.status_code == 409 and 'not approved yet' in r.json()['detail'] and not fake_popen.instances
+        assert client.post('/api/gaps/approve', json=dict(folder=f, id='G01')).json()['approved'] is True and client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True)
+        assert client.post('/api/gaps/approve', json=dict(folder=f, id='nope')).status_code == 404
+        client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10, kind='flyover')); assert client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['approved'] is True              # asking for it yourself is the approval
+
     def test_a_rendered_clip_can_be_played_and_removed(self, client, project):
         from strata360.edit import synthetic as SY
         self.with_gap(project); f = project.folder; c = client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10)).json(); assert client.get('/api/gaps/video', params=dict(folder=f, id='G01')).status_code == 404
