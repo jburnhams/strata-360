@@ -135,3 +135,32 @@ def test_narration_longer_than_the_clips_footage_gets_the_missing_time_held_with
     d = dict(wpm=150, items=[dict(type='vo', clip='0003', text='A long line over a very short clip.')])
     r = SPL.build(d, pack, [C1, C2, tiny], LIB, MUSIC, {0: 6.0}, st=CH.Settings(seed=1)); need = 6.0 + SPL.LEAD_S + SPL.TAIL_S
     assert sum(s.dur_s for s in r['segs']) >= need - 1e-6 and any('narration needs' in w and 'shorten the line' in w and 'last frame is held' in w for w in r['warnings'])
+
+
+# ---- the director's anchors and the music's singing
+
+def anchored(items): return dict(wpm=150, items=items)
+
+
+def test_an_anchored_item_is_moved_to_the_nearest_bar_by_stretching_the_b_roll_before_it():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=8.9, why='the chorus'))])             # bars are 2 s: 8.9 s is nearest the bar at 8 s
+    r = run(d, {}); a = r['anchors'][0]; assert a['item'] == 2 and a['target_s'] == 8.0 and a['moved_s'] == 4.0 and a['left_s'] == 0.0 and a['start_s'] == 8.0 and not any('anchored' in w for w in r['warnings'])
+    assert r['pieces'][0]['seconds'] == 8.0 and sum(s.beats for s, k in zip(r['segs'], r['piece_of']) if k == 0) * BEAT == 8.0
+
+
+def test_an_anchor_that_needs_more_than_the_b_roll_can_give_is_reported_not_forced():
+    r = run(anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=40, why='x'))]), {})
+    a = r['anchors'][0]; assert a['left_s'] > 0 and a['start_s'] < 40 and any('anchored at 40 s' in w and 'no b-roll before it to stretch' in w for w in r['warnings'])
+    only_voice = run(anchored([dict(type='vo', clip='0001', text='one two three'), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=20, why='x'))]), {0: 2.0})
+    assert only_voice['anchors'][0]['moved_s'] == 0.0 and any('no b-roll before it' in w for w in only_voice['warnings'])                                        # the voice's length is not ours to change
+
+
+def test_a_later_anchor_does_not_undo_an_earlier_one():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=8, why='a')), dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=20, why='b'))])
+    r = run(d, {}); starts = {a['item']: a['start_s'] for a in r['anchors']}; assert starts == {2: 8.0, 4: 20.0}
+
+
+def test_narration_over_singing_is_found_and_reported_with_the_plan():
+    lines = [dict(text='over the verse', film_start_s=10.0, speak_s=6.0), dict(text='in the quiet', film_start_s=40.0, speak_s=5.0), dict(text='a bit of overlap', film_start_s=29.0, speak_s=5.0)]
+    got = SPL.over_singing(lines, [[8.0, 20.0], [30.0, 31.0]]); assert [g['text'] for g in got] == ['over the verse'] and got[0]['sung_s'] == 6.0                          # one second of five is under the share
+    pack = dict(PACK, music=dict(lyrics=dict(vocal_spans=[[0.0, 60.0]]))); r = SPL.build(DRAFT, pack, [C1, C2], LIB, MUSIC, VOICE, st=CH.Settings(seed=1)); assert r['over_singing'] and any('is over singing' in w and 'the music is turned down under it' in w for w in r['warnings'])

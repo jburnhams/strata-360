@@ -131,6 +131,41 @@ def _has_technique(w, c, lib, music, d):
     return False
 
 
+def est_beats(p, beat_s):
+    """About how many beats a piece takes in the film (its windows are whole beats: b-roll rounds, the rest round up)."""
+    return max(1, int(round(p['seconds'] / beat_s)) if p['kind'] == 'broll' else int(math.ceil(p['seconds'] / beat_s - 1e-9)))
+
+
+def anchor_pass(ps, draft, music, warn):
+    """Move the script's anchored items to the music: for each item with `anchor: {film_s}` the wanted start is the nearest BAR LINE to that time, and the b-roll pieces just before it (back to the previous anchored item) are lengthened or
+    shortened, in whole beats, to bring it there (b-roll is the only picture that can stretch: the voice, the runner's words and the generated clips have fixed lengths). What cannot be moved is reported. Changes `seconds` of b-roll pieces; returns [{item, anchor_s, target_s, moved_s, left_s}]."""
+    beat_s = music.beat_s; bar = music.bar_beats; items = draft['items']; out = []; floor = 0
+    for k, p in enumerate(ps):
+        anc = items[p['n']].get('anchor')
+        if not (isinstance(anc, dict) and isinstance(anc.get('film_s'), (int, float))): continue
+        starts = [0]
+        for q in ps[:-1]: starts.append(starts[-1] + est_beats(q, beat_s))
+        target = int(round(anc['film_s'] / (bar * beat_s))) * bar; left = target - starts[k]; first = left
+        for j in range(k - 1, floor - 1, -1):
+            if left == 0: break
+            q = ps[j]
+            if q['kind'] != 'broll': continue
+            new = min(max(q['seconds'] + left * beat_s, 2.0), max(q['seconds'] * 2.0, q['seconds'] + 6.0)); done = int(round((new - q['seconds']) / beat_s)); q['seconds'] = q['seconds'] + done * beat_s; left -= done
+        out.append(dict(item=p['n'] + 1, anchor_s=float(anc['film_s']), target_s=round(target * beat_s, 2), moved_s=round((first - left) * beat_s, 2), left_s=round(left * beat_s, 2)))
+        if left: warn.append(f"item {p['n'] + 1}: anchored at {anc['film_s']:.0f} s, the nearest bar is {target * beat_s:.0f} s, and there is no b-roll before it to stretch by the last {abs(left) * beat_s:.1f} s: it starts {abs(left) * beat_s:.1f} s {'early' if left > 0 else 'late'}")
+        floor = k
+    return out
+
+
+def over_singing(lines, spans, share=0.3):
+    """The narration lines (each {text, film_start_s, speak_s}) that are mostly over singing: [{text, a, b, sung_s}]."""
+    out = []
+    for l in lines:
+        a = l['film_start_s'] + LEAD_S; b = a + l['speak_s']; sung = sum(max(0.0, min(b, y) - max(a, x)) for x, y in spans)
+        if l['speak_s'] > 0 and sung > share * l['speak_s']: out.append(dict(text=l['text'], a=round(a, 1), b=round(b, 1), sung_s=round(sung, 1)))
+    return out
+
+
 def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed=1):
     """The plan for a script. `clips` are the planner's clip dicts (project.load_clips), `music` an O.Music (its `beats` is replaced by what the script needs). Returns
     dict(segs=[chrono.Seg in film order], items=[(piece index, role)], pieces, lines=[narration lines for the voice-over], beats, warnings)."""
@@ -138,6 +173,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     clips = sorted(clips, key=lambda c: c['start_utc']); index = {c['id']: i for i, c in enumerate(clips)}
     foot = {c['id']: Footage(c, CH.clip_candidates(c)) for c in clips}
     ps, w0 = pieces(draft, pack, voice_s, wpm); warn += w0; ps = [p for p in ps if p['clip'] in foot or p['kind'] == 'synthetic']
+    anchors = anchor_pass(ps, draft, music, warn)
     for p in ps:                                                                                    # the dialogue the script plays is not footage for narration
         if p['kind'] == 'clip': foot[p['clip']].reserved.append((p['start'], p['start'] + p['seconds']))
     cap_p = int(MAX_PICTURE_S / beat_s + 1e-9) * beat_s; cap_d = int(MAX_DIALOGUE_S / beat_s + 1e-9) * beat_s          # the longest window in WHOLE beats: rounding a window up to beats must never take it past what a technique allows
@@ -174,4 +210,13 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     for k, p in enumerate(ps):
         if p['kind'] == 'vo' and k in first_window: lines.append(dict(seg=p['seg'], text=p['text'], clip=p['clip'], item=p['n'], film_start_s=round(starts[first_window[k]], 3), seconds=round(sum(w.beats for w in windows if w._piece == k) * beat_s, 3), speak_s=round(p['speak_s'], 3), estimated=p['estimated']))
     lines.sort(key=lambda l: l['film_start_s'])
-    return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B + run, synthetic=synthetic, warnings=warn)
+    start_of = {}                                                                                     # where each piece really starts in the film (seconds)
+    for k in range(len(ps)):
+        if k in syn: start_of[k] = next(x['start_beat'] for x in synthetic if x['piece'] == k) * beat_s
+        elif k in first_window: start_of[k] = segs[first_window[k]].start * beat_s
+    for a in anchors:
+        k = next((k for k, p in enumerate(ps) if p['n'] + 1 == a['item']), None); a['start_s'] = round(start_of[k], 2) if k in start_of else None
+        if a['start_s'] is not None and abs(a['start_s'] - a['anchor_s']) > music.bar_beats * beat_s: warn.append(f"item {a['item']}: anchored at {a['anchor_s']:.0f} s, starts at {a['start_s']:.0f} s")
+    spans = (((pack.get('music') or {}).get('lyrics')) or {}).get('vocal_spans') or []; sung = over_singing(lines, spans)
+    for x in sung: warn.append(f"narration at {x['a']:.0f}-{x['b']:.0f} s is over singing for {x['sung_s']:.0f} s: \"{x['text'][:50]}\"; the music is turned down under it")
+    return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B + run, synthetic=synthetic, anchors=anchors, over_singing=sung, warnings=warn)

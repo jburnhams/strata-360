@@ -169,7 +169,7 @@ def plan_from_script(folder, draft_name=None, log=print):
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
     now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     edit['plan'] = dict(generated_at=now, source='script', script=name, film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=bpm, bar_beats=bar, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
-                        segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'])
+                        segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [])
     save(folder, edit); rd = config.race_dir(folder); os.makedirs(os.path.join(rd, 'script2'), exist_ok=True); p = os.path.join(rd, VO.SCRIPT2_LINES); json.dump(dict(draft=name, generated_at=now, lines=res['lines']), open(p + '.tmp', 'w'), indent=1); os.replace(p + '.tmp', p)
     return edit
 

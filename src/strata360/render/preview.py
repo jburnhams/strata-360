@@ -169,6 +169,19 @@ def audio_of(folder, clip, role=None):
     p = proxy_of(folder, clip); return p if p and has_audio(p) else None
 
 
+DUCK_GAIN = 0.4              # the music's level under the runner's own speech (the voice-over ducks it through the side chain instead)
+DUCK_RAMP_S = 0.25
+
+
+def music_duck(plan):
+    """An ffmpeg `volume` expression (per frame, `t` in film seconds) that turns the music down to DUCK_GAIN, with a short ramp each side, wherever the script plays the runner's own words (windows with role `clip`); '' when there are none."""
+    parts = [f"(1-{1 - DUCK_GAIN:g}*clip(min((t-{g['film_start_s']:.3f})/{DUCK_RAMP_S},({g['film_start_s'] + g['dur_s']:.3f}-t)/{DUCK_RAMP_S}),0,1))" for g in plan['segments'] if g.get('role') == 'clip']
+    return _nest(parts) if parts else ''
+
+
+def _nest(parts): return parts[0] if len(parts) == 1 else f'min({parts[0]},{_nest(parts[1:])})'
+
+
 def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None):
     """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track. `music_gain` is the music's level; `bg_gain`, when given, is the level of the clips' own
     background sound in narration and b-roll windows (the rough mix plays it quietly)."""
@@ -184,7 +197,8 @@ def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None):
     if has_vo: inputs += ['-i', vo]; chain += f";[{k}:a]aresample=48000,aformat=channel_layouts=mono,{'asplit=2[vo][vokey]' if has_mu else 'anull[vo]'}"; k += 1
     if has_mu:                                                                                        # the music from its first downbeat, ducked under the voice-over, fading out at the end
         inputs += ['-ss', f"{mus['offset_s']:.3f}", '-t', f'{total_s:.3f}', '-i', mp]
-        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono,volume={music_gain},afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
+        duck = music_duck(plan); duck_f = f",volume='{duck}':eval=frame" if duck else ''
+        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono,volume={music_gain}{duck_f},afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
         chain += (';[mu][vokey]sidechaincompress=threshold=0.02:ratio=6:attack=30:release=500[mud]' if has_vo else ';[mu]anull[mud]')
     mix = ['[nat]'] + (['[vo]'] if has_vo else []) + (['[mud]'] if has_mu else [])
     chain += f";{''.join(mix)}amix=inputs={len(mix)}:normalize=0:duration=longest,{tail}"
