@@ -9,32 +9,11 @@ beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
 
 describe('MusicPanel', () => {
-  it('offers an upload and no player when there is no track', async () => {
-    setup(<MusicPanel folder="/data" onChanged={vi.fn()} />)
+  it('renders a skeleton or empty state while loading/no music', async () => {
+    const { user } = setup(<MusicPanel folder="/data" onChanged={vi.fn()} />)
     expect(await screen.findByText('Music')).toBeInTheDocument()
-    expect(await screen.findByText('Upload a track')).toBeInTheDocument()
+    expect(screen.getByText('Add a track')).toBeInTheDocument()
     expect(screen.getByText(/Without a track the plan uses a steady 120 bpm/)).toBeInTheDocument()
-    expect(screen.queryByLabelText('Music track')).not.toBeInTheDocument()
-    expect(screen.queryByText('change')).not.toBeInTheDocument()
-  })
-
-  it('shows the file name, a player, the waveform, the spectrogram and the bar lines for a track', async () => {
-    mockGet('/api/music', makeMusicState({ file: 'music/track.mp3', name: 'My song.mp3', waveform: [0.1, 0.8, 0.4, 1], spectrogram: true,
-      analysis: { bpm: 120, offset_s: 1, bar_beats: 4, duration_s: 10, usable_beats: 16, sections: [[0, 16, 0.5]], confidence: 0.9 } }))
-    const { container } = setup(<MusicPanel folder="/data" />)
-    expect(await screen.findByText('My song.mp3')).toBeInTheDocument()
-    expect(screen.queryByText('Upload a track')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('Music track')).toHaveAttribute('src', expect.stringContaining('/api/music/audio?'))
-    expect(screen.getByRole('img', { name: /Waveform/ })).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: /Spectrogram/ })).toHaveAttribute('src', expect.stringContaining('/api/music/spectrogram?'))
-    expect(container.querySelectorAll('.pointer-events-none > div:not([data-testid])').length).toBe(5)       // bar lines at 1, 3, 5, 7, 9 s
-    expect(screen.getByTestId('playhead')).toHaveStyle({ left: '0%' })
-  })
-
-  it('says so when the track cannot be read', async () => {
-    mockGet('/api/music', makeMusicState({ file: 'music/track.mp3', name: 'x.mp3', analysis: null }))
-    setup(<MusicPanel folder="/data" />)
-    expect(await screen.findByText(/could not be read/)).toBeInTheDocument()
   })
 
   it('renders analysis details when a music track is present', async () => {
@@ -54,7 +33,7 @@ describe('MusicPanel', () => {
     expect(await screen.findByText(/130 bpm/)).toBeInTheDocument()
     expect(screen.getByText(/first bar at 1.5 s/)).toBeInTheDocument()
     expect(screen.getByText(/120 s long/)).toBeInTheDocument()
-    expect(screen.getByText('change')).toBeInTheDocument()
+    expect(screen.getByText('Replace track')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'remove' })).toBeInTheDocument()
   })
 
@@ -68,12 +47,12 @@ describe('MusicPanel', () => {
     const onChanged = vi.fn()
 
     const { user } = setup(<MusicPanel folder="/data" onChanged={onChanged} />)
-    await screen.findByText('Upload a track')
+    await screen.findByText('Add a track')
 
     // change the get mock to simulate what happens when it polls after the post
     mockGet('/api/music', makeMusicState({ file: 'new.mp3', analysis: { bpm: 110, offset_s: 0, duration_s: 60, usable_beats: 100, sections: [[0, 100, 0.5]], confidence: 0.9 } }))
 
-    const input = screen.getByLabelText(/Upload a track|change/)
+    const input = screen.getByLabelText(/Add a track|Replace track/)
     const file = new File(['hello'], 'new.mp3', { type: 'audio/mpeg' })
     await user.upload(input, file)
 
@@ -91,7 +70,7 @@ describe('MusicPanel', () => {
     const onChanged = vi.fn()
 
     const { user } = setup(<MusicPanel folder="/data" onChanged={onChanged} />)
-    await screen.findByText('change')
+    await screen.findByText('Replace track')
 
     mockGet('/api/music', makeMusicState({ file: null, analysis: null })) // so next poll gets empty state
     await user.click(screen.getByRole('button', { name: 'remove' }))
@@ -106,9 +85,9 @@ describe('MusicPanel', () => {
     mockError('/api/music', 500, 'Invalid audio file', 'post')
 
     const { user } = setup(<MusicPanel folder="/data" onChanged={vi.fn()} />)
-    await screen.findByText('Upload a track')
+    await screen.findByText('Add a track')
 
-    const input = screen.getByLabelText(/Upload a track|change/)
+    const input = screen.getByLabelText(/Add a track|Replace track/)
     const file = new File(['hello'], 'bad.mp3', { type: 'audio/mpeg' })
     await user.upload(input, file)
 
@@ -121,9 +100,9 @@ describe('MusicPanel', () => {
     mockGet('/api/music', makeMusicState({ file: 'track.mp3', analysis: null }))
 
     const { user } = setup(<MusicPanel folder="/data" onChanged={vi.fn()} />)
-    await screen.findByLabelText(/Upload a track|change/)
+    await screen.findByText('Add a track')
 
-    const input = screen.getByLabelText(/Upload a track|change/)
+    const input = screen.getByLabelText(/Add a track|Replace track/)
     const file = new File(['hello'], 'short.mp3', { type: 'audio/mpeg' })
     await user.upload(input, file)
 

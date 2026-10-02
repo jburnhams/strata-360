@@ -37,13 +37,7 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 | `edit/voiceover.py`, `edit/vo_fit.py` | n/a | `test_voiceover.py` | `respeak`/`fit_project` with the fake speech engine |
 | `edit/music.py` | n/a | `test_music.py` | |
 | `edit/optimise.py` | n/a | `test_edit.py` | slow pure computation (see Known issues) |
-| `cli.py` | 59% | `test_cli_commands.py` | basic commands (doctor, status, etc) covered |
-| `render/film.py` | 81% | `test_render.py` | composing film pieces |
-| `render/final.py` | 92% | `test_render.py` | final CLI rendering |
-| `render/flat.py` | 70% | `test_render.py` | flat CLI rendering, seam |
-| `render/preview.py` | 67% | `test_render.py` | preview GUI rendering |
-| `render/proxy.py` | 66% | `test_render.py` | proxy GUI rendering |
-| `audio/dsp.py` | 63% | `test_audio.py` | core ffmpeg audio operations |
+| `cli.py`, `render/*`, `audio/*` | n/a | | todo: fill in the first numbers from a fresh coverage run |
 
 ## Known issues
 

@@ -1,6 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { api, type WordT } from '../api'
-import { STATE_CLASS, STATE_NAME, baseLine, wordState } from '../marks'
 
 export type Mode = 'translated' | 'original' | 'both'
 const LANG: Record<string, string> = { en: 'English', fr: 'French', nl: 'Dutch', de: 'German', es: 'Spanish', it: 'Italian' }
@@ -8,9 +7,9 @@ export const isForeign = (lang: string, text: string, en: string | null) => lang
 
 // One recognised phrase. English is plain. A phrase in another language shows its English translation in blue by default (chip "FR → EN") and its original words in amber (chip "FR"):
 // click the chip to flip between them; the mode switch above the transcript sets what everything shows first (translated, original, or both).
-export type WordCtx = { folder: string; clip: string; si: number; words: WordT[]; onSaved: () => void; used?: Set<string> }
+export type WordCtx = { folder: string; clip: string; si: number; words: WordT[]; onSaved: () => void }
 
-const tip = (w: WordT, state = '') => !w.e ? `${w.t0.toFixed(1)} s${state ? ' · ' + state : ''} · click to correct this word` : `Original: "${w.e.orig}"\nChanged by ${w.e.src === 'user' ? 'you' : 'Gemini'}${w.e.src === 'gemini' && w.e.why ? `: ${w.e.why}` : ''}${w.e.src === 'user' && w.e.gemini_text ? `\nGemini suggested "${w.e.gemini_text}"` : ''}\nclick to edit`
+const tip = (w: WordT) => !w.e ? `${w.t0.toFixed(1)} s · click to correct this word` : `Original: "${w.e.orig}"\nChanged by ${w.e.src === 'user' ? 'you' : 'Gemini'}${w.e.src === 'gemini' && w.e.why ? `: ${w.e.why}` : ''}${w.e.src === 'user' && w.e.gemini_text ? `\nGemini suggested "${w.e.gemini_text}"` : ''}\nclick to edit`
 
 // The words of a phrase, one by one: a corrected word is highlighted (amber = Gemini, blue = you) and hovering shows the original and who changed it; clicking a word edits it. A correction replaces
 // one recognised word and keeps its timing, so nothing that depends on timing moves.
@@ -19,12 +18,11 @@ function Words({ ctx }: { ctx: WordCtx }) {
   const input = useRef<HTMLInputElement>(null)
   useEffect(() => { if (open != null) input.current?.select() }, [open])
   const save = async (i: number, text: string | null) => { setOpen(undefined); await api.editWord(ctx.folder, ctx.clip, ctx.si, i, text); ctx.onSaved() }
-  const lineUsed = !!ctx.used?.has(baseLine(ctx.clip, ctx.si))
-  return <>{ctx.words.map((w, k) => { const i = w.i ?? k; const st = wordState(w, lineUsed); return (
+  return <>{ctx.words.map((w, k) => { const i = w.i ?? k; return (
     <Fragment key={i}>
       <span className="relative inline-block">
-        <span title={tip(w, st === 'free' ? '' : STATE_NAME[st])} data-wclip={ctx.clip} data-wseg={ctx.si} data-wi={i} data-state={st} onClick={e => { e.stopPropagation(); if (window.getSelection()?.isCollapsed === false) return; setOpen(i) }}
-          className={`cursor-text rounded px-0.5 ${STATE_CLASS[st]} ${w.e ? `underline decoration-dotted decoration-2 underline-offset-2 ${w.e.src === 'user' ? 'decoration-sky-500' : 'decoration-amber-500'}` : ''} ${w.w.trim() === '' ? 'line-through opacity-60' : ''}`}>{w.w.trim() === '' ? (w.e?.orig ?? '') : w.w}</span>
+        <span title={tip(w)} onClick={e => { e.stopPropagation(); setOpen(i) }}
+          className={`cursor-text rounded px-0.5 ${w.e ? (w.e.src === 'user' ? 'bg-sky-200 dark:bg-sky-500/30' : 'bg-amber-200 dark:bg-amber-500/30') : 'hover:bg-stone-200 dark:hover:bg-stone-700'} ${w.w.trim() === '' ? 'line-through opacity-60' : ''}`}>{w.w.trim() === '' ? (w.e?.orig ?? '') : w.w}</span>
         {open === i && (
           <span className="absolute left-0 top-full z-30 mt-1 flex w-64 flex-col gap-1 rounded-lg border border-stone-300 bg-white p-2 text-xs shadow-lg dark:border-stone-700 dark:bg-stone-900" onClick={e => e.stopPropagation()}>
             <input ref={input} defaultValue={w.w} autoFocus onKeyDown={e => { if (e.key === 'Enter') void save(i, e.currentTarget.value); if (e.key === 'Escape') setOpen(undefined) }} className="rounded border border-stone-300 bg-transparent px-1.5 py-1 text-sm dark:border-stone-700" />

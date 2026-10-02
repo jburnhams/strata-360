@@ -53,11 +53,14 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/usePoll.ts` | 100% | done |
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
+| `src/components/FilmDetails.tsx` | 93.75% | done (jsdom/RTL bug with `input[type="date"]` drops onChange events, making it flaky to test saving date correctly. Gap justified) |
+| `src/components/FilmPreview.tsx` | 63.15% | partial (testing HLS native media functionality is out of scope/difficult in jsdom) |
+| `src/components/FinalRender.tsx` | 100% | done |
 | every other file in `src/` | 0% | todo
 | `src/components/Timeline.tsx` | 77.55% | partial (interactions and edge cases)
 | `src/components/Moments.tsx` | 100% | done |
 
 ### Helpers Added
 
-* `makeEditResponse`, `makePlanSegment` in `factories.ts` to mock Timeline data.
-* `extraHandlers` in `handlers.ts` to support API calls specific to `Timeline` such as `/api/edit`, `/api/edit/propose` and `/api/edit/override`.
+* `makeEditResponse`, `makePlanSegment`, `makeFilmState`, `makeFinalState` in `factories.ts` to mock endpoints.
+* default handlers added to `handlers.ts` to support API calls specific to `Timeline`, `FilmDetails`, `FilmPreview`, `FinalRender`.
