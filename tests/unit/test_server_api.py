@@ -252,6 +252,14 @@ class TestGapClipsApi(TestRaceMapData):
         self.with_gap(project); g = client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps']
         assert [x['id'] for x in g] == ['G01'] and 4000 < g[0]['duration_s'] < 4800 and g[0]['clips'] == [] and 6 <= g[0]['default_seconds'] <= 45
 
+    def test_a_flyover_can_be_planned_in_4k_and_the_list_says_whether_it_can_be_rendered(self, client, project, monkeypatch, tmp_path):
+        from strata360.overlay import flyover as FO
+        self.with_gap(project); f = project.folder; monkeypatch.delenv('MBGL_RENDER', raising=False); monkeypatch.setattr(FO, 'MBGL_DEFAULT', str(tmp_path / 'none')); monkeypatch.setattr(FO.shutil, 'which', lambda n: None)
+        r = client.get('/api/gaps', params=dict(folder=f)).json()['flyover']; assert r['available'] is False and 'terrain-flyover.md' in r['note']
+        exe = tmp_path / 'mbgl-render'; exe.write_text('x'); monkeypatch.setenv('MBGL_RENDER', str(exe)); assert client.get('/api/gaps', params=dict(folder=f)).json()['flyover'] == dict(available=True, note='')
+        c = client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=20, kind='flyover')).json(); assert c['kind'] == 'flyover' and c['size'] == '3840x2160'
+        assert client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', kind='orbit')).status_code == 400 and client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=20)).json()['kind'] == 'map'
+
     def test_planning_a_clip_for_a_gap_or_a_stretch_of_it(self, client, project):
         self.with_gap(project); f = project.folder; r = client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10)).json()
         assert r['id'] == 'G01' and r['seconds'] == 10.0 and r['status'] == 'planned' and client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['id'] == 'G01'

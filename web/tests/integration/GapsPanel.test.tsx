@@ -35,8 +35,35 @@ describe('GapsPanel', () => {
     await user.clear(box); await user.type(box, '25')
     await user.click(screen.getByRole('button', { name: 'Generate map clip' }))
     await waitFor(() => expect(render).toHaveLength(1))
-    expect(plan[0].body).toEqual({ folder: '/data', gap: 'G01', seconds: 25 })
+    expect(plan[0].body).toEqual({ folder: '/data', gap: 'G01', seconds: 25, kind: 'map' })
     expect(render[0].body).toEqual({ folder: '/data', id: 'G01' })
+  })
+
+  it('plans a 3D flyover when that kind is chosen', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap()], flyover: { available: true, note: '' } })
+    const plan = recordRequests('/api/gaps/clip'); mockPost('/api/gaps/clip', makeGapClip({ kind: 'flyover', size: '3840x2160' }))
+    const render = recordRequests('/api/gaps/render'); mockPost('/api/gaps/render', { started: true })
+    const { user } = setup(<GapsPanel folder="/data" />)
+    await user.selectOptions(await screen.findByLabelText('Kind for G01'), 'flyover')
+    await user.click(screen.getByRole('button', { name: 'Generate 3D flyover' }))
+    await waitFor(() => expect(render).toHaveLength(1))
+    expect(plan[0].body).toEqual({ folder: '/data', gap: 'G01', seconds: 14, kind: 'flyover' })
+  })
+
+  it('offers the 3D flyover but not as a choice when the renderer is not installed', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap()], flyover: { available: false, note: 'mbgl-render is not installed' } })
+    setup(<GapsPanel folder="/data" />)
+    const opt = await screen.findByRole('option', { name: /3D flyover.*not installed/ })
+    expect(opt).toBeDisabled(); expect(opt).toHaveAttribute('title', 'mbgl-render is not installed')
+  })
+
+  it('shows the kind of a planned clip, and its 3D label once rendered', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap({ clips: [makeGapClip({ kind: 'flyover', exists: true, status: 'ready' })] })] })
+    const { user } = setup(<GapsPanel folder="/data" />)
+    expect(await screen.findByLabelText('Kind for G01')).toHaveValue('flyover')
+    expect(screen.getByText(/ready · 3D · 14 s/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Watch' }))
+    expect(screen.getByLabelText('G01 flyover')).toBeInTheDocument()
   })
 
   it('shows a render in progress and does not allow starting another', async () => {
@@ -44,6 +71,7 @@ describe('GapsPanel', () => {
     setup(<GapsPanel folder="/data" />)
     expect(await screen.findByText('G01: 60/420 frames')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Generate map clip' })).toBeDisabled()
+    expect(screen.getByLabelText('Kind for G01')).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Remove G01 clip' })).not.toBeInTheDocument()
   })
 

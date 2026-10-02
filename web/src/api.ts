@@ -24,7 +24,8 @@ export interface TrackClip {
   id: string; label: string; start_utc: string; end_utc: string; duration_s: number; covered: boolean; used: boolean; used_s: number; moments?: number | null; usable_s?: number | null; scene?: { settings: string[]; weather: string[] }
   t_mid?: number; t0?: number; t1?: number; lat?: number; lon?: number; stretch?: [number, number][]; facts?: TrackClipFacts
 }
-export interface GapClip { id: string; gap: string; kind: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; error?: string; file?: string }
+export type GapKind = 'map' | 'flyover'
+export interface GapClip { id: string; gap: string; kind: GapKind | string; size?: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; error?: string; file?: string }
 export interface Gap {
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
@@ -111,8 +112,8 @@ export const api = {
   tilesStatus: (style = 'tf-landscape') => call<TileStatus>('/api/tiles/status?' + q({ style })),
   tileUrl: (style = 'tf-landscape') => `/api/tiles/${style}/{z}/{x}/{y}`,
   trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
-  gaps: (folder: string) => call<{ gaps: Gap[] }>('/api/gaps?' + q({ folder })),
-  planGapClip: (folder: string, gap: string, seconds: number) => call<GapClip>('/api/gaps/clip', { folder, gap, seconds }),
+  gaps: (folder: string) => call<{ gaps: Gap[]; flyover?: { available: boolean; note: string } }>('/api/gaps?' + q({ folder })),
+  planGapClip: (folder: string, gap: string, seconds: number, kind: GapKind = 'map') => call<GapClip>('/api/gaps/clip', { folder, gap, seconds, kind }),
   renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
   deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),
   gapVideoUrl: (folder: string, id: string) => '/api/gaps/video?' + q({ folder, id }),

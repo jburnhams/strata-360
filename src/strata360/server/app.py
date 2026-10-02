@@ -862,10 +862,14 @@ def create_app(roots, token=None):
 
     @api.get('/api/gaps', dependencies=[Depends(auth)])
     def get_gaps(folder: str):                                                           # the stretches of the race with no clip, each with its generated map clips
-        f = folder_of(folder); return dict(gaps=gap_rows(f))
+        from strata360.overlay import flyover as FO
+        f = folder_of(folder)
+        try: FO.find_mbgl(); flyover = dict(available=True, note='')
+        except FO.FlyoverError as e: flyover = dict(available=False, note=str(e))
+        return dict(gaps=gap_rows(f), flyover=flyover)
 
     @api.post('/api/gaps/clip', dependencies=[Depends(auth)])
-    def post_gap_clip(body: dict):                                                       # {folder, gap, seconds? | speedup?, from?, to?, id?}: plan a generated map clip for a gap (or a stretch of it); rendering is a separate step
+    def post_gap_clip(body: dict):                                                       # {folder, gap, kind? ('map' | 'flyover'), size?, seconds? | speedup?, from?, to?, id?}: plan a generated clip (the 2D map or the 3D flyover, 4K) for a gap (or a stretch of it); rendering is a separate step
         import datetime as dt
         from strata360.edit import synthetic as SY
         f = folder_of(body.get('folder')); gap = next((g for g in gap_rows(f) if g['id'] == body.get('gap')), None)
@@ -876,7 +880,7 @@ def create_app(roots, token=None):
             except ValueError: raise HTTPException(400, 'from/to: epoch seconds or an ISO time')
         t0, t1 = when(body.get('from')), when(body.get('to')); cid = body.get('id') or (gap['id'] if t0 is None and t1 is None else None)
         if not cid: raise HTTPException(400, 'a stretch of a gap needs an id')
-        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid)
+        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid, kind=body.get('kind') or 'map', size=body.get('size'))
         except ValueError as e: raise HTTPException(400, str(e))
         return SY.upsert(f, clip)
 
