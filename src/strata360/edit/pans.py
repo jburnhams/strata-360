@@ -35,7 +35,7 @@ GLIDE_FOV = dict(hold_wide=(100, 100), scenery=(95, 95), free_view=(90, 90), sel
 def glide_pair(ta, tb, limit=60.0):
     """Could a shot of technique `ta` glide into one of `tb` (same clip, back to back)? A guess from the techniques alone (the real test is `plan`, on the framing): both must be glideable and the field of view at the end of the first close to the start of the second."""
     a, b = GLIDE_FOV.get(ta, 'no'), GLIDE_FOV.get(tb, 'no')
-    if a == 'no' or b == 'no' or ta == tb == 'globe_shrink': return False
+    if a == 'no' or b == 'no' or ta == tb: return False                                    # the same technique twice is the same shot again, not a move
     return a is None or b is None or abs(a[1] - b[0]) <= limit
 
 
@@ -92,7 +92,7 @@ def plan(seg_a, seg_b, path_a, path_b, look=None):
             py, pp, pf = pa[0] + s * float(wrap(pb[0] - pa[0])), pa[1] + s * (pb[1] - pa[1]), pa[2] + s * (pb[2] - pa[2])
             sy, sp = subject_at(track, ta if who == 'first' else max(tb, 0.0))
             if abs(float(wrap(sy - py))) > LOOK * pf or abs(sp - pp) > LOOK * vfov(pf): return None, f'the {who} shot\'s {path["subject"]} would leave the frame'
-    return judge(dict(type='pan', beats=0, dur_s=round(D, 3), why=f'a glide of {abs(dyaw):.0f} degrees keeping the subject in view', a_dur=da, a_kf=path_a['keyframes'], b_kf=path_b['keyframes']), seg_a, path_a, path_b, look)
+    return judge(dict(type='pan', beats=0, dur_s=round(D, 3), why=f'a glide ({abs(dyaw):.0f} degrees of yaw, {abs(dp):.0f} of pitch, {abs(df):.0f} of field of view) keeping the subject in view', a_dur=da, a_kf=path_a['keyframes'], b_kf=path_b['keyframes']), seg_a, path_a, path_b, look)
 
 
 LOOK_SAMPLES = 7
@@ -162,7 +162,7 @@ def swap_for_glides(folder, segs, lib, protect=(), log=None):
         g2 = g if tech is None else dict(g, technique=tech)
         return FR.resolve_segment(g2, lib, data(g['clip']))
     def ok(a, b, fa, fb):
-        res, why = plan(a, b, fa, fb, lambda y, p_, f, t: look(a, y, p_, f, t)); return res is not None or why.startswith('the two shots already look the same')          # (two shots that look the same way need no glide: the cut between them cannot be seen)
+        res, why = plan(a, b, fa, fb, lambda y, p_, f, t: look(a, y, p_, f, t)); return res is not None                                                                                           # (two shots that look the same way count as failing: a different shot is better)
     def free(g): return not (g.get('synthetic') or g['id'] in protect or g.get('locked') or g.get('fixed'))
     for g in segs:
         if not g.get('synthetic'): fr[g['id']] = frame(g)
@@ -175,7 +175,7 @@ def swap_for_glides(folder, segs, lib, protect=(), log=None):
             cur = next((o['score'] for o in seg.get('options') or [] if o['tech'] == seg['technique']), None)
             if cur is None: continue
             for o in seg['options']:
-                if o['tech'] == seg['technique'] or o['score'] < SWAP_SHARE * cur or (lib[o['tech']].hero and not lib[seg['technique']].hero): continue
+                if o['tech'] in (p['technique'], g['technique']) or o['score'] < SWAP_SHARE * cur or (lib[o['tech']].hero and not lib[seg['technique']].hero): continue
                 f2 = frame(seg, o['tech'])
                 if not (ok(p, g, fr[p['id']], f2) if who == 'second' else ok(p, g, f2, fr[g['id']])): continue
                 if who == 'first' and k >= 2 and _contiguous(segs[k - 2], p) and ok(segs[k - 2], p, fr[segs[k - 2]['id']], fr[p['id']]) and not ok(segs[k - 2], p, fr[segs[k - 2]['id']], f2): continue         # would stop the glide before it
