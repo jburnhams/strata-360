@@ -152,9 +152,11 @@ def sync_gap_clips(folder, specs, log=print):
     from strata360.pipeline import config
     docs = {c['id']: c for c in SY.load(folder)['clips']}; todo = [sp for sp in specs if sp['clip'] not in docs or abs(docs[sp['clip']]['seconds'] - sp['seconds']) > 0.05]
     if not todo: return []
-    cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []
+    cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []; last = None
     for sp in todo:
-        old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0); kind = old['kind'] if old else SY.choose_kind(gaps[sp['clip']], sec)
+        old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
+        kind = old['kind'] if old and (old.get('by') == 'user' or old.get('file')) else SY.choose_kind(gaps[sp['clip']], sec, last)           # the planner chooses again for the new length (a clip shortened to 4 s is a map), unless it is rendered or yours
+        last = kind
         clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
     return made
 
