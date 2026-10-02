@@ -27,6 +27,13 @@ describe('ProjectProgress', () => {
     expect(screen.getByRole('button', { name: 'Go to results and export' })).toBeInTheDocument()
   })
 
+  it('the results button opens the results', async () => {
+    mockGet('/api/progress', makeProgress({ state: 'complete', percent: 100 }))
+    const onResults = vi.fn(); const { user } = setup(<ProjectProgress {...props} onResults={onResults} />, undefined)
+    await user.click(await screen.findByRole('button', { name: 'Go to results and export' }))
+    expect(onResults).toHaveBeenCalledTimes(1)
+  })
+
   it('displays stages with workers running and logs', async () => {
     mockGet('/api/progress', makeProgress({
       state: 'processing',

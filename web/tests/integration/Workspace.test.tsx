@@ -6,7 +6,7 @@ import { mockGet, mockError } from '../utils/api'
 
 // Mock the many child panels that are tested in their own files
 vi.mock('../../src/components/FilmDetails', () => ({ default: () => <div data-testid="FilmDetails" /> }))
-vi.mock('../../src/components/ProjectProgress', () => ({ default: () => <div data-testid="ProjectProgress" /> }))
+vi.mock('../../src/components/ProjectProgress', () => ({ default: ({ onResults }: any) => <div data-testid="ProjectProgress"><button onClick={onResults}>Go to results</button></div> }))
 vi.mock('../../src/components/TrackPanel', () => ({ default: () => <div data-testid="TrackPanel" /> }))
 vi.mock('../../src/components/ClockPanel', () => ({ default: () => <div data-testid="ClockPanel" /> }))
 vi.mock('../../src/components/WhoPanel', () => ({ default: () => <div data-testid="WhoPanel" /> }))
@@ -109,6 +109,12 @@ describe('Workspace', () => {
     // ClipView is shown instead
     expect(screen.queryByTestId('FilmDetails')).not.toBeInTheDocument()
     expect(screen.getByTestId('ClipView')).toHaveTextContent('CAM_123')
+  })
+
+  it('the progress panel\'s results button opens the timeline (film preview and final render)', async () => {
+    const { user } = setup(<Workspace folder="/data" />)
+    await user.click(await screen.findByRole('button', { name: 'Go to results' }))
+    expect(await screen.findByTestId('Timeline')).toBeInTheDocument()
   })
 
   it('transitions to timeline view when Timeline button is clicked', async () => {
