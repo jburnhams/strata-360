@@ -7,6 +7,7 @@ import { addNever, addPin, editNarration, highlight, removeNever, removePin, set
 import { PanelSkeleton } from './Skeleton'
 import Phrase from './Phrase'
 import WordMarker from './WordMarker'
+import RoughMixPlayer from './RoughMixPlayer'
 
 const KIND: Record<ScriptItem['type'], { label: string; cls: string }> = {
   vo: { label: 'narration', cls: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300' },
@@ -94,6 +95,7 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
             : st.plan?.source === 'script' ? `Film plan: ${st.plan.windows} windows, ${st.plan.length_s} s, from ${st.plan.script === latest ? 'this draft' : 'an older draft (make the film again to use this one)'}`
             : 'The film plan is still the beat planner’s, not this script.'}</span>
         </div>)}
+      {draft && !st.plan_running && <RoughMixPlayer folder={folder} version={ver} />}
       {!st.plan_running && st.plan_exit != null && st.plan_exit !== 0 && <p className="mt-1 text-sm text-red-600">Planning failed: {st.plan_log?.[st.plan_log.length - 1] ?? `exit ${st.plan_exit}`}</p>}
       {st.plan?.source === 'script' && st.plan.warnings.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs text-amber-700">{st.plan.warnings.map(w => <li key={w}>{w}</li>)}</ul>}
       {!draft ? <p className="mt-2 text-sm text-stone-500">No draft yet. The writer reads every clip, your notes and the transcript, and writes a first script you can then mark up and revise.</p> : (<>

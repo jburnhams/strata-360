@@ -282,3 +282,24 @@ class TestGapClipsApi(TestRaceMapData):
         from strata360.server import app as A
         A.GAP_JOBS.clear(); open(log, 'w').write(noise + 'Traceback (most recent call last):\nstrata360.overlay.tiles.MissingKey: the map style tf-landscape needs a key\n' + noise)
         c = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert c['rendering'] is False and c['error'].startswith('strata360.overlay.tiles.MissingKey')
+
+
+class TestRoughMixApi:
+    def plan(self, project):
+        project.write_json('project.json', dict(edit=dict(plan=dict(source='script', film=dict(length_s=8.0), segments=[dict(clip='X', clip_start_s=0.0, dur_s=8.0)]))))
+
+    def test_without_a_plan_nothing_is_started(self, client, project, fake_popen):
+        f = project.folder; assert client.get('/api/script2/mix', params=dict(folder=f)).json()['has_plan'] is False
+        r = client.post('/api/script2/mix', json=dict(folder=f)).json(); assert r['started'] is False and 'no film plan' in r['reason'] and not fake_popen.instances
+
+    def test_making_the_mix_runs_the_command_once_and_the_audio_is_served_when_it_exists(self, client, project, fake_popen):
+        self.plan(project); f = project.folder; assert client.post('/api/script2/mix', json=dict(folder=f)).json() == dict(started=True)
+        assert 'rough-mix' in fake_popen.instances[-1].cmd and client.post('/api/script2/mix', json=dict(folder=f)).json()['started'] is False
+        s = client.get('/api/script2/mix', params=dict(folder=f)).json(); assert s['building'] is True and s['exists'] is False and client.get('/api/script2/mix/audio', params=dict(folder=f)).status_code == 404
+        d = os.path.join(project.race_dir, 'roughmix'); open(os.path.join(d, 'mix.m4a'), 'wb').write(b'x' * 12); json.dump(dict(key='k', length_s=8.0, made_at='t'), open(os.path.join(d, 'mix.json'), 'w'))
+        assert client.get('/api/script2/mix/audio', params=dict(folder=f)).content == b'x' * 12
+
+    def test_a_failed_run_shows_its_real_error_not_the_interpreters_warnings(self, client, project, fake_popen):
+        self.plan(project); f = project.folder; client.post('/api/script2/mix', json=dict(folder=f)); fake_popen.instances[-1].returncode = 1
+        open(os.path.join(project.race_dir, 'roughmix', 'mix.log'), 'w').write('ValueError: unsupported hash type blake2s\nTraceback (most recent call last):\n  File "x", line 1\nno voice is installed: run voice setup\n')
+        s = client.get('/api/script2/mix', params=dict(folder=f)).json(); assert s['building'] is False and s['error'] == 'no voice is installed: run voice setup'

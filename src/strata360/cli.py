@@ -329,6 +329,14 @@ def cmd_gaps(a):
         h = g['duration_s'] / 3600.0; print(f"  {g['id']}  {g['local_start']} to {g['local_end']}  {h:5.1f} h  km {g['km_start']}-{g['km_end']} ({g['distance_km']} km, {100 * g['moving_share']:.0f}% moving, +{g['ascent_m']} m)  {g['daylight_start']}->{g['daylight_end']}  between clips {g['before'][-7:-2]} and {g['after'][-7:-2]}" + (f"  -> {SY.default_seconds(g['duration_s']):g} s of film" if a.plan else ''))
 
 
+def cmd_rough_mix(a):
+    """Make the rough mix of the film plan (music and clip background quietly, voice-over, the runner's speech where the script plays it) as <project>/roughmix/mix.m4a, to listen to without rendering the picture."""
+    from strata360.edit import roughmix as RM
+    try: r = RM.build(a.name, log=lambda m: print(m, flush=True))
+    except RuntimeError as e: sys.exit(str(e))
+    print(json.dumps(r))
+
+
 def cmd_gap_clip(a):
     """Render the animated map clip for a gap (`strata360 gaps` lists them) to an MP4 in <project>/synthetic/: the map follows the runner at a speed-up with the race overlay on top. --seconds or --speedup
     set how fast it goes; --from/--to (UTC, ISO) pick a stretch of the gap, which then needs its own --id. `--clip ID` renders a clip already planned in synthetic.json (the GUI plans them)."""
@@ -556,6 +564,7 @@ def main():
     p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
     p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
     p = sub.add_parser('gap-clip', help='render the animated map clip for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--size', default='1920x1080'); p.add_argument('--style', help='map style (default tf-landscape, which needs a Thunderforest key; osm needs none)'); p.set_defaults(fn=cmd_gap_clip)
+    p = sub.add_parser('rough-mix', help='the rough mix of the film plan: the sound only, music and background quiet, voice-over and speech up'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.set_defaults(fn=cmd_rough_mix)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)

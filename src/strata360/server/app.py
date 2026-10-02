@@ -19,6 +19,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
+MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
 PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
 SCRIPT2_JOBS = {}             # folder -> Popen of a running `strata360 script-draft`
@@ -878,6 +879,32 @@ def create_app(roots, token=None):
         auth(request); f = folder_of(folder); c = next((c for c in SY.load(f)['clips'] if c['id'] == id), None); p = os.path.join(config.race_dir(f), (c or {}).get('file') or '-')
         if not c or not os.path.exists(p): raise HTTPException(404, 'that clip has not been rendered yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/script2/mix', dependencies=[Depends(auth)])
+    def get_rough_mix(folder: str):                                                      # the rough mix of the film plan: whether there is one, whether it is out of date, whether it is being made and how the last try went
+        from strata360.edit import roughmix as RM
+        f = folder_of(folder); job = MIX_JOBS.get(f); running = bool(job and job.poll() is None); log = os.path.join(RM.dir_of(f), 'mix.log')
+        try: lines = [l for l in open(log, errors='replace').read().strip().splitlines() if 'unsupported hash type' not in l]
+        except OSError: lines = []
+        err = ''
+        if job and not running and job.returncode: err = next((l for l in reversed(lines) if l.strip() and not l.startswith(('Traceback', '  File', '    '))), 'failed')[:300]
+        return dict(RM.status(f), building=running, error=err, log=lines[-1] if lines else '')
+
+    @api.post('/api/script2/mix', dependencies=[Depends(auth)])
+    def post_rough_mix(body: dict):                                                      # {folder}: make the rough mix in the background (`strata360 rough-mix`)
+        from strata360.edit import roughmix as RM
+        f = folder_of(body.get('folder')); job = MIX_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='the rough mix is already being made')
+        if not RM.status(f)['has_plan']: return dict(started=False, reason='there is no film plan yet: make the film from a script first')
+        os.makedirs(RM.dir_of(f), exist_ok=True); log = open(os.path.join(RM.dir_of(f), 'mix.log'), 'wb')
+        MIX_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'rough-mix', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/script2/mix/audio')
+    def get_rough_mix_audio(request: Request, folder: str):                              # the mix (Range requests are handled, so seeking works); <audio> cannot send headers, so the cookie authenticates
+        from strata360.edit import roughmix as RM
+        auth(request); p = RM.path_of(folder_of(folder))
+        if not os.path.exists(p): raise HTTPException(404, 'the rough mix has not been made yet')
+        return FileResponse(p, media_type='audio/mp4', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/script', dependencies=[Depends(auth)])
     def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script

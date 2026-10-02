@@ -29,6 +29,7 @@ export interface Gap {
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
+export interface RoughMix { has_plan: boolean; exists: boolean; stale: boolean; length_s: number | null; made_at: string | null; source?: string | null; building: boolean; error: string; log: string }
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
@@ -133,6 +134,9 @@ export const api = {
   markWords: (folder: string, clip: string, spans: { seg: number; from: number; to: number }[], state: 'must' | 'never' | 'none') => call<{ ok: boolean; marked: number }>('/api/transcript/mark', { folder, clip, spans, state }),
   script2: (folder: string, name = '') => call<Script2State>('/api/script2?' + q(name ? { folder, name } : { folder })),
   planScript2: (folder: string, draft?: string) => call<{ started: boolean; reason?: string }>('/api/script2/plan', { folder, draft }),
+  roughMix: (folder: string) => call<RoughMix>('/api/script2/mix?' + q({ folder })),
+  makeRoughMix: (folder: string) => call<{ started: boolean; reason?: string }>('/api/script2/mix', { folder }),
+  roughMixUrl: (folder: string, v = '') => '/api/script2/mix/audio?' + q({ folder, v }),
   generateScript2: (folder: string, o: { revise?: boolean; target_s?: number; auto?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/script2/generate', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
