@@ -117,6 +117,7 @@ def resolve(folder, plan, lib=None):
     """Framing for every segment of a saved plan: {segment id: dict(subject, why, path)}."""
     lib = lib or TQ.load(); cache = {}; out = {}
     for g in plan['segments']:
+        if g.get('synthetic'): continue                                                                 # a generated clip has no camera to frame
         if g['clip'] not in cache: cache[g['clip']] = clip_data(folder, g['clip'])
         out[g['id']] = resolve_segment(g, lib, cache[g['clip']])
     return out

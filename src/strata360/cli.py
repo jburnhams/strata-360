@@ -8,6 +8,7 @@
 """
 import numpy as np
 import argparse, csv, datetime as dt, glob, json, os, subprocess, sys, time
+from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod, runner
 from strata360.pipeline.stages import STAGES, ORDER
 
@@ -38,7 +39,16 @@ def cmd_catalog(a):
     print(f'{len(cl)} clips; {len(other)} unsupported files')
 
 
+def worker_allowed(name):
+    """False (with the reason printed) when starting a worker on this project now would break the limits: one is the first free, more only with plenty of free memory (pipeline/resources.py; the app checks the same)."""
+    from strata360.pipeline import resources
+    wk = runner.workers(name); ok, why = resources.may_start_extra_worker(len(wk), config.load(name))
+    if not ok: print(f"not starting another worker: {len(wk)} already running (pid {', '.join(map(str, wk))}); {why}")
+    return ok
+
+
 def cmd_run(a):
+    if not worker_allowed(a.name): return
     stages = a.stages.split(',') if a.stages else None
     res = runner.run(a.name, stages, a.clips, a.force, fail_fast=a.fail_fast)
     failed = [k for k, v in res.items() if v == 'failed']
@@ -255,6 +265,107 @@ def cmd_progress(a):
     if p['needs']: print('  waiting for you:', ', '.join(p['needs']))
 
 
+def cmd_plan_blocks(a):
+    from strata360.edit import project as PJ
+    r = PJ.rough_blocks(a.name, a.target_s, a.auto)
+    if a.json: print(json.dumps(r, indent=1)); return
+    p = r['plan']; src = {'music': f"the music track ({r['music']['duration_s']:.0f} s long, from its first bar at {r['music']['offset_s']:.1f} s)" if r['music'] else '', 'target': f"the target you gave ({a.target_s} s)", 'automatic': 'automatic (from the usable footage)'}[r['target_source']]
+    print(f"film length guide: {src}\nrough plan: {len(p['blocks'])} blocks, {p['target_s']:.1f} s, {len(p['dropped'])} clip(s) dropped" + (f", short by {p['shortfall_s']:.1f} s" if p['shortfall_s'] else ''))
+    print(f"{'#':>3} {'clip':27} {'target':>7} {'usable':>7} {'speech':>7} {'min':>5} {'max':>6}  preferred")
+    for b in p['blocks']:
+        kinds = {}
+        for x in b['preferred']: kinds[x['kind']] = kinds.get(x['kind'], 0) + 1
+        print(f"{b['index']:>3} {b['clip']:27} {b['target_s']:>7.1f} {b['usable_s']:>7.1f} {b['dialogue_s']:>7.1f} {b['min_s']:>5.1f} {b['max_s']:>6.1f}  " + ' '.join(f'{k}x{n}' for k, n in kinds.items()))
+    for d in p['dropped']: print(f"dropped {d['clip']}: {d['reason']}")
+    for w in p['warnings']: print('warning:', w)
+    if r['clips_without_candidates']: print(f"{len(r['clips_without_candidates'])} clip(s) have no candidates yet and are not in the plan")
+
+
+def cmd_script_draft(a):
+    """Write (or, with --revise, revise) the whole-race script: the writer sees every clip, the notes, the transcript marks and the pins (edit/script_draft.py)."""
+    from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN, project as PJ
+    from strata360.pipeline import notes as N
+    cfg = config.load(a.name); pack = SP.build(a.name); notes = N.load(a.name); mus = None if a.auto else PJ.music_info(a.name, PJ.load(a.name)['settings'])
+    target, src = SD.length_guide(pack, (float(mus['duration_s']) - float(mus['offset_s'])) if mus else None, a.target_s); wpm = a.wpm or SD.narration_wpm(pack)
+    pins = PN.project_pins(notes, pack, SD.load_pins(a.name)); prev = SD.list_drafts(a.name)[-1] if a.revise and SD.list_drafts(a.name) else None; draft = SD.load_draft(a.name) if a.revise else None
+    if a.revise and not draft: sys.exit('there is no draft to revise yet: run script-draft without --revise first')
+    llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider') or 'gemini'; model = a.model or (llm.get('model') if llm.get('provider') == prov else None) or 'gemini-3.1-pro-preview'
+    print(f"{'revising' if draft else 'writing'} a {target:.0f} s script ({src}), narration at {wpm:.0f} wpm, {len(pack['clips'])} clips, {sum(1 for v in PN.marks(pins, pack).values())} marked line(s), {len(pins.get('vo') or [])} narration pin(s) [{prov} {model}]")
+    doc = SD.write(pack, target, wpm, pins, draft, retries=a.retries, model=model, provider=prov); doc.update(target_source=src, draft_of=prev); name = SD.save_draft(a.name, doc)
+    if a.json: print(json.dumps(doc, indent=1)); return
+    r = doc['report']; print(f"\n{doc.get('title') or '(untitled)'}: {r.get('total_s')} s of {target:.0f}  (runner {r.get('clip_s')} s, narration {r.get('vo_s')} s in {r.get('vo_words')} words, b-roll {r.get('broll_s')} s); {r.get('clips_used')} clips used, {r.get('clips_skipped')} skipped")
+    for i, it in enumerate(doc['items'], 1): print(f"  {i:2d} {it.get('type', '?'):5s} {str(it.get('clip')):5s} {it.get('seconds', 0):5.1f}s  " + (it.get('text') or it.get('why') or '')[:110])
+    for p_ in doc['problems']: print('problem:', p_)
+    for w in doc['warnings']: print('warning:', w)
+    print('saved script2/' + name)
+
+
+def cmd_script_plan(a):
+    """Make the film's plan from the newest whole-race script draft (the beat planner's plan is replaced), and with --voice speak the narration and mix it onto the film."""
+    from strata360.edit import project as PJ, optimise as O, voiceover as VO
+    try: edit = PJ.plan_from_script(a.name, a.draft)
+    except O.Infeasible as e: sys.exit(str(e))
+    p = edit['plan']; segs = p['segments']; roles = {}
+    for g in segs: roles[g['role']] = roles.get(g['role'], 0) + g['dur_s']
+    print(f"plan from {p['script']}: {len(segs)} windows from {p['clips_in_plan']} clips, {p['film']['length_s']:.1f} s ({p['film']['bpm']:.0f} bpm); " + ', '.join(f'{k} {v:.0f} s' for k, v in sorted(roles.items())))
+    for w in p['warnings']: print('warning:', w)
+    if a.voice:
+        try: VO.build(a.name); print('voice-over spoken and placed')
+        except Exception as e: print(f'voice-over not made: {e}')
+
+
+def cmd_gaps(a):
+    """The stretches of the race with no clip (the gaps), from the clips' times and the race track; --plan registers a synthetic clip (an animated map) for each, to be rendered later."""
+    from strata360.gps import gaps as GP, track
+    from strata360.edit import synthetic as SY
+    cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
+    if not tp: sys.exit('no race track: add the .fit or .gpx first')
+    tr = track.load(tp); gaps = GP.find_gaps(GP.load_spans(a.name), tr, a.min_minutes * 60.0, cfg.get('timezone', 'Europe/Brussels'))
+    if a.plan:
+        for g in gaps: SY.upsert(a.name, SY.make(g, seconds=a.seconds))
+    if a.json: print(json.dumps(gaps, indent=1)); return
+    print(f"{len(gaps)} gap(s) of at least {a.min_minutes:g} minutes between clips on the track" + (f"; {len(gaps)} synthetic clip(s) planned" if a.plan else ''))
+    for g in gaps:
+        h = g['duration_s'] / 3600.0; print(f"  {g['id']}  {g['local_start']} to {g['local_end']}  {h:5.1f} h  km {g['km_start']}-{g['km_end']} ({g['distance_km']} km, {100 * g['moving_share']:.0f}% moving, +{g['ascent_m']} m)  {g['daylight_start']}->{g['daylight_end']}  between clips {g['before'][-7:-2]} and {g['after'][-7:-2]}" + (f"  -> {SY.default_seconds(g['duration_s']):g} s of film" if a.plan else ''))
+
+
+def cmd_gap_clip(a):
+    """Render the animated map clip for a gap (`strata360 gaps` lists them) to an MP4 in <project>/synthetic/: the map follows the runner at a speed-up with the race overlay on top. --seconds or --speedup
+    set how fast it goes; --from/--to (UTC, ISO) pick a stretch of the gap, which then needs its own --id. `--clip ID` renders a clip already planned in synthetic.json (the GUI plans them)."""
+    import datetime as dt
+    from strata360.gps import gaps as GP, track
+    from strata360.edit import synthetic as SY
+    from strata360.overlay import mapclip as MC
+    from strata360.overlay.series import Series
+    from strata360.overlay.tiles import Tiles
+    cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
+    if not tp: sys.exit('no race track: add the .fit or .gpx first')
+    tr = track.load(tp); tz = cfg.get('timezone', 'Europe/Brussels')
+    def when(x):
+        if not x: return None
+        d = dt.datetime.fromisoformat(x.replace('Z', '+00:00')); return (d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)).timestamp()
+    if a.clip:
+        clip = next((c for c in SY.load(a.name)['clips'] if c['id'] == a.clip), None)
+        if clip is None: sys.exit(f'no planned clip {a.clip}')
+        t0, t1 = when(clip['t0']), when(clip['t1'])
+    else:
+        if not a.gap: sys.exit('--gap (or --clip) is needed')
+        gap = next((g for g in GP.find_gaps(GP.load_spans(a.name), tr, a.min_minutes * 60.0, tz) if g['id'] == a.gap), None)
+        if gap is None: sys.exit(f'no gap {a.gap}: `strata360 gaps` lists them')
+        t0, t1 = when(a.t_from), when(a.t_to)
+        if (t0 or t1) and not a.id: sys.exit('a stretch of a gap needs --id (the clip is not the gap itself)')
+        clip = SY.make(gap, seconds=a.seconds, speedup=a.speedup, fps=a.fps, t0=t0, t1=t1, id=a.id, style={'map': a.style} if a.style else None); t0, t1 = when(clip['t0']), when(clip['t1'])
+    w, h = (int(x) for x in a.size.lower().split('x')); style = (clip.get('style') or {}).get('map') or MC.default_style()
+    mc = MC.MapClip(Series(tr), t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(style), tz=tz)
+    out = os.path.join(config.race_dir(a.name), 'synthetic', clip['id'] + '.mp4'); oslib.lower_priority(); last = [0]
+    def show(done, total):
+        if done - last[0] >= max(1, total // 20) or done == total: last[0] = done; print(f'  {clip["id"]}: {done}/{total} frames', flush=True)
+    MC.render(mc, out, show); clip = SY.upsert(a.name, clip); doc = SY.load(a.name)
+    for c in doc['clips']:
+        if c['id'] == clip['id']: c.update(status='ready', file=os.path.relpath(out, config.race_dir(a.name)))
+    SY.save(a.name, doc); print(f"{clip['id']}: {clip['duration_s'] / 3600:.1f} h of the race in {clip['seconds']:g} s (x{clip['speedup']:g}) -> {out}")
+
+
 def cmd_coverage(a):
     from strata360.pipeline.coverage import coverage
     r = coverage(a.name)
@@ -286,7 +397,7 @@ def cmd_open(a):
         if ext in ('.fit', '.gpx'): shutil.copyfile(a.gps, os.path.join(rd, 'track' + ext)); print('race track saved as', os.path.join(rd, 'track' + ext))
     p = project_progress(folder); print(f"state: {p['state']}, {p['percent']}% done" + (f", about {p['eta_s'] / 60:.0f} min left" if p['eta_s'] else ''))
     if p['state'] in ('processing',) and not a.no_run:                                # a worker: it loops until nothing is left; more can run at once (each picks unfinished, unclaimed items)
-        res = runner.run(folder, None, None, False); p = project_progress(folder)
+        if worker_allowed(folder): runner.run(folder, None, None, False); p = project_progress(folder)
     if p['state'] == 'complete': print('everything is processed: next is the results / export stage')
     if p['needs']: print('waiting for you:', ', '.join(p['needs']), '(wearer_profile: ./strata360 who FOLDER --auto; camera_clock: ./strata360 clock FOLDER --suggest)')
 
@@ -439,6 +550,12 @@ def main():
     p = sub.add_parser('open', help='open a footage folder as a project: create it if new, continue whatever is unfinished (what the GUI does first)'); p.add_argument('name', metavar='FOLDER')
     p.add_argument('--languages'); p.add_argument('--gps', help='the race FIT/GPX'); p.add_argument('--no-run', action='store_true'); p.set_defaults(fn=cmd_open)
     p = sub.add_parser('progress', help='project state and per-stage progress (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_progress)
+    p = sub.add_parser('plan-blocks', help='the rough plan: one block per clip with its target length, usable footage and dialogue (the film length from --target-s, else the music track, else automatic)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--target-s', type=float, help='film length guide in seconds'); p.add_argument('--auto', action='store_true', help='ignore the music track: automatic length'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_plan_blocks)
+    p = sub.add_parser('script-draft', help='write or revise the whole-race script (clips, the runner\'s own lines and narration) with the LLM; --revise keeps the current draft and applies your marks and pins'); p.add_argument('name', metavar='FOLDER_OR_RACE')
+    p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
+    p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
+    p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
+    p = sub.add_parser('gap-clip', help='render the animated map clip for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--size', default='1920x1080'); p.add_argument('--style', help='map style (default: tf-landscape with a Thunderforest key, else osm)'); p.set_defaults(fn=cmd_gap_clip)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)

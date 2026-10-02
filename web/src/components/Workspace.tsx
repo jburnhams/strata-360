@@ -10,9 +10,11 @@ import ClipView from './ClipView'
 import { Skeleton } from './Skeleton'
 import TranscriptPanel from './TranscriptPanel'
 import ScriptPanel from './ScriptPanel'
+import ScriptDraftPanel from './ScriptDraftPanel'
 import VoiceoverPanel from './VoiceoverPanel'
 import Timeline from './Timeline'
 import FilmDetails from './FilmDetails'
+import MusicPanel from './MusicPanel'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -43,10 +45,12 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
           <div className="space-y-4">
             <FilmDetails folder={folder} />
             <ProjectProgress folder={folder} />
-            <TrackPanel folder={folder} />
+            <TrackPanel folder={folder} tz={meta?.timezone ?? 'Europe/Brussels'} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
+            <MusicPanel folder={folder} />
             <ClockPanel folder={folder} />
             <WhoPanel folder={folder} />
             <NoteBox folder={folder} title="Notes for the whole folder" placeholder="What was this? Who was there? What is the story of the day, in your own words…" />
+            <ScriptDraftPanel folder={folder} />
             <ScriptPanel folder={folder} onOpen={c => { setFocus(undefined); setSel(c) }} />
             <VoiceoverPanel folder={folder} />
             <TranscriptPanel folder={folder} clips={clips ?? []} tz={meta?.timezone ?? 'Europe/Brussels'} onOpen={(c, t) => { setFocus(t); setSel(c) }} />
