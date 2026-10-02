@@ -67,6 +67,19 @@ def test_the_key_names_what_would_be_rendered_and_changes_when_it_changes():
     a = SY.make(GAP, seconds=20); assert SY.make(GAP, seconds=20)['key'] == a['key'] and SY.make(GAP, seconds=21)['key'] != a['key'] and SY.make(GAP, seconds=20, style=dict(zoom=2))['key'] != a['key'] and SY.make(GAP, seconds=20, fps=25)['key'] != a['key']
 
 
+def test_a_flyover_is_4k_by_default_and_a_map_keeps_its_old_key():
+    f = SY.make(GAP, seconds=20, kind='flyover'); m = SY.make(GAP, seconds=20); assert f['kind'] == 'flyover' and f['size'] == '3840x2160' and 'size' not in m
+    assert f['key'] != m['key'] and SY.make(GAP, seconds=20, kind='flyover', size='1920x1080')['key'] != f['key'] and SY.make(GAP, seconds=20, kind='flyover', size='3840X2160')['key'] == f['key']
+    assert SY.make(GAP, seconds=20, kind='flyover', style=dict(imagery='topo'))['key'] != f['key']
+    for bad in ('big', '3840', '100x100'):
+        with pytest.raises(ValueError): SY.make(GAP, kind='flyover', size=bad)
+
+
+def test_changing_the_kind_of_a_planned_clip_forgets_its_render(project):
+    m = SY.make(GAP, seconds=20); SY.upsert(project.folder, m); doc = SY.load(project.folder); doc['clips'][0].update(status='ready', file='synthetic/G01.mp4'); SY.save(project.folder, doc)
+    c = SY.upsert(project.folder, SY.make(GAP, seconds=20, kind='flyover')); assert c['status'] == 'planned' and 'file' not in c and SY.load(project.folder)['clips'][0]['kind'] == 'flyover'
+
+
 def test_planned_clips_are_kept_in_time_order_and_a_render_stays_valid_until_the_key_changes(project):
     f = project.folder; assert SY.load(f) == dict(clips=[])
     later = dict(id='G02', t0=T0 + 20000, t1=T0 + 30000); SY.upsert(f, SY.make(later, seconds=10)); first = SY.upsert(f, SY.make(GAP, seconds=20)); assert [c['id'] for c in SY.load(f)['clips']] == ['G01', 'G02']

@@ -330,8 +330,9 @@ def cmd_gaps(a):
 
 
 def cmd_gap_clip(a):
-    """Render the animated map clip for a gap (`strata360 gaps` lists them) to an MP4 in <project>/synthetic/: the map follows the runner at a speed-up with the race overlay on top. --seconds or --speedup
-    set how fast it goes; --from/--to (UTC, ISO) pick a stretch of the gap, which then needs its own --id. `--clip ID` renders a clip already planned in synthetic.json (the GUI plans them)."""
+    """Render the generated clip for a gap (`strata360 gaps` lists them) to an MP4 in <project>/synthetic/ with the race overlay on top, at a speed-up: the animated 2D map (`--kind map`, the default: the map follows
+    the runner) or the 3D terrain flyover (`--kind flyover`: satellite imagery over terrain, 4K by default; needs MapLibre Native's mbgl-render, docs/terrain-flyover.md). --seconds or --speedup set how fast it goes;
+    --from/--to (UTC, ISO) pick a stretch of the gap, which then needs its own --id. `--clip ID` renders a clip already planned in synthetic.json (the GUI plans them), with the kind and size planned there."""
     import datetime as dt
     from strata360.gps import gaps as GP, track
     from strata360.edit import synthetic as SY
@@ -354,16 +355,26 @@ def cmd_gap_clip(a):
         if gap is None: sys.exit(f'no gap {a.gap}: `strata360 gaps` lists them')
         t0, t1 = when(a.t_from), when(a.t_to)
         if (t0 or t1) and not a.id: sys.exit('a stretch of a gap needs --id (the clip is not the gap itself)')
-        clip = SY.make(gap, seconds=a.seconds, speedup=a.speedup, fps=a.fps, t0=t0, t1=t1, id=a.id, style={'map': a.style} if a.style else None); t0, t1 = when(clip['t0']), when(clip['t1'])
-    w, h = (int(x) for x in a.size.lower().split('x')); style = (clip.get('style') or {}).get('map') or MC.DEFAULT_STYLE
-    mc = MC.MapClip(Series(tr), t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(style), tz=tz)
+        style = {**({'map': a.style} if a.style else {}), **({'imagery': a.imagery} if a.imagery else {}), **({'sharp': False} if a.no_sharp else {})}
+        try: clip = SY.make(gap, seconds=a.seconds, speedup=a.speedup, fps=a.fps, t0=t0, t1=t1, id=a.id, kind=a.kind, size=a.size, style=style or None)
+        except ValueError as e: sys.exit(str(e))
+        t0, t1 = when(clip['t0']), when(clip['t1'])
+    w, h = (int(x) for x in (clip.get('size') or '1920x1080').split('x')); st = clip.get('style') or {}; series = Series(tr)
+    if clip['kind'] == 'flyover':
+        from strata360.overlay import flyover as FO
+        try: mbgl = FO.find_mbgl(); mc = FO.FlyoverClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), imagery=st.get('imagery') or FO.DEFAULT_IMAGERY, tz=tz, sharp=st.get('sharp', True), mbgl=mbgl)
+        except (ValueError, FO.FlyoverError) as e: sys.exit(str(e))
+    else: mc = MC.MapClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(st.get('map') or MC.DEFAULT_STYLE), tz=tz)
     out = os.path.join(config.race_dir(a.name), 'synthetic', clip['id'] + '.mp4'); oslib.lower_priority(); last = [0]
     def show(done, total):
         if done - last[0] >= max(1, total // 20) or done == total: last[0] = done; print(f'  {clip["id"]}: {done}/{total} frames', flush=True)
-    MC.render(mc, out, show); clip = SY.upsert(a.name, clip); doc = SY.load(a.name)
+    try: MC.render(mc, out, show, bitrate=f'{max(12, round(12 * w * h / (1920 * 1080)))}M')
+    finally:
+        if hasattr(mc, 'close'): mc.close()
+    clip = SY.upsert(a.name, clip); doc = SY.load(a.name)
     for c in doc['clips']:
         if c['id'] == clip['id']: c.update(status='ready', file=os.path.relpath(out, config.race_dir(a.name)))
-    SY.save(a.name, doc); print(f"{clip['id']}: {clip['duration_s'] / 3600:.1f} h of the race in {clip['seconds']:g} s (x{clip['speedup']:g}) -> {out}")
+    SY.save(a.name, doc); print(f"{clip['id']}: {clip['duration_s'] / 3600:.1f} h of the race in {clip['seconds']:g} s (x{clip['speedup']:g}), {clip['kind']} {w}x{h} -> {out}")
 
 
 def cmd_coverage(a):
@@ -555,7 +566,7 @@ def main():
     p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
     p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
     p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
-    p = sub.add_parser('gap-clip', help='render the animated map clip for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--size', default='1920x1080'); p.add_argument('--style', help='map style (default tf-landscape, which needs a Thunderforest key; osm needs none)'); p.set_defaults(fn=cmd_gap_clip)
+    p = sub.add_parser('gap-clip', help='render the animated map clip or 3D flyover for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--kind', choices=['map', 'flyover'], default='map', help='the animated 2D map, or the 3D terrain flyover (4K)'); p.add_argument('--size', help='WIDTHxHEIGHT (default 1920x1080 for the map, 3840x2160 for the flyover)'); p.add_argument('--style', help='map style (default tf-landscape, which needs a Thunderforest key; osm needs none)'); p.add_argument('--imagery', choices=['esri', 'eox', 'osm', 'topo'], help='flyover imagery (default esri)'); p.add_argument('--no-sharp', action='store_true', help='flyover: enlarge the 720p map tiles at larger sizes (faster, softer) instead of fetching finer ones'); p.set_defaults(fn=cmd_gap_clip)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
