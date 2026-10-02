@@ -55,4 +55,19 @@ describe('TrackMap', () => {
     setup(<TrackMap {...props()} base={{ lat: [], lon: [], t: [] }} clips={[]} />)
     expect(screen.getByRole('application', { name: 'Race map' })).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Zoom in' })).not.toBeInTheDocument()
   })
+
+  it('moves markers that would sit on top of each other apart, and leaves a lone marker where it is', () => {
+    const p = props(); p.clips = [makeTrackClip(), makeTrackClip({ id: 'CAM_B', label: '0024' }), makeTrackClip({ id: 'CAM_D', label: '0025' }), makeTrackClip({ id: 'CAM_E', label: '0030', lat: 50.19, lon: 5.285 })]   // three clips in one place, one far away
+    setup(<TrackMap {...p} />)
+    const offset = (t: string) => { const e = screen.getByTitle(t); return `${e.style.marginLeft}|${e.style.marginTop}` }
+    expect(new Set([offset('Clip 0023'), offset('Clip 0024'), offset('Clip 0025')]).size).toBe(3); expect(offset('Clip 0030')).toBe(offset('Clip 0023').split('|')[0] + '|' + '-11px')
+  })
+
+  it('lets the wheel scroll the page until the map has been clicked, then zooms with it, and stops when the mouse leaves', () => {
+    setup(<TrackMap {...props()} />)
+    const c = screen.getByRole('application', { name: 'Race map' }); const wheel = () => { const e = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -120 }); c.dispatchEvent(e); return e.defaultPrevented }
+    expect(wheel()).toBe(false)                                                        // not intercepted: the page scrolls
+    fireEvent.click(c); expect(wheel()).toBe(true)                                     // after a click the map takes the wheel
+    fireEvent.mouseLeave(c); expect(wheel()).toBe(false)                               // and gives it back
+  })
 })

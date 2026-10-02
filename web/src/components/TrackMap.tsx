@@ -6,6 +6,17 @@ import { nearestIndex } from '../trackMath'
 
 const GREEN = '#16a34a', GREY = '#78716c'
 const canvasOk = () => { try { return !!document.createElement('canvas').getContext('2d') } catch { return false } }       // the canvas renderer is quicker for a long line; without a 2D context (some test environments) Leaflet draws SVG
+const MARK_W = 42, MARK_H = 22
+const FAN: [number, number][] = [[0, 0], [0, -MARK_H], [0, MARK_H], [-MARK_W, 0], [MARK_W, 0], [0, -2 * MARK_H], [0, 2 * MARK_H], [-MARK_W, -MARK_H], [MARK_W, -MARK_H], [-MARK_W, MARK_H], [MARK_W, MARK_H]]
+/** Markers that would sit on top of each other at this zoom are moved apart (a small fan around their place); the thick stretch of track still shows where each clip really is. Zooming in lets them settle. */
+function spread(m: L.Map, markers: L.Marker[]) {
+  const placed: { x: number; y: number }[] = []
+  for (const mk of markers) {
+    const p = m.latLngToContainerPoint(mk.getLatLng()); const el = mk.getElement(); if (!el) continue
+    const [dx, dy] = FAN.find(([ox, oy]) => !placed.some(q => Math.abs(q.x - (p.x + ox)) < MARK_W && Math.abs(q.y - (p.y + oy)) < MARK_H)) ?? FAN[FAN.length - 1]
+    placed.push({ x: p.x + dx, y: p.y + dy }); el.style.marginLeft = `${-MARK_W / 2 + 2 + dx}px`; el.style.marginTop = `${-MARK_H / 2 + dy}px`
+  }
+}
 const DETAIL_ZOOM_STEPS = 1.5          // this far in from the first view the map asks for the track in more detail
 
 // The race on a Leaflet map (no background tiles: the offline default is the track on a plain ground). Zoom with the buttons, the wheel, a double click or touch; drag to pan; the arrows button resets the view.
@@ -15,12 +26,13 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
   base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
   onOpenClip: (id: string) => void; fetchDetail: (bbox: [number, number, number, number]) => Promise<TrackLine>
 }) {
-  const el = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.CircleMarker | null>(null), detail = useRef<L.Polyline | null>(null)
+  const el = useRef<HTMLDivElement>(null), marks = useRef<L.Marker[]>([]), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.CircleMarker | null>(null), detail = useRef<L.Polyline | null>(null)
   const props = useRef({ base, onCursor, onHoverClip, onOpenClip, fetchDetail }); props.current = { base, onCursor, onHoverClip, onOpenClip, fetchDetail }   // handlers read the latest props without rebuilding the map
 
   useEffect(() => {
     if (!el.current || !base.lat.length) return
-    const canvas = canvasOk(); const m = L.map(el.current, { preferCanvas: canvas, ...(canvas ? {} : { renderer: L.svg() }), attributionControl: false, zoomSnap: 0.5, minZoom: 1 }); map.current = m
+    const canvas = canvasOk(); const m = L.map(el.current, { preferCanvas: canvas, ...(canvas ? {} : { renderer: L.svg() }), attributionControl: false, zoomSnap: 0.5, minZoom: 1, scrollWheelZoom: false }); map.current = m
+    m.on('click', () => m.scrollWheelZoom.enable()); m.getContainer().addEventListener('mouseleave', () => m.scrollWheelZoom.disable())          // the wheel scrolls the page until you click the map, then it zooms
     const pts = base.lat.map((la, i) => [la, base.lon[i]] as [number, number]); const line = L.polyline(pts, { color: '#15803d', weight: 2.5, opacity: 0.9 }).addTo(m)
     m.fitBounds(line.getBounds(), { padding: [20, 20] }); const home = m.getBounds(); const z0 = m.getZoom(); layer.current = L.layerGroup().addTo(m)
     line.on('mousemove', (e: L.LeafletMouseEvent) => {                                         // the nearest point of the track to the mouse
@@ -44,22 +56,23 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
         } catch { /* the coarse line stays */ }
       }, 250)
     }
-    m.on('moveend', more)
+    m.on('moveend', more); m.on('zoomend', () => spread(m, marks.current))
     return () => { window.clearTimeout(timer); m.remove(); map.current = null; layer.current = null; dot.current = null; detail.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base])
 
   useEffect(() => {                                                                             // the clips: the stretch each covers, and a marker with the clip number
-    const g = layer.current; if (!g) return; g.clearLayers()
+    const g = layer.current; if (!g) return; g.clearLayers(); marks.current = []
     for (const c of clips) {
       if (!c.covered || c.lat == null || c.lon == null) continue
       const col = c.used ? GREEN : GREY
       if (c.stretch && c.stretch.length > 1) L.polyline(c.stretch, { color: col, weight: 6, opacity: 0.85, interactive: false }).addTo(g)
       const icon = L.divIcon({ className: '', html: `<div style="background:${col};color:#fff;border:1.5px solid #fff;border-radius:10px;font:600 10px/18px ui-monospace,monospace;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.45)">${c.label}</div>`, iconSize: [38, 20], iconAnchor: [19, 10] })
-      const mk = L.marker([c.lat, c.lon], { icon, title: `Clip ${c.label}`, keyboard: true }).addTo(g)
+      const mk = L.marker([c.lat, c.lon], { icon, title: `Clip ${c.label}`, keyboard: true }).addTo(g); marks.current.push(mk)
       mk.on('mouseover', (e: L.LeafletMouseEvent) => props.current.onHoverClip(c, e.originalEvent.clientX, e.originalEvent.clientY)); mk.on('mousemove', (e: L.LeafletMouseEvent) => props.current.onHoverClip(c, e.originalEvent.clientX, e.originalEvent.clientY))
       mk.on('mouseout', () => props.current.onHoverClip(null)); mk.on('click', () => props.current.onOpenClip(c.id))
     }
+    if (map.current) spread(map.current, marks.current)
   }, [clips, base])
 
   useEffect(() => {                                                                             // the cursor shared with the charts

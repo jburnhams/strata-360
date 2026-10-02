@@ -47,3 +47,14 @@ def test_each_clip_is_placed_at_its_middle_with_the_stretch_it_covers_and_the_fa
 
 def test_a_clip_shorter_than_the_sample_gap_still_gets_a_stretch_to_draw():
     c, = S.clips(track(), [dict(id='A', t0=T0 + 601, t1=T0 + 603)]); assert c['covered'] and len(c['stretch']) == 2
+
+
+def test_pace_is_smoothed_over_about_ten_minutes_and_a_stop_stays_a_gap():
+    tr = track(); rng = np.random.default_rng(1); tr['speed'] = tr['speed'] * np.clip(1 + 0.4 * rng.standard_normal(len(tr['t'])), 0.3, None)       # a speed that jumps about from sample to sample
+    raw = S.series(tr, 1000, smooth_s=0); sm = S.series(tr, 1000)
+    spread = lambda s_: np.std([p for p in s_['pace'][:290] if p is not None]); assert spread(sm) < 0.5 * spread(raw)
+    assert [i for i, p in enumerate(sm['pace']) if p is None] == [i for i, p in enumerate(raw['pace']) if p is None] and any(p is None for p in sm['pace'])
+
+
+def test_smoothing_ignores_gaps_and_keeps_them():
+    assert S.smooth([1.0, 2.0, 100.0, 4.0, 5.0], 3) == [1.5, 2.0, 4.0, 5.0, 4.5] and S.smooth([1.0, None, 3.0], 3) == [1.0, None, 3.0] and S.smooth([2.0, 9.0], 1) == [2.0, 9.0]

@@ -9,6 +9,7 @@ import numpy as np
 
 MOVING_MS = 0.5            # faster than this is moving (gps/overview.py)
 MIN_MOVING = 0.2           # a bin with less moving time than this share has no pace (stopped)
+SMOOTH_S = 1200.0          # pace is the median over about this long (a bin of a few minutes is noisy over an 80 hour race), and a stop stays a gap
 
 
 def _iso(t): return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -42,7 +43,17 @@ def prepare(tr):
     return out
 
 
-def series(tr, points=2000):
+def smooth(values, width):
+    """Rolling median over `width` bins (odd) that ignores gaps (None) and leaves a gap where the value was a gap."""
+    if width <= 1: return list(values)
+    h = width // 2; out = []
+    for i, v in enumerate(values):
+        w = [x for x in values[max(i - h, 0):i + h + 1] if x is not None]
+        out.append(None if v is None or not w else float(np.median(w)))
+    return out
+
+
+def series(tr, points=2000, smooth_s=SMOOTH_S):
     T = tr['t']; n = len(T); k = int(max(min(points, n), 1)); edges = np.linspace(0, n, k + 1).astype(int); out = {key: [] for key in ('t', 'km', 'alt', 'alt_lo', 'alt_hi', 'pace', 'moving', 'hr')}
     ok_d = np.isfinite(tr['dist'])
     for a, b in zip(edges[:-1], edges[1:]):
@@ -55,6 +66,8 @@ def series(tr, points=2000):
         out['pace'].append(_r(float(np.median(1000.0 / sp[mv]) / 60.0), 2) if share >= MIN_MOVING and mv.any() else None)
         hr = tr['hr'][sl]; hr = hr[np.isfinite(hr)]; out['hr'].append(_r(float(hr.mean()), 0) if len(hr) else None)
     del ok_d
+    bin_s = float(T[-1] - T[0]) / max(k, 1); width = int(round(smooth_s / max(bin_s, 1e-9))) | 1
+    out['pace'] = [None if v is None else round(v, 2) for v in smooth(out['pace'], width if width > 1 else 1)]
     return dict(points=k, start_utc=_iso(T[0]), end_utc=_iso(T[-1]), duration_s=round(float(T[-1] - T[0])), distance_km=_r(float(np.nanmax(tr['dist'])) / 1000.0, 1) if np.isfinite(tr['dist']).any() else None, **out)
 
 
