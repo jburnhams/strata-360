@@ -198,11 +198,13 @@ def identity(ctx):
     ctx.write('identity.json', ctx.stamped(I.analyse_clip(ctx.read('people.json'), np.load(ctx.path('faces.npy')), I.load_profile(path))))
 
 
-@stage('scenes', 2, keys=('scenes_every_s',), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy',), default=False,
-       note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags) from a local VLM on front and rear views every few seconds (slow: minutes per clip)')
+@stage('scenes', 3, keys=('scenes_every_s',), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy',), default=False,
+       note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags; and a scenery-only score with clarity that ignores people) from a local VLM on front and rear views every few seconds (slow: minutes per clip)')
 def scenes(ctx):
     from strata360.analysis.scenes import analyse
-    ctx.write('scenes.json', ctx.stamped(analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['scenes_every_s'])))
+    try: previous = ctx.read('scenes.json')
+    except (OSError, ValueError): previous = None
+    ctx.write('scenes.json', ctx.stamped(analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['scenes_every_s'], previous=previous)))
 
 
 @stage('speakers', 1, outputs=('speakers.json', 'speakers.npy'), deps=('transcribe',), soft_deps=('audio_extract',),
