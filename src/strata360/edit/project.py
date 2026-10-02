@@ -117,7 +117,7 @@ def insert_synthetic(folder, ser, specs, beat_s):
         c = docs[sp['clip']]; dur = round(sp['beats'] * beat_s, 3)
         out.append(dict(id=f"{c['id']}@0.00", index=0, clip=c['id'], cand_id=f"{c['id']}:map", cand_start_s=0.0, cand_end_s=c['seconds'], film_start_s=round(sp['start_beat'] * beat_s, 3), start_beat=sp['start_beat'], beats=sp['beats'], dur_s=dur,
                         clip_start_s=0.0, in_s=0.0, utc_start=c['t0'], utc_end=c['t1'], energy=0.5, technique='map', family='generated', hero=False, variant_seed=0, forced=False, speech=False, kind='synthetic', view=None, options=[],
-                        synthetic=os.path.join(rd, c['file']), role=sp['role'], item=sp['item'], energy_hi=False))
+                        synthetic=os.path.normpath(os.path.join(rd, c['file'])), role=sp['role'], item=sp['item'], energy_hi=False))
     out.sort(key=lambda g: g['start_beat'])
     for i, g in enumerate(out): g['index'] = i
     return out
