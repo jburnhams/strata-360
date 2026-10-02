@@ -58,3 +58,12 @@ def test_clear_dialogue_overrides_unusable():
     un = [(m['start_s'], m['end_s']) for m in r['unusable']]
     assert all(not (a < 23 and b > 17) for a, b in un), un                                                                       # the talking part is not reported unusable
     assert any(a < 17 for a, b in un) or any(b > 23 for a, b in un)                                                              # the shaky parts around it still are
+
+
+def test_the_scenery_and_clarity_ratings_of_scenes_v3_lift_a_good_stretch_over_a_dull_one_on_the_races_own_scale():
+    d = make(lambda x: 5.0); items = [dict(frame=0, t_s=float(t), view='front', ok=True, scenic=0.5, energy=0.5, setting='forest', lens_problems='none', scenery=9.0 if t < 20 else 2.0, clarity=5.0 if t < 20 else 1.0) for t in range(0, 40, 5)]
+    json.dump(dict(schema=2, items=items, summary={}), open(os.path.join(d, 'scenes.json'), 'w')); T = C.timeline(d)
+    assert T['scenic'][:15].mean() > 0.9 and T['scenic'][25:].mean() < 0.15 and T['scenery10'][:15].mean() > 9.0 and T['scenery10'][25:].mean() < 1.0                                  # 9 and 2 on this clip's own range: the top and the bottom of the scale
+    cs = C.build(d)['candidates']; assert cs[0]['scenery'] is not None and 0 <= cs[0]['scenery'] <= 10
+    old = json.loads(json.dumps(items)); [i.pop('scenery') for i in old]; [i.pop('clarity') for i in old]; json.dump(dict(schema=1, items=old, summary={}), open(os.path.join(d, 'scenes.json'), 'w'))
+    T2 = C.timeline(d); assert np.allclose(T2['scenic'], 0.5) and np.isnan(T2['scenery10']).all() and C.build(d)['candidates'][0]['scenery'] is None                                          # an older scenes.json: as before

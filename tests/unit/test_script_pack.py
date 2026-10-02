@@ -27,3 +27,9 @@ def test_the_prompt_text_describes_each_gap_and_the_music_with_its_sung_stretche
     text = SP.render(dict(race={}, clips=[c], music=music)); assert '=== CLIP G02: 8.0 s long' in text and 'NO FOOTAGE: a gap of 1.5 h' in text and 'km 233.5 to 307.1, +2078 m, night->night' in text and 'Already planned: flyover, 8.0 s (planned)' in text and 'the runner says nothing' in text
     assert 'THE MUSIC (times are FILM seconds' in text and 'length 245 s, 97 bpm' in text and '0-10 s 0.00; 10-20 s 0.36' in text and 'Sung (en): 20-50 s, 54-92 s' in text and 'often unavoidable' in text and '[21 s] a line' in text and '[60 s] another (doubtful)' in text
     assert 'instrumental' in SP.render(dict(race={}, clips=[], music=dict(music, lyrics=dict(instrumental=True)))) and 'THE MUSIC' not in SP.render(dict(race={}, clips=[], music=None))
+
+
+def test_the_pack_tells_the_writer_how_good_each_clips_picture_is_on_the_races_own_scale():
+    c = dict(label='0001', clip='C', duration_s=50.0, usable_s=40.0, usable=[], scene=dict(settings=['forest']), note='', lines=[], speech_s=0.0, speech_words=0, start_utc='2026-02-22T10:00:00Z', look=dict(ahead=6.2, behind=4.0, clarity_ahead=4.1, clarity_behind=3.0))
+    t = SP.render(dict(race={}, clips=[c])); assert 'picture quality' in t and 'scenery 6.2 ahead, 4.0 behind, clarity 4.1 ahead, 3.0 behind' in t and '0 worst to 10 best' in t
+    assert 'picture quality' not in SP.render(dict(race={}, clips=[dict(c, look=None)])) and 'scenery 6.2 ahead' in SP.render(dict(race={}, clips=[dict(c, look=dict(ahead=6.2, behind=None, clarity_ahead=None, clarity_behind=None))]))

@@ -11,7 +11,7 @@ import json, os
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MIN_LEN = 1.5
 MAX_STRETCH = 45.0
 
@@ -77,11 +77,17 @@ def timeline(d):
         hs = [(r['t_s'], r['me']['height_deg']) for r in idn['samples'] if r.get('me') and r['me'].get('height_deg')]
         if hs: you_h = np.interp(t, [a for a, _ in hs], [b for _, b in hs])
     you_close, you_far = you_view_arrays(me, you_h)
-    scenic = np.full(n, 0.5); sen = np.full(n, 0.5); blocked = np.zeros(n); setting = [None] * n; canopy = np.zeros(n); open_ground = np.full(n, 0.5)
+    scenery10 = np.full(n, np.nan); scenic = np.full(n, 0.5); sen = np.full(n, 0.5); blocked = np.zeros(n); setting = [None] * n; canopy = np.zeros(n); open_ground = np.full(n, 0.5)
     if sc:
         fr = [i for i in sc['items'] if i['ok'] and i['view'] == 'front']; ts = [i['t_s'] for i in fr]
         if fr:
-            scenic = at(ts, [float(i['scenic']) if isinstance(i.get('scenic'), (int, float)) else 0.5 for i in fr], 0.5); sen = at(ts, [float(i['energy']) if isinstance(i.get('energy'), (int, float)) else 0.5 for i in fr], 0.5)
+            scenic = at(ts, [float(i['scenic']) if isinstance(i.get('scenic'), (int, float)) else 0.5 for i in fr], 0.5)
+            ratings = [(i['t_s'], i['scenery'], i.get('clarity')) for i in fr if isinstance(i.get('scenery'), (int, float))]
+            if ratings:                                                                                   # scenes v3: the scenery rating on this project's own scale (a winter race is not stretched into noise: edit/quality_scale.py), mostly, and the clarity
+                from strata360.edit import quality_scale as QS
+                scale = QS.project_scale(os.path.dirname(str(d))); rt = [x[0] for x in ratings]; s10 = at(rt, [QS.apply(scale, x[1]) / 10.0 for x in ratings], 0.5)
+                cl = at(rt, [(float(x[2]) - 1.0) / 4.0 if isinstance(x[2], (int, float)) else 0.5 for x in ratings], 0.5); scenic = 0.7 * s10 + 0.3 * cl; scenery10 = at(rt, [QS.apply(scale, x[1]) for x in ratings], 5.0)
+            sen = at(ts, [float(i['energy']) if isinstance(i.get('energy'), (int, float)) else 0.5 for i in fr], 0.5)
             blocked = at(ts, [1.0 if i.get('lens_problems') in ('blocked', 'fog') else 0.4 if i.get('lens_problems') in ('droplets', 'glare') else 0.0 for i in fr], 0.0)
             canopy = at(ts, [1.0 if i.get('setting') in ('forest',) else 0.3 if i.get('setting') == 'trail' else 0.0 for i in fr], 0.0)
             open_ground = at(ts, [1.0 if i.get('setting') in ('field', 'road', 'mountain', 'town') else 0.3 for i in fr], 0.5)
@@ -93,7 +99,7 @@ def timeline(d):
     except ImportError: pass
     if vq is not None and len(vq['t']):                                                               # a double check on "the lens is blocked or fogged": the vision model says so AND most of the sphere has no detail or contrast; if the picture as a whole still has something in it, the stretch stays usable
         grid_low = at(vq['t'], low_fraction(vq), 0.0); hard = blocked > 0.5; blocked = np.where(hard & (grid_low > GRID_BAD_FRAC), blocked, np.where(hard, 0.4, blocked))
-    return dict(n=n, t=t, dur=dur, grid_low=grid_low, has_quality=vq is not None, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, you_close=you_close, you_far=you_far, people=people, scenic=scenic, blocked=blocked, canopy=canopy, open_ground=open_ground,
+    return dict(n=n, t=t, dur=dur, grid_low=grid_low, has_quality=vq is not None, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, you_close=you_close, you_far=you_far, people=people, scenic=scenic, scenery10=scenery10, blocked=blocked, canopy=canopy, open_ground=open_ground,
                 setting=setting, missing=missing, clip=clip, tr=tr, al=al, sc=sc, mo=mo)
 
 
@@ -177,7 +183,7 @@ def build(d, thr=None):
         if kind == 'span': sb = f'usable again after a problem ({before})' if before else 'start of the clip'; eb = f'a problem begins ({after})' if after else 'end of the clip'
         else: sb, eb = KIND_TEXT[kind]
         cand = dict(id=f"{clip['clip_id']}#{c:02d}", clip=clip['clip_id'], kind=kind, view=KIND_VIEW[kind], span=k, start_s=float(i0), end_s=float(i1), start_utc=_iso_add(clip['time']['start_utc'], i0), end_utc=_iso_add(clip['time']['start_utc'], i1),
-                    quality=round(qq, 3), energy=round(float(T['energy'][sl].mean()), 3), min_dur=3.0 if sp else 1.0, max_dur=float(i1 - i0), features=feats, settings=sorted({x for x in T['setting'][i0:i1] if x}), people=round(float(T['people'][sl].mean()), 1))
+                    scenery=(None if np.isnan(T['scenery10'][sl]).all() else round(float(np.nanmean(T['scenery10'][sl])), 1)), quality=round(qq, 3), energy=round(float(T['energy'][sl].mean()), 3), min_dur=3.0 if sp else 1.0, max_dur=float(i1 - i0), features=feats, settings=sorted({x for x in T['setting'][i0:i1] if x}), people=round(float(T['people'][sl].mean()), 1))
         cand['why'] = dict(starts_because=sb, ends_because=eb, steadiness=round(s_, 2), shake_dps=round(float(T['shake'][sl].mean()), 1), exposure_ok=round(float(T['expo'][sl].mean()), 2), scenic=round(float(T['scenic'][sl].mean()), 2),
                            lens_blocked=round(float(T['blocked'][sl].mean()), 2), score=round(qq, 2), speech=sp, chatter=round(float(T['chatter'][sl].mean()), 2))
         if sp and T['tr']:
