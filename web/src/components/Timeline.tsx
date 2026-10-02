@@ -49,7 +49,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
             <button disabled={busy} className="text-xs underline" onClick={() => run(() => api.override(folder, { action: 'reset' }))}>clear my changes</button>}
           {busy && <span className="text-stone-500">planning…</span>}
         </div>
-        {plan && <p className="mt-2 text-xs text-stone-500">{plan.segments.length} segments from {plan.clips_in_plan} clips · {plan.film.length_s} s at {plan.film.bpm} bpm · version {s.seed} · {Object.keys(plan.technique_seconds).length} techniques
+        {plan && <p className="mt-2 text-xs text-stone-500">{plan.source === 'script' ? 'from the script draft · ' : ''}{plan.segments.length} segments from {plan.clips_in_plan} clips · {plan.film.length_s} s at {plan.film.bpm} bpm · version {s.seed} · {Object.keys(plan.technique_seconds).length} techniques
           {plan.missing_clips.length > 0 && <span className="text-amber-700"> · {plan.missing_clips.length} clip(s) not in the plan yet (still processing)</span>}</p>}
         {plan?.warnings.map(w => <p key={w} className="mt-1 text-xs text-amber-700">{w}</p>)}
         {!!plan?.orphaned_overrides.length && <p className="mt-1 text-xs text-amber-700">{plan.orphaned_overrides.length} of your changes no longer match a window and are not applied.</p>}
@@ -76,7 +76,8 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
                       <td className="p-2 font-mono text-xs text-stone-500">{mmss(g.film_start_s)}<br />{g.dur_s}s</td>
                       <td className="p-2"><div className="flex items-center gap-2">
                         {c?.thumb ? <img loading="lazy" src={api.thumbUrl(folder, g.clip, thumbVersion(c, overlay), overlay)} alt="" className="h-9 w-16 cursor-pointer rounded object-cover" onClick={() => setPlay(g)} /> : <div className="h-9 w-16 rounded bg-stone-200 dark:bg-stone-800" />}
-                        <button className="font-mono text-xs text-emerald-700 underline dark:text-emerald-400" onClick={() => onOpenClip(g.clip)}>{short(g.clip)}</button></div></td>
+                        <button className="font-mono text-xs text-emerald-700 underline dark:text-emerald-400" onClick={() => onOpenClip(g.clip)}>{short(g.clip)}</button>
+                        {g.role && <span className={`rounded-full px-2 text-xs ${g.role === 'vo' ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300' : g.role === 'clip' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300'}`} title="what this window is in the script: your own words, narration over the picture, or picture only">{g.role === 'vo' ? 'narration' : g.role === 'clip' ? 'you' : 'b-roll'}</span>}</div></td>
                       <td className="p-2 text-xs"><button className="underline" title="play this window" onClick={() => setPlay(g)}>▶ {mmss(g.clip_start_s)}–{mmss(g.clip_start_s + g.dur_s)}</button>{g.forced && <div className="text-amber-700">no usable moment</div>}{g.kind && g.kind !== 'span' && <div className="text-stone-500" title="the way of seeing this footage the window was cut from">{g.kind === 'speech' ? 'you talk' : g.kind}</div>}{g.speech && <div title="you speak">💬</div>}</td>
                       <td className="p-2"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-sm align-middle" style={{ background: colour(g) }} />
                         <select disabled={busy || g.locked} value={g.technique} onChange={e => run(() => api.override(folder, { action: 'technique', wid: g.id, technique: e.target.value }))}

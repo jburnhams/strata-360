@@ -59,6 +59,8 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
     try { const r = await api.generateScript2(folder, { revise, target_s: target ? Number(target) : undefined, auto }); if (!r.started) setErr(r.reason ?? 'could not start'); setVer(v => v + 1) } catch (e) { setErr((e as Error).message) }
     setBusy(false)
   }
+  const planIt = async () => { setBusy(true); setErr(undefined); try { const r = await api.planScript2(folder); if (!r.started) setErr(r.reason ?? 'could not start') ; setVer(v => v + 1) } catch (e) { setErr((e as Error).message) } setBusy(false) }
+  const latest = st.drafts.length ? st.drafts[st.drafts.length - 1] : null
   const savePins = async (next: ScriptPins) => { try { await api.saveScriptPins(folder, next); setErr(undefined) } catch (e) { setErr((e as Error).message) } setVer(v => v + 1) }
   const pinVo = async (never: boolean) => {
     if (!vsel || !draft) return; const clip = draft.items[vsel.i]?.clip ?? ''
@@ -85,6 +87,15 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
       {st.running && st.log.length > 0 && <p className="mt-2 font-mono text-xs text-stone-500">{st.log[st.log.length - 1]}</p>}
       {!st.running && st.last_exit != null && st.last_exit !== 0 && <p className="mt-2 text-sm text-red-600">The last attempt failed: {st.log[st.log.length - 1] ?? `exit ${st.last_exit}`}</p>}
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      {draft && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+          <button disabled={busy || st.plan_running} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-emerald-800 disabled:opacity-50 dark:text-emerald-300" title="turn this draft into the film's plan: your lines, the narration (spoken and timed) and b-roll, cut on the beat" onClick={() => void planIt()}>{st.plan_running ? 'planning…' : 'Make the film from this draft'}</button>
+          <span className="text-xs text-stone-500">{st.plan_running ? (st.plan_log?.[st.plan_log.length - 1] ?? 'speaking the narration and planning the windows…')
+            : st.plan?.source === 'script' ? `Film plan: ${st.plan.windows} windows, ${st.plan.length_s} s, from ${st.plan.script === latest ? 'this draft' : 'an older draft (make the film again to use this one)'}`
+            : 'The film plan is still the beat planner’s, not this script.'}</span>
+        </div>)}
+      {!st.plan_running && st.plan_exit != null && st.plan_exit !== 0 && <p className="mt-1 text-sm text-red-600">Planning failed: {st.plan_log?.[st.plan_log.length - 1] ?? `exit ${st.plan_exit}`}</p>}
+      {st.plan?.source === 'script' && st.plan.warnings.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs text-amber-700">{st.plan.warnings.map(w => <li key={w}>{w}</li>)}</ul>}
       {!draft ? <p className="mt-2 text-sm text-stone-500">No draft yet. The writer reads every clip, your notes and the transcript, and writes a first script you can then mark up and revise.</p> : (<>
         <div className="mt-3">
           <div className="text-base font-medium">{draft.title ?? '(untitled)'}</div>

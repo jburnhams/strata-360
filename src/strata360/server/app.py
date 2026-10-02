@@ -18,6 +18,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
+PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
 SCRIPT2_JOBS = {}             # folder -> Popen of a running `strata360 script-draft`
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
@@ -726,7 +727,10 @@ def create_app(roots, token=None):
         from strata360.edit import script_draft as SD
         f = folder_of(folder); j = SCRIPT2_JOBS.get(f); running = bool(j and j.poll() is None); doc = SD.load_draft(f, name or None); lp = os.path.join(SD._dir(f), 'job.log')
         used = sorted({i for it in (doc or {}).get('items') or [] if it.get('type') == 'clip' for i in it.get('lines') or []})          # the lines the draft plays, as resolved when it was written (cheap: no pack is built here)
-        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, last_exit=(None if running or j is None else j.returncode), log=(open(lp).read().splitlines()[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
+        from strata360.edit import project as PJ
+        pj = PLAN_JOBS.get(f); plan = (PJ.load(f).get('plan') or {}); ppath = os.path.join(SD._dir(f), 'plan.log')
+        plan_info = dict(source=plan.get('source', 'beats'), script=plan.get('script'), windows=len(plan.get('segments') or []), length_s=(plan.get('film') or {}).get('length_s'), warnings=plan.get('warnings') or [], generated_at=plan.get('generated_at')) if plan else None
+        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, plan=plan_info, plan_running=bool(pj and pj.poll() is None), plan_exit=(None if pj is None or pj.poll() is None else pj.returncode), plan_log=(open(ppath).read().splitlines()[-6:] if os.path.exists(ppath) else []), last_exit=(None if running or j is None else j.returncode), log=(open(lp).read().splitlines()[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
 
     def _llm_key(f):
         from strata360.edit import llm_remote
@@ -746,6 +750,14 @@ def create_app(roots, token=None):
         args = [*oslib.cli_command(), 'script-draft', f] + (['--revise'] if body.get('revise') else []) + (['--target-s', str(float(body['target_s']))] if body.get('target_s') else []) + (['--wpm', str(float(body['wpm']))] if body.get('wpm') else []) + (['--auto'] if body.get('auto') else [])
         d = os.path.join(config.race_dir(f), 'script2'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'job.log'), 'wb')
         SCRIPT2_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.post('/api/script2/plan', dependencies=[Depends(auth)])
+    def post_script2_plan(body: dict):                                                   # {folder, draft?}: make the film's plan from a draft (the newest by default) and speak the narration, in the background (`strata360 script-plan --voice`)
+        f = folder_of(body.get('folder')); j = PLAN_JOBS.get(f)
+        if j and j.poll() is None: return dict(started=False, reason='the film is already being planned')
+        args = [*oslib.cli_command(), 'script-plan', f, '--voice'] + (['--draft', os.path.basename(str(body['draft']))] if body.get('draft') else [])
+        d = os.path.join(config.race_dir(f), 'script2'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'plan.log'), 'wb')
+        PLAN_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.get('/api/script', dependencies=[Depends(auth)])
     def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script

@@ -197,3 +197,15 @@ class TestScript2:
         f = project.folder; r = client.post('/api/script2/generate', json=dict(folder=f, revise=True, target_s=200, wpm=170, auto=True)); assert r.json() == dict(started=True)
         cmd = fake_popen.instances[-1].cmd; assert 'script-draft' in cmd and '--revise' in cmd and '--target-s' in cmd and '200.0' in cmd and '--wpm' in cmd and '--auto' in cmd
         assert client.get('/api/script2', params=dict(folder=f)).json()['running'] is True and client.post('/api/script2/generate', json=dict(folder=f)).json()['started'] is False
+
+
+class TestScript2Plan:
+    def test_the_plan_is_reported_with_its_source(self, client, project):
+        f = project.folder; assert client.get('/api/script2', params=dict(folder=f)).json()['plan'] is None
+        project.write_json('project.json', dict(edit=dict(plan=dict(source='script', script='draft-1.json', film=dict(length_s=120.5), segments=[{}, {}, {}], warnings=['clip 0025: not enough free footage'], generated_at='2026-10-03T08:00:00Z'))))
+        p = client.get('/api/script2', params=dict(folder=f)).json()['plan']; assert p['source'] == 'script' and p['windows'] == 3 and p['length_s'] == 120.5 and p['warnings'] == ['clip 0025: not enough free footage']
+
+    def test_planning_starts_a_background_job_once_and_can_name_a_draft(self, client, project, fake_popen):
+        f = project.folder; r = client.post('/api/script2/plan', json=dict(folder=f, draft='../../etc/draft-2.json')); assert r.json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'script-plan' in cmd and '--voice' in cmd and cmd[cmd.index('--draft') + 1] == 'draft-2.json'                  # only the file name is passed on
+        j = client.get('/api/script2', params=dict(folder=f)).json(); assert j['plan_running'] is True and client.post('/api/script2/plan', json=dict(folder=f)).json()['started'] is False

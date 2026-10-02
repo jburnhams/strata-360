@@ -159,3 +159,35 @@ describe('ScriptDraftPanel narration pins', () => {
     expect(await screen.findByText('bad pins')).toBeInTheDocument()
   })
 })
+
+describe('ScriptDraftPanel film plan', () => {
+  const plan = (o = {}) => ({ source: 'script' as const, script: 'draft-2.json', windows: 35, length_s: 259.8, warnings: [] as string[], generated_at: '2026-10-03T08:00:00Z', ...o })
+
+  it('makes the film from the draft in the background', async () => {
+    mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft(), drafts: ['draft-2.json'] })); const seen = recordRequests('/api/script2/plan')
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByText(/still the beat planner/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Make the film from this draft' }))
+    await waitFor(() => expect(seen).toHaveLength(1)); expect(seen[0].body).toMatchObject({ folder: '/data' })
+  })
+
+  it('says which draft the film plan comes from and warns when it is an older one', async () => {
+    mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft(), drafts: ['draft-1.json', 'draft-2.json'], plan: plan({ script: 'draft-1.json' }) }))
+    setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByText(/35 windows, 259.8 s, from an older draft/)).toBeInTheDocument()
+  })
+
+  it('says the plan is from this draft, and lists the planner\'s warnings', async () => {
+    mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft(), drafts: ['draft-2.json'], plan: plan({ warnings: ['clip 0025: not enough free footage for 4.0 s of picture (reused)'] }) }))
+    setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByText(/Film plan: 35 windows, 259.8 s, from this draft/)).toBeInTheDocument(); expect(screen.getByText(/clip 0025: not enough free footage/)).toBeInTheDocument()
+  })
+
+  it('shows progress and failure of the planning', async () => {
+    mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft(), plan_running: true, plan_log: ['speaking line 3 of 6'] }))
+    const { unmount } = setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByText('speaking line 3 of 6')).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'planning…' })).toBeDisabled(); unmount()
+    mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft(), plan_exit: 1, plan_log: ['no candidates yet'] })); setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByText(/Planning failed: no candidates yet/)).toBeInTheDocument()
+  })
+})

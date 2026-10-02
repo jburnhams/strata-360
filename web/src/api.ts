@@ -27,7 +27,8 @@ export interface ScriptDraft {
   title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
   problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null
 }
-export interface Script2State { draft: ScriptDraft | null; drafts: string[]; pins: ScriptPins; running: boolean; last_exit: number | null; log: string[]; used: string[]; key_configured: boolean }
+export interface PlanInfo { source: 'script' | 'beats'; script: string | null; windows: number; length_s: number | null; warnings: string[]; generated_at: string | null }
+export interface Script2State { plan?: PlanInfo | null; plan_running?: boolean; plan_exit?: number | null; plan_log?: string[]; draft: ScriptDraft | null; drafts: string[]; pins: ScriptPins; running: boolean; last_exit: number | null; log: string[]; used: string[]; key_configured: boolean }
 export interface WordEdit { orig: string; src: 'user' | 'gemini'; why?: string | null; user_text?: string | null; gemini_text?: string | null }
 export type WordMark = 'must' | 'never'
 export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit; m?: WordMark }
@@ -38,13 +39,13 @@ export interface ScriptState { key_configured: boolean; providers: Record<string
 export interface PlanOption { tech: string; score: number }
 export interface PlanSegment {
   id: string; index: number; clip: string; cand_id: string; film_start_s: number; beats: number; dur_s: number; clip_start_s: number; utc_start: string; utc_end: string
-  technique: string; family: string; hero: boolean; forced: boolean; speech: boolean; locked: boolean; options: PlanOption[]
+  technique: string; family: string; hero: boolean; forced: boolean; speech: boolean; locked: boolean; options: PlanOption[]; role?: 'clip' | 'vo' | 'broll'; item?: number
   sound?: { gain_db: number; why: string[] }; kind?: string; view?: string; transition?: { type: 'cut' | 'dissolve' | 'dip' | 'whip'; beats: number; dur_s: number; why: string }
 }
 export interface EditState {
   settings: { length_s: number; bpm: number; bar_beats: number; seed: number; wpm: number; style: string }
   overrides: { locked: { wid: string }[]; tech_force: Record<string, string>; bans_cands: string[]; bans_techs: string[]; clip_weight: Record<string, number>; transitions?: Record<string, string> }
-  plan: null | { generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[] }
+  plan: null | { source?: 'script' | 'beats'; script?: string; generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[] }
 }
 export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
 export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
@@ -111,6 +112,7 @@ export const api = {
   buildVoiceover: (folder: string, o: { engine?: string; voice?: string; rate?: number } = {}) => call<{ started: boolean }>('/api/voiceover/build', { folder, ...o }),
   markWords: (folder: string, clip: string, spans: { seg: number; from: number; to: number }[], state: 'must' | 'never' | 'none') => call<{ ok: boolean; marked: number }>('/api/transcript/mark', { folder, clip, spans, state }),
   script2: (folder: string, name = '') => call<Script2State>('/api/script2?' + q(name ? { folder, name } : { folder })),
+  planScript2: (folder: string, draft?: string) => call<{ started: boolean; reason?: string }>('/api/script2/plan', { folder, draft }),
   generateScript2: (folder: string, o: { revise?: boolean; target_s?: number; auto?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/script2/generate', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
