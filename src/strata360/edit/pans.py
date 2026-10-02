@@ -44,6 +44,7 @@ def plan(seg_a, seg_b, path_a, path_b):
     """(transition dict, None) when a glide from the end of shot a to the start of shot b is allowed, else (None, the reason)."""
     if path_a.get('ref') != 'world' or path_b.get('ref') != 'world': return None, 'not both world-frame cameras'
     if seg_a['clip'] != seg_b['clip'] or abs(seg_b['clip_start_s'] - (seg_a['clip_start_s'] + seg_a['dur_s'])) > CONTIGUOUS_S: return None, 'the shots are not consecutive in the clip'
+    if any('fov' not in x for x in path_a['keyframes'] + path_b['keyframes']): return None, 'a globe or little-planet shot has no field of view to glide between'
     da, db = float(seg_a['dur_s']), float(seg_b['dur_s']); A, B = pose_at(path_a['keyframes'], da), pose_at(path_b['keyframes'], 0.0); dyaw = float(wrap(B[0] - A[0])); dp = B[1] - A[1]; df = B[2] - A[2]
     if abs(dyaw) > MAX_YAW or abs(dp) > MAX_PITCH or abs(df) > MAX_FOV: return None, f'too big a move ({abs(dyaw):.0f} degrees of yaw, {abs(dp):.0f} of pitch, {abs(df):.0f} of field of view)'
     if abs(dyaw) + abs(dp) + abs(df) / 3.0 < MIN_MOVE: return None, 'the two shots already look the same way'

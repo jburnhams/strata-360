@@ -94,3 +94,19 @@ def test_the_pack_tells_the_writer_which_views_a_clip_has_and_for_how_much_of_it
     assert SP.you_views(cands) == dict(mid=0.8, close=0.9, far=0.23) and SP.you_views([dict(kind='span', start_s=0.0, end_s=10.0, features=dict(protagonist=0.05))]) is None
     c = dict(label='0001', clip='C', duration_s=50.0, usable_s=40.0, usable=[], scene={}, note='', lines=[], speech_s=0.0, speech_words=0, you_views=dict(mid=0.8, close=0.9, far=0.23), start_utc='2026-02-22T10:00:00Z')
     assert 'views of you' in SP.render(dict(race={}, clips=[c])) and 'close (a face zoom) 90%' in SP.render(dict(race={}, clips=[c])) and 'views of you' not in SP.render(dict(race={}, clips=[dict(c, you_views=dict(mid=0.8, close=0.1, far=0.0))]))
+
+
+def test_cuts_in_a_pause_snap_to_whole_beats_so_the_shots_meet():
+    assert SPL.snap_cuts([6.1], [(5.6, 6.6)], 0.0, 0.5, end=20.0) == [6.0]
+    assert SPL.snap_cuts([6.0], [(5.9, 6.1), (7.0, 8.2)], 0.0, 0.7, end=20.0) == [7.0]             # the first pause holds no beat boundary (4.2, 4.9 ... 5.6, 6.3): the next that does is used
+    assert SPL.snap_cuts([6.0], [(5.95, 6.05)], 0.0, 0.7, end=20.0) == [6.0]                         # none within reach: the middle stays
+
+
+def test_join_runs_starts_the_second_shot_where_the_first_ends_but_never_past_the_pause():
+    from types import SimpleNamespace as NS
+    def pair(start_b, spans):
+        a = NS(cand=NS(clip='c', start_s=0.0), clip_start_s=10.0, beats=10, in_s=10.0); b = NS(cand=NS(clip='c', start_s=0.0), clip_start_s=start_b, beats=8, in_s=start_b)
+        wa, wb = NS(_piece=0, _start=10.0), NS(_piece=0, _start=start_b); SPL.join_runs([a, b], [wa, wb], [dict(pause_spans=spans)], 0.6); return b
+    assert pair(15.7, [(15.4, 16.2)]).clip_start_s == 16.0                       # the first runs to 16.0 (10 beats of 0.6 s): the second starts there
+    assert pair(15.7, [(15.4, 15.8)]).clip_start_s == 15.8                       # only to the end of the pause
+    assert pair(15.7, []).clip_start_s == 15.7                                   # no pause known: left alone

@@ -37,6 +37,39 @@ SPLIT_TARGET_S = 6.0         # each about this long, the cuts in the pauses betw
 SPLIT_MIN_S = 3.0
 
 
+def _pause_spans(ls, a, b):
+    """The (start, end) of every pause between consecutive lines (inside [a, b]) that lasts at least 0.25 s."""
+    ls = sorted(ls, key=lambda l: l['t0']); return [(round(x['t1'], 3), round(y['t0'], 3)) for x, y in zip(ls, ls[1:]) if y['t0'] - x['t1'] >= 0.25 and a < (x['t1'] + y['t0']) / 2.0 < b]
+
+
+def snap_cuts(cuts, spans, start, beat_s, end=None, reach=2.5):
+    """Move each cut to where the shot before it is a whole number of beats long and the point lies inside a pause: the film's shots are whole beats, so otherwise the shot runs past the cut and the next one repeats the footage (and the two cannot be joined by a glide). The nearest such pause within `reach` s of the cut
+    is used (the shots stay at least SPLIT_MIN_S); a cut with none keeps the middle of its pause."""
+    out = []; edge = start
+    for c in cuts:
+        opts = []
+        for lo, hi in spans:
+            j = max(1, int(math.ceil((lo - edge) / beat_s - 1e-6)))
+            while edge + j * beat_s <= hi + 1e-6:
+                t = edge + j * beat_s
+                if abs(t - c) <= reach and t - edge >= SPLIT_MIN_S - 1e-6 and (end is None or end - t >= SPLIT_MIN_S - 1e-6): opts.append(t)
+                j += 1
+        t = min(opts, key=lambda x: abs(x - c)) if opts else c; out.append(round(t, 3)); edge = out[-1]
+    return out
+
+
+def join_runs(segs, windows, ps, beat_s):
+    """Where a talking stretch was cut into shots inside a pause and the first shot (whole beats) runs a little past the cut, start the second shot where the first ends, so the two are one continuous run of the clip (nothing repeated, and a glide can join them). Only as far as the pause allows: the second shot never starts later than the end of the pause, so no word is lost. Segments are changed in place."""
+    for a, b, wa, wb in zip(segs, segs[1:], windows, windows[1:]):
+        if wa._piece != wb._piece or a.cand.clip != b.cand.clip: continue
+        end = a.clip_start_s + a.beats * beat_s; over = end - b.clip_start_s
+        if over <= 1e-6: continue
+        hi = next((h for lo, h in ps[wb._piece].get('pause_spans') or [] if lo - 1e-6 <= b.clip_start_s <= h + 1e-6), None)
+        if hi is None: continue
+        move = min(over, max(hi - b.clip_start_s, 0.0))
+        if move > 1e-6: wb._start += move; b.clip_start_s = round(wb._start, 3); b.in_s = round(wb._start - b.cand.start_s, 3)
+
+
 def _pauses(ls, a, b):
     """The middles of the pauses between consecutive lines (inside [a, b]) that last at least 0.25 s: where a cut inside a talking stretch costs no words."""
     ls = sorted(ls, key=lambda l: l['t0']); return [round((x['t1'] + y['t0']) / 2.0, 3) for x, y in zip(ls, ls[1:]) if y['t0'] - x['t1'] >= 0.25 and a < (x['t1'] + y['t0']) / 2.0 < b]
@@ -71,7 +104,7 @@ def pieces(draft, pack, voice_s, wpm):
             ls = [lines[i] for i in it.get('lines') or [] if i in lines]
             if not ls: warn.append(f'item {n + 1}: no transcript lines; skipped'); continue
             a = max(min(l['t0'] for l in ls) - BL.PAD_BEFORE_S, 0.0); b = min(max(l['t1'] for l in ls) + BL.PAD_AFTER_S, c['duration_s'])
-            out.append(dict(base, kind='clip', start=a, seconds=b - a, view=it.get('view'), pauses=_pauses(ls, a, b)))
+            out.append(dict(base, kind='clip', start=a, seconds=b - a, view=it.get('view'), pauses=_pauses(ls, a, b), pause_spans=_pause_spans(ls, a, b)))
         elif it['type'] == 'vo':
             text = (it.get('text') or '').strip(); d = voice_s.get(n); est = d is None; d = estimated_s(text, wpm) if est else d
             out.append(dict(base, kind='vo', text=text, speak_s=d, estimated=est, seconds=LEAD_S + d + TAIL_S, seg=seg_id(c['clip'], text)))
@@ -279,7 +312,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     for k, p in enumerate(ps):
         if p['kind'] == 'synthetic': continue                                                       # placed after the footage windows are planned (below)
         fp = foot[p['clip']]
-        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=split_points(p['start'], p['seconds'], p.get('pauses') or []) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
+        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=snap_cuts(split_points(p['start'], p['seconds'], p.get('pauses') or []), p.get('pause_spans') or [], p['start'], beat_s, end=p['start'] + p['seconds']) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
         if p['kind'] == 'vo' and wins:                                                                  # the narration must have picture for as long as it is spoken
             short = p['seconds'] - sum(w[2] for w in wins)
             if short > 1e-6:
@@ -294,6 +327,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     B = sum(w.beats for w in windows); music = O.Music(bpm=music.bpm, beats=B, bar_beats=music.bar_beats, sections=music.sections)
     segs = CH.assign_techniques(windows, clips, lib, music, st, rng, warn, B=B) if windows else []
     for sg, w in zip(segs, windows): sg.clip_start_s = round(w._start, 3); sg.in_s = round(w._start - sg.cand.start_s, 3)
+    join_runs(segs, windows, ps, beat_s)
     syn = {k: max(1, int(math.ceil(p['seconds'] / beat_s - 1e-9))) for k, p in enumerate(ps) if p['kind'] == 'synthetic'}; before = {}; run = 0              # beats of generated clips ahead of each piece
     for k in range(len(ps)): before[k] = run; run += syn.get(k, 0)
     for sg, w in zip(segs, windows): sg.start += before[w._piece]

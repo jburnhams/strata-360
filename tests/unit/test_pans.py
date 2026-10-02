@@ -98,3 +98,8 @@ def test_the_previews_pose_offsets_are_degrees_added_to_the_cameras_radians(monk
     src.info['c'] = dict(proxy='p.mp4', side=dict(frames=[dict(t_s=0.04 * i, source_frame=i) for i in range(100)], size=[64, 32]), ts=None, stab=None); monkeypatch.setattr(PV.guard, 'popen', lambda *a, **k: Dec())
     list(src.frames(0, 0, 3)); base = list(src.V.dirs); src.V.dirs.clear(); src.V.fov.clear()
     list(src.frames(0, 0, 3, pose_extra=np.array([[10.0, 5.0, 20.0]] * 3))); assert np.allclose(src.V.fov, 110.0) and np.allclose(src.V.dirs[0], cam.direction(np.radians(10.0), np.radians(5.0))) and np.allclose(base[0], cam.direction(0.0, 0.0))
+
+
+def test_a_globe_shot_never_glides():
+    a = dict(path(0.0), keyframes=[dict(t=0, yaw=0.0, pitch=-90, disc=3.2), dict(t=2, yaw=90.0, pitch=-90, disc=0.5)])
+    assert PN.plan(seg(0.0, 2.0), seg(2.0, 2.0), a, path(0.0))[0] is None
