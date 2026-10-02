@@ -257,6 +257,11 @@ class TestMusicAPI:
 
         from strata360.edit import music as M
         monkeypatch.setattr(M, 'analyse', lambda path: dict(bpm=120.0, offset_s=0.0, sections=[]))
+        monkeypatch.setattr(M, 'decode', lambda *args, **kwargs: None)
+        monkeypatch.setattr(M, 'spectrogram', lambda *args, **kwargs: None)
+        monkeypatch.setattr(M, 'onset_envelope', lambda *args, **kwargs: (None, None))
+        monkeypatch.setattr(M, 'tempo_and_phase', lambda *args, **kwargs: (120.0, 0.0, 0.0))
+        monkeypatch.setattr(M, 'cached', lambda *args, **kwargs: dict(bpm=120.0, offset_s=0.0, sections=[]))
 
         r_post = c.post(f'/api/music?folder={folder}&filename=track.wav', content=wav_data)
 
