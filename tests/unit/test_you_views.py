@@ -50,9 +50,9 @@ def test_each_view_of_you_frames_you_and_says_which_view_it_is():
 
 
 def test_the_close_view_centres_the_head_and_the_far_view_centres_the_body():
-    face = aim.aim_face(-5.0, 50.0, 8.0); assert face == pytest.approx(8.0 - 0.07 * 50.0)                                                       # the middle of the head, not the top of the frame
+    face = aim.aim_face(-5.0, 50.0, 8.0); assert face == pytest.approx(8.0 - aim.FACE_BELOW_TOP * 50.0)                                                       # the middle of the head, not the top of the frame
     close = FR.resolve_segment(seg('selfie_close'), LIB, data(you())); far = FR.resolve_segment(seg('selfie_far'), LIB, data(you()))
-    assert close['keyframes'][0]['pitch'] > far['keyframes'][0]['pitch'] + 3                                                                       # close looks up at the head, far at the middle of the body
+    assert close['keyframes'][0]['pitch'] == pytest.approx(face, abs=1.0) and far['keyframes'][0]['pitch'] == pytest.approx(-5.0, abs=1.0)                  # close aims at the face, far at the middle of the body (it all fits)
 
 
 

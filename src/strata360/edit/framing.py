@@ -104,12 +104,14 @@ def resolve_segment(g, lib, data):
             att = AT.best_yaw_offset(data['quality'], t0, t0 + T, float(look)); look = float(look) + att['offset_deg']
         path = TQ.instantiate(tech, T, rng, look_yaw=float(look)); path['subject'] = subject; path['why'] = why + (f"; turned {att['offset_deg']:+.0f} deg: {att['why']}" if att and att['offset_deg'] else ''); return path
     look = float(np.degrees(y[0])); path = TQ.instantiate(tech, T, rng, look_yaw=look)
+    if subject == 'you' and tech.id in YOU_VIEWS:                                                         # the views of you look where you ARE (world frame), not straight behind the runner: you are often to one side, and a close view would miss you
+        fov = path['keyframes'][0]['fov']; path = dict(ref='world', keyframes=[dict(t=0.0, yaw=look, pitch=0.0, fov=fov), dict(t=round(T, 3), yaw=look, pitch=0.0, fov=fov)])
     if tech.id in FOLLOW:                                                   # the technique's own move (fov, slow drift) stays; the subject is followed: held while still, panned slowly when it drifts, one quick move when it goes far
         from strata360.render.camera import CameraPath
         ev = CameraPath(path['keyframes'], path.get('ref', 'world')).evaluate(times)
         ty = np.degrees(y); aimer = (lambda pi, hi, vf, hd: AIM.aim_face(pi, hi, hd)) if tech.id == 'selfie_close' else AIM.aim_pitch
         tp = np.array([aimer(float(np.degrees(p[i])), float(h[i]), AIM.vfov_deg(float(ev['fov'][i])), None if np.isnan(hdd[i]) else float(hdd[i])) for i in range(len(times))])
-        fy, fp = AIM.follow(times, ty, tp)
+        fy, fp = AIM.follow(times, ty, tp, scale=min(1.0, float(np.mean(ev['fov'])) / 85.0))                                # a narrower view has a narrower dead band
         fy = np.degrees(np.unwrap(np.radians(fy)))
         kf = [dict(t=round(float(tt), 3), yaw=round(float(np.degrees(ev['yaw'][i]) + fy[i] - fy[0]), 2), pitch=round(float(np.clip(fp[i], -60, 60)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')
               for i, tt in enumerate(times)]
