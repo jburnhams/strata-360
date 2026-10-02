@@ -16,7 +16,7 @@ import json, os
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from strata360.pipeline import config
-from strata360.edit import techniques as TQ, aim as AIM, attention as AT
+from strata360.edit import techniques as TQ, aim as AIM, attention as AT, clip_views as CV, scenery as SC, view_quality as VQ
 
 FOLLOW = {'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold', 'selfie_close', 'selfie_far'}          # techniques that keep their subject in frame as it moves
 NO_SUBJECT = {'follow_runner', 'planet_fill', 'planet_globe', 'planet_fill_zoom_out', 'globe_shrink', 'tunnel_up', 'spin_roll'}
@@ -65,7 +65,7 @@ def clip_data(folder, clip):
     d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = cj['source_files']['osv']
     sp = os.path.join(d, 'speakers.json')
     from strata360.analysis.exposure import load_quality
-    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d))
+    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv))
 
 
 def choose_subject(g, tech, data):
@@ -88,10 +88,37 @@ def choose_subject(g, tech, data):
     return 'heading', 'straight ahead'
 
 
+FREE_PITCHES = (-10.0, 0.0, 10.0)
+FREE_HFOVS = (80.0, 100.0)
+
+
+def scenery_path(g, T, t0, rng, v):
+    """The scenery camera (edit/scenery.py) for the window: the best people-free view, panning slowly or cutting within its budget. None when the clip has no quality grid."""
+    if not v or v.get('grid') is None: return None
+    st = SC.Settings(); path = SC.track(v['grid'], t0, t0 + T, v['heading'], v['prior'], v['boxes'], st, rng); kf = SC.keyframes(path, T, st.pitch, st.hfov, t0=t0); cuts = len(path['jumps'])
+    why = 'the best-looking scenery with nobody in view' + (f': {cuts} cut{"s" if cuts != 1 else ""} to a better direction' if cuts else ', held or panned slowly')
+    return dict(ref='world', keyframes=kf, subject='scenery', why=why)
+
+
+def free_path(g, T, t0, rng, v):
+    """A fixed pose (a free camera, edit/view_quality.py): the view that looks best over the whole window, one of the top few at random (the seeded variety); people are not avoided. None without a quality grid."""
+    if not v or v.get('grid') is None: return None
+    best = []
+    for yaw in range(-180, 180, 15):
+        for pitch in FREE_PITCHES:
+            for hfov in FREE_HFOVS: best.append((VQ.window_score(v['grid'], t0, t0 + T, yaw, pitch, hfov, 16 / 9, step=1.0)['score'], yaw, pitch, hfov))
+    best.sort(reverse=True); sc, yaw, pitch, hfov = best[int(rng.integers(0, min(3, len(best))))]
+    return dict(ref='world', keyframes=[dict(t=0.0, yaw=float(yaw), pitch=float(pitch), fov=float(hfov), ease='linear'), dict(t=round(float(T), 3), yaw=float(yaw), pitch=float(pitch), fov=float(hfov), ease='linear')], subject='free', why=f'a fixed view chosen for its detail and exposure (score {sc:.2f})')
+
+
 def resolve_segment(g, lib, data):
     """The framing of one plan segment: dict(subject, why, path). Deterministic for the same plan and analysis (the window's variant seed drives the technique's choices)."""
     tech = lib[g['technique']]; subject, why = choose_subject(g, tech, data); T = float(g['dur_s']); t0 = float(g['clip_start_s'])
     rng = np.random.default_rng(int(g.get('variant_seed') or 0)); heading = data['heading']
+    if tech.id in ('scenery', 'free_view'):
+        made = (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
+        if made is not None: return made
+        why = 'there is no quality grid for this clip yet (the quality stage): looking straight ahead'; subject = 'heading'
     if subject in ('person', 'you'):
         ts, yw, pt, hh, hd = _track(data[subject], t0, t0 + T)
         times = np.arange(0.0, T + 1e-9, STEP_S); abs_t = t0 + times

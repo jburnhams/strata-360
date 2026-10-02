@@ -67,3 +67,11 @@ def test_the_scenery_and_clarity_ratings_of_scenes_v3_lift_a_good_stretch_over_a
     cs = C.build(d)['candidates']; assert cs[0]['scenery'] is not None and 0 <= cs[0]['scenery'] <= 10
     old = json.loads(json.dumps(items)); [i.pop('scenery') for i in old]; [i.pop('clarity') for i in old]; json.dump(dict(schema=1, items=old, summary={}), open(os.path.join(d, 'scenes.json'), 'w'))
     T2 = C.timeline(d); assert np.allclose(T2['scenic'], 0.5) and np.isnan(T2['scenery10']).all() and C.build(d)['candidates'][0]['scenery'] is None                                          # an older scenes.json: as before
+
+
+def test_a_clip_with_a_quality_grid_has_the_scenery_and_free_view_features_and_one_without_has_none():
+    d = make(lambda x: 5.0); T0 = C.timeline(d); assert (T0['scenery_ok'] == 0).all() and (T0['free_ok'] == 0).all()
+    f = lambda v: np.full((80, 12, 24), v, np.float16); np.savez_compressed(os.path.join(d, 'quality_grid.npz'), hz=2.0, tex=f(8.0), clip_hi=f(0.0), clip_lo=f(0.0))
+    T1 = C.timeline(d); assert T1['scenery_ok'].mean() > 0.6 and T1['free_ok'].mean() > 0.6                                                              # a sharp varied grid and nobody in view: somewhere good to look
+    c = C.build(d)['candidates'][0]['features']; assert c['scenery_ok'] > 0.6 and c['free_ok'] > 0.6
+    dark = np.full((80, 12, 24), 0.9, np.float16); np.savez_compressed(os.path.join(d, 'quality_grid.npz'), hz=2.0, tex=f(8.0), clip_hi=f(0.0), clip_lo=dark); assert C.timeline(d)['scenery_ok'].mean() < 0.1       # black everywhere

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLOSE_FOV = 50.0              # the views of you: close (a face zoom), mid (selfie_hold, 85) and far (ultra wide)
 FAR_FOV = 130.0
-FEATURES = {'steady', 'clear_nadir', 'open_ground', 'canopy', 'subject', 'speech', 'protagonist', 'low_obstruction', 'resolution', 'you_close', 'you_far'}
+FEATURES = {'steady', 'clear_nadir', 'open_ground', 'canopy', 'subject', 'speech', 'protagonist', 'low_obstruction', 'resolution', 'you_close', 'you_far', 'scenery_ok', 'free_ok'}
 
 
 @dataclass
@@ -57,6 +57,7 @@ def instantiate(t, dur, rng, look_yaw=0.0):
     T = float(dur); s = _sign(rng); fam = t.id
     if fam == 'hold_wide': return dict(ref='world', keyframes=[k(0, yaw=look_yaw, pitch=0, fov=100), k(T, yaw=look_yaw, pitch=0, fov=100)])
     if fam == 'selfie_hold': return dict(ref='body', keyframes=[k(0, yaw=180, pitch=0, fov=85), k(T, yaw=180, pitch=0, fov=85)])
+    if fam in ('scenery', 'free_view'): return dict(ref='world', keyframes=[k(0, yaw=look_yaw, pitch=0, fov=100), k(T, yaw=look_yaw, pitch=0, fov=100)])      # (the framing replaces this with the camera the scenery engine or the view search found)
     if fam == 'selfie_close': return dict(ref='body', keyframes=[k(0, yaw=180, pitch=0, fov=CLOSE_FOV), k(T, yaw=180, pitch=0, fov=CLOSE_FOV)])        # you, the face: a zoom centred on the head
     if fam == 'selfie_far': return dict(ref='body', keyframes=[k(0, yaw=180, pitch=0, fov=FAR_FOV), k(T, yaw=180, pitch=0, fov=FAR_FOV)])           # you, ultra wide: the whole body and the surroundings
     if fam == 'follow_runner': return dict(ref='heading', heading=dict(tau_s=2.0), keyframes=[k(0, yaw=0, pitch=-3, fov=95), k(T, yaw=0, pitch=-3, fov=95)])
