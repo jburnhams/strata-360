@@ -8,6 +8,7 @@
 """
 import numpy as np
 import argparse, csv, datetime as dt, glob, json, os, subprocess, sys, time
+from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod, runner
 from strata360.pipeline.stages import STAGES, ORDER
 
@@ -328,6 +329,37 @@ def cmd_gaps(a):
         h = g['duration_s'] / 3600.0; print(f"  {g['id']}  {g['local_start']} to {g['local_end']}  {h:5.1f} h  km {g['km_start']}-{g['km_end']} ({g['distance_km']} km, {100 * g['moving_share']:.0f}% moving, +{g['ascent_m']} m)  {g['daylight_start']}->{g['daylight_end']}  between clips {g['before'][-7:-2]} and {g['after'][-7:-2]}" + (f"  -> {SY.default_seconds(g['duration_s']):g} s of film" if a.plan else ''))
 
 
+def cmd_gap_clip(a):
+    """Render the animated map clip for a gap (`strata360 gaps` lists them) to an MP4 in <project>/synthetic/: the map follows the runner at a speed-up with the race overlay on top. --seconds or --speedup
+    set how fast it goes; --from/--to (UTC, ISO) pick a stretch of the gap, which then needs its own --id."""
+    import datetime as dt
+    from strata360.gps import gaps as GP, track
+    from strata360.edit import synthetic as SY
+    from strata360.overlay import mapclip as MC
+    from strata360.overlay.series import Series
+    from strata360.overlay.tiles import Tiles
+    cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
+    if not tp: sys.exit('no race track: add the .fit or .gpx first')
+    tr = track.load(tp); tz = cfg.get('timezone', 'Europe/Brussels'); gap = next((g for g in GP.find_gaps(GP.load_spans(a.name), tr, a.min_minutes * 60.0, tz) if g['id'] == a.gap), None)
+    if gap is None: sys.exit(f'no gap {a.gap}: `strata360 gaps` lists them')
+    def when(x):
+        if not x: return None
+        d = dt.datetime.fromisoformat(x.replace('Z', '+00:00')); return (d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)).timestamp()
+    t0, t1 = when(a.t_from), when(a.t_to)
+    if (t0 or t1) and not a.id: sys.exit('a stretch of a gap needs --id (the clip is not the gap itself)')
+    clip = SY.make(gap, seconds=a.seconds, speedup=a.speedup, fps=a.fps, t0=t0, t1=t1, id=a.id, style={'map': a.style} if a.style else None)
+    w, h = (int(x) for x in a.size.lower().split('x')); style = (clip.get('style') or {}).get('map') or MC.default_style()
+    mc = MC.MapClip(Series(tr), gap['t0'] if t0 is None else t0, gap['t1'] if t1 is None else t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(style), tz=tz)
+    out = os.path.join(config.race_dir(a.name), 'synthetic', clip['id'] + '.mp4'); oslib.lower_priority(); last = [0]
+    def show(done, total):
+        if done - last[0] >= max(1, total // 20) or done == total: last[0] = done; print(f'  {clip["id"]}: {done}/{total} frames', flush=True)
+    MC.render(mc, out, show); clip = SY.upsert(a.name, SY.make(gap, seconds=a.seconds, speedup=a.speedup, fps=a.fps, t0=t0, t1=t1, id=a.id, style={'map': a.style} if a.style else None))
+    doc = SY.load(a.name)
+    for c in doc['clips']:
+        if c['id'] == clip['id']: c.update(status='ready', file=os.path.relpath(out, config.race_dir(a.name)))
+    SY.save(a.name, doc); print(f"{clip['id']}: {clip['duration_s'] / 3600:.1f} h of the race in {clip['seconds']:g} s (x{clip['speedup']:g}) -> {out}")
+
+
 def cmd_coverage(a):
     from strata360.pipeline.coverage import coverage
     r = coverage(a.name)
@@ -517,6 +549,7 @@ def main():
     p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
     p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
     p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
+    p = sub.add_parser('gap-clip', help='render the animated map clip for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap', required=True); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--size', default='1920x1080'); p.add_argument('--style', help='map style (default: tf-landscape with a Thunderforest key, else osm)'); p.set_defaults(fn=cmd_gap_clip)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
