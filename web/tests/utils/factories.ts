@@ -1,4 +1,4 @@
-import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip } from '../../src/api'
+import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState } from '../../src/api'
 
 // Typed builders for API payloads: sensible defaults, override what the test cares about (`makeBrowse({ can_create: false })`).
 // Add one per interface in src/api.ts as tests need it. Keep the defaults boring and valid.
@@ -62,3 +62,5 @@ export const makeGap = (o: Partial<Gap> = {}): Gap => ({
   id: 'G01', t0: 1771521420, t1: 1771534020, duration_s: 12600, local_start: 'Thu 19 Feb 18:17', local_end: 'Thu 19 Feb 21:47', km_start: 2.5, km_end: 27, distance_km: 24.5, moving_share: 0.99, ascent_m: 860,
   daylight: 'twilight->night', before: 'a', after: 'b', default_seconds: 14, clips: [], ...o,
 })
+export const makeFilmState = (o: Partial<FilmState> = {}): FilmState => ({ state: 'none', running: false, ...o })
+export const makeFinalState = (o: Partial<FinalState> = {}): FinalState => ({ state: 'none', running: false, settings: { size: '1080p', fps: 30, bitrate: '20M' }, ...o })
