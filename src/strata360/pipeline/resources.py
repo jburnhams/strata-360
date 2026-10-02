@@ -23,7 +23,7 @@ def run_text(cmd, timeout=10):
 DEFAULTS = dict(max_workers=2, extra_worker_free_gb=7.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
-STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=6.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
+STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=4.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
                     places=0.3, identity=0.5, candidates=0.5, audio_extract=0.5, audio_clean=2.0, audio_events=2.0, audio_background=1.2, transcript_check=0.5)
 STAGE_MAX_CONCURRENT = dict(transcript_check=1, audio_clean=1, audio_events=1, audio_background=1, proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
 
