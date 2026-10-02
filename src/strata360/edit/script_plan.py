@@ -218,5 +218,4 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
         k = next((k for k, p in enumerate(ps) if p['n'] + 1 == a['item']), None); a['start_s'] = round(start_of[k], 2) if k in start_of else None
         if a['start_s'] is not None and abs(a['start_s'] - a['anchor_s']) > music.bar_beats * beat_s: warn.append(f"item {a['item']}: anchored at {a['anchor_s']:.0f} s, starts at {a['start_s']:.0f} s")
     spans = (((pack.get('music') or {}).get('lyrics')) or {}).get('vocal_spans') or []; sung = over_singing(lines, spans)
-    for x in sung: warn.append(f"narration at {x['a']:.0f}-{x['b']:.0f} s is over singing for {x['sung_s']:.0f} s: \"{x['text'][:50]}\"; the music is turned down under it")
     return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B + run, synthetic=synthetic, anchors=anchors, over_singing=sung, warnings=warn)

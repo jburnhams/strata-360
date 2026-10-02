@@ -124,13 +124,12 @@ def test_the_length_guide_ignores_gap_clips_and_resolve_gives_gap_items_their_se
     s = dict(items=[gap('G01', 'map', 12.04), dict(type='vo', clip='G01', text='a ' * 8)], skipped=[]); SD.resolve(s, DPACK, 150); assert s['items'][0]['seconds'] == 12.0 and s['items'][1]['seconds'] == 10.0         # narration over a gap plays for the whole gap clip
 
 
-def test_notes_say_when_narration_is_over_singing_and_when_an_anchor_cannot_be_met():
-    s = dict(items=[broll('0002', 20), dict(type='vo', clip='0003', text='a ' * 40, anchor=dict(film_s=100, why='the hook')), broll('0002', 5)], skipped=[]); SD.resolve(s, DPACK, 150)       # the narration runs 20 s to 41 s
-    notes = SD.director_notes(s, DPACK); assert any('item 2' in n and 'over singing' in n for n in notes) and any('anchored at 100 s' in n and 'starts it at 20 s' in n for n in notes) and not any('item 1' in n or 'item 3' in n for n in notes)
-    assert SD.director_notes(s, dict(DPACK, music=None)) == [n for n in notes if 'anchored' in n]
+def test_notes_say_when_an_anchor_cannot_be_met_but_say_nothing_about_narration_over_singing():
+    s = dict(items=[broll('0002', 20), dict(type='vo', clip='0003', text='a ' * 40, anchor=dict(film_s=100, why='the hook')), broll('0002', 5)], skipped=[]); SD.resolve(s, DPACK, 150)       # the narration runs 20 s to 41 s, inside the singing
+    notes = SD.director_notes(s, DPACK); assert len(notes) == 1 and 'item 2' in notes[0] and 'anchored at 100 s' in notes[0] and 'starts it at 20 s' in notes[0] and 'singing' not in notes[0]
 
 
 def test_the_request_carries_the_music_and_the_gap_choices_and_the_prompt_explains_gap_items_and_anchors():
     msgs, text = SD.build_messages(DPACK, 245, 150); sys_, user = msgs[0]['content'], msgs[1]['content']
     assert 'THE MUSIC (times are FILM seconds' in user and 'Sung (en): 30-60 s' in user and '=== CLIP G01' in user and 'NO FOOTAGE: a gap of 1.0 h' in user and '"type": "gap"' in user and '"anchor"' in user
-    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and SD.PROMPT_VERSION == 5
+    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 6

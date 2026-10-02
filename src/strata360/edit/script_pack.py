@@ -157,7 +157,7 @@ def render(pack, with_usable=False, marks=None):
         ly = m.get('lyrics')
         if ly and ly.get('instrumental'): L.append('The track is instrumental: nothing is sung.')
         elif ly:
-            L.append(f"Sung ({ly.get('language')}): " + (', '.join(f'{a:.0f}-{b:.0f} s' for a, b in ly['vocal_spans']) or 'nowhere') + '. Narration over singing fights the words; the runner\'s own speech may be placed over it when it matters more.')
+            L.append(f"Sung ({ly.get('language')}): " + (', '.join(f'{a:.0f}-{b:.0f} s' for a, b in ly['vocal_spans']) or 'nowhere') + '. Narration over singing is fine and often unavoidable (the music is turned down under it).')
             L.append('Words heard by speech recognition (rough: the times are right, the words are often wrong; use them for what the song is about and where, never quote them):')
             L += [f"  [{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') for p in ly['phrases'][:45]]
     L += ['', f"CLIPS (all {len(pack['clips'])}, in shooting order; the film follows this order)"]

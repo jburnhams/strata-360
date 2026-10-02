@@ -10,7 +10,7 @@ import datetime as dt, json, os, re, time
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
 from strata360.edit.script_pack import norm_label
 
-PROMPT_VERSION = 5
+PROMPT_VERSION = 6
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
 VO_PAUSE_S = 0.25             # breathing room after a narration item
 MIN_GAP_S = 2.0               # a gap item plays for this long at least,
@@ -39,7 +39,7 @@ RULES
 7. The runner's recordings are made on the move, sometimes days after the events they describe: what the runner says about "last night" is a recollection. Narrate in a way that keeps the timeline honest.
 8. Build an arc: set the scene, let the race grow, make the hard middle felt, and give the ending room: the last part of the film should be the strongest and mostly in the runner's own words.
 9. REVISING. When a CURRENT DRAFT is supplied, you are revising it, not starting again: keep every item the new constraints do not touch, with the same wording and the same choice of lines, and change only what the constraints and the target length require. Return the whole revised script.
-10. THE MUSIC. The film is cut to the track you are given (its sections, bars and, when it has words, where it is sung). Let the music's energy follow the story: quiet sections for the slow, hard or reflective parts, the loud sections for the pushes and the ending. Keep narration out of sung stretches unless the words and the film say the same thing at that moment; the runner's own recorded words may overlap singing when they matter more, but say so in "why". The song's words (rough recognition) tell you what it is about: use a hook where it meets the film (for example a line about not sleeping over the night), never to quote it.
+10. THE MUSIC. The film is cut to the track you are given (its sections, bars and, when it has words, where it is sung). Let the music's energy follow the story: quiet sections for the slow, hard or reflective parts, the loud sections for the pushes and the ending. Narration over singing is normal and often unavoidable (the music is turned down under the voice): do not contort the script to avoid it, but where a line matters most, a gap in the singing is a good place for it. The song's words (rough recognition) tell you what it is about: use a hook where it meets the film (for example a line about not sleeping over the night), never to quote it.
 11. FIXED PARTS. Anything the user has fixed (MUST INCLUDE, DO NOT USE, narration to use word for word, phrases never to say) is not up for discussion. Plan the film around the fixed parts: they leave a known amount of time for everything else.
 '''
 
@@ -174,13 +174,10 @@ def used_line_ids(script, pack):
 
 
 def director_notes(script, pack):
-    """Advisory notes on how the script meets the music (after resolve(): items have `seconds`): narration over singing, and anchors that the running time does not reach. They never force a retry; the editor and the user see them."""
-    notes = []; t = 0.0; m = pack.get('music') or {}; spans = ((m.get('lyrics') or {}).get('vocal_spans')) or []
+    """Advisory notes on how the script meets the music (after resolve(): items have `seconds`): anchors that the running time does not reach. (Narration over singing is not noted: it is normal, and the music is turned down under it.) They never force a retry."""
+    notes = []; t = 0.0
     for n, it in enumerate((script or {}).get('items') or [], 1):
         d = float(it.get('seconds') or 0.0); a, b = t, t + d
-        if it.get('type') == 'vo' and spans and d > 0:
-            sung = sum(max(0.0, min(b, y) - max(a, x)) for x, y in spans)
-            if sung > 0.3 * d: notes.append(f"item {n}: narration at {a:.0f}-{b:.0f} s is over singing for {sung:.0f} s of its {d:.0f}; it will be moved or the music turned down: say why in the item if it is deliberate")
         anc = it.get('anchor')
         if isinstance(anc, dict) and isinstance(anc.get('film_s'), (int, float)) and abs(anc['film_s'] - a) > 6.0: notes.append(f"item {n}: anchored at {anc['film_s']:.0f} s but the running total starts it at {a:.0f} s; the editor will move it to the nearest bar it can")
         t = b

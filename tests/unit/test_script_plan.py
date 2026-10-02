@@ -160,7 +160,7 @@ def test_a_later_anchor_does_not_undo_an_earlier_one():
     r = run(d, {}); starts = {a['item']: a['start_s'] for a in r['anchors']}; assert starts == {2: 8.0, 4: 20.0}
 
 
-def test_narration_over_singing_is_found_and_reported_with_the_plan():
+def test_narration_over_singing_is_found_and_recorded_in_the_plan_without_a_warning():
     lines = [dict(text='over the verse', film_start_s=10.0, speak_s=6.0), dict(text='in the quiet', film_start_s=40.0, speak_s=5.0), dict(text='a bit of overlap', film_start_s=29.0, speak_s=5.0)]
     got = SPL.over_singing(lines, [[8.0, 20.0], [30.0, 31.0]]); assert [g['text'] for g in got] == ['over the verse'] and got[0]['sung_s'] == 6.0                          # one second of five is under the share
-    pack = dict(PACK, music=dict(lyrics=dict(vocal_spans=[[0.0, 60.0]]))); r = SPL.build(DRAFT, pack, [C1, C2], LIB, MUSIC, VOICE, st=CH.Settings(seed=1)); assert r['over_singing'] and any('is over singing' in w and 'the music is turned down under it' in w for w in r['warnings'])
+    pack = dict(PACK, music=dict(lyrics=dict(vocal_spans=[[0.0, 60.0]]))); r = SPL.build(DRAFT, pack, [C1, C2], LIB, MUSIC, VOICE, st=CH.Settings(seed=1)); assert r['over_singing'] and not any('singing' in w for w in r['warnings'])                         # recorded in the plan, not a warning: narration over singing is normal
