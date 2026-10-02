@@ -91,6 +91,14 @@ def track(grid, t0, t1, heading, prior, boxes, st=None, rng=None, start=None):
     path = path[::-1]; yaw = bins()[path]; return dict(times=times, yaw=yaw, jumps=sorted(jumps), score=float(V[-1].max()) / n, budget=J)
 
 
+def samples(grid, heading, prior, boxes, st=None, every=1.0):
+    """The best people-free direction over the clip, one sample every `every` seconds, for the clip view's Scenic aim: [{t, yaw, pitch}] (degrees, the grid's frame; the viewer's follower holds and pans it steadily, so there is no path to solve here)."""
+    st = st or Settings(); out = []; n = len(grid['tex']); hz = float(grid['hz'])
+    for t in np.arange(0.0, n / hz, every):
+        sc = node_scores(grid, float(t), heading, prior, boxes, st)[0]; out.append(dict(t=round(float(t), 2), yaw=round(float(bins()[int(np.argmax(sc))]), 1), pitch=float(st.pitch)))
+    return out
+
+
 def keyframes(path, T, pitch=0.0, fov=100.0, t0=None):
     """Camera keyframes (window seconds from 0 to T; the world frame, yaw continuous across pans, a cut where the path jumps: two keyframes 0.04 s apart)."""
     t0 = float(path['times'][0]) if t0 is None else t0; ts = np.clip(path['times'] - t0, 0.0, T); yaw = np.array(path['yaw'], float); out = []; cur = yaw[0]; last = None

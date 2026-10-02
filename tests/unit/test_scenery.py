@@ -102,3 +102,17 @@ def test_the_people_boxes_come_from_the_identity_samples_and_every_detection_of_
     people = dict(people=[dict(t_s=5.0, yaw=30.0, pitch=2.0, height_deg=None), dict(t_s=5.5, yaw=-30.0, pitch=0.0, height_deg=33.0), dict(t_s=20.0, yaw=0.0, pitch=0.0, height_deg=50.0), dict(t_s=None, yaw=1.0, pitch=1.0)])
     at = CV.boxes_fn(ident, lambda t: 100.0, people); out = at(5.2)
     assert (170.0 + 100.0 - 360.0, -10.0, 50.0) in [tuple(round(x, 1) for x in b) for b in out] and (130.0, 2.0, 40.0) in out and (70.0, 0.0, 33.0) in out and len(out) == 4 and at(40.0) == [] and CV.boxes_fn(None, lambda t: 0.0)(1.0) == []        # a face with no body counts as 40 degrees
+
+
+def test_the_clip_views_scenic_samples_are_one_a_second_and_look_at_the_best_direction_without_people(tmp_path):
+    g = grid(n=20); g['tex'][:, :, 12:16] = 14.0; g['tex'][:, :, 18:20] = 12.0                                   # the best detail ahead (yaw 0 to 60), good detail at yaw 90 to 120 too
+    s = SC.samples(g, HEAD, PRIOR, NOBODY, ST); assert [x['t'] for x in s] == [float(i) for i in range(10)] and all(abs(SC.wrap(x['yaw'] - 30)) < 40 and x['pitch'] == ST.pitch for x in s)
+    me = lambda t: [(30.0, 0.0, 50.0)]; s2 = SC.samples(g, HEAD, PRIOR, me, ST); assert all(abs(SC.wrap(x['yaw'] - 30)) > 40 for x in s2)                # a person there: it looks elsewhere
+
+
+def test_the_server_keeps_scenic_samples_beside_the_quality_grid_and_gives_none_without_one(tmp_path):
+    from strata360.server import app as SRV
+    assert SRV.scenic_samples(str(tmp_path), None) == [] and not (tmp_path / 'scenic_view.json').exists()
+    (tmp_path / 'quality_grid.npz').write_bytes(b'x'); assert SRV.scenic_samples(str(tmp_path), None) == []                   # a broken grid: none, and no crash
+    (tmp_path / 'scenic_view.json').write_text('[{"t": 0.0, "yaw": 5.0, "pitch": 0.0}]'); import os; os.utime(tmp_path / 'scenic_view.json', (4e9, 4e9))
+    assert SRV.scenic_samples(str(tmp_path), None) == [{'t': 0.0, 'yaw': 5.0, 'pitch': 0.0}]                                  # a cache newer than the grid is used as it is

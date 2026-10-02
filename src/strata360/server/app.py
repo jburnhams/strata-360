@@ -21,6 +21,22 @@ MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
 TILES = {}                    # map style -> overlay.tiles.Tiles (one per style, shared by every request)
 TILE_FETCH = None             # tests replace this: fetch(url) -> bytes
+def scenic_samples(d, osv):
+    """The Scenic aim's samples for a clip ([{t, yaw, pitch}], edit/scenery.py `samples`), cached in `scenic_view.json` and made again when the quality grid is newer; [] without a grid."""
+    from strata360.analysis import quality_grid as QG
+    cache, grid_file = os.path.join(d, 'scenic_view.json'), os.path.join(d, QG.FILE)
+    if not os.path.exists(grid_file): return []
+    try:
+        if os.path.getmtime(cache) >= os.path.getmtime(grid_file): return json.load(open(cache))
+    except (OSError, ValueError): pass
+    try:
+        from strata360.edit import clip_views as CV, scenery as SC
+        v = CV.load(d, osv); out = SC.samples(v['grid'], v['heading'], v['prior'], v['boxes'])
+        with open(cache + '.tmp', 'w') as f: json.dump(out, f)
+        os.replace(cache + '.tmp', cache); return out
+    except Exception: return []
+
+
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
@@ -326,6 +342,7 @@ def create_app(roots, token=None):
             from strata360.edit import attention as AT
             vq = load_quality(d); out['clarity'] = AT.clarity_samples(vq) if vq is not None and len(vq['t']) else []
         except Exception: out['clarity'] = []
+        out['scenic'] = scenic_samples(d, (c.get('source_files') or {}).get('osv'))                      # the best people-free direction over time (the "Scenic" aim), kept beside the quality grid it comes from
         out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
         th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th and {**th, 'overlay': TH.overlay_fresh(d)}; out['places'] = _j(d, 'places.json')
