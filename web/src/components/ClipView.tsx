@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, type ClipDetail } from '../api'
 import NoteBox from './NoteBox'
 import RedoDialog from './RedoDialog'
@@ -7,6 +7,9 @@ import PlayIcons from './PlayIcons'
 import Moments from './Moments'
 import ClipPlayer from './ClipPlayer'
 import { PanelSkeleton, Skeleton } from './Skeleton'
+import WordMarker from './WordMarker'
+import { usedSet } from '../marks'
+import { usePoll } from '../usePoll'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -19,6 +22,8 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
   const [err, setErr] = useState<string>()
   const [redo, setRedo] = useState(false)
   const [mode, setMode] = useState<Mode>('translated')
+  const script = usePoll(() => api.script2(folder), 15000, [folder, clip])
+  const used = useMemo(() => usedSet(script?.used), [script])
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
   const reload = () => api.clip(folder, clip).then(setC).catch(() => {})
   useEffect(() => { if (c && focus != null) document.getElementById(`seg-${Math.round(focus * 100)}`)?.scrollIntoView({ block: 'center' }) }, [c, focus])
@@ -77,14 +82,16 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
         <div className="mb-2 flex items-center gap-2 text-xs text-stone-500">other languages shown as
           <select value={mode} onChange={e => setMode(e.target.value as Mode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="translated">translated</option><option value="original">original</option><option value="both">both</option></select></div>
         {c.transcript.length === 0 && <p className="text-sm text-stone-500">No speech recognised.</p>}
+        <WordMarker folder={folder} onSaved={reload}>
         {c.transcript.map((l, i) => (
           <div key={i} id={`seg-${Math.round(l.t0 * 100)}`} className={`py-1 text-sm ${l.flagged ? 'opacity-50' : ''} ${focus != null && Math.abs(l.t0 - focus) < 0.05 ? 'rounded bg-emerald-100 px-1 dark:bg-emerald-950' : ''}`}>
             <span className="mr-2 font-mono text-xs text-stone-500">{fmt(l.t0)}</span>
             {l.who && <span className={`mr-2 rounded-full px-2 text-xs ${l.who === 'wearer' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{l.who === 'wearer' ? 'you' : 'other'}</span>}
             <PlayIcons folder={folder} clip={clip} t0={l.play0 ?? l.t0} t1={l.play1 ?? l.t1} original={!!c.audio_files?.original} clean={!!c.audio_files?.clean} />
-            <Phrase text={l.text} en={l.text_en} lang={l.lang} mode={mode} word={l.words?.length ? { folder, clip, si: l.si, words: l.words, onSaved: reload } : undefined} />
+            <Phrase text={l.text} en={l.text_en} lang={l.lang} mode={mode} word={l.words?.length ? { folder, clip, si: l.si, words: l.words, onSaved: reload, used } : undefined} />
           </div>
         ))}
+        </WordMarker>
       </Card>
       {redo && <RedoDialog folder={folder} clip={clip} onClose={() => setRedo(false)} />}
       <NoteBox folder={folder} clip={clip} title="Notes for this clip" placeholder="What happened here? Names, places, how it felt, anything to mention or avoid…" />

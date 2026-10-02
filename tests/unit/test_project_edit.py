@@ -74,3 +74,13 @@ if __name__ == '__main__':
         try: f(); print('ok  ', f.__name__)
         except (AssertionError, O.Infeasible) as e: bad += 1; print('FAIL', f.__name__, repr(e)[:300])
     print(f'{len(fns) - bad}/{len(fns)} passed'); sys.exit(bad)
+
+
+def test_rough_blocks_take_the_length_from_a_target_then_the_music_then_the_footage(monkeypatch):
+    f = make_project(); jp = os.path.join(f, 'strata360', 'blocks.json')
+    r = P.rough_blocks(f, target_s=60); assert r['target_source'] == 'target' and abs(r['plan']['target_s'] - 60) < 1 and os.path.exists(jp) and json.load(open(jp))['target_source'] == 'target'
+    assert [b['clip'] for b in r['plan']['blocks']] == sorted(b['clip'] for b in r['plan']['blocks']) and len(r['plan']['blocks']) + len(r['plan']['dropped']) == 5
+    monkeypatch.setattr(P, 'music_info', lambda folder, settings: dict(duration_s=100.0, offset_s=4.0, bpm=120.0))
+    m = P.rough_blocks(f); assert m['target_source'] == 'music' and abs(m['plan']['target_s'] - 96.0) < 1 and m['music']['offset_s'] == 4.0                       # the track from its first downbeat
+    assert P.rough_blocks(f, auto=True)['target_source'] == 'automatic' and P.rough_blocks(f, target_s=40)['target_source'] == 'target'                          # --auto ignores the track; a target beats it
+    assert P.load(f)['plan'] is None                                                                                                                         # the saved plan is untouched

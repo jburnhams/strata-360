@@ -69,3 +69,43 @@ describe('NoteBox', () => {
     expect(await screen.findByPlaceholderText('Write here')).toHaveValue('')
   })
 })
+
+describe('NoteBox voice-over MUST INCLUDE', () => {
+  const vo = () => screen.getByPlaceholderText(/Narration you want in the film/)
+
+  it('loads the narration field beside the note, for the folder and for a clip', async () => {
+    mockGet('/api/notes', makeNotes({ folder: 'note', vo_must: { folder: 'Say this.', folder_ordered: false, clips: { a: 'Say that.' } } }))
+    const { rerender } = setup(<NoteBox {...props} />)
+    await screen.findByPlaceholderText('Write here'); expect(vo()).toHaveValue('Say this.')
+    expect(screen.getByLabelText(/keep them in the order written/)).not.toBeChecked()
+    rerender(<NoteBox {...props} clip="a" />)
+    await vi.waitFor(() => expect(vo()).toHaveValue('Say that.'))
+    expect(screen.queryByLabelText(/keep them in the order written/)).not.toBeInTheDocument()                      // clip narration is always inside the clip
+  })
+
+  it('saves the narration on its own, after typing stops, without touching the note', async () => {
+    const seen = recordRequests('/api/notes')
+    const { user } = typing(); await screen.findByPlaceholderText('Write here')
+    await user.type(vo(), 'Hi')
+    expect(screen.getByText('saving…')).toBeInTheDocument()
+    await act(() => vi.advanceTimersByTimeAsync(700))
+    await vi.waitFor(() => expect(screen.getByText('saved')).toBeInTheDocument())
+    expect(seen.filter(r => r.method === 'POST')).toMatchObject([{ body: { folder: '/f', kind: 'vo', text: 'Hi', ordered: true } }])
+  })
+
+  it('saves the order switch at once', async () => {
+    const seen = recordRequests('/api/notes')
+    const { user } = typing(); await screen.findByPlaceholderText('Write here')
+    await user.click(screen.getByLabelText(/keep them in the order written/))
+    await vi.waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1))
+    expect(seen.filter(r => r.method === 'POST')[0].body).toMatchObject({ kind: 'vo', ordered: false })
+  })
+
+  it('saves a clip\'s narration against that clip', async () => {
+    const seen = recordRequests('/api/notes')
+    const { user } = setup(<NoteBox {...props} clip="c1" />); await screen.findByPlaceholderText('Write here')
+    await user.type(vo(), 'x'); await act(() => vi.advanceTimersByTimeAsync(700))
+    await vi.waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1))
+    expect(seen.filter(r => r.method === 'POST')[0].body).toMatchObject({ kind: 'vo', clip: 'c1', text: 'x' })
+  })
+})
