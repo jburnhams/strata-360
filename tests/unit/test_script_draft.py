@@ -126,13 +126,13 @@ def test_the_length_guide_ignores_gap_clips_and_resolve_gives_gap_items_their_se
 
 def test_notes_say_when_an_anchor_cannot_be_met_but_say_nothing_about_narration_over_singing():
     s = dict(items=[broll('0002', 20), dict(type='vo', clip='0003', text='a ' * 40, anchor=dict(film_s=100, why='the hook')), broll('0002', 5)], skipped=[]); SD.resolve(s, DPACK, 150)       # the narration runs 20 s to 41 s, inside the singing
-    notes = SD.director_notes(s, DPACK); assert len(notes) == 1 and 'item 2' in notes[0] and 'anchored at 100 s' in notes[0] and 'starts it at 20 s' in notes[0] and 'singing' not in notes[0]
+    notes = [n for n in SD.director_notes(s, DPACK) if 'gap' not in n]; assert len(notes) == 1 and 'item 2' in notes[0] and 'anchored at 100 s' in notes[0] and 'starts it at 20 s' in notes[0] and 'singing' not in notes[0]
 
 
 def test_the_request_carries_the_music_and_the_gap_choices_and_the_prompt_explains_gap_items_and_anchors():
     msgs, text = SD.build_messages(DPACK, 245, 150); sys_, user = msgs[0]['content'], msgs[1]['content']
     assert 'THE MUSIC (times are FILM seconds' in user and 'Sung (en): 30-60 s' in user and '=== CLIP G01' in user and 'NO FOOTAGE: a gap of 1.0 h' in user and '"type": "gap"' in user and '"anchor"' in user
-    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 9 and 'paraphrase freely' in sys_
+    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 10 and 'paraphrase freely' in sys_
 
 
 def test_with_the_tempo_known_every_item_counts_in_whole_beats_so_the_writers_total_matches_the_plan():
@@ -175,9 +175,17 @@ def test_a_view_is_only_for_clip_and_broll_items_of_a_clip_that_has_it():
 
 
 def test_the_prompt_explains_the_views_of_you():
-    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 9
+    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 10
 
 
 def test_a_reply_with_raw_newlines_inside_strings_is_still_read():
     raw = '{"title": "T", "story": "two\nlines", "items": [], "skipped": []}'
     assert SD.parse(raw)['story'] == 'two\nlines' and SD.parse('```json\n' + raw + '\n```')['title'] == 'T' and SD.parse('no json here') is None
+
+
+def test_gaps_of_an_hour_or_more_that_the_script_leaves_unfilled_are_noted_and_the_prompt_asks_for_most_to_be_filled():
+    s = dict(items=[broll('0002', 6)], skipped=[]); SD.resolve(s, DPACK, 150)
+    assert any('1 gap(s) of an hour or more are not filled: G01' in n for n in SD.director_notes(s, DPACK))
+    s2 = dict(items=[broll('0002', 6), gap('G01')], skipped=[]); SD.resolve(s2, DPACK, 150); assert not any('not filled' in n for n in SD.director_notes(s2, DPACK))
+    short = dict(DPACK, clips=[dict(c, race_s=1800.0) if c.get('synthetic') else c for c in DPACK['clips']]); assert not any('not filled' in n for n in SD.director_notes(s, short))                    # a half hour gap is not asked for
+    assert 'fill MOST gaps of an hour or more' in SD.build_messages(DPACK, 245, 150)[0][0]['content']

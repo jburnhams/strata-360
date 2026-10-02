@@ -172,13 +172,23 @@ def est_beats(p, beat_s):
     return max(1, int(round(p['seconds'] / beat_s)) if p['kind'] == 'broll' else int(math.ceil(p['seconds'] / beat_s - 1e-9)))
 
 
-def fit_pass(ps, music, target_s):
-    """Bring the film's length to the music's (D7): when the pieces add up to more than `target_s` plus a bar, shorten the b-roll (never below 2 s a piece), and when to less than it minus a bar, lengthen the b-roll (up to double, or 6 s more); the voice, the runner's words and the
-    generated clips keep their lengths. The anchors are placed after this (anchor_pass), so they win over the length. Returns dict(target_s, before_s, after_s)."""
-    beat_s = music.beat_s; band = music.bar_beats; target = int(round(target_s / beat_s)); total = sum(est_beats(p, beat_s) for p in ps); before = total; free = [p for p in ps if p['kind'] == 'broll']; diff = total - target
+GAP_MIN_S = 3.0              # a generated clip is shortened to this at the least to fit the music
+
+
+def flex(p):
+    """(shortest, longest) seconds a piece may be stretched to in order to fit the music, or None when its length is fixed: camera b-roll 2 s up to double (or 6 s more); a generated clip (picture only, not under narration) 3 s up to one and a half times (45 s at most)."""
+    if p['kind'] == 'broll': return 2.0, max(p['seconds'] * 2.0, p['seconds'] + 6.0)
+    if p['kind'] == 'synthetic' and p.get('role') == 'broll': return GAP_MIN_S, min(MAX_GAP_S, max(p['seconds'] * 1.5, p['seconds'] + 3.0))
+    return None
+
+
+def fit_pass(ps, music, target_s, start=0):
+    """Bring the film's length to the music's (D7): when the pieces add up to more than `target_s` plus a bar, shorten the flexible pieces (flex(): b-roll and generated clips), and when to less than it minus a bar, lengthen them; the voice and the
+    runner's words keep their lengths; only the pieces from index `start` on are changed. Returns dict(target_s, before_s, after_s)."""
+    beat_s = music.beat_s; band = music.bar_beats; target = int(round(target_s / beat_s)); total = sum(est_beats(p, beat_s) for p in ps); before = total; free = [p for p in ps[start:] if flex(p)]; diff = total - target
     if abs(diff) > band and free:
         sign = -1 if diff > 0 else 1; need = abs(diff) - band // 2                                                          # bring it to within half a bar of the music
-        room = {id(p): int(((p['seconds'] - 2.0) if sign < 0 else (max(p['seconds'] * 2.0, p['seconds'] + 6.0) - p['seconds'])) / beat_s + 1e-9) for p in free}
+        room = {id(p): int(((p['seconds'] - flex(p)[0]) if sign < 0 else (flex(p)[1] - p['seconds'])) / beat_s + 1e-9) for p in free}
         while need > 0:
             active = [p for p in free if room[id(p)] > 0]
             if not active: break
@@ -189,12 +199,45 @@ def fit_pass(ps, music, target_s):
     return dict(target_s=round(target_s, 2), before_s=round(before * beat_s, 2), after_s=round(total * beat_s, 2))
 
 
+def fit_and_anchor(ps, draft, music, target_s, warn):
+    """Fit the film to the music and place the anchors, in the order that leaves the film nearest the music: (A) anchors first, then only the flexible pieces from the last anchored one on are fitted (its own length too: its start does not move), so no anchor moves; (B) everything fitted first, then the
+    anchors (which stretch b-roll before them). Both are tried on copies of the lengths; the better is kept. Returns (the fit report or None, the anchors report); warnings go into `warn`."""
+    if not target_s: return None, anchor_pass(ps, draft, music, warn)
+    beat_s = music.beat_s; total = lambda: sum(est_beats(p, beat_s) for p in ps); target = target_s / beat_s; keep = [p['seconds'] for p in ps]; res = []
+    for order in ('anchors_first', 'fit_first'):
+        for p, x in zip(ps, keep): p['seconds'] = x
+        w = []
+        if order == 'anchors_first':
+            anc = anchor_pass(ps, draft, music, w); last = max((k for k, p in enumerate(ps) if p.get('n') is not None and isinstance(draft['items'][p['n']].get('anchor'), dict)), default=-1); fit = fit_pass(ps, music, target_s, start=max(last, 0))                                   # (the anchored piece itself may change: its start does not move)
+        else: fit = fit_pass(ps, music, target_s); anc = anchor_pass(ps, draft, music, w)
+        res.append((abs(total() - target), order == 'fit_first', [p['seconds'] for p in ps], fit, anc, w))
+    best = min(res, key=lambda r: r[:2])
+    for p, x in zip(ps, best[2]): p['seconds'] = x
+    warn.extend(best[5]); fit = dict(best[3], after_s=round(total() * beat_s, 2)); return fit, best[4]
+
+
+def auto_gaps(ps, pack, music, target_s, warn, min_race_s=3600.0, seconds=(3.0, 8.0)):
+    """When the film is still shorter than the music by more than a bar, add the gaps of an hour or more that the script left out, longest first, as short 2D map clips in their place in the race, until the music is filled (to within
+    half a bar). Each is about a fiftieth of its time in the film, between 3 and 8 s. Returns the labels added; `ps` is changed (pieces without an item number: they are not in the script)."""
+    beat_s = music.beat_s; band = music.bar_beats; total = sum(est_beats(p, beat_s) for p in ps); target = int(round(target_s / beat_s)); used = {p['label'] for p in ps}
+    if target - total <= band: return []
+    start = {c['label']: c['start_utc'] for c in pack['clips']}; added = []; short_s = (target - total) * beat_s
+    for c in sorted((c for c in pack['clips'] if c.get('synthetic') and c.get('race_s', 0) >= min_race_s and c['label'] not in used), key=lambda c: -c['race_s']):
+        left = target - total
+        if left <= band // 2: break
+        sec = min(max(c['race_s'] / 3600.0 * 0.5 + 3.0, seconds[0]), seconds[1], max(left * beat_s, seconds[0]))
+        piece = dict(n=None, clip=c['clip'], label=c['label'], duration_s=c['duration_s'], kind='synthetic', role='broll', gap_kind=None, text='', speak_s=0.0, estimated=False, seconds=round(sec, 2), seg=None, auto=True)
+        at = next((j for j, p in enumerate(ps) if start.get(p['label'], '') > c['start_utc']), len(ps)); ps.insert(at, piece); total += est_beats(piece, beat_s); added.append(c['label'])
+    if added: warn.append(f"the script is {short_s:.0f} s short of the music: added the unfilled gap clip(s) {', '.join(added)} (2D maps, in their place in the race)")
+    return added
+
+
 def anchor_pass(ps, draft, music, warn):
     """Move the script's anchored items to the music: for each item with `anchor: {film_s}` the wanted start is the nearest BAR LINE to that time, and the b-roll pieces just before it (back to the previous anchored item) are lengthened or
     shortened, in whole beats, to bring it there (b-roll is the only picture that can stretch: the voice, the runner's words and the generated clips have fixed lengths). What cannot be moved is reported. Changes `seconds` of b-roll pieces; returns [{item, anchor_s, target_s, moved_s, left_s}]."""
     beat_s = music.beat_s; bar = music.bar_beats; items = draft['items']; out = []; floor = 0
     for k, p in enumerate(ps):
-        anc = items[p['n']].get('anchor')
+        anc = items[p['n']].get('anchor') if p.get('n') is not None else None
         if not (isinstance(anc, dict) and isinstance(anc.get('film_s'), (int, float))): continue
         starts = [0]
         for q in ps[:-1]: starts.append(starts[-1] + est_beats(q, beat_s))
@@ -226,7 +269,9 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     clips = sorted(clips, key=lambda c: c['start_utc']); index = {c['id']: i for i, c in enumerate(clips)}
     foot = {c['id']: Footage(c, CH.clip_candidates(c)) for c in clips}
     ps, w0 = pieces(draft, pack, voice_s, wpm); warn += w0; ps = [p for p in ps if p['clip'] in foot or p['kind'] == 'synthetic']
-    fit = fit_pass(ps, music, target_s) if target_s else None; anchors = anchor_pass(ps, draft, music, warn)
+    fit, anchors = fit_and_anchor(ps, draft, music, target_s, warn)
+    auto = auto_gaps(ps, pack, music, target_s, warn) if target_s else []
+    if auto: fit['after_s'] = round(sum(est_beats(p, beat_s) for p in ps) * beat_s, 2); anchors = anchor_pass(ps, draft, music, [])           # (the gaps added ahead of an anchored item shift it: placed again)
     for p in ps:                                                                                    # the dialogue the script plays is not footage for narration
         if p['kind'] == 'clip': foot[p['clip']].reserved.append((p['start'], p['start'] + p['seconds']))
     cap_p = int(MAX_PICTURE_S / beat_s + 1e-9) * beat_s; cap_d = int(MAX_DIALOGUE_S / beat_s + 1e-9) * beat_s          # the longest window in WHOLE beats: rounding a window up to beats must never take it past what a technique allows
@@ -268,10 +313,10 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
         if k in syn: start_of[k] = next(x['start_beat'] for x in synthetic if x['piece'] == k) * beat_s
         elif k in first_window: start_of[k] = segs[first_window[k]].start * beat_s
     for a in anchors:
-        k = next((k for k, p in enumerate(ps) if p['n'] + 1 == a['item']), None); a['start_s'] = round(start_of[k], 2) if k in start_of else None
+        k = next((k for k, p in enumerate(ps) if p.get('n') is not None and p['n'] + 1 == a['item']), None); a['start_s'] = round(start_of[k], 2) if k in start_of else None
         if a['start_s'] is not None and abs(a['start_s'] - a['anchor_s']) > music.bar_beats * beat_s: warn.append(f"item {a['item']}: anchored at {a['anchor_s']:.0f} s, starts at {a['start_s']:.0f} s")
     spans = (((pack.get('music') or {}).get('lyrics')) or {}).get('vocal_spans') or []; sung = over_singing(lines, spans)
     if fit:
         fit['final_s'] = round((B + run) * beat_s, 2); fit['over_s'] = round(fit['final_s'] - target_s, 2)
         if abs(fit['over_s']) > music.bar_beats * beat_s: warn.append(f"the film is {abs(fit['over_s']):.0f} s {'longer' if fit['over_s'] > 0 else 'shorter'} than the music ({fit['final_s']:.0f} s against {target_s:.0f} s) and the b-roll cannot absorb it: " + ('shorten narration, your own words or a gap clip' if fit['over_s'] > 0 else 'add picture or narration') + (' (the anchors fix where some items start)' if anchors else ''))
-    return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B + run, synthetic=synthetic, anchors=anchors, over_singing=sung, fit=fit, warnings=warn)
+    return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B + run, synthetic=synthetic, anchors=anchors, over_singing=sung, fit=fit, auto_gaps=auto, warnings=warn)

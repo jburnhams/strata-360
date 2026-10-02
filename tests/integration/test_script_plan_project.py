@@ -99,3 +99,15 @@ def test_a_rendered_generated_clip_is_not_a_warning_and_its_file_is_played(gap_f
     rd = os.path.join(gap_folder, 'strata360'); os.makedirs(os.path.join(rd, 'synthetic'), exist_ok=True); open(os.path.join(rd, 'synthetic', 'G01.mp4'), 'wb').write(b'x')
     doc = SY.load(gap_folder); doc['clips'][0].update(status='ready', file='synthetic/G01.mp4'); SY.save(gap_folder, doc)
     assert not any('not rendered yet' in w for w in PJ.plan_from_script(gap_folder)['plan']['warnings'])
+
+
+def test_narration_over_a_gap_plans_a_clip_as_long_as_the_voice_needs_and_b_roll_keeps_the_planned_kind(gap_folder, monkeypatch):
+    from strata360.edit import synthetic as SY, script_plan as SPL
+    d = draft_for(None); d['items'] = d['items'][:3] + [dict(type='vo', clip='G01', text='A long stretch of night, one step after another, and nothing else.'), dict(type='broll', clip='0003', seconds=4.0)]
+    SD.save_draft(gap_folder, d); monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 9.0 for l in lines}); log = []
+    p = PJ.plan_from_script(gap_folder, log=log.append)['plan']; c = SY.load(gap_folder)['clips']; need = SPL.LEAD_S + 9.0 + SPL.TAIL_S
+    assert len(c) == 1 and c[0]['kind'] == 'map' and c[0]['seconds'] >= need - 0.01 and c[0]['approved'] is True and any('planned map clip G01' in l for l in log)                       # no gap item, but the narration needs picture
+    syn = [g for g in p['segments'] if g.get('synthetic')]; assert len(syn) == 1 and syn[0]['role'] == 'vo' and abs(syn[0]['dur_s'] - c[0]['seconds']) < 0.6                              # the window is as long as the clip: no held last frame
+    SY.upsert(gap_folder, SY.make(dict(id='G01', t0=1_771_754_000.0, t1=1_771_754_000.0 + 7200), seconds=20.0, kind='flyover', approved=False))
+    PJ.plan_from_script(gap_folder); c = SY.load(gap_folder)['clips'][0]; assert c['kind'] == 'flyover' and c['seconds'] == 20.0                                                         # long enough and of another kind: left as it is
+    d['items'][3] = dict(type='broll', clip='G01', seconds=12.0); SD.save_draft(gap_folder, d); PJ.plan_from_script(gap_folder); c = SY.load(gap_folder)['clips'][0]; assert c['kind'] == 'flyover' and c['seconds'] == 12.0       # b-roll: its own length, in the planned kind

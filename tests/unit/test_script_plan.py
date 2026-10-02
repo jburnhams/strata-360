@@ -191,3 +191,46 @@ def test_the_plan_reports_a_film_that_is_too_long_for_the_music_when_the_b_roll_
     r = SPL.build(d, PACK, [C1, C2], LIB, MUSIC, {2: 5.0}, st=CH.Settings(seed=1), target_s=10.0)
     assert r['fit']['target_s'] == 10.0 and r['fit']['over_s'] > 2.0 and any('longer than the music' in w and 'shorten narration' in w for w in r['warnings'])
     ok = SPL.build(anchored([dict(type='broll', clip='0001', seconds=20.0)]), PACK, [C1, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1), target_s=10.0); assert ok['fit']['final_s'] <= 11.0 and not any('than the music' in w for w in ok['warnings'])
+
+
+# ---- generated clips fit the music too, and unfilled gaps are added when the film is short
+
+def gap_piece(label, seconds, role='broll'): return dict(kind='synthetic', role=role, label=label, clip=label, seconds=seconds, n=0, text='', speak_s=0.0, estimated=False, duration_s=seconds)
+
+
+def gp(label, start, race_s=7200.0, seconds=8.0): return dict(label=label, clip=label, duration_s=seconds, usable_s=45.0, usable=[], scene={}, note='', lines=[], synthetic=True, race_s=race_s, speedup=1.0, start_utc=start)
+
+
+def test_generated_clips_are_shortened_to_fit_the_music_but_not_under_narration_and_never_below_three_seconds():
+    ps = [gap_piece('G01', 20.0), gap_piece('G02', 20.0, role='vo'), dict(kind='clip', seconds=10.0, n=2)]; f = SPL.fit_pass(ps, MUSIC, 30.0)             # 50 s, the music has 30 s
+    assert ps[1]['seconds'] == 20.0 and ps[0]['seconds'] == 3.0 + 0.0 or ps[0]['seconds'] >= SPL.GAP_MIN_S
+    assert ps[0]['seconds'] >= SPL.GAP_MIN_S and f['after_s'] < f['before_s'] and SPL.flex(ps[1]) is None and SPL.flex(ps[2]) is None and SPL.flex(gap_piece('G', 10.0)) == (SPL.GAP_MIN_S, 15.0)
+
+
+def test_unfilled_gaps_of_an_hour_or_more_are_added_in_their_place_when_the_film_is_short_of_the_music():
+    ps = [dict(kind='broll', seconds=10.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='broll', seconds=10.0, n=1, label='0002', clip='c2', text='', seg=None)]
+    pack = dict(clips=[dict(label='0001', start_utc='2026-02-22T10:01:00Z'), gp('G01', '2026-02-22T10:30:00Z', 7200.0), gp('G02', '2026-02-22T10:10:00Z', 1800.0), gp('G03', '2026-02-22T10:20:00Z', 36000.0), dict(label='0002', start_utc='2026-02-22T12:00:00Z')])
+    warn = []; added = SPL.auto_gaps(ps, pack, MUSIC, 32.0, warn)                                                                                    # 20 s of picture, the music has 32 s
+    assert added == ['G03', 'G01'] and [p['label'] for p in ps] == ['0001', 'G03', 'G01', '0002'] and all(p['n'] is None and p['kind'] == 'synthetic' and p['role'] == 'broll' for p in ps[1:3])
+    assert 3.0 <= ps[1]['seconds'] <= 8.0 and any('12 s short of the music' in w and 'G03, G01' in w for w in warn)
+    assert SPL.auto_gaps(ps, pack, MUSIC, 32.0, []) == [] and SPL.auto_gaps([dict(kind='broll', seconds=10.0, n=0, label='0001', clip='c', text='', seg=None)], pack, MUSIC, 10.0, []) == []        # nothing missing: nothing added; G02 is under an hour
+
+
+def test_the_plan_adds_the_missing_gap_and_leaves_a_script_that_already_fills_the_music_alone():
+    clips = [dict(c, start_utc=u) for c, u in zip(PACK['clips'], ('2026-02-22T10:01:00Z', '2026-02-22T10:02:00Z'))]; pack = dict(PACK, clips=clips + [gp('G01', '2026-02-22T10:01:30Z')])
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0)])
+    r = SPL.build(d, pack, [C1, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1), target_s=30.0); assert r['auto_gaps'] == ['G01'] and [s['clip'] for s in r['synthetic']] == ['G01'] and r['synthetic'][0]['item'] is None and r['synthetic'][0]['start_beat'] > 0
+    full = SPL.build(d, pack, [C1, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1), target_s=8.0); assert full['auto_gaps'] == [] and full['synthetic'] == []
+
+
+def test_an_anchored_gap_clip_can_be_shortened_to_fit_the_music_without_moving_its_anchor():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='gap', clip='G01', kind='map', seconds=20.0, anchor=dict(film_s=4.0, why='x')), dict(type='broll', clip='0002', seconds=4.0)])
+    ps = [dict(kind='broll', seconds=4.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='synthetic', role='broll', seconds=20.0, n=1, label='G01', clip='G01', text='', seg=None), dict(kind='broll', seconds=4.0, n=2, label='0002', clip='c2', text='', seg=None)]
+    warn = []; fit, anc = SPL.fit_and_anchor(ps, d, MUSIC, 20.0, warn)                                                                              # 28 s of pieces, the music has 20 s
+    assert anc[0]['start_s'] if 'start_s' in anc[0] else True; assert ps[1]['seconds'] < 20.0 and ps[0]['seconds'] == 4.0 and abs(fit['after_s'] - 20.0) <= 2.5 and anc[0]['left_s'] == 0.0
+
+
+def test_without_a_music_length_nothing_is_fitted_and_the_anchors_are_still_placed():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=8.0, why='x'))])
+    ps = [dict(kind='broll', seconds=4.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='broll', seconds=4.0, n=1, label='0002', clip='c2', text='', seg=None)]
+    fit, anc = SPL.fit_and_anchor(ps, d, MUSIC, None, []); assert fit is None and anc[0]['moved_s'] == 4.0 and ps[0]['seconds'] == 8.0
