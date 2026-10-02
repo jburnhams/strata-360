@@ -665,6 +665,47 @@ def create_app(roots, token=None):
         except O.Infeasible: pass
         MU.remove(config.race_dir(f)); return dict(file=None, name=None, analysis=None, waveform=None, spectrogram=False)
 
+    TRACKS = {}
+
+    def loaded_track(f):                                                                 # the race track, loaded once per file version (a race is hundreds of thousands of samples)
+        from strata360.gps import track, series as GS
+        p = config.track_path(f, config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else None)
+        if not p: raise HTTPException(404, 'no race track')
+        key = (p, os.path.getmtime(p))
+        if key not in TRACKS:
+            TRACKS.clear()
+            try: TRACKS[key] = GS.prepare(track.load(p))
+            except Exception as e: raise HTTPException(400, f'could not read the track: {type(e).__name__}: {e}')
+        return TRACKS[key]
+
+    @api.get('/api/track/series', dependencies=[Depends(auth)])
+    def get_track_series(folder: str, points: int = 2000):                               # the track decimated for the charts: elapsed time, km, altitude (with each bin's lowest and highest), pace of the moving part, share moving, heart rate
+        from strata360.gps import series as GS
+        return GS.series(loaded_track(folder_of(folder)), max(100, min(points, 6000)))
+
+    @api.get('/api/track/line', dependencies=[Depends(auth)])
+    def get_track_line(folder: str, bbox: str = '', limit: int = 3000):                  # the line of the track inside bbox=lat0,lon0,lat1,lon1 (or all of it), at most `limit` points: the map asks for more detail as it zooms in
+        from strata360.gps import series as GS
+        box = None
+        if bbox:
+            try: box = tuple(float(x) for x in bbox.split(','))
+            except ValueError: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
+            if len(box) != 4: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
+        return GS.line(loaded_track(folder_of(folder)), box, max(200, min(limit, 20000)))
+
+    @api.get('/api/track/clips', dependencies=[Depends(auth)])
+    def get_track_clips(folder: str):                                                    # every clip placed on the track (middle, the stretch it covers, facts for the hover card), with whether the newest script draft plays it
+        from strata360.gps import series as GS
+        from strata360.edit import script_draft as SD, script_pack as SP
+        f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f) if os.path.exists(os.path.join(rd, 'race.json')) else {}; items = GS.clips(loaded_track(f), GS.load_spans(f), cfg.get('timezone', 'Europe/Brussels'))
+        draft = SD.load_draft(f); used = {}
+        for it in (draft or {}).get('items') or []: used[str(it.get('clip', '')).zfill(4)] = used.get(str(it.get('clip', '')).zfill(4), 0.0) + float(it.get('seconds') or 0)
+        for c in items:
+            d = os.path.join(rd, 'clips', c['id']); sc = (_j(d, 'scenes.json') or {}).get('summary') or {}; cd = (_j(d, 'candidates.json') or {}).get('summary') or {}
+            c['label'] = SP.label_of(c['id']); c['scene'] = dict(settings=list((sc.get('settings') or {}))[:2], weather=list((sc.get('weather') or {}))[:2] if isinstance(sc.get('weather'), dict) else []); c['moments'] = cd.get('n'); c['usable_s'] = cd.get('usable_s')
+            c['used'] = c['label'] in used; c['used_s'] = round(used.get(c['label'], 0.0), 1)
+        return dict(clips=items, has_draft=bool(draft))
+
     @api.post('/api/track', dependencies=[Depends(auth)])
     async def post_track(request: Request, folder: str, filename: str = 'track.fit'):    # the file is the raw request body; saved under the known name track.fit / track.gpx
         f = folder_of(folder); ext = os.path.splitext(filename)[1].lower()

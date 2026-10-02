@@ -209,3 +209,36 @@ class TestScript2Plan:
         f = project.folder; r = client.post('/api/script2/plan', json=dict(folder=f, draft='../../etc/draft-2.json')); assert r.json() == dict(started=True)
         cmd = fake_popen.instances[-1].cmd; assert 'script-plan' in cmd and '--voice' in cmd and cmd[cmd.index('--draft') + 1] == 'draft-2.json'                  # only the file name is passed on
         j = client.get('/api/script2', params=dict(folder=f)).json(); assert j['plan_running'] is True and client.post('/api/script2/plan', json=dict(folder=f)).json()['started'] is False
+
+
+class TestRaceMapData:
+    T0 = 1_771_700_000.0
+
+    def put_track(self, project, hours=2):
+        import numpy as np
+        n = int(hours * 360); t = self.T0 + 10.0 * np.arange(n); d = 3.0 * 10.0 * np.arange(n); nan = np.full(n, np.nan); p = os.path.join(project.race_dir, 'track.gpx'); os.makedirs(project.race_dir, exist_ok=True); open(p, 'w').write('<gpx/>')
+        np.savez_compressed(p + '.npz', t=t, lat=50.0 + d * 5.4e-6, lon=5.0 + d * 1.119e-5, alt=100 + np.arange(n) * 0.2, speed=nan, hr=nan, cadence=nan, dist=nan, temp=nan, power=nan)          # track.load reads this cache, so the test needs no GPX library; like a GPX it has no speed or distance
+
+    def iso(self, off):
+        import datetime as dt
+        return (dt.datetime.fromtimestamp(self.T0 + off, dt.timezone.utc)).isoformat()
+
+    def test_without_a_track_there_is_nothing_to_draw(self, client, project):
+        for path in ('series', 'line', 'clips'): assert client.get(f'/api/track/{path}', params=dict(folder=project.folder)).status_code == 404
+
+    def test_series_gives_the_charts_their_points(self, client, project):
+        self.put_track(project); s = client.get('/api/track/series', params=dict(folder=project.folder, points=150)).json()
+        assert s['points'] == 150 and len(s['t']) == 150 and s['pace'][10] is not None and abs(s['pace'][10] - 1000 / 3 / 60) < 0.5 and s['distance_km'] > 15      # a GPX gets distance and pace from its positions
+
+    def test_the_line_comes_whole_or_for_the_box_in_view(self, client, project):
+        self.put_track(project); q = dict(folder=project.folder); whole = client.get('/api/track/line', params=dict(q, limit=300)).json(); assert 0 < len(whole['lat']) <= 300
+        part = client.get('/api/track/line', params=dict(q, bbox='50.0,5.0,50.02,5.05', limit=5000)).json(); assert 0 < len(part['lat']) < len(whole['lat']) * 20 and max(part['lat']) < 50.05
+        assert client.get('/api/track/line', params=dict(q, bbox='1,2,3')).status_code == 400 and client.get('/api/track/line', params=dict(q, bbox='a,b,c,d')).status_code == 400
+
+    def test_every_clip_is_placed_and_marked_as_played_by_the_draft_or_not(self, client, project):
+        from strata360.edit import script_draft as SD
+        self.put_track(project); project.add_clip('CAM_20260222190000_0001_D', start_utc=self.iso(600), source_frames=1800, fps=30.0); project.add_clip('CAM_20260222180000_0002_D', start_utc=self.iso(-7200), source_frames=900, fps=30.0)
+        SD.save_draft(project.folder, dict(items=[dict(type='clip', clip='0001', seconds=12.5, lines=[]), dict(type='vo', clip='0001', text='x', seconds=4.0)]))
+        r = client.get('/api/track/clips', params=dict(folder=project.folder)).json(); by = {c['label']: c for c in r['clips']}; assert r['has_draft'] is True
+        a, b = by['0001'], by['0002']; assert a['covered'] and a['used'] is True and a['used_s'] == 16.5 and a['lat'] > 50.0 and len(a['stretch']) >= 2 and a['facts']['local']
+        assert b['covered'] is False and b['used'] is False and 'lat' not in b                                         # before the track starts: listed, not placed
