@@ -53,6 +53,6 @@ Measured on the approved clips (closest the route gets to a side or the bottom, 
 - **Python 3.13 under pyenv here prints `ValueError: unsupported hash type blake2b/blake2s` at start-up** (hashlib built without OpenSSL); harmless for these scripts.
 - **Imagery licence:** unread for Esri World Imagery (what Komoot uses), Sentinel-2 and the Wallonia orthophotos; needed before any film that is shared.
 
-## For the plan (to add to implementation-plan.md N2 when this branch meets the music branch)
+## Status in the plan
 
-> **N2 prototype built (2 Oct):** MapLibre Native's `feature/terrain-3d` branch (draft PR 4190) renders terrain on Metal here; the driver, camera and findings are in `docs/terrain-flyover.md` and `scripts/flyover/`. Esri imagery over Mapterhorn terrain; keyframed zoom and pitch; the heading is fitted so that the route stays on the picture and barely rotates, the look-at point pans instead. About 0.4 s a frame at 720p. Next: the progressive route line, the camera plan from a gap and the synthetic-clip hookup, tests, and the imagery licence.
+This note's summary has been moved into `docs/implementation-plan.md` (N2, 2 Oct): it supersedes the earlier "MapLibre GL JS in headless Chromium now, Native later" decision. Keep the build steps, camera findings and open items here; the plan holds the next steps (connect to the film as a synthetic clip, progressive route line, tests, imagery licence).
