@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 import { setup } from '../utils/render'
 import Timeline from '../../src/components/Timeline'
-import { makeClipInfo, makeEditResponse, makePlanSegment } from '../utils/factories'
+import { makeClipInfo, makeEditResponse, makeEditState, makePlanSegment } from '../utils/factories'
 import { mockGet, mockPost, mockError, mockPending, recordRequests } from '../utils/api'
 import { stubMedia } from '../utils/media'
 
@@ -73,7 +73,16 @@ describe('Timeline', () => {
     await user.click(proposeBtn)
 
     expect(seenPropose).toHaveLength(1)
-    expect(seenPropose[0].body).toEqual({ folder: '/data', length_s: 90, bpm: 120, keep: true })
+    expect(seenPropose[0].body).toEqual({ folder: '/data', length_s: 90, bpm: 120, keep: true, replace: true })
+  })
+
+  it('asks before the beat planner replaces a film planned from the script', async () => {
+    const plan = { source: 'script', generated_at: '2026-10-02T10:00:00Z', film: { length_s: 60, beats: 120, bpm: 120 }, segments: [], clips_in_plan: 0, missing_clips: [], orphaned_overrides: [], technique_seconds: {}, warnings: [] }
+    const editResp = makeEditResponse({ edit: makeEditState({ plan: plan as never }) }); mockGet('/api/edit', editResp); mockPost('/api/edit/propose', { edit: editResp.edit })
+    const seen = recordRequests('/api/edit/propose'); const { findByRole, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false); await user.click(await findByRole('button', { name: 'Re-plan' }))
+    expect(ask).toHaveBeenCalledWith(expect.stringContaining('planned from your script')); expect(seen).toHaveLength(0)
+    ask.mockReturnValue(true); await user.click(await findByRole('button', { name: 'Re-plan' })); expect(seen).toHaveLength(1); ask.mockRestore()
   })
 
   it('handles overrides (locking a segment)', async () => {

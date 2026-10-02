@@ -407,3 +407,11 @@ def test_the_interpreters_hashlib_noise_never_reaches_a_job_log_shown_in_the_web
              '                             ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^', 'ValueError: unsupported hash type blake2s', 'writing draft 2 of 3', 'Traceback (most recent call last):', '  File "script_draft.py", line 9, in main', 'KeyError: gemini']
     assert SRV.clean_log(noisy) == ['writing draft 2 of 3', 'Traceback (most recent call last):', '  File "script_draft.py", line 9, in main', 'KeyError: gemini']      # a real traceback stays
     assert SRV.clean_log([]) == []
+
+
+class TestProposeKeepsAScriptPlan:
+    def test_the_beat_planner_does_not_replace_a_film_planned_from_the_script_unless_told_to(self, client, project, monkeypatch):
+        from strata360.edit import project as PJ
+        monkeypatch.setattr(PJ, 'load', lambda f: dict(plan=dict(source='script'))); called = []; monkeypatch.setattr(PJ, 'propose', lambda f, s=None, o=None, keep=True: called.append(1) or dict(plan=None))
+        r = client.post('/api/edit/propose', json=dict(folder=project.folder)); assert r.status_code == 409 and 'planned from the script' in r.json()['detail'] and not called
+        assert client.post('/api/edit/propose', json=dict(folder=project.folder, replace=True)).status_code == 200 and called

@@ -803,9 +803,10 @@ def create_app(roots, token=None):
         return dict(edit=e, techniques=[dict(id=t.id, family=t.family, hero=t.hero, dur=list(t.dur), dialogue_ok=t.dialogue_ok) for t in lib.values()], script=lines)
 
     @api.post('/api/edit/propose', dependencies=[Depends(auth)])
-    def post_propose(body: dict):                                                        # {folder, length_s?, bpm?, seed?, keep?}
+    def post_propose(body: dict):                                                        # {folder, length_s?, bpm?, seed?, keep?, replace?}: the beat planner's film (it replaces a film planned from the script only with `replace`)
         from strata360.edit import project as PJ, optimise as O
         f = folder_of(body.get('folder'))
+        if ((PJ.load(f).get('plan') or {}).get('source') == 'script') and not body.get('replace'): raise HTTPException(409, 'the film is planned from the script: this would replace it with the beat planner\'s arrangement of the clips (send replace to do that)')
         try: return dict(edit=PJ.propose(f, {k: body.get(k) for k in ('length_s', 'bpm', 'seed')}, keep=bool(body.get('keep', True))))
         except O.Infeasible as e: raise HTTPException(400, str(e))
 
