@@ -234,3 +234,9 @@ def test_without_a_music_length_nothing_is_fitted_and_the_anchors_are_still_plac
     d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=8.0, why='x'))])
     ps = [dict(kind='broll', seconds=4.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='broll', seconds=4.0, n=1, label='0002', clip='c2', text='', seg=None)]
     fit, anc = SPL.fit_and_anchor(ps, d, MUSIC, None, []); assert fit is None and anc[0]['moved_s'] == 4.0 and ps[0]['seconds'] == 8.0
+
+
+def test_broll_is_never_stretched_past_its_clips_own_length():
+    assert SPL.flex(dict(kind='broll', seconds=3.7, duration_s=4.8)) == (2.0, 4.6)                     # a 4.8 s clip: no more than the clip, not the doubled 7.4 s
+    assert SPL.flex(dict(kind='broll', seconds=3.7, duration_s=60.0)) == (2.0, 9.7)                    # a long clip: as before (6 s more)
+    assert SPL.flex(dict(kind='broll', seconds=5.0, duration_s=4.8)) == (2.0, 5.0)                     # already longer than the clip: not shortened by the cap

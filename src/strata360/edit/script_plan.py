@@ -209,8 +209,8 @@ GAP_MIN_S = 3.0              # a generated clip is shortened to this at the leas
 
 
 def flex(p):
-    """(shortest, longest) seconds a piece may be stretched to in order to fit the music, or None when its length is fixed: camera b-roll 2 s up to double (or 6 s more); a generated clip (picture only, not under narration) 3 s up to one and a half times (45 s at most)."""
-    if p['kind'] == 'broll': return 2.0, max(p['seconds'] * 2.0, p['seconds'] + 6.0)
+    """(shortest, longest) seconds a piece may be stretched to in order to fit the music, or None when its length is fixed: camera b-roll 2 s up to double (or 6 s more), but not longer than its clip; a generated clip (picture only, not under narration) 3 s up to one and a half times (45 s at most)."""
+    if p['kind'] == 'broll': return 2.0, max(min(max(p['seconds'] * 2.0, p['seconds'] + 6.0), float(p.get('duration_s') or 1e9) - 0.2), p['seconds'])           # never past the clip's own length: more would show the same footage twice
     if p['kind'] == 'synthetic' and p.get('role') == 'broll': return GAP_MIN_S, min(MAX_GAP_S, max(p['seconds'] * 1.5, p['seconds'] + 3.0))
     return None
 
@@ -279,7 +279,7 @@ def anchor_pass(ps, draft, music, warn):
             if left == 0: break
             q = ps[j]
             if q['kind'] != 'broll': continue
-            new = min(max(q['seconds'] + left * beat_s, 2.0), max(q['seconds'] * 2.0, q['seconds'] + 6.0)); done = int(round((new - q['seconds']) / beat_s)); q['seconds'] = q['seconds'] + done * beat_s; left -= done
+            new = min(max(q['seconds'] + left * beat_s, 2.0), flex(q)[1]); done = int(round((new - q['seconds']) / beat_s)); q['seconds'] = q['seconds'] + done * beat_s; left -= done
         out.append(dict(item=p['n'] + 1, anchor_s=float(anc['film_s']), target_s=round(target * beat_s, 2), moved_s=round((first - left) * beat_s, 2), left_s=round(left * beat_s, 2)))
         if left: warn.append(f"item {p['n'] + 1}: anchored at {anc['film_s']:.0f} s, the nearest bar is {target * beat_s:.0f} s, and there is no b-roll before it to stretch by the last {abs(left) * beat_s:.1f} s: it starts {abs(left) * beat_s:.1f} s {'early' if left > 0 else 'late'}")
         floor = k
