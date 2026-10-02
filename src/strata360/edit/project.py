@@ -109,11 +109,11 @@ def serialise(segs, clips, music, lib, locked_wids=()):
 
 
 def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
-    """Plan, in synthetic.json, the generated clip every item of the draft that uses a gap needs, so that it can be rendered afterwards (rendering is its own step; a 3D flyover asked for by the script waits for your approval):
+    """Plan, in synthetic.json, the generated clip every item of the draft that uses a gap needs, so that it can be rendered afterwards (rendering is its own step, started from the Gaps panel):
       a `gap` item       the kind and length it names;
       a `broll` item     its length, in the kind already planned for the gap (else the 2D map);
       a `vo` item        narration over the gap: the clip is at least as long as the narration needs (its lead-in, the spoken length from `voice_s` or the words at `wpm`, its tail), in the planned kind (else the map).
-    A clip already planned for the same kind and long enough is left as it is; one of another kind or too short is planned again (a render of the old one no longer matches, and a 3D flyover asks again for approval). Returns the clips planned."""
+    A clip already planned for the same kind and long enough is left as it is; one of another kind or too short is planned again (a render of the old one no longer matches. Returns the clips planned."""
     from strata360.edit import script_plan as SPL, synthetic as SY
     from strata360.gps import gaps as GP, track
     from strata360.pipeline import config
@@ -134,15 +134,15 @@ def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
         else:
             sec = round(float(it.get('seconds') or 0), 2)
             if old and old['kind'] == kind and abs(old['seconds'] - sec) < 0.05: continue
-        try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind, approved=kind != 'flyover')
+        try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind)
         except ValueError as e: log(f'item {n + 1}: {gid}: {e}; skipped'); continue
-        made.append(SY.upsert(folder, clip)); log(f"planned {kind} clip {gid} for {clip['seconds']:g} s" + (' (waiting for your approval)' if made[-1]['approved'] is False else '')); docs[gid] = made[-1]
+        made.append(SY.upsert(folder, clip)); log(f"planned {kind} clip {gid} for {clip['seconds']:g} s"); docs[gid] = made[-1]
     return made
 
 
 def sync_gap_clips(folder, specs, log=print):
     """Make synthetic.json match the plan's generated clips: the plan may have shortened or lengthened one to fit the music, or added a gap the script left out (`specs` are the plan's `synthetic` entries: clip, seconds). A clip that is
-    missing is planned as the 2D map; one of another length is planned again in its own kind (a 3D flyover then asks for approval again). Returns the clips planned."""
+    missing is planned as the 2D map; one of another length is planned again in its own kind. Returns the clips planned."""
     from strata360.edit import synthetic as SY
     from strata360.gps import gaps as GP, track
     from strata360.pipeline import config
@@ -151,7 +151,7 @@ def sync_gap_clips(folder, specs, log=print):
     cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []
     for sp in todo:
         old = docs.get(sp['clip']); kind = old['kind'] if old else 'map'; sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
-        clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind, approved=kind != 'flyover'); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
+        clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
     return made
 
 
@@ -189,7 +189,7 @@ def plan_from_script(folder, draft_name=None, log=print):
     for g, role, k in zip(ser, res['roles'], res['piece_of']): g['role'] = role; g['item'] = res['pieces'][k]['n']; g['energy_hi'] = g['energy'] >= 0.6
     sync_gap_clips(folder, res.get('synthetic') or [], log); ser = insert_synthetic(folder, ser, res.get('synthetic') or [], music.beat_s)
     for g in ser:
-        if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + (' (a 3D flyover the script asked for: approve it in the Gaps panel)' if (next((c for c in SY.load(folder)['clips'] if c['id'] == g['clip']), {}).get('approved') is False) else '') + '; the film shows a card until it is')
+        if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
     PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}

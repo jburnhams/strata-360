@@ -42,7 +42,7 @@ def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=N
         except ValueError: raise ValueError('size: WIDTHxHEIGHT, such as 3840x2160')
         if w < 320 or h < 180: raise ValueError('size: at least 320x180')
         c['size'] = f'{w}x{h}'
-    c['approved'] = bool(approved)                                                              # a clip the script asked for (not you) is not rendered until you approve it: a 3D flyover is minutes of machine time
+    c['approved'] = bool(approved)                                                              # kept for older plans: no clip waits for approval any more
     c['key'] = key_of(dict(c, t0=round(a), t1=round(b))); return c
 
 

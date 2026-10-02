@@ -16,7 +16,7 @@ def test_every_gap_is_a_pack_clip_with_the_choices_for_filling_it_and_the_state_
     monkeypatch.setattr(X, 'context_at', lambda tr, a, b, tz: dict(covered=True, distance_km=250.0, elapsed_h=20.0, local_date='Sat 21 Feb', local_time='19:00')); monkeypatch.setattr(X, 'describe', lambda ctx: 'night, km 250')
     planned = SY.make(GAP, seconds=8.0, kind='flyover', approved=False); monkeypatch.setattr(SY, 'load', lambda folder: dict(clips=[dict(planned, status='planned')]))
     out = SP.gap_clips('x', object(), 'UTC'); assert [c['label'] for c in out] == ['G02', 'G03'] and all(c['synthetic'] and c['lines'] == [] and c['usable_s'] == SP.MAX_GAP_S for c in out)
-    a, b = out; assert a['duration_s'] == 8.0 and a['race_s'] == 5400.0 and [o['kind'] for o in a['options']] == ['map', 'flyover'] and 'approval' in a['options'][1]['note'] and a['planned'] == dict(kind='flyover', seconds=8.0, status='planned', approved=False)
+    a, b = out; assert a['duration_s'] == 8.0 and a['race_s'] == 5400.0 and [o['kind'] for o in a['options']] == ['map', 'flyover'] and 'default' in a['options'][1]['note'] and a['planned'] == dict(kind='flyover', seconds=8.0, status='planned', approved=False)
     assert b['planned'] is None and b['duration_s'] == SY.default_seconds(3600.0) and a['km'] == 250.0 and SP.gap_clips('x', None, 'UTC') == []
 
 

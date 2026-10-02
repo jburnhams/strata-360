@@ -87,7 +87,7 @@ def scene_summary(cdir):
 
 
 MAX_GAP_S = 45.0                       # the longest a gap is shown in the film (edit/synthetic.default_seconds caps at the same)
-FLYOVER_NOTE = 'a 3D terrain flyover: needs the user\'s approval to render, minutes of machine time'
+FLYOVER_NOTE = 'a 3D terrain flyover: the default for a gap, shows the land crossed'
 
 
 def you_views(cands):
@@ -182,7 +182,7 @@ def render(pack, with_usable=False, marks=None):
         if c.get('synthetic'):
             g = c.get('gap') or {}; pl = c.get('planned')
             L.append(f"NO FOOTAGE: a gap of {c['race_s'] / 3600:.1f} h between clips ({g.get('local_start')} to {g.get('local_end')}, km {g.get('km_start')} to {g.get('km_end')}, +{g.get('ascent_m')} m{', ' + g['daylight'] if g.get('daylight') else ''}); {int(round(100 * (g.get('moving_share') or 0)))}% of it spent moving. "
-                     f"Fill it with a generated clip: a 2D map (the route drawn as the runner moves along it) or a 3D terrain flyover (needs the user's approval to render), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
+                     f"Fill it with a generated clip: a 3D terrain flyover (the default) or, for a very short gap, a 2D map (the route drawn as the runner moves along it), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
                      + (f" Already planned: {pl['kind']}, {pl['seconds']} s ({pl['status']})." if pl else ''))
         if c.get('track'): L.append('track: ' + c['track'])
         if c.get('place'): L.append('place: ' + c['place'])

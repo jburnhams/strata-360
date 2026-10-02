@@ -928,7 +928,6 @@ def create_app(roots, token=None):
         f = folder_of(body.get('folder')); cid = str(body.get('id') or '')
         c = next((c for c in SY.load(f)['clips'] if c['id'] == cid), None)
         if c is None: raise HTTPException(404, 'no such planned clip')
-        if c.get('approved') is False: raise HTTPException(409, f"{cid} was planned by the script and is not approved yet: approve it first (a {c['kind']} render takes machine time)")
         job = GAP_JOBS.get(f)
         if job and job[1].poll() is None: return dict(started=False, reason=f'{job[0]} is already being rendered')
         d = os.path.join(config.race_dir(f), 'synthetic'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, cid + '.log'), 'wb')

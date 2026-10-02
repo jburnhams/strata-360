@@ -23,7 +23,7 @@ describe('ScriptDraftPanel', () => {
       { type: 'gap', clip: 'G04', kind: 'map', seconds: 8, why: 'a quiet hour' },
       { type: 'clip', clip: '0023', from: '0023.00', to: '0023.01', view: 'close' }] }) }))
     setup(<ScriptDraftPanel folder="/data" />)
-    expect(await screen.findByText(/3D flyover \(needs your approval\), 14 s: the long night climb/)).toBeInTheDocument()
+    expect(await screen.findByText(/3D flyover, 14 s: the long night climb/)).toBeInTheDocument()
     expect(screen.getByText(/2D map, 8 s: a quiet hour/)).toBeInTheDocument(); expect(screen.getByText('anchored at 100 s')).toBeInTheDocument(); expect(screen.getAllByText('gap')).toHaveLength(2); expect(screen.getByText('close view of you')).toBeInTheDocument()
   })
 
