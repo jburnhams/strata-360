@@ -227,6 +227,10 @@ class TestProfile:
         a, _ = self.patches(series, tiles, T0 + 100); b, _ = self.patches(series, tiles, T0 + 500); assert b[2][0] > a[2][0]
         end, _ = self.patches(series, tiles, T0 + 899); assert end[0][2].shape[1] >= 1900
 
+    def test_before_the_track_starts_and_after_it_ends_the_profile_is_still_there_with_its_cursor_at_the_start_or_the_end(self, series, tiles):
+        before, _ = self.patches(series, tiles, T0 - 3600); after, _ = self.patches(series, tiles, T0 + 86400)
+        assert before and after and before[0][2].shape[1] <= 2 and after[0][2].shape[1] >= 1918                                  # the done part is empty at the start and the whole width at the end
+
     def test_without_altitude_or_distance_nothing_is_drawn_and_it_scales_with_the_frame(self, series, tiles):
         flat = Series(dict(race_track(n=600), alt=np.full(600, np.nan))); ov = overlay(flat, tiles, elements=['profile']); assert ov.widgets[0].patches(T0 + 100, flat.at(T0 + 100)) == []
         out, _ = self.patches(series, tiles, T0 + 300, size=(960, 540)); assert out[0][2].shape[0] == 60 and out[0][1] == 540 - 60 and out[0][2].shape[1] + out[1][2].shape[1] == 960

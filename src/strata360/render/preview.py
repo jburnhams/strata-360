@@ -1,4 +1,4 @@
-"""A rough preview of the whole film, streamed as it is rendered: the planned windows cut from the clips' proxy videos, framed by their camera paths (edit/framing.py), hard cuts, with the clips' own
+"""A rough preview of the whole film, streamed as it is rendered: the planned windows cut from the clips' proxy videos, framed by their camera paths (edit/framing.py), hard cuts, with the race overlay (the same as the final film's, `overlay/`) and the clips' own
 sound (low, full where someone is talking) under the voice-over track. Written as an HLS "event" playlist, so a browser can start playing after the first two seconds and keeps buffering while the
 rest is made.
 
@@ -71,8 +71,8 @@ def stab_matrices(osv):
 
 class PreviewSource:
     """Frames of the planned windows from the clips' proxies (upright equirect), through the real renderer's projection (EquirectView). A clip without a proxy gives a dark card."""
-    def __init__(self, folder, segs, framing, w, h, decode_w):
-        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w = folder, segs, framing, w, h, decode_w; self.V = EquirectView(w, h); self.info = {}; self.done = 0
+    def __init__(self, folder, segs, framing, w, h, decode_w, overlay=None):
+        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w, self.overlay = folder, segs, framing, w, h, decode_w, overlay; self.V = EquirectView(w, h); self.info = {}; self.done = 0
 
     def _clip(self, clip):
         if clip not in self.info:
@@ -81,6 +81,16 @@ class PreviewSource:
         return self.info[clip]
 
     def frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
+        """The frames a0..a1 of window k as BGR; with an overlay the film's race overlay (clock, numbers, maps, as in the final film) is drawn on each at the race time it shows, before any blend between shots."""
+        it = self._frames(k, a0, a1, yaw_extra, pose_extra)
+        if self.overlay is None: yield from it; return
+        import datetime as dt
+        sg = self.segs[k]; utc0 = None if sg.get('synthetic') else dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp()
+        for i, img in enumerate(it):
+            t = SYN.race_time(sg, a0 + i, FPS) if utc0 is None else utc0 + (a0 + i) / FPS
+            yield np.ascontiguousarray(self.overlay.apply(np.ascontiguousarray(img[..., ::-1]), t)[..., ::-1])                 # (the overlay draws RGB)
+
+    def _frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
         sg = self.segs[k]; m = a1 - a0
         if m <= 0: return
         if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, FPS, self.w, self.h, 'bgr'); return           # a generated clip: its pictures as they are
@@ -222,7 +232,8 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
     enc = guard.popen(['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', str(FPS), '-i', '-', '-i', os.path.join(d, 'audio.wav'), '-map', '0:v', '-map', '1:a', *encoder_args(),
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
                             '-hls_segment_filename', os.path.join(d, 'seg%05d.ts'), os.path.join(d, 'index.m3u8')], stdin=subprocess.PIPE)
-    src = PreviewSource(folder, segs, framing, w, h, decode_w); last = [0.0]
+    from strata360.overlay import for_project
+    src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h))); last = [0.0]
     def emit(img):
         enc.stdin.write(img.tobytes()); src.done += 1
         if time.time() - last[0] > 1.0: last[0] = time.time(); status('rendering', src.done); progress and progress(src.done, total)

@@ -129,7 +129,8 @@ class Profile:
     def patches(self, t, v):
         if self.built is None: self._build()
         d = v['dist_m']
-        if not self.built or not math.isfinite(d): return []
+        if not self.built: return []
+        if not math.isfinite(d): d = self.d0 if t <= float(self.c.series._pt[0]) else self.d1                    # before the track starts the cursor is at the start, after it ends at the end (the profile is on every shot)
         c = self.c; W = c.W; x = int(round(float(np.clip((d - self.d0) / (self.d1 - self.d0), 0.0, 1.0)) * (W - 1))); Y = c.H - self.H; r = self.dot.shape[0] / 2; cur = np.zeros((self.H, max(2, int(round(2 * c.s))), 4), np.uint8); cur[...] = (255, 255, 255, 235)
         out = [(0, Y, self.done[:, :x + 1]), (x + 1, Y, self.todo[:, x + 1:]), (x - cur.shape[1] / 2, Y, cur), (x - r, Y + float(self.ys[x]) - r, self.dot)]
         return [p for p in out if p[2].shape[1] > 0]
