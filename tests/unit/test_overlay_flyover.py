@@ -15,9 +15,10 @@ def series(): return Series(race_track(n=3600, speed=3.0, grade=0.02, heading='e
 @pytest.fixture
 def fake_mbgl(monkeypatch, tmp_path):
     """subprocess.run in flyover.py: `.calls` are the command lines; each writes a flat grey picture of the size asked for (-w x -h, times -r)."""
-    calls = []
+    calls = []; real = subprocess.run
 
     def run(cmd, **kw):
+        if '-o' not in cmd or '-z' not in cmd: return real(cmd, **kw)                                                       # anything that is not mbgl-render (hw.py asks ffmpeg for its encoders on a Mac or Windows)
         calls.append(cmd); arg = lambda f: cmd[cmd.index(f) + 1]; r = float(arg('-r')); w, h = int(int(arg('-w')) * r), int(int(arg('-h')) * r)
         cv2.imwrite(arg('-o'), np.full((h, w, 3), (30, 90, 160), np.uint8)); return subprocess.CompletedProcess(cmd, 0, '', '')
     monkeypatch.setattr(FO.subprocess, 'run', run); run.calls = calls; return run
@@ -135,7 +136,7 @@ def test_frame_k_shows_the_race_at_speedup_times_k_over_fps(series, tmp_path):
 
 
 def test_it_renders_through_the_map_clip_encoder_interface(series, tmp_path, fake_mbgl, monkeypatch):
-    c = clip(series, seconds=1.0, fps=5.0, size=(1280, 720), tmp=tmp_path); seen = []
+    monkeypatch.setenv('STRATA_ENCODER', 'software'); c = clip(series, seconds=1.0, fps=5.0, size=(1280, 720), tmp=tmp_path); seen = []
     class P:
         stdin = type('S', (), {'write': lambda s, b: seen.append(len(b)), 'close': lambda s: None})(); returncode = 0
         def wait(self): open(MC_TMP[0], 'wb').write(b'x'); return 0
