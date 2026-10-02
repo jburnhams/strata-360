@@ -9,12 +9,13 @@ import math, os
 
 import numpy as np
 
-MAX_YAW, MAX_PITCH, MAX_FOV = 55.0, 20.0, 65.0
+MAX_YAW, MAX_PITCH, MAX_FOV = 55.0, 20.0, 85.0
 MAX_SPEED = 80.0                # degrees a second of yaw at its fastest
 MAX_ZOOM_RATE = 80.0            # degrees of field of view a second
 MIN_MOVE = 6.0
 LOOK = 0.42
 MIN_S, MAX_S, SHARE = 0.6, 1.2, 0.4
+ZOOM_MAX_S = 1.7                # a glide that mostly zooms may take this long (a zoom of 85 degrees at the speed limit needs about 1.6 s)
 CONTIGUOUS_S = 0.6          # the second shot starts within this many seconds of where the first ends (windows are whole beats, so a cut inside a talking stretch overlaps by a few tenths)
 ASPECT = 16 / 9
 SAMPLES = 9
@@ -32,7 +33,7 @@ def vfov(fov): return math.degrees(2 * math.atan(math.tan(math.radians(fov) / 2)
 GLIDE_FOV = dict(hold_wide=(100, 100), scenery=(95, 95), free_view=(90, 90), selfie_hold=(85, 85), selfie_close=(50, 50), selfie_far=(130, 130), push_in=(100, 65), pull_out=(65, 100), dialogue_hold=(70, 65), globe_shrink=None)     # the techniques whose shots can be glided to and from, with the field of view at their start and end (the planner's guess before the real framing exists; None: any)
 
 
-def glide_pair(ta, tb, limit=60.0):
+def glide_pair(ta, tb, limit=80.0):
     """Could a shot of technique `ta` glide into one of `tb` (same clip, back to back)? A guess from the techniques alone (the real test is `plan`, on the framing): both must be glideable and the field of view at the end of the first close to the start of the second."""
     a, b = GLIDE_FOV.get(ta, 'no'), GLIDE_FOV.get(tb, 'no')
     if a == 'no' or b == 'no' or ta == tb: return False                                    # the same technique twice is the same shot again, not a move
@@ -78,7 +79,7 @@ def plan(seg_a, seg_b, path_a, path_b, look=None):
         return judge(res, seg_a, path_a, path_b, look)
     if abs(dyaw) > MAX_YAW or abs(dp) > MAX_PITCH or abs(df) > MAX_FOV: return None, f'too big a move ({abs(dyaw):.0f} degrees of yaw, {abs(dp):.0f} of pitch, {abs(df):.0f} of field of view)'
     if abs(dyaw) + abs(dp) + abs(df) / 3.0 < MIN_MOVE: return None, 'the two shots already look the same way'
-    D = min(max(MIN_S + abs(dyaw) / MAX_YAW * (MAX_S - MIN_S), MIN_S + abs(df) / MAX_FOV * (MAX_S - MIN_S), MIN_S), MAX_S, SHARE * min(da, db))
+    D = min(max(min(MIN_S + abs(dyaw) / MAX_YAW * (MAX_S - MIN_S), MAX_S), MIN_S + abs(df) / MAX_FOV * (ZOOM_MAX_S - MIN_S), MIN_S), ZOOM_MAX_S, SHARE * min(da, db))
     if D < MIN_S - 1e-9: return None, 'the shots are too short for a glide'
     if 1.5 * abs(dyaw) / D > MAX_SPEED or 1.5 * abs(df) / D > MAX_ZOOM_RATE: return None, 'the move would be too fast'
     for who, path, upto in (('first', path_a, 0.0), ('second', path_b, 0.5)):

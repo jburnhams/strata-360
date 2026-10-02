@@ -26,7 +26,7 @@ def test_it_is_refused_when_the_shots_are_not_consecutive_or_not_both_world_fram
     reason = lambda a, b, pa, pb: PN.plan(a, b, pa, pb)[1]
     assert 'not consecutive' in reason(seg(0, 10.0), seg(1, 20.0), path(0.0), path(20.0)) and 'not consecutive' in reason(seg(0, 10.0), seg(1, 14.8), path(0.0), path(20.0)) and 'not consecutive' in reason(seg(0, 10.0), seg(1, 13.3), path(0.0), path(20.0)) and 'not consecutive' in reason(seg(0, 10.0), seg(1, 14.0, clip='d'), path(0.0), path(20.0))
     assert 'world-frame' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0, ref='body'), path(20.0)) and 'world-frame' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(20.0, ref='heading'))
-    assert 'too big a move' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(120.0)) and 'too big a move' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(10.0, pitch=40.0)) and 'too big a move' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(10.0, fov=170.0))
+    assert 'too big a move' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(120.0)) and 'too big a move' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(10.0, pitch=40.0)) and 'too big a move' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(10.0, fov=185.0))
     assert 'look the same way' in reason(seg(0, 10.0), seg(1, 14.0), path(0.0), path(2.0)) and 'too short' in reason(seg(0, 10.0, 1.2), seg(1, 11.2, 1.2), path(0.0, T=1.2), path(30.0, T=1.2))
 
 
@@ -76,7 +76,8 @@ def test_the_framing_records_where_the_subject_is_for_the_glides():
 def test_a_change_between_the_mid_and_far_view_of_you_is_a_gentle_glide_that_takes_longer_for_the_bigger_zoom():
     mid_far, _ = PN.plan(seg(0, 10.0), seg(1, 14.0), path(0.0, fov=85.0), path(0.0, fov=130.0, pitch=2.0)); small, _ = PN.plan(seg(0, 10.0), seg(1, 14.0), path(0.0, fov=85.0), path(0.0, fov=100.0, pitch=2.0))
     assert mid_far is not None and small is not None and mid_far['dur_s'] > small['dur_s'] and mid_far['dur_s'] <= PN.MAX_S and 1.5 * 45 / mid_far['dur_s'] <= PN.MAX_ZOOM_RATE
-    assert 'too big a move' in PN.plan(seg(0, 10.0), seg(1, 14.0), path(0.0, fov=50.0), path(0.0, fov=130.0))[1]                                                                        # 80 degrees of zoom is too much
+    tr = PN.plan(seg(0, 10.0), seg(1, 14.0), path(0.0, fov=50.0), path(0.0, fov=130.0))[0]; assert tr and 1.5 <= tr['dur_s'] <= 1.7                                    # 80 degrees of zoom (close to far) glides, slowly
+    assert 'too big a move' in PN.plan(seg(0, 10.0), seg(1, 14.0), path(0.0, fov=40.0), path(0.0, fov=130.0))[1]                                                                        # 80 degrees of zoom is too much
 
 
 class Recorder:
@@ -125,7 +126,7 @@ def test_a_glide_whose_middle_shows_mostly_sky_is_refused_and_a_good_one_keeps_i
 
 def test_the_planner_guess_of_which_techniques_can_glide_into_each_other():
     assert not PN.glide_pair('selfie_hold', 'selfie_hold') and PN.glide_pair('hold_wide', 'push_in') and PN.glide_pair('selfie_hold', 'selfie_close') and PN.glide_pair('globe_shrink', 'hold_wide')
-    assert not PN.glide_pair('selfie_far', 'selfie_close') and not PN.glide_pair('follow_runner', 'hold_wide') and not PN.glide_pair('globe_shrink', 'globe_shrink') and not PN.glide_pair('spin_roll', 'hold_wide')
+    assert PN.glide_pair('selfie_far', 'selfie_close') and not PN.glide_pair('selfie_far', 'selfie_close', limit=50.0) and not PN.glide_pair('follow_runner', 'hold_wide') and not PN.glide_pair('globe_shrink', 'globe_shrink') and not PN.glide_pair('spin_roll', 'hold_wide')
 
 
 def test_swap_for_glides_replaces_a_shot_by_an_equivalent_technique_that_can_glide(monkeypatch, tmp_path):
