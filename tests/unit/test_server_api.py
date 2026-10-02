@@ -385,3 +385,17 @@ class TestLyricsApi:
         r = client.post('/api/lyrics/phrase', json=dict(folder=f, key='14.5-20.0', deleted=True)).json(); assert r['deleted'] is True and client.get('/api/lyrics', params=dict(folder=f)).json()['vocal_spans'] == [[9.7, 14.3]]
         assert client.post('/api/lyrics/phrase', json=dict(folder=f, key='9.0-9.5', deleted=True)).status_code == 404
         assert client.delete('/api/lyrics', params=dict(folder=f)).json() == dict(reset=True) and client.get('/api/lyrics', params=dict(folder=f)).json()['exists'] is False
+
+
+class TestClipSounds:
+    def test_the_clip_audio_endpoint_serves_original_clean_and_background(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID)
+        for name in ('audio_original.flac', 'audio_clean.flac', 'audio_background.flac'): open(os.path.join(p.clip_dir(), name), 'wb').write(name.encode())
+        get = lambda kind: client.get('/api/clip/audio', params={'folder': p.folder, 'clip': CLIP_ID, 'kind': kind})
+        assert get('original').content == b'audio_original.flac' and get('clean').content == b'audio_clean.flac' and get('background').content == b'audio_background.flac'
+        os.remove(os.path.join(p.clip_dir(), 'audio_background.flac')); assert get('background').status_code == 404
+
+    def test_the_clip_detail_says_which_sounds_exist(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID); open(os.path.join(p.clip_dir(), 'audio_background.flac'), 'wb').write(b'x')
+        d = client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()
+        assert d['audio_files'] == dict(original=False, clean=False, background=True)

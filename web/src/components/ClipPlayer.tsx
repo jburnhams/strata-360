@@ -41,8 +41,8 @@ function describeAim(a: Aim, found: boolean, speaking: boolean): string {
 const AIMS: [Aim, string, string][] = [['free', 'Free', 'stays where you put it'], ['heading', 'Heading', 'points where the runner is going, at 95°'], ['you', 'You mid', 'turns to you, the wearer, at the film\'s mid view (85°)'], ['you_close', 'You close', 'you, close up (50°)'], ['you_far', 'You far', 'you, far out with the surroundings (130°)'],
   ['person', 'Person', 'always another person (70°): stays with the same one as long as it can, and jumps as little as possible'], ['clarity', 'Clarity', 'the part of the picture with the most detail, contrast and colour (and away from a foggy lens), at 100°'], ['scenic', 'Scenic', 'the best scenery with nobody in view, at 100°']]
 
-export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, person, clarity, scenic, hasPreview, duration, window: win, autoStart }: {
-  folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; focus?: Focus[] | null; person?: Focus[] | null; clarity?: { t: number; yaw: number; pitch: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; hasPreview: boolean; duration: number
+export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, person, clarity, scenic, sounds, hasPreview, duration, window: win, autoStart }: {
+  folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; focus?: Focus[] | null; person?: Focus[] | null; clarity?: { t: number; yaw: number; pitch: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; sounds?: { original?: boolean; clean?: boolean; background?: boolean }; hasPreview: boolean; duration: number
   window?: { start: number; end: number }; autoStart?: boolean   // play only this part of the clip (the timeline's window); autoStart begins at once
 }) {
   const video = useRef<HTMLVideoElement>(null)
@@ -56,6 +56,8 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   const [shown, setShown] = useState<string>('')
   const [fov, setFov] = useState(100)
   const [muted, setMuted] = useState(false)
+  const [sound, setSound] = useState<'original' | 'clean' | 'background'>('original')                 // original is the video's own sound; clean and background play from their own files, kept in step with the video
+  const audio = useRef<HTMLAudioElement>(null)
   const [rate, setRate] = useState(1)
   const [err, setErr] = useState<string>()
 
@@ -141,6 +143,19 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   useEffect(() => { st.current.fov = fov; st.current.active = performance.now() }, [fov])
   useEffect(() => { setStarted(false); setPlaying(false); setT(0); setErr(undefined); st.current.yaw = 0; st.current.pitch = 0 }, [clip])
 
+  // The other sounds (clean, background) are a second element that follows the video: play, pause, seeks, speed, and a drift correction while playing.
+  useEffect(() => {
+    const v = video.current, a = audio.current
+    if (!started || !v || !a || sound === 'original') return
+    const sync = () => { if (Math.abs(a.currentTime - v.currentTime) > 0.15) a.currentTime = v.currentTime }
+    const play = () => { sync(); a.playbackRate = v.playbackRate; void a.play().catch(() => undefined) }
+    const pause = () => a.pause(), rate = () => { a.playbackRate = v.playbackRate }
+    v.addEventListener('play', play); v.addEventListener('pause', pause); v.addEventListener('seeked', sync); v.addEventListener('ratechange', rate); v.addEventListener('timeupdate', sync)
+    a.currentTime = v.currentTime; a.playbackRate = v.playbackRate; if (!v.paused) void a.play().catch(() => undefined)
+    return () => { v.removeEventListener('play', play); v.removeEventListener('pause', pause); v.removeEventListener('seeked', sync); v.removeEventListener('ratechange', rate); v.removeEventListener('timeupdate', sync); a.pause() }
+  }, [started, sound, clip])
+  useEffect(() => { setSound('original') }, [clip])
+
   const drag = useRef<{ x: number; y: number } | null>(null)
   const wake = () => { st.current.active = performance.now() }
   const onDown = (e: React.PointerEvent) => { wake(); drag.current = { x: e.clientX, y: e.clientY }; (e.target as HTMLElement).setPointerCapture(e.pointerId) }
@@ -165,7 +180,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
     <div className="overflow-hidden rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
       <div className="relative aspect-video w-full bg-black">
         {thumbKind && !started && <img src={api.thumbUrl(folder, clip, thumbKind + (overlay ? '+overlay' : ''), overlay)} alt="" className="absolute inset-0 h-full w-full object-cover" />}
-        <video ref={video} src={started ? api.previewUrl(folder, clip) : undefined} muted={muted} playsInline preload="auto" crossOrigin="anonymous" className="hidden"
+        <video ref={video} src={started ? api.previewUrl(folder, clip) : undefined} muted={muted || sound !== 'original'} playsInline preload="auto" crossOrigin="anonymous" className="hidden"
           onLoadedMetadata={e => { if (win) (e.target as HTMLVideoElement).currentTime = win.start }}
           onTimeUpdate={e => { const v = e.target as HTMLVideoElement; setT(v.currentTime); if (win && v.currentTime >= win.end) { v.pause(); v.currentTime = win.start } }} onPlay={() => { setPlaying(true); st.current.active = performance.now() }} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setErr('could not load the preview video')} />
         <canvas ref={canvas} className={`absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing ${started ? '' : 'hidden'}`}
@@ -184,6 +199,13 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
         <input type="range" min={0} max={duration} step={0.04} value={t} disabled={!started} className="min-w-32 flex-1"
           onChange={e => { const v = video.current; if (v) { v.currentTime = Number(e.target.value); setT(v.currentTime) } }} aria-label="Seek" />
         <button className="text-xs" disabled={!started} onClick={() => setMuted(m => !m)} title="sound">{muted ? '🔇' : '🔊'}</button>
+        {(sounds?.clean || sounds?.background) && (
+          <select value={sound} disabled={!started} onChange={e => setSound(e.target.value as 'original' | 'clean' | 'background')} aria-label="Which sound" title="Which sound to hear while it plays" className="rounded border border-stone-300 bg-transparent px-1 text-xs dark:border-stone-700">
+            <option value="original">Original sound</option>
+            <option value="clean" disabled={!sounds?.clean}>Clean (speech made clearer)</option>
+            <option value="background" disabled={!sounds?.background}>Background (without speech)</option>
+          </select>)}
+        {started && sound !== 'original' && <audio ref={audio} src={api.clipAudioUrl(folder, clip, sound)} muted={muted} preload="auto" className="hidden" />}
         <select value={rate} disabled={!started} onChange={e => { const r = Number(e.target.value); setRate(r); if (video.current) video.current.playbackRate = r }} className="rounded border border-stone-300 bg-transparent px-1 text-xs dark:border-stone-700">
           {[0.5, 1, 1.5, 2].map(r => <option key={r} value={r}>{r}×</option>)}</select>
 <select value={aim} onChange={e => changeAim(e.target.value as Aim)} aria-label="Where the view points" title={AIMS.find(x => x[0] === aim)?.[2]} className="rounded border border-stone-300 bg-transparent px-1 text-xs dark:border-stone-700">

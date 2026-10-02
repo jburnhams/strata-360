@@ -35,3 +35,13 @@ describe('ClipPlayer aim menu', () => {
     await user.selectOptions(menu, 'You close'); await user.selectOptions(menu, 'Free'); expect(fov()).toBe('50')
   })
 })
+
+describe('ClipPlayer sound menu', () => {
+  it('is there only when the clip has a clean or background sound, and starts on the original', () => {
+    const { unmount } = setup(<ClipPlayer {...base} sounds={{ original: true }} />); expect(screen.queryByRole('combobox', { name: 'Which sound' })).toBeNull(); unmount()
+    setup(<ClipPlayer {...base} sounds={{ original: true, clean: true, background: false }} />)
+    const menu = screen.getByRole('combobox', { name: 'Which sound' }); expect(menu).toHaveValue('original')
+    expect(Array.from(menu.querySelectorAll('option')).map(o => [o.textContent, o.disabled])).toEqual([['Original sound', false], ['Clean (speech made clearer)', false], ['Background (without speech)', true]])
+    expect(menu).toBeDisabled()                                                                      // until the video has started
+  })
+})

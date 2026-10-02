@@ -311,8 +311,8 @@ def create_app(roots, token=None):
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/clip/audio')
-    def get_clip_audio(request: Request, folder: str, clip: str, kind: str = 'original'):  # the clip's stored sound: original (lossless) or cleaned (Range requests work); <audio> cannot send headers, so the cookie/query token authenticates
-        auth(request); f = folder_of(folder); name = 'audio_clean.flac' if kind == 'clean' else 'audio_original.flac'; p = os.path.join(_cd(f, clip), name)
+    def get_clip_audio(request: Request, folder: str, clip: str, kind: str = 'original'):  # the clip's stored sound: original (lossless), cleaned, or the background without speech (Range requests work); <audio> cannot send headers, so the cookie/query token authenticates
+        auth(request); f = folder_of(folder); name = {'clean': 'audio_clean.flac', 'background': 'audio_background.flac'}.get(kind, 'audio_original.flac'); p = os.path.join(_cd(f, clip), name)
         if not os.path.exists(p): raise HTTPException(404, 'not made yet')
         return FileResponse(p, media_type='audio/flac', headers={'Cache-Control': 'no-cache'})
 
@@ -331,7 +331,7 @@ def create_app(roots, token=None):
         if ev:
             from strata360.analysis import sound_events as SE
             out['sounds'] = dict(seconds=SE.category_seconds(ev), windows=[dict(t0=w['t0'], t1=w['t1'], cats={k: v for k, v in w['cats'].items() if v >= 0.2}, top=w['top'][:3]) for w in ev['windows']], hints={c: list(h) for c, h in SE.HINTS.items()})
-        out['audio_files'] = dict(original=os.path.exists(os.path.join(d, 'audio_original.flac')), clean=os.path.exists(os.path.join(d, 'audio_clean.flac')))
+        out['audio_files'] = dict(original=os.path.exists(os.path.join(d, 'audio_original.flac')), clean=os.path.exists(os.path.join(d, 'audio_clean.flac')), background=os.path.exists(os.path.join(d, 'audio_background.flac')))
         mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
             from strata360.analysis.views import focus_samples, person_samples

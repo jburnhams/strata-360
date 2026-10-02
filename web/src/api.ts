@@ -87,7 +87,7 @@ export interface Unusable { start_s: number; end_s: number; usable: false; reaso
 export interface Sounds { seconds: Record<string, number>; windows: { t0: number; t1: number; cats: Record<string, number>; top: [string, number][] }[]; hints: Record<string, [string, number]> }
 export interface ClipDetail {
   sounds?: Sounds
-  audio_files?: { original: boolean; clean: boolean }
+  audio_files?: { original: boolean; clean: boolean; background?: boolean }
   id: string; note: string; time: Record<string, string | number | boolean | null>; video: Record<string, any>; camera?: Record<string, string>
   motion: Record<string, number | null> | null; audio: { summary: any; segments: { label: string; t0_s: number; t1_s: number }[] } | null
   transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; clarity?: { t: number; yaw: number; pitch: number; score?: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
@@ -156,7 +156,7 @@ export const api = {
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
-  clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean') => '/api/clip/audio?' + q({ folder, clip, kind }),
+  clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean' | 'background') => '/api/clip/audio?' + q({ folder, clip, kind }),
   editScript: (folder: string, texts: Record<string, string>) => call<{ saved: string | null; speaking: boolean }>('/api/script/edit', { folder, texts }),
   voiceoverUse: (folder: string, seg: number, use: 'synth' | 'recorded') => call<{ ok: boolean }>('/api/voiceover/use', { folder, seg, use }),
   voiceoverAudio: (folder: string, seg?: number, source?: string, track?: string) => '/api/voiceover/audio?' + q(seg === undefined ? (track ? { folder, track } : { folder }) : { folder, seg: String(seg), source: source ?? 'synth' }),
