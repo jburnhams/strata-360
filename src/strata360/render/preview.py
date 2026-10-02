@@ -213,8 +213,9 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
     """Render the film into film_dir (see the module docstring). Blocks until done; progress(frames_done, frames_total) is called about once a second."""
     from strata360.analysis import views
     from strata360.edit import pans as PN
+    key = plan_key(folder, plan)                                                                                 # of the plan as saved (the server looks the film up by it); the glides below follow from the plan, so they need no part in it
     plan = dict(plan, segments=PN.apply_pans(plan['segments'], framing, scorer=PN.looker(folder))[0])                                   # a hard cut inside one clip becomes a glide where that is gentle and keeps people in shot (edit/pans.py)
-    key = plan_key(folder, plan); d = film_dir(folder, key); os.makedirs(d, exist_ok=True); w = px; h = px * 9 // 16 // 2 * 2
+    d = film_dir(folder, key); os.makedirs(d, exist_ok=True); w = px; h = px * 9 // 16 // 2 * 2
     segs = plan['segments']; bounds = [int(round((g['film_start_s'] + g['dur_s']) * FPS)) for g in segs]; starts = [0] + bounds[:-1]; total = bounds[-1]; total_s = total / FPS
     placeholders = sorted({g['clip'] for g in segs if not g.get('synthetic') and not proxy_of(folder, g['clip'])}); status = lambda state, n, **kw: json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=n, frames_total=total, placeholders=placeholders, started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')) or os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
     t0 = time.time(); status('audio', 0); build_audio(folder, plan, os.path.join(d, 'audio.wav'), total_s)
