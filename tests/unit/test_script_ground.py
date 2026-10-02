@@ -24,9 +24,10 @@ def test_a_grounded_narration_passes():
     assert chk(vo('0001', 'Twenty kilometres in.', 'km 20.0 of 100')) == []
 
 
-def test_missing_basis_a_made_up_quote_and_a_made_up_number_are_reported():
+def test_missing_basis_an_invented_basis_and_a_made_up_number_are_reported_but_a_paraphrase_is_fine():
     p = ' | '.join(chk(vo('0001', 'Nothing here.'), vo('0001', 'It rained all day.', 'the rain never stopped'), vo('0001', 'Fifty-five of us quit.', 'km 20.0 of 100')))
-    assert 'has no basis' in p and 'is not in the material' in p and 'the number 55 is not in the material' in p
+    assert 'has no basis' in p and 'does not seem to come from the material' in p and 'the number 55 is not in the material' in p
+    assert chk(vo('0001', 'Twenty kilometres in.', 'km 20.0 of 100, the first fifth')) == [] and chk(vo('0001', 'Twenty kilometres in.', 'clip 0001: km 20.0 of the 100 km')) == []          # a paraphrase of the material passes
 
 
 def test_km_to_go_must_match_the_clips_own_distance():

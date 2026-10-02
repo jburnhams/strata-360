@@ -36,3 +36,10 @@ def test_the_head_is_always_in_frame_and_the_body_as_far_as_fits():
     tall = aim.aim_pitch(-30, 70, vf, -30 + 35); small = aim.aim_pitch(-30, 15, vf, -30 + 7.5)
     assert tall < -30 + 35                                                                  # a tall person: aimed below the head, the head near the top
     assert small == -30                                                                     # a person who fits easily: centred
+
+
+def test_a_narrower_view_has_a_narrower_dead_band_so_you_stay_in_frame():
+    ty = lambda x: 100 + 6.0 * min(x, 3) / 3          # you drift 6 degrees: inside the usual 9 degree band, outside a band scaled to a 50 degree view
+    _, y_wide, _ = run(ty, lambda x: -20.0, 8); t = np.arange(0, 8, 0.04); y_n, _ = aim.follow(t, [ty(x) for x in t], [-20.0] * len(t), 0.04, scale=50 / 85)
+    assert np.ptp(y_wide) < 0.01 and abs(np.unwrap(np.radians(y_n))[-1] * 180 / math.pi - 106) < abs(y_wide[-1] - 106)
+    assert aim.Follower(0, 0, 0.5).by == aim.BAND_YAW / 2 and aim.Follower(0, 0).by == aim.BAND_YAW

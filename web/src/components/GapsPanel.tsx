@@ -25,7 +25,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
   const kindOf = (g: Gap): GapKind => kinds[g.id] ?? (g.clips.find(x => x.id === g.id)?.kind === 'flyover' ? 'flyover' : 'map')
   const flyover = data.flyover ?? { available: true, note: '' }
   const hours = (g: Gap) => `${(g.duration_s / 3600).toFixed(1)} h`
-  const state = (c: GapClip) => c.rendering ? (c.progress || 'rendering…') : c.exists ? `ready · ${c.kind === 'flyover' ? '3D · ' : ''}${c.seconds} s for ${(c.duration_s / 3600).toFixed(1)} h (x${c.speedup})` : 'planned'
+  const state = (c: GapClip) => c.rendering ? (c.progress || 'rendering…') : c.error ? `failed: ${c.error}` : c.approved === false && !c.exists ? `planned by the script: ${c.kind === 'flyover' ? '3D flyover' : 'clip'} waiting for your approval` : c.exists ? `ready · ${c.kind === 'flyover' ? '3D · ' : ''}${c.seconds} s for ${(c.duration_s / 3600).toFixed(1)} h (x${c.speedup})` : 'planned'
   return (
     <div className="mt-4">
       <div className="mb-1 flex items-baseline gap-2"><b>Gaps in the footage</b><span className="text-xs text-stone-500">{data.gaps.length} · a generated clip can fill each one</span></div>
@@ -40,7 +40,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
                 <span>{g.local_start} → {g.local_end}</span>
                 <span className="text-stone-500">{hours(g)} · km {g.km_start}–{g.km_end} · +{g.ascent_m} m{g.daylight ? ` · ${g.daylight}` : ''}</span>
                 <span className="ml-auto flex items-center gap-2">
-                  {c && <span className="text-xs text-stone-500" aria-label={`${g.id} state`}>{state(c)}</span>}
+                  {c && <span className={`text-xs ${c.error && !c.rendering ? 'text-red-600' : 'text-stone-500'}`} aria-label={`${g.id} state`}>{state(c)}</span>}
                   <label className="flex items-center gap-1 text-xs text-stone-500">seconds
                     <input aria-label={`Seconds for ${g.id}`} type="number" min={2} step={1} className="w-16 rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"
                       value={seconds[g.id] ?? String(c?.seconds ?? g.default_seconds)} onChange={e => setSeconds({ ...seconds, [g.id]: e.target.value })} />
@@ -49,7 +49,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
                     <option value="map">{KIND_LABEL.map}</option>
                     <option value="flyover" disabled={!flyover.available} title={flyover.note || undefined}>{KIND_LABEL.flyover}{flyover.available ? '' : ' (not installed)'}</option>
                   </select>
-                  <button disabled={!!c?.rendering} className="rounded bg-emerald-700 px-2 py-1 text-white disabled:opacity-50" onClick={() => generate(g)}>{c?.exists ? 'Regenerate' : BUTTON[kindOf(g)]}</button>
+                  <button disabled={!!c?.rendering} className="rounded bg-emerald-700 px-2 py-1 text-white disabled:opacity-50" onClick={() => generate(g)}>{c?.exists ? 'Regenerate' : c?.approved === false ? 'Approve and render' : BUTTON[kindOf(g)]}</button>
                   {c?.exists && <button className="text-emerald-700 underline dark:text-emerald-400" onClick={() => setOpen(open === g.id ? undefined : g.id)}>{open === g.id ? 'Hide' : 'Watch'}</button>}
                   {c && !c.rendering && <button aria-label={`Remove ${g.id} clip`} className="text-stone-500 underline" onClick={() => run(() => api.deleteGapClip(folder, c.id))}>Remove</button>}
                 </span>

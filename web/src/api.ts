@@ -25,17 +25,24 @@ export interface TrackClip {
   t_mid?: number; t0?: number; t1?: number; lat?: number; lon?: number; stretch?: [number, number][]; facts?: TrackClipFacts
 }
 export type GapKind = 'map' | 'flyover'
-export interface GapClip { id: string; gap: string; kind: GapKind | string; size?: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; file?: string }
+export interface GapClip { id: string; gap: string; kind: GapKind | string; size?: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; error?: string; approved?: boolean; file?: string }
 export interface Gap {
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
+}
+export interface RoughMix { has_plan: boolean; exists: boolean; stale: boolean; stale_because: string[]; length_s: number | null; made_at: string | null; source?: string | null; building: boolean; error: string; log: string }
+export interface TileStatus { ok: boolean; style: string; error: string; credit?: string; tile_px?: number }
+export interface LyricPhrase { key: string; id: string; t0: number; t1: number; text: string; heard: string; conf: number; doubtful: boolean; deleted: boolean; edited: boolean; counts: boolean }
+export interface Lyrics {
+  has_track: boolean; exists: boolean; stale: boolean; instrumental: boolean; phrases: number; sung_s: number | null; duration_s: number | null; made_at: string | null; language: string | null
+  building: boolean; error: string; log: string; phrases_list: LyricPhrase[]; vocal_spans: [number, number][]
 }
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
-export interface ScriptItem { type: 'vo' | 'clip' | 'broll'; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
+export interface ScriptItem { type: 'vo' | 'clip' | 'broll' | 'gap'; kind?: GapKind | string; anchor?: { film_s: number; why?: string }; view?: 'mid' | 'close' | 'far'; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
 export interface ScriptDraft {
   title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
   problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null
@@ -107,11 +114,14 @@ export const api = {
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
   trackSeries: (folder: string, points = 2000) => call<TrackSeries>('/api/track/series?' + q({ folder, points: String(points) })),
   trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000) => call<TrackLine>('/api/track/line?' + q(bbox ? { folder, bbox: bbox.join(','), limit: String(limit) } : { folder, limit: String(limit) })),
+  tilesStatus: (style = 'tf-landscape') => call<TileStatus>('/api/tiles/status?' + q({ style })),
+  tileUrl: (style = 'tf-landscape') => `/api/tiles/${style}/{z}/{x}/{y}`,
   trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
   gaps: (folder: string) => call<{ gaps: Gap[]; flyover?: { available: boolean; note: string } }>('/api/gaps?' + q({ folder })),
   planGapClip: (folder: string, gap: string, seconds: number, kind: GapKind = 'map') => call<GapClip>('/api/gaps/clip', { folder, gap, seconds, kind }),
   renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
   deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),
+  approveGapClip: (folder: string, id: string) => call<GapClip>('/api/gaps/approve', { folder, id }),
   gapVideoUrl: (folder: string, id: string) => '/api/gaps/video?' + q({ folder, id }),
   track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
   uploadTrack: async (folder: string, file: File) => {
@@ -134,6 +144,14 @@ export const api = {
   markWords: (folder: string, clip: string, spans: { seg: number; from: number; to: number }[], state: 'must' | 'never' | 'none') => call<{ ok: boolean; marked: number }>('/api/transcript/mark', { folder, clip, spans, state }),
   script2: (folder: string, name = '') => call<Script2State>('/api/script2?' + q(name ? { folder, name } : { folder })),
   planScript2: (folder: string, draft?: string) => call<{ started: boolean; reason?: string }>('/api/script2/plan', { folder, draft }),
+  lyrics: (folder: string) => call<Lyrics>('/api/lyrics?' + q({ folder })),
+  findLyrics: (folder: string) => call<{ started: boolean; reason?: string }>('/api/lyrics', { folder }),
+  editLyric: (folder: string, key: string, change: { text?: string; deleted?: boolean; keep?: boolean }) => call<LyricPhrase>('/api/lyrics/phrase', { folder, key, ...change }),
+  resetLyrics: (folder: string) => fetch('/api/lyrics?' + q({ folder }), { method: 'DELETE' }),
+  roughMix: (folder: string) => call<RoughMix>('/api/script2/mix?' + q({ folder })),
+  makeRoughMix: (folder: string) => call<{ started: boolean; reason?: string }>('/api/script2/mix', { folder }),
+  resetRoughMix: (folder: string) => fetch('/api/script2/mix?' + q({ folder }), { method: 'DELETE' }),
+  roughMixUrl: (folder: string, v = '') => '/api/script2/mix/audio?' + q({ folder, v }),
   generateScript2: (folder: string, o: { revise?: boolean; target_s?: number; auto?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/script2/generate', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),

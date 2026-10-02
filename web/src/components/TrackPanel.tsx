@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
+import { api, type TileStatus, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
 import { useThumbOverlay } from '../thumbOverlay'
 import { PanelSkeleton } from './Skeleton'
 import TrackMap from './TrackMap'
@@ -61,10 +61,11 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe
 
 function RaceView({ folder, onOpenClip, tz }: { folder: string; onOpenClip: (clip: string) => void; tz: string }) {
   const [overlay] = useThumbOverlay()
-  const [base, setBase] = useState<TrackLine>(), [series, setSeries] = useState<TrackSeries>(), [clips, setClips] = useState<TrackClip[]>([]), [hasDraft, setHasDraft] = useState(false), [err, setErr] = useState<string>()
+  const [base, setBase] = useState<TrackLine>(), [series, setSeries] = useState<TrackSeries>(), [clips, setClips] = useState<TrackClip[]>([]), [hasDraft, setHasDraft] = useState(false), [tiles, setTiles] = useState<TileStatus>(), [err, setErr] = useState<string>()
   const [xMode, setXMode] = useState<XMode>('time'), [cursor, setCursor] = useState<number | null>(null), [hover, setHover] = useState<{ clip: TrackClip; x: number; y: number }>()
   useEffect(() => {
     setErr(undefined); setBase(undefined); setSeries(undefined)
+    api.tilesStatus().then(setTiles).catch(e => setTiles({ ok: false, style: 'tf-landscape', error: (e as Error).message }))
     Promise.all([api.trackLine(folder, undefined, 4000), api.trackSeries(folder, 2000), api.trackClips(folder)])
       .then(([b, s, c]) => { setBase(b); setSeries(s); setClips(c.clips); setHasDraft(c.has_draft) }).catch(e => setErr((e as Error).message))
   }, [folder])
@@ -74,11 +75,13 @@ function RaceView({ folder, onOpenClip, tz }: { folder: string; onOpenClip: (cli
   if (!base || !series) return <div className="mt-3 h-[420px] animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800" aria-label="Loading the race map" />
   return (
     <div className="mt-3 space-y-2">
-      <TrackMap base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} />
+      {tiles && !tiles.ok && <p role="alert" className="text-sm text-amber-700">The map background is off: {tiles.error}</p>}
+      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} />
       <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
         <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
         {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#78716c' }} />not in the film</span>}
         <span>click the map, then scroll to zoom</span>
+        {tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}
         <span>{clips.filter(c => c.covered).length} clips on the track{off.length ? ` · not on the track: ${off.map(c => c.label).join(', ')}` : ''}</span>
         <span className="ml-auto flex items-center gap-1">horizontal axis
           <select aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="time">time</option><option value="km">distance</option></select></span>

@@ -45,6 +45,15 @@ describe('TrackPanel', () => {
     expect(await screen.findByRole('group', { name: 'Elevation chart' })).toBeInTheDocument(); expect(screen.getByRole('group', { name: 'Pace chart' })).toBeInTheDocument()
   })
 
+  it('shows the map credit when the background is on, and says why it is off when it is not', async () => {
+    mockGet('/api/track', makeTrackOverview({ present: true, file: 't.fit', bbox: [40, 10, 41, 11], line: [[40, 10], [41, 11]] }))
+    const { unmount } = setup(<TrackPanel folder="/data" />)
+    expect(await screen.findByText(/Maps © Thunderforest/)).toBeInTheDocument(); expect(screen.queryByText(/map background is off/)).not.toBeInTheDocument(); unmount()
+    mockGet('/api/tiles/status', { ok: false, style: 'tf-landscape', error: 'the map style tf-landscape needs a key: put THUNDERFOREST_API_KEY=... in secrets.env' })
+    setup(<TrackPanel folder="/data" />)
+    expect(await screen.findByText(/The map background is off: the map style tf-landscape needs a key/)).toBeInTheDocument(); expect(screen.getByRole('application', { name: 'Race map' })).toBeInTheDocument()
+  })
+
   it('uploads a file and refreshes', async () => {
     mockGet('/api/track', makeTrackOverview({ present: false }))
     mockPost('/api/track', makeTrackOverview({ present: true, file: 'new.fit', distance_km: 5 }))

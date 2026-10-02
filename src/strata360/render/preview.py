@@ -169,11 +169,28 @@ def audio_of(folder, clip, role=None):
     p = proxy_of(folder, clip); return p if p and has_audio(p) else None
 
 
-def build_audio(folder, plan, out, total_s):
-    """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track."""
+DUCK_GAIN = 0.4              # the music's level under the runner's own speech (the voice-over ducks it through the side chain instead)
+DUCK_RAMP_S = 0.25
+
+
+def music_duck(plan):
+    """An ffmpeg `volume` expression (per frame, `t` in film seconds) that turns the music down to DUCK_GAIN, with a short ramp each side, wherever the script plays the runner's own words (windows with role `clip`); '' when there are none."""
+    parts = []; run = 0.0
+    for g in plan['segments']:
+        a = float(g['film_start_s']) if g.get('film_start_s') is not None else run; b = a + float(g['dur_s']); run = b                    # (a plan without film_start_s is read as windows end to end)
+        if g.get('role') == 'clip': parts.append(f"(1-{1 - DUCK_GAIN:g}*clip(min((t-{a:.3f})/{DUCK_RAMP_S},({b:.3f}-t)/{DUCK_RAMP_S}),0,1))")
+    return _nest(parts) if parts else ''
+
+
+def _nest(parts): return parts[0] if len(parts) == 1 else f'min({parts[0]},{_nest(parts[1:])})'
+
+
+def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None):
+    """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track. `music_gain` is the music's level; `bg_gain`, when given, is the level of the clips' own
+    background sound in narration and b-roll windows (the rough mix plays it quietly)."""
     inputs = []; chains = []; n = 0
     for g in plan['segments']:
-        p = audio_of(folder, g['clip'], g.get('role')); d = g['dur_s']; gain = window_gain(folder, g)
+        p = audio_of(folder, g['clip'], g.get('role')); d = g['dur_s']; gain = bg_gain if bg_gain is not None and not role_has_speech(g.get('role')) else window_gain(folder, g)
         if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain}{mute_filter(never_spans(folder, g['clip'], g['clip_start_s'], d) if role_has_speech(g.get('role')) else [])},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
         n += 1
@@ -183,7 +200,8 @@ def build_audio(folder, plan, out, total_s):
     if has_vo: inputs += ['-i', vo]; chain += f";[{k}:a]aresample=48000,aformat=channel_layouts=mono,{'asplit=2[vo][vokey]' if has_mu else 'anull[vo]'}"; k += 1
     if has_mu:                                                                                        # the music from its first downbeat, ducked under the voice-over, fading out at the end
         inputs += ['-ss', f"{mus['offset_s']:.3f}", '-t', f'{total_s:.3f}', '-i', mp]
-        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono,volume=0.5,afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
+        duck = music_duck(plan); duck_f = f",volume='{duck}':eval=frame" if duck else ''
+        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono,volume={music_gain}{duck_f},afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
         chain += (';[mu][vokey]sidechaincompress=threshold=0.02:ratio=6:attack=30:release=500[mud]' if has_vo else ';[mu]anull[mud]')
     mix = ['[nat]'] + (['[vo]'] if has_vo else []) + (['[mud]'] if has_mu else [])
     chain += f";{''.join(mix)}amix=inputs={len(mix)}:normalize=0:duration=longest,{tail}"

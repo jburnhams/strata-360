@@ -250,6 +250,9 @@ def plan(clips, lib, music, st=None):
     return assign_techniques(windows, clips, lib, music, st, rng, warnings)
 
 # --------------------------------------------------------------------------------------------------------------------------------------------- 3. techniques
+VIEW_TECH = {'mid': 'selfie_hold', 'close': 'selfie_close', 'far': 'selfie_far'}      # the views of you a window can ask for (K6)
+
+
 def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
     """The beam search over an ordered list of windows for each window's technique; shared by the beat planner (`plan`) and the script planner (edit/script_plan.py). `windows` are in film order (their
     beats add up to `B`, default the music's); returns the ordered list of Seg."""
@@ -275,6 +278,10 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             opts.append((tid, base))
         options.append(sorted(opts, key=lambda x: -x[1])[:8])
         want = w.tech_id if w.fixed else st.tech_force.get(wids[k])
+        view = getattr(w, 'view', None)
+        if not want and view in VIEW_TECH:                                                                  # the script asked for a view of you (mid, close, far): used when the footage allows it
+            if any(o[0] == VIEW_TECH[view] for o in opts): want = VIEW_TECH[view]
+            else: warnings.append(f"{wids[k]}: the {view} view of you was asked for but this window does not allow it (you are not found, or too near or too far); the planner chose its own shot")
         if want:
             if any(o[0] == want for o in opts): opts = [o for o in opts if o[0] == want]
             elif w.fixed: opts = [(want, 0.0)]                                                               # a locked window keeps its technique even if the rules would no longer allow it

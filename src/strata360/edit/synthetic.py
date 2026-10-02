@@ -23,7 +23,7 @@ def key_of(c):
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=None, t1=None, id=None, size=None):
+def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=None, t1=None, id=None, size=None, approved=True):
     """The clip for a gap (or for a stretch of it: `t0` and `t1` in epoch seconds), by length in the film or by speed-up (not both; neither gives the default)."""
     if kind not in KINDS: raise ValueError(f'kind: one of {KINDS}')
     if seconds is not None and speedup is not None: raise ValueError('give the length in the film or the speed-up, not both')
@@ -42,6 +42,7 @@ def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=N
         except ValueError: raise ValueError('size: WIDTHxHEIGHT, such as 3840x2160')
         if w < 320 or h < 180: raise ValueError('size: at least 320x180')
         c['size'] = f'{w}x{h}'
+    c['approved'] = bool(approved)                                                              # a clip the script asked for (not you) is not rendered until you approve it: a 3D flyover is minutes of machine time
     c['key'] = key_of(dict(c, t0=round(a), t1=round(b))); return c
 
 
@@ -60,7 +61,7 @@ def save(folder, doc):
 def upsert(folder, clip):
     """Add the clip, or replace the one with its id. A changed key means the old render no longer matches: the status goes back to planned and the file is forgotten."""
     doc = load(folder); old = next((c for c in doc['clips'] if c['id'] == clip['id']), None)
-    if old and old.get('key') == clip['key']: clip = dict(clip, status=old.get('status', clip['status']), **({'file': old['file']} if old.get('file') else {}))
+    if old and old.get('key') == clip['key']: clip = dict(clip, status=old.get('status', clip['status']), approved=bool(old.get('approved', True)) or bool(clip.get('approved', True)), **({'file': old['file']} if old.get('file') else {}))
     doc['clips'] = sorted([c for c in doc['clips'] if c['id'] != clip['id']] + [clip], key=lambda c: c['t0']); save(folder, doc); return clip
 
 

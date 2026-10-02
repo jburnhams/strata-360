@@ -55,3 +55,15 @@ class TestMusicRecord:
     def test_remove_forgets_the_record(self, tmp_path):
         rd = str(tmp_path); M.store(rd, open(make_track(str(tmp_path / 'a.wav'), 124.0, 1.3, 30), 'rb').read(), '.wav', 'a.wav'); M.remove(rd)
         assert not os.path.exists(os.path.join(rd, 'music.json')) and not os.path.exists(os.path.join(rd, 'music', 'spectrogram.png'))
+
+
+def test_the_music_is_turned_down_under_the_runners_own_speech_and_only_there(tmp_path):
+    f = str(tmp_path); rd = config.race_dir(f); os.makedirs(os.path.join(rd, 'music'))
+    make_track(os.path.join(rd, 'music', 'track.wav'), 124.0, 1.3, 30)
+    seg = lambda t0, role: dict(clip='X', clip_start_s=0.0, dur_s=4.0, film_start_s=t0, speech=role == 'clip', role=role)
+    plan = dict(film=dict(music=dict(file='music/track.wav', offset_s=0.0)), segments=[seg(0.0, 'broll'), seg(4.0, 'clip'), seg(8.0, 'broll')])
+    out = os.path.join(f, 'a.wav'); PV.build_audio(f, plan, out, 12.0, music_gain=0.5)
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', out, '-f', 'f32le', '-ac', '1', '-ar', '8000', '-'], capture_output=True).stdout; a = np.frombuffer(raw, np.float32)
+    rms = lambda t0, t1: float(np.sqrt(np.mean(a[int(t0 * 8000):int(t1 * 8000)] ** 2)))
+    assert rms(4.5, 7.5) < 0.6 * rms(0.5, 3.5) and rms(8.5, 11.0) > 0.7 * rms(0.5, 3.5)                       # down by about 8 dB inside the window, back up after it
+    assert PV.music_duck(dict(segments=[])) == '' and PV.music_duck(plan).count('clip(') == 1

@@ -141,3 +141,14 @@ def test_overflow_choices_name_what_can_be_done_and_are_empty_when_it_fits():
     assert V.overflow_choices('synth', 0.0) == [] and V.overflow_choices('recorded', 0.004) == []
     s = V.overflow_choices('synth', 2.0); r = V.overflow_choices('recorded', 2.0)
     assert 'about 2.0 s' in s[0] and any('faster' in c for c in s) and not any('faster' in c for c in r) and any('record it again' in c for c in r)
+
+
+def test_the_voices_measured_speed_comes_from_the_spoken_narration_of_the_plan(tmp_path):
+    import json, os
+    from strata360.edit import voiceover as V
+    from strata360.pipeline import config
+    f = str(tmp_path / 'p'); d = os.path.join(config.race_dir(f), 'script2'); os.makedirs(d)
+    line = lambda words, sec, est=False: dict(seg='a', text=' '.join(['w'] * words), speak_s=sec, estimated=est, film_start_s=0, seconds=sec)
+    json.dump(dict(lines=[line(30, 10.0), line(30, 10.0), line(500, 10.0, est=True)]), open(os.path.join(d, 'lines.json'), 'w')); assert V.measured_wpm(f) == 180                     # estimated lines are left out
+    json.dump(dict(lines=[line(10, 4.0)]), open(os.path.join(d, 'lines.json'), 'w')); assert V.measured_wpm(f) is None                                                            # too little speech to say
+    assert V.measured_wpm(str(tmp_path / 'none')) is None

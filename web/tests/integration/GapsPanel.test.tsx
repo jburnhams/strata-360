@@ -75,6 +75,21 @@ describe('GapsPanel', () => {
     expect(screen.queryByRole('button', { name: 'Remove G01 clip' })).not.toBeInTheDocument()
   })
 
+  it('shows why the last render failed', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap({ clips: [makeGapClip({ error: 'strata360.overlay.tiles.MissingKey: the map style tf-landscape needs a key' })] })] })
+    setup(<GapsPanel folder="/data" />)
+    expect(await screen.findByLabelText('G01 state')).toHaveTextContent('failed: strata360.overlay.tiles.MissingKey')
+  })
+
+  it('says a clip the script planned is waiting for approval and offers to approve and render it', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap({ clips: [makeGapClip({ kind: 'flyover', approved: false })] })] })
+    const plan = recordRequests('/api/gaps/clip'); mockPost('/api/gaps/clip', makeGapClip({ kind: 'flyover', approved: true })); mockPost('/api/gaps/render', { started: true })
+    const { user } = setup(<GapsPanel folder="/data" />)
+    expect(await screen.findByLabelText('G01 state')).toHaveTextContent('planned by the script: 3D flyover waiting for your approval')
+    await user.click(screen.getByRole('button', { name: 'Approve and render' }))
+    await waitFor(() => expect(plan.some(r => r.body && (r.body as { kind?: string }).kind === 'flyover')).toBe(true))
+  })
+
   it('plays a rendered clip and can remove it', async () => {
     mockGet('/api/gaps', { gaps: [makeGap({ clips: [makeGapClip({ exists: true, status: 'ready' })] })] })
     const del = recordRequests('/api/gaps/clip'); mockDelete('/api/gaps/clip', { removed: true })

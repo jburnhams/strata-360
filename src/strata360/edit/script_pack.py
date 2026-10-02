@@ -79,21 +79,51 @@ def scene_summary(cdir):
     return dict(settings=top('setting'), weather=top('weather', 2), lighting=top('lighting', 2), crowd=top('crowd', 1), seen=desc[::step][:3], lens_problems=[v for v in top('lens_problems', 2) if v != 'none'])
 
 
-def synthetic_clips(folder, tr, tz):
-    """The generated clips that are rendered (edit/synthetic.py) as pack clips: a label like `G03`, a length in the film, the stretch of the race they cover, and no words. They are picture only."""
+MAX_GAP_S = 45.0                       # the longest a gap is shown in the film (edit/synthetic.default_seconds caps at the same)
+FLYOVER_NOTE = 'a 3D terrain flyover: needs the user\'s approval to render, minutes of machine time'
+
+
+def you_views(cands):
+    """How much of a clip's usable time has each view of you (K6): {mid, close, far} as shares 0..1 (edit/techniques selfie_hold, selfie_close, selfie_far), from the candidates' features weighted by their length; None when you are hardly in the clip."""
+    spans = [c for c in cands if c.get('kind', 'span') == 'span' and c['end_s'] > c['start_s']] or list(cands); tot = sum(c['end_s'] - c['start_s'] for c in spans)
+    if not tot: return None
+    share = lambda k: sum((c['end_s'] - c['start_s']) * (c.get('features') or {}).get(k, 0.0) for c in spans) / tot
+    mid, close, far = share('protagonist'), share('you_close'), share('you_far')
+    return None if mid < 0.1 else dict(mid=round(mid, 2), close=round(close, 2), far=round(far, 2))
+
+
+def gap_clips(folder, tr, tz):
+    """Every gap in the footage (gps/gaps.py: 20 minutes or more between clips on the track) as a pack clip `G01`..., in time order: no footage, no words, picture only, with the choices for filling it (the animated 2D map, or
+    a 3D flyover with the same numbers on screen), the length it gets by default and the state of any clip already planned for it (edit/synthetic.py)."""
     import datetime as dt
     from strata360.edit import synthetic as SY
-    from strata360.gps import context as X
-    out = []
-    for c in SY.load(folder)['clips']:
-        if c.get('status') != 'ready' or not c.get('file'): continue
-        t0 = dt.datetime.fromisoformat(c['t0'].replace('Z', '+00:00')).timestamp(); t1 = dt.datetime.fromisoformat(c['t1'].replace('Z', '+00:00')).timestamp()
-        d = dict(label=norm_label(c['id']), clip=c['id'], start_utc=c['t0'], duration_s=round(c['seconds'], 1), usable_s=round(c['seconds'], 1), usable=[(0.0, round(c['seconds'], 1))], synthetic=True, race_s=c['duration_s'], speedup=c['speedup'],
-                 scene={}, note='', lines=[], speech_s=0.0, speech_words=0)
-        if tr is not None:
-            ctx = X.context_at(tr, t0, t1, tz); d['track'] = X.describe(ctx)
-            if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
+    from strata360.gps import context as X, gaps as GP
+    if tr is None: return []
+    planned = {c['id']: c for c in SY.load(folder)['clips']}; out = []
+    for g in GP.find_gaps(GP.load_spans(folder), tr, 1200.0, tz):
+        c = planned.get(g['id']); sec = round(c['seconds'], 1) if c else SY.default_seconds(g['duration_s']); ctx = X.context_at(tr, g['t0'], g['t1'], tz)
+        d = dict(label=norm_label(g['id']), clip=g['id'], start_utc=dt.datetime.fromtimestamp(g['t0'], dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=MAX_GAP_S, usable=[(0.0, MAX_GAP_S)], synthetic=True, race_s=g['duration_s'],
+                 speedup=round(g['duration_s'] / sec, 1), scene={}, note='', lines=[], speech_s=0.0, speech_words=0, track=X.describe(ctx),
+                 gap={k: g.get(k) for k in ('local_start', 'local_end', 'km_start', 'km_end', 'distance_km', 'ascent_m', 'daylight', 'moving_share')},
+                 options=[dict(kind='map', default_seconds=sec), dict(kind='flyover', default_seconds=sec, note=FLYOVER_NOTE)], planned=dict(kind=c['kind'], seconds=c['seconds'], status=c.get('status'), approved=c.get('approved', True)) if c else None)
+        if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
         out.append(d)
+    return out
+
+
+def music_facts(folder):
+    """What the writer is told about the music, in FILM time (the film starts at the track's first downbeat): its length, tempo, the sections with their energy, and the lyrics (lyrics.py): where it is sung and the words heard
+    (rough: the times are right, the words are often wrong). None when there is no track."""
+    from strata360.edit import project as PJ, lyrics as LY
+    edit = PJ.load(folder); mus = PJ.music_record(folder, edit['settings'])
+    if not mus: return None
+    a = mus['analysis']; beat = 60.0 / float(a['bpm']); off = float(a['offset_s']); length = round(float(a['usable_beats']) * beat, 1)
+    out = dict(length_s=length, bpm=round(float(a['bpm']), 1), bar_s=round(beat * int(a['bar_beats']), 2), sections=[dict(t0=round(s0 * beat, 1), t1=round(s1 * beat, 1), energy=round(float(e), 2)) for s0, s1, e in a['sections']], lyrics=None)
+    v = LY.view(folder)
+    if v and not v['instrumental']:
+        film = lambda t: round(t - off, 1); spans = [[film(x), film(y)] for x, y in v['vocal_spans'] if y - off > 0 and x - off < length]
+        out['lyrics'] = dict(language=v.get('language'), vocal_spans=[[max(x, 0.0), min(y, length)] for x, y in spans], phrases=[dict(t0=max(film(p['t0']), 0.0), t1=film(p['t1']), text=p['text'], doubtful=p['doubtful']) for p in v['phrases'] if p['counts'] and p['t1'] - off > 0 and p['t0'] - off < length])
+    elif v: out['lyrics'] = dict(instrumental=True)
     return out
 
 
@@ -107,7 +137,7 @@ def build(folder, tz=None):
     for c in sorted(clips, key=lambda c: c['start_utc']):
         cdir = os.path.join(rd, 'clips', c['id']); label = label_of(c['id']); t0 = dt.datetime.fromisoformat(c['start_utc'].replace('Z', '+00:00')).timestamp(); dur = float(c['duration_s'])
         usable = merge([(x['start_s'], x['end_s']) for x in c['candidates']]); usable_s = sum(b - a for a, b in usable)
-        d = dict(label=label, clip=c['id'], start_utc=c['start_utc'], duration_s=round(dur, 1), usable_s=round(usable_s, 1), usable=[(round(a, 1), round(b, 1)) for a, b in usable])
+        d = dict(label=label, clip=c['id'], start_utc=c['start_utc'], duration_s=round(dur, 1), usable_s=round(usable_s, 1), usable=[(round(a, 1), round(b, 1)) for a, b in usable], you_views=you_views(c['candidates']))
         if tr is not None:
             ctx = X.context_at(tr, t0, t0 + dur, tz); d['track'] = X.describe(ctx)
             if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
@@ -117,11 +147,11 @@ def build(folder, tz=None):
             if pj.get('covered') and pj.get('summary'): d['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '')
         d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
         d['speech_s'] = round(sum(l['t1'] - l['t0'] for l in d['lines']), 1); d['speech_words'] = sum(l['words'] for l in d['lines']); out.append(d)
-    out = sorted(out + synthetic_clips(folder, tr, tz), key=lambda c: c['start_utc'])
+    out = sorted(out + gap_clips(folder, tr, tz), key=lambda c: c['start_utc'])
     speech_s = sum(c['speech_s'] for c in out); speech_w = sum(c['speech_words'] for c in out)
     race = dict(note=(notes.get('folder') or '').strip(), details=MT.describe(folder), km_total=MT.load(folder).get('distance_km'), speech_wpm=round(speech_w / speech_s * 60) if speech_s else None, clips_missing=missing)
     if tr is not None: race['track'] = f"the GPS recorded {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours (the runner's own elapsed time: not a time limit, and the distance can exceed the official one because of detours). The km in each clip's track line is GPS distance from the start"
-    return dict(race=race, clips=out)
+    return dict(race=race, clips=out, music=music_facts(folder))
 
 
 def render(pack, with_usable=False, marks=None):
@@ -130,14 +160,29 @@ def render(pack, with_usable=False, marks=None):
     if r.get('details'): L.append(r['details'])
     if r.get('track'): L.append('Track: ' + r['track'])
     if r.get('note'): L += ["The runner's own notes about the race:", r['note']]
+    m = pack.get('music')
+    if m:
+        L += ['', 'THE MUSIC (times are FILM seconds: the film starts with the music and ends when it ends)', f"length {m['length_s']:.0f} s, {m['bpm']:g} bpm, a bar is {m['bar_s']:g} s. Sections by energy (0 quiet, 1 loud): " + '; '.join(f"{x['t0']:.0f}-{x['t1']:.0f} s {x['energy']:.2f}" for x in m['sections'])]
+        ly = m.get('lyrics')
+        if ly and ly.get('instrumental'): L.append('The track is instrumental: nothing is sung.')
+        elif ly:
+            L.append(f"Sung ({ly.get('language')}): " + (', '.join(f'{a:.0f}-{b:.0f} s' for a, b in ly['vocal_spans']) or 'nowhere') + '. Narration over singing is fine and often unavoidable (the music is turned down under it).')
+            L.append('Words heard by speech recognition (rough: the times are right, the words are often wrong; use them for what the song is about and where, never quote them):')
+            L += [f"  [{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') for p in ly['phrases'][:45]]
     L += ['', f"CLIPS (all {len(pack['clips'])}, in shooting order; the film follows this order)"]
     for c in pack['clips']:
         L.append(f"\n=== CLIP {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
-        if c.get('synthetic'): L.append(f"NO FOOTAGE: a generated animated map of the route, {c['race_s'] / 3600:.1f} h of the race in {c['duration_s']} s (x{c['speedup']:g}). Picture only: use it as b-roll or under narration; it has no sound and no words.")
+        if c.get('synthetic'):
+            g = c.get('gap') or {}; pl = c.get('planned')
+            L.append(f"NO FOOTAGE: a gap of {c['race_s'] / 3600:.1f} h between clips ({g.get('local_start')} to {g.get('local_end')}, km {g.get('km_start')} to {g.get('km_end')}, +{g.get('ascent_m')} m{', ' + g['daylight'] if g.get('daylight') else ''}); {int(round(100 * (g.get('moving_share') or 0)))}% of it spent moving. "
+                     f"Fill it with a generated clip: a 2D map (the route drawn as the runner moves along it) or a 3D terrain flyover (needs the user's approval to render), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
+                     + (f" Already planned: {pl['kind']}, {pl['seconds']} s ({pl['status']})." if pl else ''))
         if c.get('track'): L.append('track: ' + c['track'])
         if c.get('place'): L.append('place: ' + c['place'])
         s = c.get('scene') or {}
         if s: L.append('camera sees: ' + '; '.join(x for x in [', '.join(s.get('settings') or []), ('weather ' + ', '.join(s['weather'])) if s.get('weather') else '', ('lighting ' + ', '.join(s['lighting'])) if s.get('lighting') else '', ('crowd ' + ', '.join(s['crowd'])) if s.get('crowd') and s['crowd'] != ['none'] else '', ('; '.join(s['seen'])) if s.get('seen') else '', ('lens problems: ' + ', '.join(s['lens_problems'])) if s.get('lens_problems') else ''] if x))
+        yv = c.get('you_views')
+        if yv and (yv['close'] >= 0.3 or yv['far'] >= 0.3): L.append(f"views of you (ask for one with \"view\" on a clip or b-roll item): mid {yv['mid'] * 100:.0f}% of the usable time, close (a face zoom) {yv['close'] * 100:.0f}%, far (ultra wide, the whole body and the surroundings) {yv['far'] * 100:.0f}%")
         if c.get('note'): L.append("runner's note: " + c['note'])
         if with_usable and c.get('usable'): L.append('usable stretches (s): ' + ', '.join(f'{a}-{b}' for a, b in c['usable']))
         if c['lines']:

@@ -7,7 +7,7 @@ Built on FastAPI (interactive API docs at /api/docs). Security model: the server
 `?token=` on first visit, or as `Authorization: Bearer`). Nothing here deletes or modifies footage; the only writes are the project folders (`<footage>/strata360/`).
 
 API (JSON):  GET /api/roots, /api/browse?path=, /api/progress?folder=, /api/log?folder=;  POST /api/open {folder, languages?, gps?}, /api/run {folder}, /api/stop {folder}."""
-import argparse, glob, json, os, secrets, subprocess, sys, threading, time
+import argparse, glob, io, json, os, re, secrets, subprocess, sys, threading, time
 from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
@@ -19,6 +19,10 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
+TILES = {}                    # map style -> overlay.tiles.Tiles (one per style, shared by every request)
+TILE_FETCH = None             # tests replace this: fetch(url) -> bytes
+LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
 PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
 SCRIPT2_JOBS = {}             # folder -> Popen of a running `strata360 script-draft`
@@ -680,6 +684,32 @@ def create_app(roots, token=None):
             except Exception as e: raise HTTPException(400, f'could not read the track: {type(e).__name__}: {e}')
         return TRACKS[key]
 
+    def tile_source(style):
+        """The Tiles of a map style. The key stays on the server (secrets.env); the browser only ever sees /api/tiles URLs. A missing key is an error (503) with the message to fix it, never an empty map."""
+        from strata360.overlay import tiles as TL
+        if style not in TL.STYLES: raise HTTPException(404, f'unknown map style {style}: one of {", ".join(sorted(TL.STYLES))}')
+        if style not in TILES:
+            try: TILES[style] = TL.Tiles(style, fetch=TILE_FETCH)
+            except TL.MissingKey as e: raise HTTPException(503, str(e))
+        return TILES[style]
+
+    @api.get('/api/tiles/status', dependencies=[Depends(auth)])
+    def get_tiles_status(style: str = 'tf-landscape'):                                  # whether the map background can be drawn (and the credit it must carry), for the overview map
+        from strata360.overlay import tiles as TL
+        try: t = tile_source(style)
+        except HTTPException as e: return dict(ok=False, style=style, error=str(e.detail))
+        return dict(ok=True, style=style, error='', credit=TL.STYLES[style]['credit'], tile_px=t.px)
+
+    @api.get('/api/tiles/{style}/{z}/{x}/{y}')
+    def get_tile(request: Request, style: str, z: int, x: int, y: int):                 # one map tile as a PNG, from the disk cache shared by every race (fetched once from the tile service, key kept here)
+        from strata360.overlay import tiles as TL
+        auth(request)
+        if not 0 <= z <= TL.MAX_ZOOM: raise HTTPException(404, 'zoom out of range')
+        t = tile_source(style)
+        try: im = t.tile(z, x, y)
+        except TL.TileError as e: raise HTTPException(502, str(e))
+        buf = io.BytesIO(); im.save(buf, 'PNG'); return Response(buf.getvalue(), media_type='image/png', headers={'Cache-Control': 'max-age=86400'})
+
     @api.get('/api/track/series', dependencies=[Depends(auth)])
     def get_track_series(folder: str, points: int = 2000):                               # the track decimated for the charts: elapsed time, km, altitude (with each bin's lowest and highest), pace of the moving part, share moving, heart rate
         from strata360.gps import series as GS
@@ -808,10 +838,20 @@ def create_app(roots, token=None):
         from strata360.edit import synthetic as SY
         cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.find_gaps(GP.load_spans(f), loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
         job = GAP_JOBS.get(f); running = job[0] if job and job[1].poll() is None else None
-        def prog(cid):
-            try: tail = open(os.path.join(rd, 'synthetic', cid + '.log')).read().strip().splitlines()[-1]; return tail
-            except (OSError, IndexError): return ''
-        for c in docs: c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
+        def log_lines(cid):
+            try: return open(os.path.join(rd, 'synthetic', cid + '.log'), errors='replace').read().strip().splitlines()
+            except OSError: return []
+        def prog(cid):                                                               # the newest "n/m frames" line (the log also holds start-up warnings that say nothing about the render)
+            for l in reversed(log_lines(cid)):
+                if re.search(r'\d+/\d+ frames', l): return l.strip()
+            return 'starting…'
+        def failure(cid):                                                            # why the last render stopped: the last real error line, not the interpreter's hashlib warnings
+            for l in reversed(log_lines(cid)):
+                if re.match(r'^[\w.]*(Error|Exception|Busy|MissingKey)\b', l) and 'unsupported hash type' not in l: return l.strip()[:300]
+            return ''
+        for c in docs:
+            c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
+            c['error'] = '' if c['rendering'] or c['exists'] else failure(c['id'])
         for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]
         return gaps
 
@@ -845,11 +885,20 @@ def create_app(roots, token=None):
         except ValueError as e: raise HTTPException(400, str(e))
         return SY.upsert(f, clip)
 
+    @api.post('/api/gaps/approve', dependencies=[Depends(auth)])
+    def post_gap_approve(body: dict):                                                    # {folder, id}: approve a clip the script planned (a 3D flyover is not rendered until you do)
+        from strata360.edit import synthetic as SY
+        f = folder_of(body.get('folder')); doc = SY.load(f); c = next((c for c in doc['clips'] if c['id'] == body.get('id')), None)
+        if c is None: raise HTTPException(404, 'no such planned clip')
+        c['approved'] = True; SY.save(f, doc); return c
+
     @api.post('/api/gaps/render', dependencies=[Depends(auth)])
     def post_gap_render(body: dict):                                                     # {folder, id}: render a planned generated clip in the background (`strata360 gap-clip --clip`)
         from strata360.edit import synthetic as SY
         f = folder_of(body.get('folder')); cid = str(body.get('id') or '')
-        if not any(c['id'] == cid for c in SY.load(f)['clips']): raise HTTPException(404, 'no such planned clip')
+        c = next((c for c in SY.load(f)['clips'] if c['id'] == cid), None)
+        if c is None: raise HTTPException(404, 'no such planned clip')
+        if c.get('approved') is False: raise HTTPException(409, f"{cid} was planned by the script and is not approved yet: approve it first (a {c['kind']} render takes machine time)")
         job = GAP_JOBS.get(f)
         if job and job[1].poll() is None: return dict(started=False, reason=f'{job[0]} is already being rendered')
         d = os.path.join(config.race_dir(f), 'synthetic'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, cid + '.log'), 'wb')
@@ -872,6 +921,73 @@ def create_app(roots, token=None):
         auth(request); f = folder_of(folder); c = next((c for c in SY.load(f)['clips'] if c['id'] == id), None); p = os.path.join(config.race_dir(f), (c or {}).get('file') or '-')
         if not c or not os.path.exists(p): raise HTTPException(404, 'that clip has not been rendered yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/lyrics', dependencies=[Depends(auth)])
+    def get_lyrics(folder: str):                                                         # the words found in the music track: where it is sung, with your corrections, and whether a run is going or failed
+        from strata360.edit import lyrics as LY
+        f = folder_of(folder); job = LYRICS_JOBS.get(f); running = bool(job and job.poll() is None); log = os.path.join(config.race_dir(f), 'lyrics.log')
+        try: lines = [l for l in open(log, errors='replace').read().strip().splitlines() if 'unsupported hash type' not in l]
+        except OSError: lines = []
+        err = ''
+        if job and not running and job.returncode: err = next((l for l in reversed(lines) if l.strip() and not l.startswith(('Traceback', '  File', '    '))), 'failed')[:300]
+        v = LY.view(f) or {}
+        return dict(LY.status(f), building=running, error=err, log=lines[-1] if lines else '', phrases_list=v.get('phrases', []), vocal_spans=v.get('vocal_spans', []))
+
+    @api.post('/api/lyrics', dependencies=[Depends(auth)])
+    def post_lyrics(body: dict):                                                         # {folder}: listen to the track in the background (`strata360 lyrics`)
+        from strata360.edit import lyrics as LY
+        f = folder_of(body.get('folder')); job = LYRICS_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='the lyrics are already being found')
+        if not LY.status(f)['has_track']: return dict(started=False, reason='there is no music track yet: add one first')
+        log = open(os.path.join(config.race_dir(f), 'lyrics.log'), 'wb')
+        LYRICS_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'lyrics', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.post('/api/lyrics/phrase', dependencies=[Depends(auth)])
+    def post_lyrics_phrase(body: dict):                                                  # {folder, key, text?, deleted?, keep?}: correct one phrase (new words, not sung, or counts as sung after all)
+        from strata360.edit import lyrics as LY
+        p = LY.edit(folder_of(body.get('folder')), str(body.get('key') or ''), body.get('text'), body.get('deleted'), body.get('keep'))
+        if p is None: raise HTTPException(404, 'no such phrase')
+        return p
+
+    @api.delete('/api/lyrics', dependencies=[Depends(auth)])
+    def delete_lyrics(folder: str, corrections: bool = False):                           # reset: forget the record (and your corrections with ?corrections=true)
+        from strata360.edit import lyrics as LY
+        f = folder_of(folder); job = LYRICS_JOBS.get(f)
+        if job and job.poll() is None: raise HTTPException(409, 'the lyrics are being found')
+        return dict(reset=LY.reset(f, corrections))
+
+    @api.get('/api/script2/mix', dependencies=[Depends(auth)])
+    def get_rough_mix(folder: str):                                                      # the rough mix of the film plan: whether there is one, whether it is out of date, whether it is being made and how the last try went
+        from strata360.edit import roughmix as RM
+        f = folder_of(folder); job = MIX_JOBS.get(f); running = bool(job and job.poll() is None); log = os.path.join(RM.dir_of(f), 'mix.log')
+        try: lines = [l for l in open(log, errors='replace').read().strip().splitlines() if 'unsupported hash type' not in l]
+        except OSError: lines = []
+        err = ''
+        if job and not running and job.returncode: err = next((l for l in reversed(lines) if l.strip() and not l.startswith(('Traceback', '  File', '    '))), 'failed')[:300]
+        return dict(RM.status(f), building=running, error=err, log=lines[-1] if lines else '')
+
+    @api.post('/api/script2/mix', dependencies=[Depends(auth)])
+    def post_rough_mix(body: dict):                                                      # {folder}: make the rough mix in the background (`strata360 rough-mix`)
+        from strata360.edit import roughmix as RM
+        f = folder_of(body.get('folder')); job = MIX_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='the rough mix is already being made')
+        if not RM.status(f)['has_plan']: return dict(started=False, reason='there is no film plan yet: make the film from a script first')
+        os.makedirs(RM.dir_of(f), exist_ok=True); log = open(os.path.join(RM.dir_of(f), 'mix.log'), 'wb')
+        MIX_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'rough-mix', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.delete('/api/script2/mix', dependencies=[Depends(auth)])
+    def delete_rough_mix(folder: str):                                                   # reset: forget the mix, so it is made again from scratch
+        from strata360.edit import roughmix as RM
+        f = folder_of(folder); job = MIX_JOBS.get(f)
+        if job and job.poll() is None: raise HTTPException(409, 'the rough mix is being made')
+        return dict(reset=RM.reset(f))
+
+    @api.get('/api/script2/mix/audio')
+    def get_rough_mix_audio(request: Request, folder: str):                              # the mix (Range requests are handled, so seeking works); <audio> cannot send headers, so the cookie authenticates
+        from strata360.edit import roughmix as RM
+        auth(request); p = RM.path_of(folder_of(folder))
+        if not os.path.exists(p): raise HTTPException(404, 'the rough mix has not been made yet')
+        return FileResponse(p, media_type='audio/mp4', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/script', dependencies=[Depends(auth)])
     def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script

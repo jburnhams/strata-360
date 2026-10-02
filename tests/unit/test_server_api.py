@@ -274,6 +274,15 @@ class TestGapClipsApi(TestRaceMapData):
         assert client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True); cmd = fake_popen.instances[-1].cmd; assert 'gap-clip' in cmd and cmd[cmd.index('--clip') + 1] == 'G01'
         g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert g['rendering'] is True and client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json()['started'] is False
 
+    def test_a_clip_the_script_planned_is_not_rendered_until_it_is_approved(self, client, project, fake_popen):
+        from strata360.edit import synthetic as SY
+        self.with_gap(project); f = project.folder; g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]
+        SY.upsert(f, SY.make(g, seconds=10, kind='flyover', approved=False)); c = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert c['approved'] is False
+        r = client.post('/api/gaps/render', json=dict(folder=f, id='G01')); assert r.status_code == 409 and 'not approved yet' in r.json()['detail'] and not fake_popen.instances
+        assert client.post('/api/gaps/approve', json=dict(folder=f, id='G01')).json()['approved'] is True and client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True)
+        assert client.post('/api/gaps/approve', json=dict(folder=f, id='nope')).status_code == 404
+        client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10, kind='flyover')); assert client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['approved'] is True              # asking for it yourself is the approval
+
     def test_a_rendered_clip_can_be_played_and_removed(self, client, project):
         from strata360.edit import synthetic as SY
         self.with_gap(project); f = project.folder; c = client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10)).json(); assert client.get('/api/gaps/video', params=dict(folder=f, id='G01')).status_code == 404
@@ -281,3 +290,98 @@ class TestGapClipsApi(TestRaceMapData):
         doc = SY.load(f); doc['clips'][0].update(status='ready', file='synthetic/G01.mp4'); SY.save(f, doc)
         assert client.get('/api/gaps/video', params=dict(folder=f, id='G01')).content == b'x' * 10 and client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['exists'] is True
         assert client.delete('/api/gaps/clip', params=dict(folder=f, id='G01')).json() == dict(removed=True) and not os.path.exists(os.path.join(project.race_dir, 'synthetic', 'G01.mp4')) and SY.load(f)['clips'] == [] and c
+
+    def test_progress_ignores_start_up_warnings_and_a_failure_shows_its_real_error(self, client, project, fake_popen):
+        self.with_gap(project); f = project.folder; client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10)); client.post('/api/gaps/render', json=dict(folder=f, id='G01'))
+        log = os.path.join(project.race_dir, 'synthetic', 'G01.log'); noise = 'ValueError: unsupported hash type blake2s\n'
+        open(log, 'w').write('  G01: 40/300 frames\n' + noise); g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert g['progress'] == 'G01: 40/300 frames' and g['error'] == ''
+        open(log, 'w').write(noise); assert client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['progress'] == 'starting…'
+        from strata360.server import app as A
+        A.GAP_JOBS.clear(); open(log, 'w').write(noise + 'Traceback (most recent call last):\nstrata360.overlay.tiles.MissingKey: the map style tf-landscape needs a key\n' + noise)
+        c = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert c['rendering'] is False and c['error'].startswith('strata360.overlay.tiles.MissingKey')
+
+
+class TestRoughMixApi:
+    def plan(self, project):
+        project.write_json('project.json', dict(edit=dict(plan=dict(source='script', film=dict(length_s=8.0), segments=[dict(clip='X', clip_start_s=0.0, dur_s=8.0)]))))
+
+    def test_without_a_plan_nothing_is_started(self, client, project, fake_popen):
+        f = project.folder; assert client.get('/api/script2/mix', params=dict(folder=f)).json()['has_plan'] is False
+        r = client.post('/api/script2/mix', json=dict(folder=f)).json(); assert r['started'] is False and 'no film plan' in r['reason'] and not fake_popen.instances
+
+    def test_making_the_mix_runs_the_command_once_and_the_audio_is_served_when_it_exists(self, client, project, fake_popen):
+        self.plan(project); f = project.folder; assert client.post('/api/script2/mix', json=dict(folder=f)).json() == dict(started=True)
+        assert 'rough-mix' in fake_popen.instances[-1].cmd and client.post('/api/script2/mix', json=dict(folder=f)).json()['started'] is False
+        s = client.get('/api/script2/mix', params=dict(folder=f)).json(); assert s['building'] is True and s['exists'] is False and client.get('/api/script2/mix/audio', params=dict(folder=f)).status_code == 404
+        d = os.path.join(project.race_dir, 'roughmix'); open(os.path.join(d, 'mix.m4a'), 'wb').write(b'x' * 12); json.dump(dict(key='k', length_s=8.0, made_at='t'), open(os.path.join(d, 'mix.json'), 'w'))
+        assert client.get('/api/script2/mix/audio', params=dict(folder=f)).content == b'x' * 12
+
+    def test_reset_forgets_the_mix_unless_it_is_being_made(self, client, project, fake_popen):
+        self.plan(project); f = project.folder; d = os.path.join(project.race_dir, 'roughmix'); os.makedirs(d, exist_ok=True); open(os.path.join(d, 'mix.m4a'), 'wb').write(b'x'); json.dump(dict(key='k', parts={}), open(os.path.join(d, 'mix.json'), 'w'))
+        assert client.delete('/api/script2/mix', params=dict(folder=f)).json() == dict(reset=True) and not os.path.exists(os.path.join(d, 'mix.m4a')) and client.delete('/api/script2/mix', params=dict(folder=f)).json() == dict(reset=False)
+        client.post('/api/script2/mix', json=dict(folder=f)); assert client.delete('/api/script2/mix', params=dict(folder=f)).status_code == 409
+
+    def test_a_failed_run_shows_its_real_error_not_the_interpreters_warnings(self, client, project, fake_popen):
+        self.plan(project); f = project.folder; client.post('/api/script2/mix', json=dict(folder=f)); fake_popen.instances[-1].returncode = 1
+        open(os.path.join(project.race_dir, 'roughmix', 'mix.log'), 'w').write('ValueError: unsupported hash type blake2s\nTraceback (most recent call last):\n  File "x", line 1\nno voice is installed: run voice setup\n')
+        s = client.get('/api/script2/mix', params=dict(folder=f)).json(); assert s['building'] is False and s['error'] == 'no voice is installed: run voice setup'
+
+
+class TestMapTiles:
+    @pytest.fixture(autouse=True)
+    def keys(self, tmp_path, monkeypatch):
+        from strata360.edit import llm_remote as L
+        monkeypatch.setattr(L, 'VARS_FILE', str(tmp_path / 'secrets.env')); monkeypatch.delenv('THUNDERFOREST_API_KEY', raising=False)
+
+    def served(self, monkeypatch, fetch):
+        from strata360.server import app as A
+        monkeypatch.setattr(A, 'TILE_FETCH', fetch)
+
+    def test_a_tile_is_fetched_once_through_the_server_and_then_comes_from_the_cache(self, client, monkeypatch):
+        from overlay_fakes import TileServer
+        ts = TileServer(colour=(10, 200, 30)); self.served(monkeypatch, ts)
+        r = client.get('/api/tiles/osm/5/16/10'); assert r.status_code == 200 and r.headers['content-type'] == 'image/png' and r.content[:4] == b'\x89PNG'
+        assert client.get('/api/tiles/osm/5/16/10').status_code == 200 and len(ts.urls) == 1
+
+    def test_the_key_stays_on_the_server_and_is_never_in_what_the_browser_gets(self, client, monkeypatch):
+        from overlay_fakes import TileServer
+        monkeypatch.setenv('THUNDERFOREST_API_KEY', 'secretkey123'); ts = TileServer(); self.served(monkeypatch, ts)
+        r = client.get('/api/tiles/tf-landscape/6/32/21'); assert r.status_code == 200 and 'secretkey123' in ts.urls[0] and b'secretkey123' not in r.content
+        s = client.get('/api/tiles/status', params=dict(style='tf-landscape')).json(); assert s['ok'] is True and 'Thunderforest' in s['credit'] and 'secretkey123' not in str(s)
+
+    def test_a_missing_key_is_an_error_with_the_fix_not_an_empty_map(self, client):
+        s = client.get('/api/tiles/status', params=dict(style='tf-landscape')).json(); assert s['ok'] is False and 'THUNDERFOREST_API_KEY' in s['error']
+        r = client.get('/api/tiles/tf-landscape/6/32/21'); assert r.status_code == 503 and 'THUNDERFOREST_API_KEY' in r.json()['detail']
+
+    def test_unknown_styles_and_zooms_and_a_failing_service_are_refused_clearly(self, client, monkeypatch):
+        import urllib.error
+        assert client.get('/api/tiles/nope/5/1/1').status_code == 404 and client.get('/api/tiles/osm/40/1/1').status_code == 404
+        def boom(url): raise urllib.error.HTTPError(url, 429, 'slow down', {}, None)
+        self.served(monkeypatch, boom); r = client.get('/api/tiles/osm/5/3/3'); assert r.status_code == 502 and 'HTTP 429' in r.json()['detail']
+
+
+class TestLyricsApi:
+    def track(self, project):
+        os.makedirs(os.path.join(project.race_dir, 'music'), exist_ok=True); open(os.path.join(project.race_dir, 'music', 'track.mp3'), 'wb').write(b'x'); json.dump(dict(file='music/track.mp3', sig=[1, 2]), open(os.path.join(project.race_dir, 'music.json'), 'w'))
+
+    def record(self, project):
+        from strata360.edit import lyrics as LY
+        ph = lambda a, b, t: dict(t0=a, t1=b, text=t, avg_logprob=-0.4, no_speech=0.3, words=[])
+        LY.build(project.folder, log=lambda m: None, transcriber=lambda p: ([ph(10.0, 14.0, 'one'), ph(14.5, 20.0, 'two')], dict(language='en', language_probability=0.9, duration_s=60.0)))
+
+    def test_without_a_track_nothing_is_started(self, client, project, fake_popen):
+        f = project.folder; assert client.get('/api/lyrics', params=dict(folder=f)).json()['has_track'] is False
+        r = client.post('/api/lyrics', json=dict(folder=f)).json(); assert r['started'] is False and 'no music track' in r['reason'] and not fake_popen.instances
+
+    def test_finding_the_lyrics_runs_the_command_once_and_a_failure_shows_its_real_error(self, client, project, fake_popen):
+        self.track(project); f = project.folder; assert client.post('/api/lyrics', json=dict(folder=f)).json() == dict(started=True)
+        assert 'lyrics' in fake_popen.instances[-1].cmd and client.post('/api/lyrics', json=dict(folder=f)).json()['started'] is False and client.get('/api/lyrics', params=dict(folder=f)).json()['building'] is True
+        fake_popen.instances[-1].returncode = 1; open(os.path.join(project.race_dir, 'lyrics.log'), 'w').write('ValueError: unsupported hash type blake2s\nTraceback (most recent call last):\n  File "x", line 1\nModuleNotFoundError: No module named faster_whisper\n')
+        s = client.get('/api/lyrics', params=dict(folder=f)).json(); assert s['building'] is False and s['error'] == 'ModuleNotFoundError: No module named faster_whisper'
+
+    def test_the_phrases_and_sung_stretches_come_back_and_can_be_corrected_and_reset(self, client, project):
+        self.track(project); self.record(project); f = project.folder; g = client.get('/api/lyrics', params=dict(folder=f)).json()
+        assert g['exists'] and [p['key'] for p in g['phrases_list']] == ['10.0-14.0', '14.5-20.0'] and g['vocal_spans'] == [[9.7, 20.3]]
+        r = client.post('/api/lyrics/phrase', json=dict(folder=f, key='14.5-20.0', deleted=True)).json(); assert r['deleted'] is True and client.get('/api/lyrics', params=dict(folder=f)).json()['vocal_spans'] == [[9.7, 14.3]]
+        assert client.post('/api/lyrics/phrase', json=dict(folder=f, key='9.0-9.5', deleted=True)).status_code == 404
+        assert client.delete('/api/lyrics', params=dict(folder=f)).json() == dict(reset=True) and client.get('/api/lyrics', params=dict(folder=f)).json()['exists'] is False

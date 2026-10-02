@@ -135,3 +135,59 @@ def test_narration_longer_than_the_clips_footage_gets_the_missing_time_held_with
     d = dict(wpm=150, items=[dict(type='vo', clip='0003', text='A long line over a very short clip.')])
     r = SPL.build(d, pack, [C1, C2, tiny], LIB, MUSIC, {0: 6.0}, st=CH.Settings(seed=1)); need = 6.0 + SPL.LEAD_S + SPL.TAIL_S
     assert sum(s.dur_s for s in r['segs']) >= need - 1e-6 and any('narration needs' in w and 'shorten the line' in w and 'last frame is held' in w for w in r['warnings'])
+
+
+# ---- the director's anchors and the music's singing
+
+def anchored(items): return dict(wpm=150, items=items)
+
+
+def test_an_anchored_item_is_moved_to_the_nearest_bar_by_stretching_the_b_roll_before_it():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=8.9, why='the chorus'))])             # bars are 2 s: 8.9 s is nearest the bar at 8 s
+    r = run(d, {}); a = r['anchors'][0]; assert a['item'] == 2 and a['target_s'] == 8.0 and a['moved_s'] == 4.0 and a['left_s'] == 0.0 and a['start_s'] == 8.0 and not any('anchored' in w for w in r['warnings'])
+    assert r['pieces'][0]['seconds'] == 8.0 and sum(s.beats for s, k in zip(r['segs'], r['piece_of']) if k == 0) * BEAT == 8.0
+
+
+def test_an_anchor_that_needs_more_than_the_b_roll_can_give_is_reported_not_forced():
+    r = run(anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=40, why='x'))]), {})
+    a = r['anchors'][0]; assert a['left_s'] > 0 and a['start_s'] < 40 and any('anchored at 40 s' in w and 'no b-roll before it to stretch' in w for w in r['warnings'])
+    only_voice = run(anchored([dict(type='vo', clip='0001', text='one two three'), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=20, why='x'))]), {0: 2.0})
+    assert only_voice['anchors'][0]['moved_s'] == 0.0 and any('no b-roll before it' in w for w in only_voice['warnings'])                                        # the voice's length is not ours to change
+
+
+def test_a_later_anchor_does_not_undo_an_earlier_one():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=8, why='a')), dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=20, why='b'))])
+    r = run(d, {}); starts = {a['item']: a['start_s'] for a in r['anchors']}; assert starts == {2: 8.0, 4: 20.0}
+
+
+def test_narration_over_singing_is_found_and_recorded_in_the_plan_without_a_warning():
+    lines = [dict(text='over the verse', film_start_s=10.0, speak_s=6.0), dict(text='in the quiet', film_start_s=40.0, speak_s=5.0), dict(text='a bit of overlap', film_start_s=29.0, speak_s=5.0)]
+    got = SPL.over_singing(lines, [[8.0, 20.0], [30.0, 31.0]]); assert [g['text'] for g in got] == ['over the verse'] and got[0]['sung_s'] == 6.0                          # one second of five is under the share
+    pack = dict(PACK, music=dict(lyrics=dict(vocal_spans=[[0.0, 60.0]]))); r = SPL.build(DRAFT, pack, [C1, C2], LIB, MUSIC, VOICE, st=CH.Settings(seed=1)); assert r['over_singing'] and not any('singing' in w for w in r['warnings'])                         # recorded in the plan, not a warning: narration over singing is normal
+
+
+# ---- fitting the film to the music
+
+def pieces_of(*secs): return [dict(kind='broll', seconds=x, n=i) for i, x in enumerate(secs)]
+
+
+def test_b_roll_is_shortened_evenly_to_bring_the_film_to_the_musics_length():
+    ps = pieces_of(10.0, 10.0, 10.0) + [dict(kind='vo', seconds=10.0, n=3)]; f = SPL.fit_pass(ps, MUSIC, 30.0)                                       # 40 s of pieces, the music has 30 s
+    assert f['before_s'] == 40.0 and abs(f['after_s'] - 30.0) <= 1.0 and [p['seconds'] for p in ps[:3]] == pytest.approx([ps[0]['seconds']] * 3, abs=0.51) and ps[3]['seconds'] == 10.0 and all(p['seconds'] >= 2.0 for p in ps)
+
+
+def test_b_roll_is_never_shortened_below_two_seconds_and_what_cannot_be_absorbed_is_left():
+    ps = pieces_of(3.0, 3.0) + [dict(kind='clip', seconds=30.0, n=2)]; f = SPL.fit_pass(ps, MUSIC, 20.0)
+    assert [p['seconds'] for p in ps[:2]] == [2.0, 2.0] and f['after_s'] == 34.0                                                                      # 4 s of b-roll is all there was to give
+
+
+def test_a_short_film_gets_longer_b_roll_and_a_film_within_a_bar_is_left_alone():
+    ps = pieces_of(4.0, 4.0); f = SPL.fit_pass(ps, MUSIC, 14.0); assert f['after_s'] > 8.0 and f['after_s'] <= 14.0 + 1.0 and all(p['seconds'] <= 10.0 for p in ps)
+    ps = pieces_of(4.0, 4.0); f = SPL.fit_pass(ps, MUSIC, 9.0); assert f['after_s'] == 8.0 and [p['seconds'] for p in ps] == [4.0, 4.0]                  # a bar is 2 s
+
+
+def test_the_plan_reports_a_film_that_is_too_long_for_the_music_when_the_b_roll_cannot_absorb_it():
+    d = anchored([dict(type='broll', clip='0001', seconds=3.0), dict(type='clip', clip='0001', lines=['0001.00', '0001.01']), dict(type='vo', clip='0002', text='one two three four five six seven eight nine')])
+    r = SPL.build(d, PACK, [C1, C2], LIB, MUSIC, {2: 5.0}, st=CH.Settings(seed=1), target_s=10.0)
+    assert r['fit']['target_s'] == 10.0 and r['fit']['over_s'] > 2.0 and any('longer than the music' in w and 'shorten narration' in w for w in r['warnings'])
+    ok = SPL.build(anchored([dict(type='broll', clip='0001', seconds=20.0)]), PACK, [C1, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1), target_s=10.0); assert ok['fit']['final_s'] <= 11.0 and not any('than the music' in w for w in ok['warnings'])

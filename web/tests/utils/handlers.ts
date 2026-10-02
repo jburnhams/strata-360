@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse, makeScript2State, makeTrackLine, makeTrackSeries, makeTrackClip, makeFilmState, makeFinalState } from './factories'
+import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse, makeScript2State, makeTrackLine, makeTrackSeries, makeTrackClip, makeFilmState, makeFinalState, makeRoughMix, makeLyrics } from './factories'
 
 // Default happy-path handlers, one per endpoint. Only the endpoints the tests so far need are here: when a test hits an endpoint that is missing,
 // msw fails it loudly (onUnhandledFrame: 'error'), so add the handler here (with a factory in factories.ts) rather than inline in the test.
@@ -39,6 +39,9 @@ export const handlers = [
   http.get('/api/final', () => HttpResponse.json(makeFinalState())),
   http.post('/api/final/start', () => HttpResponse.json({ started: true })),
   http.post('/api/final/stop', () => HttpResponse.json({ ok: true })),
+  http.get('/api/script2/mix', () => HttpResponse.json(makeRoughMix({ has_plan: false }))),
+  http.get('/api/tiles/status', () => HttpResponse.json({ ok: true, style: 'tf-landscape', error: '', credit: 'Maps © Thunderforest, data © OpenStreetMap contributors', tile_px: 512 })),
+  http.get('/api/lyrics', () => HttpResponse.json(makeLyrics({ has_track: false }))),
   http.get('/api/gaps', () => HttpResponse.json({ gaps: [] })),
   http.get('/api/track/clips', () => HttpResponse.json({ clips: [makeTrackClip()], has_draft: true })),
   http.get('/api/script2', () => HttpResponse.json(makeScript2State())),

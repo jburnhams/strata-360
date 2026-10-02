@@ -72,13 +72,19 @@ def load_average():
     except (OSError, AttributeError): return None
 
 
-def windows_available_gb():
+def _windows_memory():
     import ctypes
 
     class MemStatus(ctypes.Structure):
         _fields_ = [('length', ctypes.c_ulong), ('load', ctypes.c_ulong), ('total_phys', ctypes.c_ulonglong), ('avail_phys', ctypes.c_ulonglong),
                     ('total_page', ctypes.c_ulonglong), ('avail_page', ctypes.c_ulonglong), ('total_virt', ctypes.c_ulonglong), ('avail_virt', ctypes.c_ulonglong), ('avail_ext', ctypes.c_ulonglong)]
-    s = MemStatus(); s.length = ctypes.sizeof(s); ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s)); return s.avail_phys / 1e9
+    s = MemStatus(); s.length = ctypes.sizeof(s); ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s)); return s
+
+
+def windows_available_gb(): return _windows_memory().avail_phys / 1e9
+
+
+def windows_total_gb(): return _windows_memory().total_phys / 1e9
 
 
 def cli_command():

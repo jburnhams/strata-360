@@ -123,6 +123,15 @@ def script2_lines(folder):
     return 'script2-' + hashlib.sha1(json.dumps([[l['seg'], l['text'], l['film_start_s'], l['seconds']] for l in lines]).encode()).hexdigest()[:10], lines
 
 
+def measured_wpm(folder):
+    """How fast the voice-over really speaks, words a minute: the spoken narration of the newest script plan (script2/lines.json: its measured `speak_s` per line, not the estimated ones), or None when there is none yet."""
+    try: d = json.load(open(os.path.join(config.race_dir(folder), SCRIPT2_LINES)))
+    except (OSError, ValueError): return None
+    ls = [l for l in d.get('lines', []) if not l.get('estimated') and float(l.get('speak_s') or 0) > 0 and (l.get('text') or '').strip()]
+    words = sum(len(l['text'].split()) for l in ls); sec = sum(float(l['speak_s']) for l in ls)
+    return round(words * 60.0 / sec) if sec >= 10.0 and words >= 20 else None
+
+
 def line_durations(folder, lines, log=print):
     """{seg: seconds} how long each narration line takes at its natural pace: your recording of it if there is one, else the synthetic voice (reused when its words did not change). {} when no voice is installed
     (the planner then estimates from the words)."""

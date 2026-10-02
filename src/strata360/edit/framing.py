@@ -18,9 +18,10 @@ from scipy.ndimage import gaussian_filter1d
 from strata360.pipeline import config
 from strata360.edit import techniques as TQ, aim as AIM, attention as AT
 
-FOLLOW = {'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold'}          # techniques that keep their subject in frame as it moves
+FOLLOW = {'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold', 'selfie_close', 'selfie_far'}          # techniques that keep their subject in frame as it moves
 NO_SUBJECT = {'follow_runner', 'planet_fill', 'planet_globe', 'planet_fill_zoom_out', 'globe_shrink', 'tunnel_up', 'spin_roll'}
 TIGHT = {'push_in', 'dialogue_hold'}
+YOU_VIEWS = {'selfie_hold', 'selfie_close', 'selfie_far'}      # the three views of you (mid, close, far)
 STEP_S = 0.1
 
 
@@ -72,7 +73,9 @@ def choose_subject(g, tech, data):
     t0 = g['clip_start_s']; t1 = t0 + g['dur_s']
     if tech.id in NO_SUBJECT: return 'none', 'this technique has its own framing'
     cp, cy = _coverage(data['person'], t0, t1), _coverage(data['you'], t0, t1); who = _speaker(data['speakers'], t0, t1)
-    if tech.id == 'selfie_hold': return ('you', 'you, the wearer') if cy >= 0.3 else ('none', 'you are not found in this window: behind the runner')
+    if tech.id in YOU_VIEWS:
+        what = {'selfie_hold': 'you, the wearer', 'selfie_close': 'you, close on the face', 'selfie_far': 'you, ultra wide: the whole body and the surroundings'}[tech.id]
+        return (('you', what) if cy >= 0.3 else ('none', 'you are not found in this window: behind the runner'))
     kind = g.get('kind')                                                                 # the candidate the window was cut from says how it is meant to be seen
     if kind == 'person' and cp >= 0.3: return 'person', 'this stretch was chosen for the people in view'
     if kind == 'you' and cy >= 0.3: return 'you', 'this stretch was chosen for you in view'
@@ -101,11 +104,14 @@ def resolve_segment(g, lib, data):
             att = AT.best_yaw_offset(data['quality'], t0, t0 + T, float(look)); look = float(look) + att['offset_deg']
         path = TQ.instantiate(tech, T, rng, look_yaw=float(look)); path['subject'] = subject; path['why'] = why + (f"; turned {att['offset_deg']:+.0f} deg: {att['why']}" if att and att['offset_deg'] else ''); return path
     look = float(np.degrees(y[0])); path = TQ.instantiate(tech, T, rng, look_yaw=look)
+    if subject == 'you' and tech.id in YOU_VIEWS:                                                         # the views of you look where you ARE (world frame), not straight behind the runner: you are often to one side, and a close view would miss you
+        fov = path['keyframes'][0]['fov']; path = dict(ref='world', keyframes=[dict(t=0.0, yaw=look, pitch=0.0, fov=fov), dict(t=round(T, 3), yaw=look, pitch=0.0, fov=fov)])
     if tech.id in FOLLOW:                                                   # the technique's own move (fov, slow drift) stays; the subject is followed: held while still, panned slowly when it drifts, one quick move when it goes far
         from strata360.render.camera import CameraPath
         ev = CameraPath(path['keyframes'], path.get('ref', 'world')).evaluate(times)
-        ty = np.degrees(y); tp = np.array([AIM.aim_pitch(float(np.degrees(p[i])), float(h[i]), AIM.vfov_deg(float(ev['fov'][i])), None if np.isnan(hdd[i]) else float(hdd[i])) for i in range(len(times))])
-        fy, fp = AIM.follow(times, ty, tp)
+        ty = np.degrees(y); aimer = (lambda pi, hi, vf, hd: AIM.aim_face(pi, hi, hd)) if tech.id == 'selfie_close' else AIM.aim_pitch
+        tp = np.array([aimer(float(np.degrees(p[i])), float(h[i]), AIM.vfov_deg(float(ev['fov'][i])), None if np.isnan(hdd[i]) else float(hdd[i])) for i in range(len(times))])
+        fy, fp = AIM.follow(times, ty, tp, scale=min(1.0, float(np.mean(ev['fov'])) / 85.0))                                # a narrower view has a narrower dead band
         fy = np.degrees(np.unwrap(np.radians(fy)))
         kf = [dict(t=round(float(tt), 3), yaw=round(float(np.degrees(ev['yaw'][i]) + fy[i] - fy[0]), 2), pitch=round(float(np.clip(fp[i], -60, 60)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')
               for i, tt in enumerate(times)]

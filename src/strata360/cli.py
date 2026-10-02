@@ -283,10 +283,10 @@ def cmd_plan_blocks(a):
 
 def cmd_script_draft(a):
     """Write (or, with --revise, revise) the whole-race script: the writer sees every clip, the notes, the transcript marks and the pins (edit/script_draft.py)."""
-    from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN, project as PJ
+    from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN, project as PJ, voiceover as VO
     from strata360.pipeline import notes as N
     cfg = config.load(a.name); pack = SP.build(a.name); notes = N.load(a.name); mus = None if a.auto else PJ.music_info(a.name, PJ.load(a.name)['settings'])
-    target, src = SD.length_guide(pack, (float(mus['duration_s']) - float(mus['offset_s'])) if mus else None, a.target_s); wpm = a.wpm or SD.narration_wpm(pack)
+    target, src = SD.length_guide(pack, (float(mus['duration_s']) - float(mus['offset_s'])) if mus else None, a.target_s); wpm = a.wpm or SD.narration_wpm(pack, measured=VO.measured_wpm(a.name))
     pins = PN.project_pins(notes, pack, SD.load_pins(a.name)); prev = SD.list_drafts(a.name)[-1] if a.revise and SD.list_drafts(a.name) else None; draft = SD.load_draft(a.name) if a.revise else None
     if a.revise and not draft: sys.exit('there is no draft to revise yet: run script-draft without --revise first')
     llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider') or 'gemini'; model = a.model or (llm.get('model') if llm.get('provider') == prov else None) or 'gemini-3.1-pro-preview'
@@ -327,6 +327,26 @@ def cmd_gaps(a):
     print(f"{len(gaps)} gap(s) of at least {a.min_minutes:g} minutes between clips on the track" + (f"; {len(gaps)} synthetic clip(s) planned" if a.plan else ''))
     for g in gaps:
         h = g['duration_s'] / 3600.0; print(f"  {g['id']}  {g['local_start']} to {g['local_end']}  {h:5.1f} h  km {g['km_start']}-{g['km_end']} ({g['distance_km']} km, {100 * g['moving_share']:.0f}% moving, +{g['ascent_m']} m)  {g['daylight_start']}->{g['daylight_end']}  between clips {g['before'][-7:-2]} and {g['after'][-7:-2]}" + (f"  -> {SY.default_seconds(g['duration_s']):g} s of film" if a.plan else ''))
+
+
+def cmd_lyrics(a):
+    """Find the words in the project's music track (where it is sung, for keeping speech out of the singing), writing <project>/lyrics.json; --reset forgets it first (--reset-all also your corrections)."""
+    from strata360.edit import lyrics as LY
+    from strata360.pipeline import guard
+    if a.reset or a.reset_all: print('reset' if LY.reset(a.name, corrections=a.reset_all) else 'there was no lyrics record')
+    try:
+        with guard.heavy('lyrics', 1.5): r = LY.build(a.name, log=lambda m: print(m, flush=True))
+    except RuntimeError as e: sys.exit(str(e))
+    print(json.dumps(r))
+
+
+def cmd_rough_mix(a):
+    """Make the rough mix of the film plan (music and clip background quietly, voice-over, the runner's speech where the script plays it) as <project>/roughmix/mix.m4a, to listen to without rendering the picture."""
+    from strata360.edit import roughmix as RM
+    if a.reset: print('reset' if RM.reset(a.name) else 'there was no rough mix')
+    try: r = RM.build(a.name, log=lambda m: print(m, flush=True))
+    except RuntimeError as e: sys.exit(str(e))
+    print(json.dumps(r))
 
 
 def cmd_gap_clip(a):
@@ -567,6 +587,8 @@ def main():
     p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
     p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
     p = sub.add_parser('gap-clip', help='render the animated map clip or 3D flyover for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--kind', choices=['map', 'flyover'], default='map', help='the animated 2D map, or the 3D terrain flyover (4K)'); p.add_argument('--size', help='WIDTHxHEIGHT (default 1920x1080 for the map, 3840x2160 for the flyover)'); p.add_argument('--style', help='map style (default tf-landscape, which needs a Thunderforest key; osm needs none)'); p.add_argument('--imagery', choices=['esri', 'eox', 'osm', 'topo'], help='flyover imagery (default esri)'); p.add_argument('--no-sharp', action='store_true', help='flyover: enlarge the 720p map tiles at larger sizes (faster, softer) instead of fetching finer ones'); p.set_defaults(fn=cmd_gap_clip)
+    p = sub.add_parser('lyrics', help='find the words in the music track (where it is sung)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--reset', action='store_true'); p.add_argument('--reset-all', action='store_true', help='also forget your corrections'); p.set_defaults(fn=cmd_lyrics)
+    p = sub.add_parser('rough-mix', help='the rough mix of the film plan: the sound only, music and background quiet, voice-over and speech up'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--reset', action='store_true', help='forget the earlier mix first (it is also made again by itself when its inputs change)'); p.set_defaults(fn=cmd_rough_mix)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)

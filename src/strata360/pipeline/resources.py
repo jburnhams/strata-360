@@ -23,7 +23,7 @@ def run_text(cmd, timeout=10):
 DEFAULTS = dict(max_workers=2, extra_worker_free_gb=7.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
-STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=6.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
+STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=4.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
                     places=0.3, identity=0.5, candidates=0.5, audio_extract=0.5, audio_clean=2.0, audio_events=2.0, audio_background=1.2, transcript_check=0.5)
 STAGE_MAX_CONCURRENT = dict(transcript_check=1, audio_clean=1, audio_events=1, audio_background=1, proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
 
@@ -44,6 +44,17 @@ def mem_available_gb():
     except Exception:
         try: return int(re.search(r'MemAvailable:\s+(\d+) kB', open('/proc/meminfo').read()).group(1)) / 1e6
         except Exception: return 1e3
+
+
+def mem_total_gb():
+    """The machine's physical memory, GB (macOS `hw.memsize`, /proc/meminfo, Windows GlobalMemoryStatusEx); 16 where it cannot be read."""
+    if oslib.WIN:
+        try: return oslib.windows_total_gb()
+        except Exception: return 16.0
+    try: return int(run_text(['sysctl', '-n', 'hw.memsize'], 5).strip()) / 1e9
+    except Exception:
+        try: return int(re.search(r'MemTotal:\s+(\d+) kB', open('/proc/meminfo').read()).group(1)) / 1e6
+        except Exception: return 16.0
 
 
 def busy(cfg=None):

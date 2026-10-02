@@ -53,14 +53,49 @@ def test_no_draft_and_no_candidates_are_refused_with_the_reason(make_project):
     with pytest.raises(O.Infeasible, match='candidates'): PJ.plan_from_script(pr.folder)
 
 
-def test_a_generated_clip_in_the_script_becomes_a_window_that_plays_its_file(folder, monkeypatch):
-    from strata360.edit import synthetic as SY, framing as FR
-    gap = dict(id='G01', t0=1_771_754_000.0, t1=1_771_754_000.0 + 7200); clip = SY.make(gap, seconds=6.0); SY.save(folder, dict(clips=[dict(clip, status='ready', file='synthetic/G01.mp4')]))
-    d = draft_for(folder); d['items'].insert(2, dict(type='broll', clip='g01', seconds=30)); SD.save_draft(folder, d); monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.0 for l in lines})
-    p = PJ.plan_from_script(folder)['plan']; segs = p['segments']; syn = [g for g in segs if g.get('synthetic')]
-    assert len(syn) == 1 and syn[0]['clip'] == 'G01' and syn[0]['synthetic'].endswith(os.path.join('synthetic', 'G01.mp4')) and syn[0]['role'] == 'broll' and syn[0]['item'] == 2 and abs(syn[0]['dur_s'] - 6.0) < 0.6
-    assert [g['index'] for g in segs] == list(range(len(segs))) and abs(p['film']['length_s'] - sum(g['dur_s'] for g in segs)) < 1e-6
-    assert all(abs(a['film_start_s'] + a['dur_s'] - b['film_start_s']) < 0.002 for a, b in zip(segs, segs[1:]))
-    seen = []; monkeypatch.setattr(FR, 'clip_data', lambda f, c: seen.append(c) or {}); monkeypatch.setattr(FR, 'resolve_segment', lambda g, lib, data: {}); res = FR.resolve(folder, p)
-    assert syn[0]['id'] not in res and 'G01' not in seen and len(res) == len(segs) - 1                                          # a generated clip has no camera to frame
-    lines = json.load(open(os.path.join(folder, 'strata360', 'script2', 'lines.json')))['lines']; after = [g for g in segs if g['item'] == 3][0]; assert [l['text'] for l in lines][-1] == 'Then it got harder.' and lines[-1]['film_start_s'] >= syn[0]['film_start_s'] + syn[0]['dur_s'] - 0.002 and after['film_start_s'] >= syn[0]['film_start_s'] + syn[0]['dur_s'] - 0.002
+C = 'CAM_20260222113000_0003_D'
+
+
+@pytest.fixture
+def gap_folder(make_project):
+    """Clips 0001 and 0002 a minute apart, 0003 an hour and a half later, and a race track over all of it: one gap (G01) between 0002 and 0003."""
+    import numpy as np
+    pr = make_project(config=True)
+    pr.add_clip(A, start_utc='2026-02-22T10:01:00+00:00', source_frames=1800, fps=30.0, candidates=dict(candidates=[cand(A, 0, 0, 60), cand(A, 1, 20, 36, 'speech', 1.0)], unusable=[]),
+                transcript=dict(segments=[dict(t0=20.0, t1=22.0, text='we are fine', text_en='we are fine', lang='en', words=words('we', 'are', 'fine', t=20.0))]))
+    pr.add_clip(B, start_utc='2026-02-22T10:02:00+00:00', source_frames=900, fps=30.0, candidates=dict(candidates=[cand(B, 0, 0, 30)], unusable=[]))
+    pr.add_clip(C, start_utc='2026-02-22T11:30:00+00:00', source_frames=900, fps=30.0, candidates=dict(candidates=[cand(C, 0, 0, 30)], unusable=[]))
+    n = 720; t0 = 1_771_754_400.0 - 3600; d = 3.0 * 10.0 * np.arange(n); nan = np.full(n, np.nan); tp = os.path.join(pr.race_dir, 'track.gpx'); open(tp, 'w').write('<gpx/>')
+    np.savez_compressed(tp + '.npz', t=t0 + 10.0 * np.arange(n), lat=50.0 + d * 5.4e-6, lon=5.0 + d * 1.119e-5, alt=100 + np.arange(n) * 0.2, speed=nan, hr=nan, cadence=nan, dist=nan, temp=nan, power=nan)
+    return pr.folder
+
+
+def gap_draft(kind='flyover', seconds=14):
+    d = draft_for(None); d['items'] = d['items'][:3] + [dict(type='gap', clip='g01', kind=kind, seconds=seconds, why='the quiet hour', anchor=dict(film_s=20, why='the chorus')), dict(type='broll', clip='0003', seconds=4.0)]; return d
+
+
+def test_a_gap_item_plans_its_clip_and_becomes_a_window_that_waits_to_be_rendered(gap_folder, monkeypatch):
+    from strata360.edit import synthetic as SY
+    SD.save_draft(gap_folder, gap_draft()); monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.0 for l in lines}); log = []
+    p = PJ.plan_from_script(gap_folder, log=log.append)['plan']; segs = p['segments']; syn = [g for g in segs if g.get('synthetic')]
+    c = SY.load(gap_folder)['clips']; assert len(c) == 1 and c[0]['id'] == 'G01' and c[0]['kind'] == 'flyover' and c[0]['seconds'] == 14.0 and c[0]['approved'] is False and c[0]['status'] == 'planned' and any('waiting for your approval' in l for l in log)
+    assert len(syn) == 1 and syn[0]['clip'] == 'G01' and syn[0]['role'] == 'broll' and syn[0]['item'] == 3 and syn[0]['synthetic'].endswith(os.path.join('synthetic', 'G01.mp4')) and abs(syn[0]['dur_s'] - 14.0) < 0.6
+    assert any('G01' in w and 'not rendered yet' in w and 'approve it in the Gaps panel' in w for w in p['warnings'])
+    assert [g['index'] for g in segs] == list(range(len(segs))) and all(abs(a['film_start_s'] + a['dur_s'] - b['film_start_s']) < 0.002 for a, b in zip(segs, segs[1:])) and abs(p['film']['length_s'] - sum(g['dur_s'] for g in segs)) < 1e-6
+
+
+def test_planning_again_keeps_an_approved_clip_but_a_new_length_asks_again(gap_folder, monkeypatch):
+    from strata360.edit import synthetic as SY
+    monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.0 for l in lines}); SD.save_draft(gap_folder, gap_draft()); PJ.plan_from_script(gap_folder)
+    doc = SY.load(gap_folder); doc['clips'][0]['approved'] = True; doc['clips'][0]['status'] = 'ready'; SY.save(gap_folder, doc)
+    PJ.plan_from_script(gap_folder); c = SY.load(gap_folder)['clips'][0]; assert c['approved'] is True and c['status'] == 'ready'                     # the same kind and length: left alone
+    SD.save_draft(gap_folder, gap_draft(seconds=20)); PJ.plan_from_script(gap_folder); c = SY.load(gap_folder)['clips'][0]; assert c['seconds'] == 20.0 and c['approved'] is False and c['status'] == 'planned'
+    SD.save_draft(gap_folder, gap_draft(kind='map')); PJ.plan_from_script(gap_folder); c = SY.load(gap_folder)['clips'][0]; assert c['kind'] == 'map' and c['approved'] is True                  # a 2D map needs no approval
+
+
+def test_a_rendered_generated_clip_is_not_a_warning_and_its_file_is_played(gap_folder, monkeypatch):
+    from strata360.edit import synthetic as SY
+    monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.0 for l in lines}); SD.save_draft(gap_folder, gap_draft(kind='map')); PJ.plan_from_script(gap_folder)
+    rd = os.path.join(gap_folder, 'strata360'); os.makedirs(os.path.join(rd, 'synthetic'), exist_ok=True); open(os.path.join(rd, 'synthetic', 'G01.mp4'), 'wb').write(b'x')
+    doc = SY.load(gap_folder); doc['clips'][0].update(status='ready', file='synthetic/G01.mp4'); SY.save(gap_folder, doc)
+    assert not any('not rendered yet' in w for w in PJ.plan_from_script(gap_folder)['plan']['warnings'])
