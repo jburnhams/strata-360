@@ -92,11 +92,19 @@ def build_messages(pack, target_s, wpm, pins=None, draft=None):
     return [dict(role='system', content=SYSTEM), dict(role='user', content=user + SCHEMA)], text
 
 
+def tidy(d):
+    """A draft with each item's `basis` a list of strings (models sometimes write one string, or leave it out); other fields untouched. Returns d."""
+    for it in (d.get('items') or []) if isinstance(d, dict) else []:
+        if isinstance(it, dict) and 'basis' in it:
+            b = it['basis']; it['basis'] = [] if b is None else [str(x) for x in b] if isinstance(b, (list, tuple)) else [str(b)] if str(b).strip() else []
+    return d
+
+
 def parse(text):
     m = re.search(r'\{.*\}', text or '', re.S)
     for cand in ((m.group(0), re.sub(r',\s*([}\]])', r'\1', m.group(0))) if m else ()):
         for strict in (True, False):                                                                       # (strict=False lets a string hold a raw newline or tab, which models sometimes write)
-            try: return json.loads(cand, strict=strict)
+            try: return tidy(json.loads(cand, strict=strict))
             except ValueError: pass
     return None
 
@@ -256,7 +264,7 @@ def load_draft(folder, name=None):
     """The newest draft (or the named one) as a dict, or None."""
     names = list_drafts(folder); name = name or (names[-1] if names else None)
     if not name: return None
-    try: return json.load(open(os.path.join(_dir(folder), os.path.basename(name))))
+    try: return tidy(json.load(open(os.path.join(_dir(folder), os.path.basename(name)))))
     except (OSError, ValueError): return None
 
 

@@ -10,6 +10,13 @@ const word = (i: number, w: string, m?: 'must' | 'never') => ({ i, w, t0: i, t1:
 const transcript = (m1?: 'must' | 'never') => ({ segments: [makeSeg({ si: 0, clip: CLIP, text: 'we are fine', words: [word(0, 'we', m1), word(1, 'are'), word(2, 'fine')] }), makeSeg({ si: 1, clip: CLIP, text: 'not used', words: [word(0, 'not'), word(1, 'used')] })] })
 
 describe('ScriptDraftPanel', () => {
+  it('still renders a draft whose narration basis is one string (not a list)', async () => {
+    mockGet('/api/script2', makeScript2State({ drafts: ['d1.json'], draft: makeScriptDraft({ items: [
+      { type: 'vo', clip: '0023', text: 'It is Sunday afternoon.', basis: 'Sun 22 Feb 14:04' as unknown as string[], seconds: 4 }] }) }))
+    setup(<ScriptDraftPanel folder="/data" />)
+    expect((await screen.findByText(/It is Sunday afternoon/)).closest('[data-vo]')).toHaveAttribute('title', 'based on: Sun 22 Feb 14:04')
+  })
+
   it('shows a gap item with its kind, length, reason and anchor', async () => {
     mockGet('/api/script2', makeScript2State({ drafts: ['d1.json'], draft: makeScriptDraft({ items: [
       { type: 'gap', clip: 'G03', kind: 'flyover', seconds: 14, why: 'the long night climb', anchor: { film_s: 100, why: 'the chorus' } },

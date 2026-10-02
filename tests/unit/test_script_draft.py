@@ -189,3 +189,9 @@ def test_gaps_of_an_hour_or_more_that_the_script_leaves_unfilled_are_noted_and_t
     s2 = dict(items=[broll('0002', 6), gap('G01')], skipped=[]); SD.resolve(s2, DPACK, 150); assert not any('not filled' in n for n in SD.director_notes(s2, DPACK))
     short = dict(DPACK, clips=[dict(c, race_s=1800.0) if c.get('synthetic') else c for c in DPACK['clips']]); assert not any('not filled' in n for n in SD.director_notes(s, short))                    # a half hour gap is not asked for
     assert 'fill MOST gaps of an hour or more' in SD.build_messages(DPACK, 245, 150)[0][0]['content']
+
+
+def test_a_drafts_basis_is_always_a_list_of_strings():
+    d = SD.tidy(dict(items=[dict(type='vo', basis='one string'), dict(type='vo', basis=None), dict(type='vo', basis=['a', 2]), dict(type='broll')]))
+    assert [it.get('basis') for it in d['items']] == [['one string'], [], ['a', '2'], None]
+    assert SD.parse('{"items": [{"type": "vo", "basis": "x"}]}')['items'][0]['basis'] == ['x']
