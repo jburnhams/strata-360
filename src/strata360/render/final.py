@@ -49,9 +49,9 @@ class FinalSource:
 
     def _clip(self, clip):
         if clip not in self.info:
-            from strata360.osv.telemetry import read_frames
+            from strata360.osv.telemetry import read_frames, video_pts
             cj = json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json'))); osv = cj['source_files']['osv']
-            self.info[clip] = dict(boxes=self._boxes(clip, osv), osv=osv, src_fps=float(cj['video']['nominal_fps']), n=int(cj['video']['source_frames']), R=flat.Renderer(osv, self.W, self.H, 90.0, self.interp), T=read_frames(osv))
+            self.info[clip] = dict(boxes=self._boxes(clip, osv), osv=osv, src_fps=float(cj['video']['nominal_fps']), n=int(cj['video']['source_frames']), R=flat.Renderer(osv, self.W, self.H, 90.0, self.interp), T=read_frames(osv), pts=np.asarray(video_pts(osv, 0), float))
         return self.info[clip]
 
     def frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
@@ -64,9 +64,10 @@ class FinalSource:
         ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
         path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
-        ks = np.clip(np.round(t_abs * ci['src_fps']).astype(int), 0, ci['n'] - 1); quat = ci['T']['quat']; Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
+        pts = ci['pts']; ks = np.minimum(flat.frame_at(pts, t_abs), ci['n'] - 1); quat = ci['T']['quat']             # the frame shown at clip time t is found by the frame timestamps, not by t x fps (a clip whose camera dropped frames has timestamps that jump)
+        Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
         utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0            # the window's first frame on the race clock
-        P = path.evaluate(times, Ms, self.fps); first = int(ks[0]); ss = max(first / ci['src_fps'] - 0.002, 0.0)
+        P = path.evaluate(times, Ms, self.fps); first = int(ks[0]); ss = max(float(pts[first]) - 0.002, 0.0)
         dm, ds = flat.decoder(ci['osv'], 1, ss=ss), flat.decoder(ci['osv'], 0, ss=ss); k_dec = first - 1; last_seam = None; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
         try:
             for i in range(m):

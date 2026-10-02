@@ -5,7 +5,7 @@
 
 Frame k shows the race at `t0 + k * speedup / fps`. There is NO overlay in the picture: the film puts its own overlay (clock, distance, pace, maps, the same as on every other shot) on this clip when it is played, at the race time each frame shows (render/final.py), so the overlay is the same all through the film. The camera is centred on the runner (smoothed a
 little so a noisy track does not shake the picture) at a zoom that follows how fast the runner moves across the screen: close in when slow, wide when fast, so the marker covers about the same number of
-pixels each frame whatever the speed-up (`PX_PER_FRAME`, a fraction of the frame width) within `zoom` limits. The stretch's route behind the marker is drawn in red, ahead of it in white (the rest of the race is left off). Drawn by our own
+pixels each frame whatever the speed-up (`PX_PER_FRAME`, a fraction of the frame width) within `zoom` limits. The whole route that is on the screen is drawn thin and grey, so the clip reads as one part of the journey with its before and after in view; the stretch itself is drawn over it, in red behind the marker and in white ahead of it. Drawn by our own
 overlay code (overlay/draw.py, tiles.py), no map engine."""
 import os, subprocess
 
@@ -21,6 +21,9 @@ PX_PER_FRAME = 0.004          # how far the marker moves across the frame each f
 CAMERA_S = 1.5                # the camera follows the runner smoothed over this much film time
 ZOOM_S = 4.0                  # and its zoom over this much
 ZOOM = (9.0, 16.0)            # the closest and widest the map goes
+
+
+CONTEXT = (175, 175, 175)     # the route outside the stretch (before and after it), thin and grey
 
 
 DEFAULT_STYLE = 'tf-landscape'      # plain landscape map; needs THUNDERFOREST_API_KEY (a missing key is an error, never a quiet change of map; `--style osm` chooses the key-free map on purpose)
@@ -55,6 +58,7 @@ class MapClip:
         img = np.array(self.tiles.picture(cx, cy, kk, W, H), np.uint8); u = (self.rw[0] - cx) * kk + W / 2; v = (self.rw[1] - cy) * kk + H / 2
         inside = (self.rt >= self.t0) & (self.rt <= self.t1); behind = inside & (self.rt <= t); ahead = inside & (self.rt > t); here = ((self.pos[0][k] - cx) * kk + W / 2, (self.pos[1][k] - cy) * kk + H / 2); w = max(1.0, 3 * self.s)
         ub, vb = np.append(u[behind], here[0]), np.append(v[behind], here[1]); ua, va = np.insert(u[ahead], 0, here[0]), np.insert(v[ahead], 0, here[1])
+        D.route_line(img, u, v, colour=(0, 0, 0), width=w + 2 * self.s); D.route_line(img, u, v, colour=CONTEXT, width=w * 0.8)                # the whole route that is on screen, thin and grey: the clip is only a part of the journey, the before and after stay in view
         D.route_line(img, np.where(inside, u, np.nan), np.where(inside, v, np.nan), colour=(0, 0, 0), width=w + 3 * self.s)
         D.route_line(img, ua, va, colour=(250, 250, 250), width=w); D.route_line(img, ub, vb, colour=(230, 20, 20), width=w + self.s)
         dot = D.marker(11 * self.s); r = dot.shape[0] / 2; D.composite(img, [(here[0] - r, here[1] - r, dot)])

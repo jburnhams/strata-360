@@ -62,3 +62,13 @@ def test_render_writes_an_mp4(series, tiles, tmp_path):
     out = str(tmp_path / 'x' / 'g.mp4'); seen = []; MC.render(clip(series, tiles, seconds=1.0, fps=10.0), out, progress=lambda d, n: seen.append((d, n)), bitrate='1M')
     assert seen[-1] == (10, 10) and not (tmp_path / 'x' / 'g.mp4.part.mp4').exists()
     n = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', out], capture_output=True, text=True).stdout.strip(); assert n == '10'
+
+
+def test_the_whole_route_on_screen_is_drawn_grey_under_the_stretch_so_the_before_and_after_show(series, tiles, monkeypatch):
+    from strata360.overlay import draw as D
+    calls = []; real = D.route_line
+    monkeypatch.setattr(D, 'route_line', lambda img, u, v, colour=(230, 20, 20), width=3.0: (calls.append((tuple(colour), int(np.isfinite(u).sum()))), real(img, u, v, colour, width))[1])
+    c = clip(series, tiles); c.frame(3)
+    grey = [n for col, n in calls if col == MC.CONTEXT]; red = [n for col, n in calls if col == (230, 20, 20)]; white = [n for col, n in calls if col == (250, 250, 250)]
+    assert grey == [len(series.route_lat)] and 0 < red[0] < len(series.route_lat) and 0 < white[0] < len(series.route_lat)                 # every point of the route; the stretch's parts are shorter
+    assert [col for col, _ in calls].index(MC.CONTEXT) < [col for col, _ in calls].index((250, 250, 250))                                    # drawn first, the stretch over it

@@ -26,26 +26,15 @@ def _cached(osv, name, make):
 def read_frames(osv, djmd_stream=3):
     """Returns dict of arrays, one row per djmd packet (= per video frame):
        ts_us (device microseconds), quat (N,4) fields 1..4 in stored order, acc (N,3). Cached on disk (see `_cached`)."""
-    return align_to_frames(_cached(osv, f'frames{djmd_stream}', lambda: _read_frames(osv, djmd_stream)))
+    return _cached(osv, f'frames{djmd_stream}', lambda: _read_frames(osv, djmd_stream))
 
 
-def missing_frames(ts_us):
-    """For each row, how many frames were lost before it: where the timestamps jump by more than 1.5 steps the camera dropped frames (a clip with one 180 ms and one 40 ms jump has lost 8 + 1 = 9 frames after them). All zero when the timestamps are even."""
-    ts = np.asarray(ts_us, float)
-    if len(ts) < 3: return np.zeros(len(ts), int)
-    d = np.diff(ts); step = float(np.median(d))
-    if step <= 0: return np.zeros(len(ts), int)
-    lost = np.where(d > 1.5 * step, np.round(d / step) - 1, 0).astype(int)
-    return np.concatenate([[0], np.cumsum(lost)])
-
-
-def align_to_frames(T):
-    """The orientation and acceleration of each frame, as it must be used with that frame's PICTURE. In a clip where the camera dropped frames (the timestamps jump) the rows run ahead of the pictures by exactly the number of frames lost: measured on clip 0021 of the Legends race (one jump of 180 ms and one of 40 ms near the start),
-    the image motion of both lenses matched the gyro 9.0 frames (180 ms) late at 10, 25 and 45 s (correlation 0.97 to 0.99), and in clips without jumps at 0 ms. So row m is read from row m minus the frames lost before it. Clips with even timestamps are returned as they are."""
-    lost = missing_frames(T['ts_us'])
-    if not lost.any(): return T
-    idx = np.maximum(np.arange(len(lost)) - lost, 0)
-    return dict(T, quat=T['quat'][idx], acc=T['acc'][idx])
+def has_dropped_frames(osv):
+    """Did the camera drop frames in this clip? Its timestamps then jump (more than 1.5 steps between two frames). Such a clip's video has undecodable frames after the jump (the references are missing): the hardware decoder silently leaves them out, which pairs the two lenses out of step, so it is
+    decoded in software with the damaged frames kept (render/flat.py `decoder`). The rows of `read_frames` are one per frame, in step with the pictures: no shift is needed."""
+    ts = np.asarray(read_frames(osv)['ts_us'], float)
+    if len(ts) < 3: return False
+    d = np.diff(ts); step = float(np.median(d)); return step > 0 and bool((d > 1.5 * step).any())
 
 
 def _read_frames(osv, djmd_stream=3):

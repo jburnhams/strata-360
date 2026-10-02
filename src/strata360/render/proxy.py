@@ -44,7 +44,7 @@ class EquirectRenderer(r4.Renderer):
 
 
 def decoder(osv, stream, every):
-    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
+    cmd = ['ffmpeg', '-v', 'error', *r4.decode_args(osv)[0], '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))'", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
     return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
 
@@ -78,6 +78,7 @@ def _make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt'
         frames.append(dict(proxy_frame=j, source_frame=int(k), t_s=round(float(pts[k] - pts[0]), 4)))
         if progress and j % 25 == 0: progress(j, len(idx))
     enc.stdin.close(); enc.wait(); dm.kill(); ds.kill()
+    if not frames_limit and len(frames) != len(idx): raise RuntimeError(f'the lens streams of {os.path.basename(osv)} gave {len(frames)} frames of the {len(idx)} expected: they would be paired out of step, so no proxy is made (a decoder dropped frames)')       # never a silent mismatch between the lenses
     if encoder == 'h264':                                                                            # add the clip's audio (AAC) and finish: one file for the detectors and the player
         subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', out, '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', final], check=True)
         os.remove(out); out = final
