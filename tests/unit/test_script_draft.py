@@ -116,7 +116,7 @@ def test_gap_items_that_are_not_valid_are_sent_back_with_the_reason():
     bad = lambda *its: SD.check(dict(items=base + list(its) + tail, skipped=[]), DPACK, 40, 150)[1]
     assert any('gap kind must be one of map, flyover, not 3d' in p for p in bad(gap('G01', '3d'))) and any('plays for 2 to 45 seconds, not 90' in p for p in bad(gap('G01', 'map', 90)))
     assert any('0002 is a camera clip, not a gap' in p for p in bad(gap('0002'))) and any('is a gap with no words: use a gap item' in p for p in bad(clipitem('G01', '0001.00', '0001.01')))
-    assert any('an anchor is' in p for p in bad(gap('G01', 'map', 12, anchor='at the chorus'))) and not any('anchor' in p for p in bad(gap('G01', 'map', 12, anchor=dict(film_s=40, why='x'))))
+    assert any('an anchor is' in p for p in bad(gap('G01', 'map', 12, anchor='at the chorus'))) and not any('anchor' in p for p in bad(gap('G01', 'map', 12, anchor=dict(film_s=16, why='x'))))
 
 
 def test_the_length_guide_ignores_gap_clips_and_resolve_gives_gap_items_their_seconds():
@@ -132,7 +132,7 @@ def test_notes_say_when_an_anchor_cannot_be_met_but_say_nothing_about_narration_
 def test_the_request_carries_the_music_and_the_gap_choices_and_the_prompt_explains_gap_items_and_anchors():
     msgs, text = SD.build_messages(DPACK, 245, 150); sys_, user = msgs[0]['content'], msgs[1]['content']
     assert 'THE MUSIC (times are FILM seconds' in user and 'Sung (en): 30-60 s' in user and '=== CLIP G01' in user and 'NO FOOTAGE: a gap of 1.0 h' in user and '"type": "gap"' in user and '"anchor"' in user
-    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 7 and 'paraphrase freely' in sys_
+    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 8 and 'paraphrase freely' in sys_
 
 
 def test_with_the_tempo_known_every_item_counts_in_whole_beats_so_the_writers_total_matches_the_plan():
@@ -152,3 +152,15 @@ def test_an_unreadable_last_attempt_keeps_the_best_earlier_one_and_says_so():
 def test_a_length_problem_sends_back_the_real_length_of_every_item():
     long = dict(GOOD, items=GOOD['items'] + [broll('0002', 9)]); chat = Chat(long, GOOD); SD.write(PACK, 25.6, 150, chat=chat, retries=1, log=lambda m: None)
     msg = chat.calls[1][-1]['content']; assert 'the film is' in msg and 'The real length of each of your items' in msg and '  1. clip 0001:' in msg and '  5. broll 0002: 9.0 s' in msg and 'no commentary' in msg
+
+
+def test_an_anchor_far_from_where_the_items_really_land_is_sent_back_with_the_real_start():
+    items = [broll('0002', 6), dict(clipitem('0003', '0003.00', '0003.00'), anchor=dict(film_s=60, why='the hook'))]
+    _, probs = SD.check(dict(items=items, skipped=[]), dict(PACK, music=dict(bpm=120.0)), 12, 150); p = [x for x in probs if 'anchored at 60 s' in x]
+    assert len(p) == 1 and 'item 2' in p[0] and 'it starts at 6 s' in p[0] and 'put the anchor where the items really land' in p[0]
+    near = [broll('0002', 6), dict(clipitem('0003', '0003.00', '0003.00'), anchor=dict(film_s=11, why='x'))]
+    assert not [x for x in SD.check(dict(items=near, skipped=[]), dict(PACK, music=dict(bpm=120.0)), 12, 150)[1] if 'anchored' in x]                  # within 8 s: the editor stretches b-roll
+
+
+def test_the_narration_is_counted_at_the_voices_measured_speed_when_it_is_known():
+    assert SD.narration_wpm(PACK, measured=170) == 170.0 and SD.narration_wpm(PACK) != 170.0

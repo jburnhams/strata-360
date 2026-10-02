@@ -283,10 +283,10 @@ def cmd_plan_blocks(a):
 
 def cmd_script_draft(a):
     """Write (or, with --revise, revise) the whole-race script: the writer sees every clip, the notes, the transcript marks and the pins (edit/script_draft.py)."""
-    from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN, project as PJ
+    from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN, project as PJ, voiceover as VO
     from strata360.pipeline import notes as N
     cfg = config.load(a.name); pack = SP.build(a.name); notes = N.load(a.name); mus = None if a.auto else PJ.music_info(a.name, PJ.load(a.name)['settings'])
-    target, src = SD.length_guide(pack, (float(mus['duration_s']) - float(mus['offset_s'])) if mus else None, a.target_s); wpm = a.wpm or SD.narration_wpm(pack)
+    target, src = SD.length_guide(pack, (float(mus['duration_s']) - float(mus['offset_s'])) if mus else None, a.target_s); wpm = a.wpm or SD.narration_wpm(pack, measured=VO.measured_wpm(a.name))
     pins = PN.project_pins(notes, pack, SD.load_pins(a.name)); prev = SD.list_drafts(a.name)[-1] if a.revise and SD.list_drafts(a.name) else None; draft = SD.load_draft(a.name) if a.revise else None
     if a.revise and not draft: sys.exit('there is no draft to revise yet: run script-draft without --revise first')
     llm = dict(cfg.get('llm') or {}); prov = a.provider or llm.get('provider') or 'gemini'; model = a.model or (llm.get('model') if llm.get('provider') == prov else None) or 'gemini-3.1-pro-preview'

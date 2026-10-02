@@ -10,9 +10,10 @@ import datetime as dt, json, math, os, re, time
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
 from strata360.edit.script_pack import norm_label
 
-PROMPT_VERSION = 7
+PROMPT_VERSION = 8
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
 VO_PAUSE_S = 0.25             # breathing room after a narration item
+ANCHOR_SLACK_S = 8.0          # an anchor further than this from where the items put it is sent back (the editor stretches b-roll for small differences)
 MIN_GAP_S = 2.0               # a gap item plays for this long at least,
 MAX_GAP_S = SP.MAX_GAP_S      # and this long at most
 TOLERANCE = 0.03              # the film's length may differ from the target by this share
@@ -72,8 +73,9 @@ def length_guide(pack, music_s=None, target_s=None):
     return round(min(base + 0.5 * speech if speech else base, hi, total), 0), 'automatic'
 
 
-def narration_wpm(pack, vo_wpm=VO_WPM, max_speedup=VO_MAX_SPEEDUP):
-    """The average of the normal voice-over pace and the runner's own speech rate in the recordings, never faster than the voice can be sped up."""
+def narration_wpm(pack, vo_wpm=VO_WPM, max_speedup=VO_MAX_SPEEDUP, measured=None):
+    """The pace the narration is counted at: the voice's own measured speed when there is one (`measured`, from the narration already spoken for this project), else the average of the normal voice-over pace and the runner's own speech rate in the recordings, never faster than the voice can be sped up."""
+    if measured: return float(measured)
     own = (pack.get('race') or {}).get('speech_wpm')
     return round(min((vo_wpm + own) / 2.0, vo_wpm * max_speedup) if own else vo_wpm, 0)
 
@@ -115,9 +117,9 @@ def check(script, pack, target_s, wpm):
     """(report, problems): durations are recomputed from the pack (the model's arithmetic is not used); `problems` are structural and drive a retry."""
     beat_s = 60.0 / pack['music']['bpm'] if (pack.get('music') or {}).get('bpm') else None
     clips = {c['label']: c for c in pack['clips']}; order = {c['label']: i for i, c in enumerate(pack['clips'])}; by = {l['id']: l for c in pack['clips'] for l in c['lines']}; pos = PN.index(pack)
-    rows = []; items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0); words_total = 0; last_line = {}
+    rows = []; anchors = []; items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0); words_total = 0; last_line = {}
     for n, it in enumerate(items, 1):
-        t = it.get('type'); cl = norm_label(it.get('clip', ''))
+        t = it.get('type'); cl = norm_label(it.get('clip', '')); total_before = total
         if cl not in clips: probs.append(f'item {n}: no such clip {cl}'); continue
         if cl != cur:
             if cur is not None: seen_done.add(cur)
@@ -145,7 +147,10 @@ def check(script, pack, target_s, wpm):
             if not MIN_GAP_S <= d <= MAX_GAP_S: probs.append(f'item {n}: a gap plays for {MIN_GAP_S:g} to {MAX_GAP_S:g} seconds, not {d:g}')
         else: probs.append(f'item {n}: unknown type {t}'); continue
         if it.get('anchor') is not None and not (isinstance(it['anchor'], dict) and isinstance(it['anchor'].get('film_s'), (int, float))): probs.append(f'item {n}: an anchor is {{"film_s": seconds, "why": "reason"}}')
+        if isinstance(it.get('anchor'), dict) and isinstance(it['anchor'].get('film_s'), (int, float)): anchors.append((n, float(it['anchor']['film_s']), total_before))
         d = on_beats(d, t, beat_s); kinds[t] += d; total += d; per[cl] = per.get(cl, 0.0) + d; rows.append((n, t, cl, d, total))
+    for n, want, start in anchors:
+        if abs(want - start) > ANCHOR_SLACK_S: probs.append(f'item {n}: anchored at {want:.0f} s but by the real lengths of your items it starts at {start:.0f} s: the editor can only move it by stretching b-roll before it, so put the anchor where the items really land ({start:.0f} s), or add or remove about {abs(want - start):.0f} s of b-roll or narration before it')
     skipped = {norm_label(s.get('clip', '')) for s in (script or {}).get('skipped') or []}
     for lab, c in clips.items():
         if lab not in per and lab not in skipped and not c.get('synthetic'): probs.append(f'clip {lab} is neither used nor listed under skipped')
