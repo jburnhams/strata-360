@@ -245,3 +245,12 @@ def test_broll_is_never_stretched_past_its_clips_own_length():
 def test_usable_footage_counts_overlapping_candidates_once():
     from types import SimpleNamespace as NS
     assert SPL.usable_s([NS(start_s=0.0, end_s=4.0), NS(start_s=0.0, end_s=3.0), NS(start_s=3.5, end_s=5.0), NS(start_s=10.0, end_s=11.0)]) == 6.0 and SPL.usable_s([]) == 0.0
+
+
+def test_a_shot_between_two_cuts_is_never_longer_than_a_window_may_be():
+    from types import SimpleNamespace as NS
+    class FP:
+        duration = 100.0; occ = []
+        def candidate_at(self, a, b): return NS(start_s=a, end_s=b)
+    w = SPL.dialogue_windows(FP(), 0.0, 45.0, [], 'x', cap=19.8, cuts=[6.0, 27.0])          # 0-6, 6-27 (21 s: too long), 27-45
+    assert all(l <= 19.8 + 1e-9 for _, _, l in w) and abs(sum(l for _, _, l in w) - 45.0) < 1e-9 and [round(a, 2) for _, a, _ in w] == [0.0, 6.0, 16.5, 27.0]

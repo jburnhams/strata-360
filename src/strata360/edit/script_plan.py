@@ -185,9 +185,11 @@ def dialogue_windows(fp, start, seconds, warn, label, cap=MAX_DIALOGUE_S, cuts=(
     edges = [start] + [c for c in cuts if start < c < start + seconds] + [start + seconds]
     if len(edges) > 2:
         for a, b in zip(edges, edges[1:]):
-            c = fp.candidate_at(a, b)
-            if c is None: warn.append(f'clip {label}: no candidate under the dialogue at {a:.1f} s'); continue
-            fp.occ.append((a, b)); out.append((c, a, b - a))
+            n = max(int(math.ceil((b - a) / cap - 1e-9)), 1); size = (b - a) / n                                  # a shot between two cuts is never longer than a window may be: it is cut into equal parts
+            for k in range(n):
+                x = a + k * size; c = fp.candidate_at(x, x + size)
+                if c is None: warn.append(f'clip {label}: no candidate under the dialogue at {x:.1f} s'); continue
+                fp.occ.append((x, x + size)); out.append((c, x, size))
         return out
     n = int(math.ceil(seconds / cap - 1e-9)); size = seconds / n
     for k in range(n):
