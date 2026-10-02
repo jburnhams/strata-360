@@ -155,6 +155,12 @@ def proxy(ctx):
     make_proxy(ctx.clip.osv, ctx.path('proxy.mp4'), p['size'], p['every_frames'], p['bitrate'], p.get('encoder', 'h264'))
 
 
+@stage('quality', 1, outputs=('quality_grid.npz',), deps=('proxy',), note='how good each direction looks, on a 15 degree grid twice a second, from plain image measurements (detail, blur, haze, contrast, colour, blown out or black): the guardrails for choosing a view (about a tenth of real time)')
+def quality(ctx):
+    from strata360.analysis import quality_grid as QG
+    QG.save(ctx.path(QG.FILE), QG.analyse(ctx.path('proxy.mp4')))
+
+
 @stage('thumb', 1, outputs=('thumb_quick.jpg',), deps=('motion',), soft_deps=('proxy',), note='a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early')
 def thumb(ctx):
     from strata360.analysis.thumbs import quick
