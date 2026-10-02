@@ -306,9 +306,6 @@ def plan(clips, lib, music, st=None):
     return out
 
 
-OVERLAP_TOL_S = 2e-3      # window starts are stored to the millisecond, and a real tempo's beat is not a whole number of ms, so back-to-back windows can 'overlap' by up to 1 ms
-
-
 def violations(segs, lib, music, clips):
     """Everything the plan must satisfy, as a list of messages (empty = valid)."""
     v = []; beat_s = music.beat_s; order = {c['id']: i for i, c in enumerate(sorted(clips, key=lambda c: c['start_utc']))}
@@ -320,7 +317,7 @@ def violations(segs, lib, music, clips):
     for a, b in zip(segs, segs[1:]):
         ia, ib = order[a.cand.clip], order[b.cand.clip]
         if ib < ia: v.append(f'not chronological: {b.cand.clip} after {a.cand.clip}')
-        if ia == ib and b.clip_start_s < a.clip_start_s + a.beats * beat_s - OVERLAP_TOL_S: v.append(f'overlap or disorder inside {a.cand.clip}: {a.clip_start_s:.2f}+{a.beats * beat_s:.2f} then {b.clip_start_s:.2f}')
+        if ia == ib and b.clip_start_s < a.clip_start_s + a.beats * beat_s - 1e-6: v.append(f'overlap or disorder inside {a.cand.clip}: {a.clip_start_s:.2f}+{a.beats * beat_s:.2f} then {b.clip_start_s:.2f}')
     missing = set(order) - {s.cand.clip for s in segs}
     if missing: v.append(f'clips with nothing in the film: {sorted(missing)}')
     hero = sum(s.beats * beat_s for s in segs if s.tech.hero)

@@ -53,36 +53,15 @@ def load_clips(folder):
     return clips, missing
 
 
-def music_record(folder, settings):
-    """The project's music.json record (file, name, analysis, waveform; edit/music.py), or None when there is no track (or it cannot be read)."""
+def music_info(folder, settings):
+    """The analysis of the project's music track (edit/music.py), or None when there is none (or it cannot be read)."""
     from strata360.edit import music as MU
     f = settings.get('music')
     if not f: return None
-    rd = config.race_dir(folder)
-    if not os.path.exists(os.path.join(rd, f)): return None
-    try: return MU.info(rd, f)
+    p = os.path.join(config.race_dir(folder), f)
+    if not os.path.exists(p): return None
+    try: return MU.cached(config.race_dir(folder), p)
     except (RuntimeError, OSError): return None
-
-
-def music_info(folder, settings):
-    """The analysis of the project's music track (edit/music.py), or None when there is none (or it cannot be read)."""
-    r = music_record(folder, settings); return r['analysis'] if r else None
-
-
-def rough_blocks(folder, target_s=None, auto=False):
-    """The rough plan (edit/blocks.py, implementation plan V1) for the saved overrides, written to <race dir>/blocks.json and returned. The film length guide (D8): `target_s` if given, else the music
-    track's length from its first downbeat (D7), else automatic from the usable footage; `auto` ignores the track. Does not touch the saved plan: the beat planner still makes the film."""
-    from strata360.edit import blocks as BL
-    edit = load(folder); s = edit['settings']; o = edit['overrides']; clips, missing = load_clips(folder); mus = None if auto else music_info(folder, s)
-    if target_s is not None: source, target = 'target', float(target_s)
-    elif mus: source, target = 'music', max(float(mus['duration_s']) - float(mus['offset_s']), 0.0)
-    else: source, target = 'automatic', None
-    bpm = float(mus['bpm']) if mus else float(s['bpm'])
-    st = CH.Settings(seed=int(s['seed']), locked=tuple(o['locked']), tech_force=dict(o['tech_force']), bans_cands=frozenset(o['bans_cands']), bans_techs=frozenset(o['bans_techs']), clip_weight={k: float(v) for k, v in o['clip_weight'].items()})
-    rp = BL.plan_blocks(clips, target, st, 60.0 / bpm)
-    out = dict(generated_at=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), target_source=source, music=(dict(file=s['music'], duration_s=mus['duration_s'], offset_s=mus['offset_s']) if mus else None),
-               clips_without_candidates=missing, plan=BL.asdict(rp))
-    rd = config.race_dir(folder); os.makedirs(rd, exist_ok=True); p = os.path.join(rd, 'blocks.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(out, open(tmp, 'w'), indent=1); os.replace(tmp, p); return out
 
 
 def _planner(edit, lib, prev_plan, mus=None):

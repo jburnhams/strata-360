@@ -8,6 +8,7 @@ import { stubMedia } from '../utils/media'
 
 vi.mock('../../src/components/FilmPreview', () => ({ default: () => <div data-testid="film-preview" /> }))
 vi.mock('../../src/components/FinalRender', () => ({ default: () => <div data-testid="final-render" /> }))
+vi.mock('../../src/components/MusicPanel', () => ({ default: () => <div data-testid="music-panel" /> }))
 vi.mock('../../src/components/WindowPlayer', () => ({ default: () => <div data-testid="window-player" /> }))
 
 describe('Timeline', () => {

@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse, makeScript2State, makeFilmState, makeFinalState } from './factories'
+import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse, makeFilmState, makeFinalState } from './factories'
 
 // Default happy-path handlers, one per endpoint. Only the endpoints the tests so far need are here: when a test hits an endpoint that is missing,
 // msw fails it loudly (onUnhandledFrame: 'error'), so add the handler here (with a factory in factories.ts) rather than inline in the test.
@@ -31,10 +31,6 @@ export const handlers = [
   http.post('/api/track', () => HttpResponse.json(makeTrackOverview({ present: true, file: 'track.fit' }))),
   http.get('/api/who', () => HttpResponse.json(makeWhoState())),
   http.post('/api/who', () => HttpResponse.json({ ok: true })),
-  http.get('/api/script2', () => HttpResponse.json(makeScript2State())),
-  http.post('/api/script2/pins', async ({ request }) => HttpResponse.json(await request.json())),
-  http.post('/api/script2/generate', () => HttpResponse.json({ started: true })),
-  http.post('/api/transcript/mark', () => HttpResponse.json({ ok: true, marked: 0 })),
   http.get('/api/music', () => HttpResponse.json(makeMusicState())),
   http.post('/api/music', () => HttpResponse.json(makeMusicState({ file: 'track.mp3' }))),
   http.delete('/api/music', () => HttpResponse.json({ ok: true })),

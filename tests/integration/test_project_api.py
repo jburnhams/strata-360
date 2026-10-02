@@ -83,32 +83,3 @@ class TestNotesOnARealProject:
         assert client.post('/api/notes', json=dict(folder=folder, clip=CLIP, text='the start')).status_code == 200
         assert {c['id']: c['has_note'] for c in get(served, '/api/clips').json()['clips']} == {CLIP: True, CLIP2: False}
         assert get(served, '/api/clip', clip=CLIP).json()['note'] == 'the start'
-
-
-class TestMusic:
-    def test_no_track_until_one_is_uploaded(self, served):
-        assert get(served, '/api/music').json() == dict(file=None, name=None, analysis=None, waveform=None, spectrogram=False)
-        assert get(served, '/api/music/audio').status_code == 404
-
-    @pytest.fixture(autouse=True)
-    def read_wav_directly(self, monkeypatch):                                              # the server fixtures fake subprocess.Popen, so ffmpeg cannot decode; the synthetic track is a plain 22.05 kHz WAV
-        import wave, numpy as np
-        from strata360.edit import music as M
-        def decode(path, sr=M.SR):
-            try:
-                with wave.open(path) as w: return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32767
-            except wave.Error as e: raise RuntimeError('could not read the audio: ' + str(e))      # as the real decode does
-        monkeypatch.setattr(M, 'decode', decode)
-
-    def test_upload_analyse_play_and_remove(self, served, tmp_path):
-        from library import make_track
-        client, folder = served; data = open(make_track(str(tmp_path / 'song.wav'), 124.0, 1.3, 30), 'rb').read()
-        r = client.post('/api/music', params=dict(folder=folder, filename='song.wav'), content=data); assert r.status_code == 200, r.text
-        m = get(served, '/api/music').json(); assert m['name'] == 'song.wav' and m['file'] == 'music/track.wav' and abs(m['analysis']['bpm'] - 124.0) < 0.6 and len(m['waveform']) > 100 and m['spectrogram'] is True
-        assert get(served, '/api/music/audio').content == data and get(served, '/api/music/spectrogram').content[:4] == b'\x89PNG'
-        assert client.delete('/api/music', params=dict(folder=folder)).status_code == 200 and get(served, '/api/music').json()['file'] is None
-
-    def test_a_file_that_is_not_audio_is_refused_and_changes_nothing(self, served):
-        client, folder = served
-        r = client.post('/api/music', params=dict(folder=folder, filename='x.mp3'), content=b'nope' * 3000); assert r.status_code == 400
-        assert get(served, '/api/music').json()['file'] is None
