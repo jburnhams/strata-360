@@ -39,7 +39,7 @@ def test_fmt(metric, v, s): assert LY.fmt(metric, v) == s
 
 class TestSettings:
     def test_defaults(self):
-        st = LY.settings(); assert st['elements'] == list(LY.ELEMENTS) and st['style'] is None and st['map_opacity'] == 0.6 and st['auto_zoom'] is True
+        st = LY.settings(); assert st['elements'] == [e for e in LY.ELEMENTS if e != 'credit'] and 'credit' in LY.ELEMENTS and st['style'] is None and st['map_opacity'] == 0.6 and st['auto_zoom'] is True
 
     def test_unknown_element(self):
         with pytest.raises(ValueError, match='unknown overlay element.*speedo'): LY.settings({'elements': ['clock', 'speedo']})
@@ -51,7 +51,8 @@ class TestSettings:
 class TestShows:
     def test_the_values_at_the_frame_time(self, series, tiles, texts):
         overlay(series, tiles).patches(T0 + 300)                             # 900 m, 5:33 /km, 5 %, 345 m, 147 bpm; 08:05:00 in Brussels
-        for s in ('2025/09/16', '08:05:00', '0.9', 'km', '5:33', 'min/km', '345', '5', '147', 'ALT (m)', 'SLOPE (%)', 'BPM', '© OpenStreetMap contributors'): assert s in texts
+        for s in ('2025/09/16', '08:05:00', '0.9', 'km', '5:33', 'min/km', '345', '5', '147', 'ALT (m)', 'SLOPE (%)', 'BPM'): assert s in texts
+        assert '© OpenStreetMap contributors' not in texts                                    # no credit on the picture: it goes with the film's distribution
 
     def test_time_zone(self, series, tiles, texts):
         LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['clock']}, tz='UTC', tiles=tiles).patches(T0 + 1.6); assert '06:00:01' in texts
@@ -80,7 +81,7 @@ class TestPlacement:
 
     def test_anchored_to_the_right_and_bottom_edges(self, series, tiles):
         ov = overlay(series, tiles, size=(2160, 1080)); x, y, _ = self.corner(ov, 'route_map'); assert (x, y) == pytest.approx((2160 - 276, 24))
-        hx, hy, _ = self.corner(ov, 'altitude'); assert (hx, hy) == pytest.approx((16 - D.icon('mountain', 64)[1], 980 - D.icon('mountain', 64)[1]))
+        hx, hy, _ = self.corner(ov, 'altitude'); assert (hx, hy) == pytest.approx((16 - D.icon('mountain', 64)[1], 850 - D.icon('mountain', 64)[1]))
 
     def test_scale_setting(self, series, tiles):
         assert self.corner(overlay(series, tiles, scale=1.5), 'local_map')[2][:2] == (384, 384)
@@ -126,14 +127,14 @@ class TestMapStyles:
         return make
 
     def test_plain_overview_and_detailed_close_up(self, series, tmp_path, texts):
-        made = []; ov = LY.Overlay(series, (1920, 1080), {}, tiles=self.factory(made, tmp_path)); ov.patches(T0)
+        made = []; ov = LY.Overlay(series, (1920, 1080), {'elements': list(LY.ELEMENTS)}, tiles=self.factory(made, tmp_path)); ov.patches(T0)                  # (the credit is only drawn when asked for: it is not in the default elements)
         assert made == ['tf-landscape', 'tf-outdoors'] and texts.count('Maps © Thunderforest, data © OpenStreetMap contributors') == 1
 
     def test_one_style_for_both(self, series, tmp_path):
         made = []; LY.Overlay(series, (1920, 1080), {'style': 'tf-atlas'}, tiles=self.factory(made, tmp_path)); assert made == ['tf-atlas']
 
     def test_per_map_style_and_one_credit_line_each(self, series, tmp_path, texts):
-        made = []; ov = LY.Overlay(series, (1920, 1080), {'layout': {'route_map': {'style': 'osm'}}}, tiles=self.factory(made, tmp_path)); ov.patches(T0)
+        made = []; ov = LY.Overlay(series, (1920, 1080), {'elements': list(LY.ELEMENTS), 'layout': {'route_map': {'style': 'osm'}}}, tiles=self.factory(made, tmp_path)); ov.patches(T0)
         assert made == ['osm', 'tf-outdoors'] and '© OpenStreetMap contributors' in texts and 'Maps © Thunderforest, data © OpenStreetMap contributors' in texts
 
     def test_missing_key_for_the_default_styles(self, series):
@@ -205,3 +206,32 @@ class TestFinalKey:
 
     def test_signature_holds_the_merged_settings(self):
         sig = json.loads(LY.signature({'scale': 2}, None)); assert sig[0]['scale'] == 2 and sig[0]['local_zoom'] == 14 and sig[1] is None
+
+
+
+class TestProfile:
+    """The elevation profile of the whole race along the bottom, with the runner's place on it: the same on every shot."""
+    def patches(self, series, tiles, t, size=(1920, 1080)):
+        ov = overlay(series, tiles, size=size, elements=['profile']); return ov.widgets[0].patches(t, series.at(t)), ov.widgets[0]
+
+    def test_it_is_a_default_element_drawn_first_so_the_numbers_sit_on_top_and_the_bottom_row_clears_it(self):
+        assert list(LY.ELEMENTS)[0] == 'profile' and LY.ELEMENTS['profile']['height'] == 120 and LY.ELEMENTS['altitude']['y'] + 64 <= 1080 - 120 and LY.ELEMENTS['pace']['y'] + 56 + 16 <= 1080 - 120 and LY.ELEMENTS['heart_rate']['y'] + 52 <= 1080 - 120
+
+    def test_the_part_run_is_light_the_part_to_come_dark_with_a_cursor_and_a_dot_at_the_runners_distance(self, series, tiles):
+        out, w = self.patches(series, tiles, T0 + 450); done, todo, cur, dot = out; x = done[2].shape[1] - 1
+        assert done[:2] == (0, 1080 - 120) and todo[0] == x + 1 and done[2].shape[0] == 120 and done[2].shape[1] + todo[2].shape[1] == 1920 and abs(x / 1919 - series.at(T0 + 450)['dist_m'] / w.d1) < 0.01
+        assert done[2][..., 3].max() == 255 and done[2][..., :3].max() == 255 and todo[2][..., :3].max() == 255 and todo[2][..., 3].max() == 150 and cur[2][0, 0, 3] == 235                    # the done fill is light, the line bright; the to-come part dark
+        assert abs(dot[0] + dot[2].shape[1] / 2 - cur[0] - cur[2].shape[1] / 2) < 1 and 1080 - 120 <= dot[1] <= 1080
+
+    def test_the_cursor_moves_with_the_runner_and_is_clamped_to_the_ends(self, series, tiles):
+        a, _ = self.patches(series, tiles, T0 + 100); b, _ = self.patches(series, tiles, T0 + 500); assert b[2][0] > a[2][0]
+        end, _ = self.patches(series, tiles, T0 + 899); assert end[0][2].shape[1] >= 1900
+
+    def test_without_altitude_or_distance_nothing_is_drawn_and_it_scales_with_the_frame(self, series, tiles):
+        flat = Series(dict(race_track(n=600), alt=np.full(600, np.nan))); ov = overlay(flat, tiles, elements=['profile']); assert ov.widgets[0].patches(T0 + 100, flat.at(T0 + 100)) == []
+        out, _ = self.patches(series, tiles, T0 + 300, size=(960, 540)); assert out[0][2].shape[0] == 60 and out[0][1] == 540 - 60 and out[0][2].shape[1] + out[1][2].shape[1] == 960
+
+
+def test_no_credit_is_drawn_unless_it_is_asked_for(series, tiles, texts):
+    ov = overlay(series, tiles); ov.patches(T0 + 300); assert not any('©' in t for t in texts) and not any(type(w).__name__ == 'Credit' for w in ov.widgets)                                           # credits go with the film's distribution
+    ov = overlay(series, tiles, elements=['route_map', 'credit']); ov.patches(T0 + 300); assert any('OpenStreetMap' in t for t in texts)

@@ -14,7 +14,6 @@ import numpy as np, cv2
 from scipy.interpolate import PchipInterpolator
 
 from strata360 import hw
-from strata360.overlay import draw as D
 from strata360.overlay.mapclip import frame_count
 
 BASE_W, BASE_H = 1280, 720    # the picture the camera is planned for
@@ -227,7 +226,7 @@ class FlyoverClip:
         self.route = route_from_series(series); self.shots = plan_shots(series, self.t0, self.t1, self.frames / self.fps); self.cam = camera or plan_camera(self.route, self.shots, self.fps, self.frames, exag)
         g, lat, lon, _ = self.route; i0, i1 = np.searchsorted(g, [self.cam['runner'].min() - 500, self.cam['runner'].max() + 3000]); sl = slice(i0, max(i1, i0 + 2))
         self.style = make_style(imagery, exag, lon[sl], lat[sl], self.scale if sharp else 1.0, self.dz)
-        self.credit = IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT; self._credit = None                                                       # the imagery's credit is drawn into the picture; the film adds its own overlay on top
+        self.credit = IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT                                                                                  # (the imagery's credit is not drawn: credits go with the film's distribution, strata360 credits lists them)
         self._tmp = None
 
     def time(self, k): return self.t0 + k * self.speedup / self.fps
@@ -255,10 +254,8 @@ class FlyoverClip:
         return np.ascontiguousarray(img[:self.H, :, ::-1])             # the bottom strip (missing tiles) cropped, BGR -> RGB
 
     def frame(self, k):
-        """The picture of frame k as RGB uint8: the terrain with the imagery credit; the race overlay is the film's own, added when the film is rendered (render/final.py)."""
-        img = self.still(k)
-        if self._credit is None: s_ = self.scale; rgba, pad, w = D.text(self.credit, 15 * s_, D.LABEL_FONT, (255, 255, 255), tabular=False); self._credit = (self.W - w - 24 * s_ - pad, self.H - 38 * s_ - pad, rgba)
-        return D.composite(img, [self._credit])
+        """The picture of frame k as RGB uint8: the terrain with no overlay and no credit (the film's own overlay is added when the film is rendered, render/final.py)."""
+        return self.still(k)
 
     def close(self):
         if self._tmp: shutil.rmtree(self._tmp, ignore_errors=True); self._tmp = None

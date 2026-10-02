@@ -119,10 +119,10 @@ def test_the_backend_is_metal_on_a_mac_and_can_be_chosen(monkeypatch):
     monkeypatch.setattr(hw.sys, 'platform', 'darwin'); assert hw.mbgl_backend() == 'metal'; monkeypatch.setenv('STRATA_MBGL_BACKEND', 'vulkan'); assert hw.mbgl_backend() == 'vulkan'
 
 
-def test_a_frame_is_a_4k_rgb_picture_cropped_from_the_taller_render_with_only_the_imagery_credit_drawn_in(series, tmp_path, fake_mbgl):
+def test_a_frame_is_a_4k_rgb_picture_cropped_from_the_taller_render_with_nothing_drawn_over_it(series, tmp_path, fake_mbgl):
     c = clip(series, size=(3840, 2160), tmp=tmp_path); f = c.frame(5); assert f.shape == (2160, 3840, 3) and f.dtype == np.uint8 and len(fake_mbgl.calls) == 1
     assert tuple(f[1000, 1900]) == (160, 90, 30)                                                                            # the fake's BGR (30, 90, 160) as RGB where nothing is drawn over it
-    drawn = (f != np.array([160, 90, 30], np.uint8)).any(axis=2); ys, xs = np.nonzero(drawn); assert 50 < drawn.sum() < 150000 and ys.min() > 2000 and xs.min() > 1500                # only the credit, small, at the bottom right: the film adds the overlay
+    assert (f == np.array([160, 90, 30], np.uint8)).all()                                                                 # no overlay and no credit: the film adds its overlay; credits go with the distribution
     assert len(c.style['sources']['me']['data']['features']) == 2                                                             # the marker and its halo
     c.close()
 
