@@ -173,7 +173,7 @@ def insert_synthetic(folder, ser, specs, beat_s):
 def plan_from_script(folder, draft_name=None, log=print):
     """Make the film's plan from the whole-race script (edit/script_draft.py, edit/script_plan.py) and save it as the plan: the script's dialogue, narration and b-roll in order, in windows of whole beats, the
     narration timed by how long the voice takes to say it. Also writes script2/lines.json, the narration the voice-over builder speaks and places. Raises O.Infeasible with the reason."""
-    from strata360.edit import script_draft as SD, script_pack as SP, script_plan as SPL, synthetic as SY, transitions as TR, voiceover as VO
+    from strata360.edit import pans as PN, script_draft as SD, script_pack as SP, script_plan as SPL, synthetic as SY, transitions as TR, voiceover as VO
     edit = load(folder); clips, missing = load_clips(folder); names = SD.list_drafts(folder); name = draft_name or (names[-1] if names else None); draft = SD.load_draft(folder, name)
     if not draft: raise O.Infeasible('there is no script draft yet: write one first (strata360 script-draft)')
     if not clips: raise O.Infeasible('no candidates yet: the candidates stage has to finish for at least one clip')
@@ -190,6 +190,7 @@ def plan_from_script(folder, draft_name=None, log=print):
     sync_gap_clips(folder, res.get('synthetic') or [], log); ser = insert_synthetic(folder, ser, res.get('synthetic') or [], music.beat_s)
     for g in ser:
         if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + (' (a 3D flyover the script asked for: approve it in the Gaps panel)' if (next((c for c in SY.load(folder)['clips'] if c['id'] == g['clip']), {}).get('approved') is False) else '') + '; the film shows a card until it is')
+    PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']

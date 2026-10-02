@@ -126,3 +126,15 @@ def test_a_glide_whose_middle_shows_mostly_sky_is_refused_and_a_good_one_keeps_i
 def test_the_planner_guess_of_which_techniques_can_glide_into_each_other():
     assert PN.glide_pair('hold_wide', 'push_in') and PN.glide_pair('selfie_hold', 'selfie_close') and PN.glide_pair('globe_shrink', 'hold_wide')
     assert not PN.glide_pair('selfie_far', 'selfie_close') and not PN.glide_pair('follow_runner', 'hold_wide') and not PN.glide_pair('globe_shrink', 'globe_shrink') and not PN.glide_pair('spin_roll', 'hold_wide')
+
+
+def test_swap_for_glides_replaces_a_shot_by_an_equivalent_technique_that_can_glide(monkeypatch, tmp_path):
+    lib = TQ.load(); poses = {'hold_wide': (0.0, 100.0), 'push_in': (60.0, 80.0), 'selfie_far': (0.0, 130.0)}
+    def resolve(g, lib_, data): y, f = poses[g['technique']]; return dict(ref='world', subject='heading', keyframes=kf(y, y, T=g['dur_s'], fov=f))
+    monkeypatch.setattr(FR, 'clip_data', lambda folder, c: {}); monkeypatch.setattr(FR, 'resolve_segment', resolve); monkeypatch.setattr(PN, 'looker', lambda folder: (lambda *a: None))
+    mk = lambda i, start, tech, opts: dict(seg(i, start), technique=tech, family='x', hero=False, options=[dict(tech=t, score=s) for t, s in opts])
+    segs = [mk(0, 0.0, 'hold_wide', [('hold_wide', 1.0)]), mk(1, 4.0, 'push_in', [('push_in', 1.0), ('selfie_far', 0.9), ('hold_wide', 0.5)])]
+    assert PN.plan(segs[0], segs[1], resolve(segs[0], lib, {}), resolve(segs[1], lib, {}))[0] is None                       # 60 degrees of yaw: too big
+    done = PN.swap_for_glides('f', segs, lib); assert done == [('w1', 'push_in', 'selfie_far')] and segs[1]['technique'] == 'selfie_far'
+    segs = [mk(0, 0.0, 'hold_wide', [('hold_wide', 1.0)]), mk(1, 4.0, 'push_in', [('push_in', 1.0), ('selfie_far', 0.9)])]
+    assert PN.swap_for_glides('f', segs, lib, protect={'w1'}) == [] and segs[1]['technique'] == 'push_in'                 # the user's own choice stays

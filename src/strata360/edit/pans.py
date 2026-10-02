@@ -140,3 +140,47 @@ def apply_pans(segs, framing, enabled=None, scorer=None):
         res, why = plan(p, g, a, b, (lambda y, pi, f, t: scorer(p, y, pi, f, t)) if scorer else None); report.append((g['id'], res['why'] if res else why))
         if res: out[k]['transition'] = res
     return out, report
+
+
+SWAP_SHARE = 0.85       # a shot may be swapped for another technique whose planner score is at least this share of the chosen one's ("broadly equivalent")
+
+
+def _contiguous(a, b):
+    return not (a.get('synthetic') or b.get('synthetic')) and a['clip'] == b['clip'] and abs(b['clip_start_s'] - (a['clip_start_s'] + a['dur_s'])) <= CONTIGUOUS_S
+
+
+def swap_for_glides(folder, segs, lib, protect=(), log=None):
+    """Where two back-to-back shots of one clip cannot glide, swap one of them (in place) for a broadly equivalent technique (its `options` score at least SWAP_SHARE of the chosen one's, not a hero shot unless it is one already) that does, tested on the real framing and the quality of the views on the way.
+    Windows the user fixed (`protect`: window ids with a forced technique, and locked ones) are left alone, as is a swap that would stop an earlier glide. Returns [(window id, old technique, new technique)]."""
+    from strata360.edit import framing as FR
+    if os.environ.get('STRATA_NO_PANS'): return []
+    cache = {}; fr = {}; look = looker(folder); done = []
+    def data(c):
+        if c not in cache: cache[c] = FR.clip_data(folder, c)
+        return cache[c]
+    def frame(g, tech=None):
+        g2 = g if tech is None else dict(g, technique=tech)
+        return FR.resolve_segment(g2, lib, data(g['clip']))
+    def ok(a, b, fa, fb):
+        res, why = plan(a, b, fa, fb, lambda y, p_, f, t: look(a, y, p_, f, t)); return res is not None or why.startswith('the two shots already look the same')          # (two shots that look the same way need no glide: the cut between them cannot be seen)
+    def free(g): return not (g.get('synthetic') or g['id'] in protect or g.get('locked') or g.get('fixed'))
+    for g in segs:
+        if not g.get('synthetic'): fr[g['id']] = frame(g)
+    for k in range(1, len(segs)):
+        p, g = segs[k - 1], segs[k]
+        if not _contiguous(p, g) or ok(p, g, fr[p['id']], fr[g['id']]): continue
+        best = None
+        for who, seg in (('second', g), ('first', p)):
+            if not free(seg): continue
+            cur = next((o['score'] for o in seg.get('options') or [] if o['tech'] == seg['technique']), None)
+            if cur is None: continue
+            for o in seg['options']:
+                if o['tech'] == seg['technique'] or o['score'] < SWAP_SHARE * cur or (lib[o['tech']].hero and not lib[seg['technique']].hero): continue
+                f2 = frame(seg, o['tech'])
+                if not (ok(p, g, fr[p['id']], f2) if who == 'second' else ok(p, g, f2, fr[g['id']])): continue
+                if who == 'first' and k >= 2 and _contiguous(segs[k - 2], p) and ok(segs[k - 2], p, fr[segs[k - 2]['id']], fr[p['id']]) and not ok(segs[k - 2], p, fr[segs[k - 2]['id']], f2): continue         # would stop the glide before it
+                if best is None or o['score'] > best[0]: best = (o['score'], seg, o['tech'], f2)
+        if best:
+            _, seg, tech, f2 = best; done.append((seg['id'], seg['technique'], tech)); seg['technique'] = tech; seg['family'] = lib[tech].family; seg['hero'] = lib[tech].hero; fr[seg['id']] = f2
+            if log: log(f"swapped {seg['id']} to {tech} so the cut into {g['id']} can be a glide" if seg is p else f"swapped {seg['id']} to {tech} so the cut into it can be a glide")
+    return done
