@@ -28,9 +28,6 @@ export default function FilmDetails({ folder }: { folder: string }) {
         <label className="text-sm"><span className="mb-1 block text-stone-500">Date {m.date == null && m.defaults.date ? <span className="text-xs">(earliest capture)</span> : <button className="text-xs underline" onClick={() => save({ date: '' })}>use earliest capture</button>}</span>
           <input type="date" className={inp} value={m.effective.date ?? ''} onChange={e => save({ date: e.target.value })} /></label>
       </div>
-      <label className="mt-3 block max-w-xs text-sm"><span className="mb-1 block text-stone-500">Official race distance (km) <span className="text-xs">(the script writer uses it for "km to go")</span></span>
-        <input type="number" min={1} step="any" className={inp} defaultValue={m.distance_km ?? ''} key={`dist-${m.distance_km}`} placeholder="e.g. 100"
-          onBlur={e => { const v = e.target.value; if (String(m.distance_km ?? '') !== v) save({ distance_km: v === '' ? null : Number(v) }) }} /></label>
       <h4 className="mb-2 mt-4 text-sm font-medium">Race results</h4>
       <div className="grid gap-3 sm:grid-cols-4">
         {num('starters', 'Starters')}{num('finishers', 'Finishers')}

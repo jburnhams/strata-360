@@ -108,37 +108,8 @@ def pick(state):
     return e['id'], v
 
 
-SCRIPT2_LINES = os.path.join('script2', 'lines.json')       # the narration of the whole-race script's plan (edit/script_plan.py): {draft, lines: [{seg, text, film_start_s, seconds, ...}]}
-
-
-def script2_lines(folder):
-    """(name, lines) of the script plan's narration when it is newer than any beat-planner script, else None. The name changes whenever the words or their places change, so a finished track is rebuilt."""
-    p = os.path.join(config.race_dir(folder), SCRIPT2_LINES)
-    if not os.path.exists(p): return None
-    legacy = sorted(glob.glob(os.path.join(config.race_dir(folder), 'scripts', 'script-*.json')))
-    if legacy and os.path.getmtime(legacy[-1]) > os.path.getmtime(p): return None
-    try: d = json.load(open(p))
-    except (OSError, ValueError): return None
-    lines = [dict(seg=l['seg'], text=l['text'].strip(), film_start_s=float(l['film_start_s']), seconds=float(l['seconds'])) for l in d.get('lines', []) if (l.get('text') or '').strip()]
-    return 'script2-' + hashlib.sha1(json.dumps([[l['seg'], l['text'], l['film_start_s'], l['seconds']] for l in lines]).encode()).hexdigest()[:10], lines
-
-
-def line_durations(folder, lines, log=print):
-    """{seg: seconds} how long each narration line takes at its natural pace: your recording of it if there is one, else the synthetic voice (reused when its words did not change). {} when no voice is installed
-    (the planner then estimates from the words)."""
-    st = load_state(folder)
-    try: engine, voice = pick(st)
-    except RuntimeError as e: log(f'no voice: {e}'); return {}
-    out = {}
-    for l in lines:
-        rp = recorded_path(folder, l['seg']); sp = synth_line(folder, l['seg'], l['text'], engine, voice, st['rate']); out[l['seg']] = duration(rp if source_for(st, l['seg'], os.path.exists(rp)) == 'recorded' else sp)
-    return out
-
-
 def script_lines(folder):
     """(file name, [{seg, text, film_start_s, seconds}]) of the newest script; lines with no words are left out."""
-    s2 = script2_lines(folder)
-    if s2: return s2
     files = sorted(glob.glob(os.path.join(config.race_dir(folder), 'scripts', 'script-*.json')))
     if not files: return None, []
     d = json.load(open(files[-1]))
@@ -294,8 +265,6 @@ def _mix(folder, out, total, dest):
 
 
 def newest_script(folder):
-    s2 = script2_lines(folder)
-    if s2: return s2[0]
     f = sorted(glob.glob(os.path.join(config.race_dir(folder), 'scripts', 'script-*.json')))
     return os.path.basename(f[-1]) if f else None
 

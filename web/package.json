@@ -15,9 +15,7 @@
     "test:coverage:gate": "vitest run --coverage --config vitest.gate.config.ts"
   },
   "dependencies": {
-    "@types/leaflet": "^1.9.22",
     "hls.js": "^1.7.3",
-    "leaflet": "^1.9.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -33,7 +31,6 @@
     "@vitest/coverage-v8": "^4.0.16",
     "fast-check": "^4.10.2",
     "jsdom": "^27.4.0",
-    "leaflet-node": "^2.0.27",
     "msw": "^3.0.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.0",

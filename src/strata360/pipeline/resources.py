@@ -3,7 +3,7 @@
 Rules (all applied by every worker, whoever started it):
   * a worker runs at the lowest CPU priority (nice 19) and, on macOS, in the *background* task class (throttled CPU, disk and network), and with few threads; its child processes
     (ffmpeg, model processes) inherit that;
-  * only ONE worker runs unless there is plenty of free memory (default: at least 7 GB available for each extra worker, tuned for a 16 GB Mac) and the machine is not busy;
+  * only ONE worker runs unless there is plenty of free memory (default: at least 12 GB available for each extra worker) and the machine is not busy;
   * before starting an item a worker checks the memory that stage needs and waits while there is not enough, or while the machine is busy;
   * the heavy stages (the vision model, detectors, proxy rendering, speech recognition) never run twice at the same time: parallelism is only across different stages;
   * models use the GPU where it pays (STRATA_GPU=0 forces the CPU), in short slices with gaps (hw.gpu_throttled, duty STRATA_GPU_DUTY) so the screen stays responsive: macOS has no per-process GPU priority.
@@ -20,7 +20,7 @@ def run_text(cmd, timeout=10):
         p = _REAL_POPEN(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True); out, _ = p.communicate(timeout=timeout); return out or ''
     except Exception: return ''
 
-DEFAULTS = dict(max_workers=2, extra_worker_free_gb=7.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
+DEFAULTS = dict(max_workers=2, extra_worker_free_gb=12.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
 STAGE_MEM_GB = dict(proxy=2.5, people=4.0, scenes=6.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,

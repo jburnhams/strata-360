@@ -13,7 +13,6 @@ const resolve = (body: Body) => async ({ request }: { request: Request }) => {
 }
 
 export const mockGet = (path: string, body: Body) => server.use(http.get(path, resolve(body)))
-export const mockDelete = (path: string, body: Body) => server.use(http.delete(path, resolve(body)))
 export const mockPost = (path: string, body: Body) => server.use(http.post(path, resolve(body)))
 export const mockError = (path: string, status: number, detail?: string, method: 'get' | 'post' = 'get') =>
   server.use(http[method](path, () => HttpResponse.json(detail === undefined ? {} : { detail }, { status })))

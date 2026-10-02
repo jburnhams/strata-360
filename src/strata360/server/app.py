@@ -8,20 +8,16 @@ Built on FastAPI (interactive API docs at /api/docs). Security model: the server
 
 API (JSON):  GET /api/roots, /api/browse?path=, /api/progress?folder=, /api/log?folder=;  POST /api/open {folder, languages?, gps?}, /api/run {folder}, /api/stop {folder}."""
 import argparse, glob, json, os, secrets, subprocess, sys, threading, time
-from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod
-from strata360.analysis import thumbs as TH, transcript_edits as TE, transcript_fix as TF, transcript_marks as TM
+from strata360.analysis import thumbs as TH, transcript_edits as TE, transcript_fix as TF
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
-GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
-PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
-SCRIPT2_JOBS = {}             # folder -> Popen of a running `strata360 script-draft`
 SCRIPT_JOBS = {}              # folder -> Popen of a running `strata360 script`
 LOCK = threading.Lock()
 
@@ -200,16 +196,13 @@ def create_app(roots, token=None):
                             thumb=thumb and thumb.split('+')[0], thumb_overlay=bool(thumb and thumb.endswith('+overlay')), audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
-    def effective(d):                                                                    # the transcript with the user's corrections and marks applied (None when there is none)
-        tr = TE.load_effective(d); return TM.annotate(tr, d) if tr else tr
-
     def word_view(s):                                                                    # the words of a phrase for the editable view: shown text, timing, and the correction (if any)
-        return [dict(i=i, w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {}), **({'m': w['mark']} if w.get('mark') else {})) for i, w in enumerate(s.get('words') or [])]
+        return [dict(i=i, w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {})) for i, w in enumerate(s.get('words') or [])]
 
     def phrase_parts(s, si, who, **extra):                                               # the displayed phrases of one segment: a long phrase comes in parts (only at sentence ends, every part over 5 s)
         res = []; ps = TE.parts(s); whole = len(ps) == 1
         for p in ps:
-            ws = [dict(i=w['i'], w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {}), **({'m': w['mark']} if w.get('mark') else {})) for w in p['words']]
+            ws = [dict(i=w['i'], w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {})) for w in p['words']]
             text = s['text'].strip() if (whole and not s.get('edited')) else ' '.join(w['w'].strip() for w in p['words'] if w['w'].strip())
             en = s.get('text_en') if (whole or s.get('lang') != 'en') else text
             if whole and s.get('lang') == 'en' and s.get('edited'): en = text
@@ -227,17 +220,6 @@ def create_app(roots, token=None):
             else: raise HTTPException(400, 'text: a string')
         except (IndexError, KeyError, OSError): raise HTTPException(404, 'no such word')
         return dict(ok=True)
-
-    @api.post('/api/transcript/mark', dependencies=[Depends(auth)])
-    def post_transcript_mark(body: dict):                                            # {folder, clip, spans: [{seg, from, to}], state: 'must' | 'never' | 'none'}: mark words green (must use) or red (never use); 'none' clears them
-        f = folder_of(body.get('folder')); d = _cd(f, body.get('clip')); state = body.get('state'); state = None if state in ('none', 'white', None) else state
-        try: spans = [(int(x['seg']), int(x['from']), int(x['to'])) for x in body.get('spans') or []]
-        except (KeyError, TypeError, ValueError): raise HTTPException(400, 'spans: [{seg, from, to}] of numbers')
-        if not spans: raise HTTPException(400, 'spans: at least one')
-        try: TM.set_spans(d, spans, state)
-        except ValueError as e: raise HTTPException(400, str(e))
-        except (IndexError, OSError): raise HTTPException(404, 'no such word')
-        return dict(ok=True, marked=len(TM.states(d)))
 
     @api.post('/api/transcript/suggest', dependencies=[Depends(auth)])
     def post_transcript_suggest(body: dict):                                         # {folder}: run the audio check of the transcript (stage `transcript_check`: paid Gemini calls, every reply cached, clips already done are skipped)
@@ -263,7 +245,7 @@ def create_app(roots, token=None):
     def get_transcript(folder: str):                                                     # every recognised phrase of every clip, in clip order: the overview's running transcript
         f = folder_of(folder); rd = config.race_dir(f); out = []
         for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
-            c = _j(d, 'clip.json'); tr = effective(d)
+            c = _j(d, 'clip.json'); tr = TE.load_effective(d)
             if not c or not tr: continue
             sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
             for si, s in enumerate(tr['segments']):
@@ -302,7 +284,7 @@ def create_app(roots, token=None):
         f = folder_of(folder); d = _cd(f, clip); c = _j(d, 'clip.json'); out = dict(id=c['clip_id'], time=c['time'], video=c['video'], camera=c.get('camera'), audio_info=c.get('audio'), note=N.load(f)['clips'].get(c['clip_id'], ''))
         mo = _j(d, 'motion.json'); out['motion'] = None if not mo else mo['summary']
         au = _j(d, 'audio.json'); out['audio'] = None if not au else dict(summary=au.get('summary'), segments=au.get('segments', [])[:40])
-        tr = effective(d); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
+        tr = TE.load_effective(d); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
         out['transcript'] = [x for si, s in enumerate((tr or {}).get('segments', [])) for x in phrase_parts(s, si, lab.get((round(s['t0'], 2), round(s['t1'], 2))), flagged=bool(s.get('flags')))]
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
@@ -345,9 +327,8 @@ def create_app(roots, token=None):
         return N.load(folder_of(folder))
 
     @api.post('/api/notes', dependencies=[Depends(auth)])
-    def post_notes(body: dict):                                                          # {folder, text, clip?}: the folder note, or one clip's note; with kind 'vo' the voice-over MUST INCLUDE text (and `ordered` for the folder's: keep the order written)
+    def post_notes(body: dict):                                                          # {folder, text, clip?}: the folder note, or one clip's note
         from strata360.pipeline import notes as N
-        if body.get('kind') == 'vo': return N.save_vo(folder_of(body.get('folder')), body.get('text', ''), body.get('clip'), body.get('ordered'))
         return N.save(folder_of(body.get('folder')), body.get('text', ''), body.get('clip'))
 
     @api.get('/api/track', dependencies=[Depends(auth)])
@@ -617,96 +598,34 @@ def create_app(roots, token=None):
         cfg = config.load(f); ck = cfg.setdefault('camera_clock', {}); ck['utc_offset_hours'] = 0.0; ck['offset_seconds'] = off; ck['verified'] = True; ck['note'] = 'set in the app'; config.save(f, cfg)
         res = runner.run(f, ['ingest'], None, False); return dict(clock=clock_state(f), retimed=len(res))
 
-    def music_state(f, warning=None):                                                   # what the app shows about the track: music.json's record without the file names of its parts
-        from strata360.edit import project as PJ
-        r = PJ.music_record(f, PJ.load(f)['settings'])
-        out = dict(file=r['file'] if r else None, name=r['name'] if r else None, analysis=r['analysis'] if r else None, waveform=r['waveform'] if r else None, spectrogram=bool(r))
-        if warning: out['warning'] = warning
-        return out
-
     @api.get('/api/music', dependencies=[Depends(auth)])
-    def get_music(folder: str):                                                          # the music track of the project and what was found in it (music.json)
-        return music_state(folder_of(folder))
-
-    def music_file(f, name=None):
+    def get_music(folder: str):                                                          # the music track of the project and what was found in it
         from strata360.edit import project as PJ
-        r = PJ.music_record(f, PJ.load(f)['settings'])
-        if not r: raise HTTPException(404, 'no music track')
-        return os.path.join(config.race_dir(f), name or r['file'])
-
-    @api.get('/api/music/audio')
-    def get_music_audio(request: Request, folder: str):                                  # the track itself, to play in the page (Range requests work); <audio> cannot send headers, so the cookie/query token authenticates
-        import mimetypes
-        auth(request); p = music_file(folder_of(folder)); return FileResponse(p, media_type=mimetypes.guess_type(p)[0] or 'audio/mpeg', headers={'Cache-Control': 'no-cache'})
-
-    @api.get('/api/music/spectrogram')
-    def get_music_spectrogram(request: Request, folder: str, v: str = ''):               # the spectrogram picture (PNG) made with the analysis
-        auth(request); f = folder_of(folder); from strata360.edit import project as PJ
-        r = PJ.music_record(f, PJ.load(f)['settings'])
-        if not r: raise HTTPException(404, 'no music track')
-        return FileResponse(os.path.join(config.race_dir(f), r['spectrogram']), media_type='image/png', headers={'Cache-Control': 'max-age=3600'})
+        f = folder_of(folder); s = PJ.load(f)['settings']; return dict(file=s.get('music'), analysis=PJ.music_info(f, s))
 
     @api.post('/api/music', dependencies=[Depends(auth)])
-    async def post_music(request: Request, folder: str, filename: str = 'track.mp3'):    # the audio file is the raw request body; saved as music/track.<ext>, analysed into music.json and used for tempo, bars, energy and the film's sound
-        from strata360.edit import project as PJ, optimise as O, music as MU
+    async def post_music(request: Request, folder: str, filename: str = 'track.mp3'):    # the audio file is the raw request body; saved as music/track.<ext> and used for tempo, bars, energy and the film's sound
+        from strata360.edit import project as PJ, optimise as O
         f = folder_of(folder); ext = os.path.splitext(filename)[1].lower()
         if ext not in ('.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg', '.opus'): raise HTTPException(400, 'an audio file: mp3, wav, m4a, aac, flac or ogg')
         data = await request.body()
         if len(data) < 5000 or len(data) > 300 * 1024 * 1024: raise HTTPException(400, 'the file is empty or too large')
-        try: rec = MU.store(config.race_dir(f), data, ext, os.path.basename(filename))
+        d = os.path.join(config.race_dir(f), 'music'); os.makedirs(d, exist_ok=True)
+        for old in os.listdir(d):
+            if old.startswith('track.'): os.replace(os.path.join(d, old), os.path.join(d, old + '.replaced'))
+        open(os.path.join(d, 'track' + ext), 'wb').write(data)
+        try: PJ.set_music(f, 'music/track' + ext)
+        except O.Infeasible as e: return dict(file='music/track' + ext, analysis=PJ.music_info(f, PJ.load(f)['settings']), warning=str(e))
         except RuntimeError as e: raise HTTPException(400, str(e))
-        try: PJ.set_music(f, rec['file'])
-        except O.Infeasible as e: return music_state(f, str(e))
-        return music_state(f)
+        return dict(file='music/track' + ext, analysis=PJ.music_info(f, PJ.load(f)['settings']))
 
     @api.delete('/api/music', dependencies=[Depends(auth)])
     def delete_music(folder: str):
-        from strata360.edit import project as PJ, optimise as O, music as MU
+        from strata360.edit import project as PJ, optimise as O
         f = folder_of(folder)
         try: PJ.set_music(f, None)
         except O.Infeasible: pass
-        MU.remove(config.race_dir(f)); return dict(file=None, name=None, analysis=None, waveform=None, spectrogram=False)
-
-    TRACKS = {}
-
-    def loaded_track(f):                                                                 # the race track, loaded once per file version (a race is hundreds of thousands of samples)
-        from strata360.gps import track, series as GS
-        p = config.track_path(f, config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else None)
-        if not p: raise HTTPException(404, 'no race track')
-        key = (p, os.path.getmtime(p))
-        if key not in TRACKS:
-            TRACKS.clear()
-            try: TRACKS[key] = GS.prepare(track.load(p))
-            except Exception as e: raise HTTPException(400, f'could not read the track: {type(e).__name__}: {e}')
-        return TRACKS[key]
-
-    @api.get('/api/track/series', dependencies=[Depends(auth)])
-    def get_track_series(folder: str, points: int = 2000):                               # the track decimated for the charts: elapsed time, km, altitude (with each bin's lowest and highest), pace of the moving part, share moving, heart rate
-        from strata360.gps import series as GS
-        return GS.series(loaded_track(folder_of(folder)), max(100, min(points, 6000)))
-
-    @api.get('/api/track/line', dependencies=[Depends(auth)])
-    def get_track_line(folder: str, bbox: str = '', limit: int = 3000):                  # the line of the track inside bbox=lat0,lon0,lat1,lon1 (or all of it), at most `limit` points: the map asks for more detail as it zooms in
-        from strata360.gps import series as GS
-        box = None
-        if bbox:
-            try: box = tuple(float(x) for x in bbox.split(','))
-            except ValueError: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
-            if len(box) != 4: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
-        return GS.line(loaded_track(folder_of(folder)), box, max(200, min(limit, 20000)))
-
-    @api.get('/api/track/clips', dependencies=[Depends(auth)])
-    def get_track_clips(folder: str):                                                    # every clip placed on the track (middle, the stretch it covers, facts for the hover card), with whether the newest script draft plays it
-        from strata360.gps import series as GS
-        from strata360.edit import script_draft as SD, script_pack as SP
-        f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f) if os.path.exists(os.path.join(rd, 'race.json')) else {}; items = GS.clips(loaded_track(f), GS.load_spans(f), cfg.get('timezone', 'Europe/Brussels'))
-        draft = SD.load_draft(f); used = {}
-        for it in (draft or {}).get('items') or []: used[norm_label(it.get('clip', ''))] = used.get(norm_label(it.get('clip', '')), 0.0) + float(it.get('seconds') or 0)
-        for c in items:
-            d = os.path.join(rd, 'clips', c['id']); sc = (_j(d, 'scenes.json') or {}).get('summary') or {}; cd = (_j(d, 'candidates.json') or {}).get('summary') or {}
-            c['label'] = SP.label_of(c['id']); c['scene'] = dict(settings=list((sc.get('settings') or {}))[:2], weather=list((sc.get('weather') or {}))[:2] if isinstance(sc.get('weather'), dict) else []); c['moments'] = cd.get('n'); c['usable_s'] = cd.get('usable_s')
-            c['used'] = c['label'] in used; c['used_s'] = round(used.get(c['label'], 0.0), 1)
-        return dict(clips=items, has_draft=bool(draft))
+        return dict(file=None, analysis=None)
 
     @api.post('/api/track', dependencies=[Depends(auth)])
     async def post_track(request: Request, folder: str, filename: str = 'track.fit'):    # the file is the raw request body; saved under the known name track.fit / track.gpx
@@ -764,110 +683,6 @@ def create_app(roots, token=None):
         except (KeyError, ValueError) as ex: raise HTTPException(400, str(ex))
         except O.Infeasible as ex: raise HTTPException(400, str(ex))
         return dict(edit=e)
-
-    @api.get('/api/script2', dependencies=[Depends(auth)])
-    def get_script2(folder: str, name: str = ''):                                        # the whole-race script: the newest (or the named) draft, the list of drafts, your saved pins, whether a draft is being written, and the lines the draft plays (a white word is yellow when its line is in `used`)
-        from strata360.edit import script_draft as SD
-        f = folder_of(folder); j = SCRIPT2_JOBS.get(f); running = bool(j and j.poll() is None); doc = SD.load_draft(f, name or None); lp = os.path.join(SD._dir(f), 'job.log')
-        used = sorted({i for it in (doc or {}).get('items') or [] if it.get('type') == 'clip' for i in it.get('lines') or []})          # the lines the draft plays, as resolved when it was written (cheap: no pack is built here)
-        from strata360.edit import project as PJ
-        pj = PLAN_JOBS.get(f); plan = (PJ.load(f).get('plan') or {}); ppath = os.path.join(SD._dir(f), 'plan.log')
-        plan_info = dict(source=plan.get('source', 'beats'), script=plan.get('script'), windows=len(plan.get('segments') or []), length_s=(plan.get('film') or {}).get('length_s'), warnings=plan.get('warnings') or [], generated_at=plan.get('generated_at')) if plan else None
-        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, plan=plan_info, plan_running=bool(pj and pj.poll() is None), plan_exit=(None if pj is None or pj.poll() is None else pj.returncode), plan_log=(open(ppath).read().splitlines()[-6:] if os.path.exists(ppath) else []), last_exit=(None if running or j is None else j.returncode), log=(open(lp).read().splitlines()[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
-
-    def _llm_key(f):
-        from strata360.edit import llm_remote
-        return llm_remote.key_configured('gemini')
-
-    @api.post('/api/script2/pins', dependencies=[Depends(auth)])
-    def post_script2_pins(body: dict):                                                   # {folder, include?, exclude?, vo?, vo_never?}: your own pins (the transcript marks and the notes' narration fields are added automatically when a draft is written)
-        from strata360.edit import script_draft as SD
-        f = folder_of(body.get('folder')); vo = body.get('vo') or []
-        if not isinstance(vo, list) or any(not isinstance(p, dict) or not str(p.get('text', '')).strip() or p.get('mode', 'anywhere') not in ('clip', 'ordered', 'anywhere') or (p.get('mode') == 'clip' and not p.get('clip')) for p in vo): raise HTTPException(400, 'vo: [{id, text, mode: clip | ordered | anywhere, clip? (for mode clip)}]')
-        return SD.save_pins(f, body)
-
-    @api.post('/api/script2/generate', dependencies=[Depends(auth)])
-    def post_script2_generate(body: dict):                                               # {folder, revise?, target_s?, wpm?, auto?}: write a new draft, or revise the newest one, in the background (about 1 to 3 minutes)
-        f = folder_of(body.get('folder')); j = SCRIPT2_JOBS.get(f)
-        if j and j.poll() is None: return dict(started=False, reason='a draft is already being written')
-        args = [*oslib.cli_command(), 'script-draft', f] + (['--revise'] if body.get('revise') else []) + (['--target-s', str(float(body['target_s']))] if body.get('target_s') else []) + (['--wpm', str(float(body['wpm']))] if body.get('wpm') else []) + (['--auto'] if body.get('auto') else [])
-        d = os.path.join(config.race_dir(f), 'script2'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'job.log'), 'wb')
-        SCRIPT2_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
-
-    @api.post('/api/script2/plan', dependencies=[Depends(auth)])
-    def post_script2_plan(body: dict):                                                   # {folder, draft?}: make the film's plan from a draft (the newest by default) and speak the narration, in the background (`strata360 script-plan --voice`)
-        f = folder_of(body.get('folder')); j = PLAN_JOBS.get(f)
-        if j and j.poll() is None: return dict(started=False, reason='the film is already being planned')
-        args = [*oslib.cli_command(), 'script-plan', f, '--voice'] + (['--draft', os.path.basename(str(body['draft']))] if body.get('draft') else [])
-        d = os.path.join(config.race_dir(f), 'script2'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'plan.log'), 'wb')
-        PLAN_JOBS[f] = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
-
-    def gap_rows(f):
-        """The gaps between clips on the track with the generated clip planned for each (and for stretches of them), whether it is rendering, and its progress."""
-        from strata360.gps import gaps as GP
-        from strata360.edit import synthetic as SY
-        cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.find_gaps(GP.load_spans(f), loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
-        job = GAP_JOBS.get(f); running = job[0] if job and job[1].poll() is None else None
-        def prog(cid):
-            try: tail = open(os.path.join(rd, 'synthetic', cid + '.log')).read().strip().splitlines()[-1]; return tail
-            except (OSError, IndexError): return ''
-        for c in docs: c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
-        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]
-        return gaps
-
-    def loaded_raw_track(f):
-        from strata360.gps import track
-        cfg = config.load(f); p = config.track_path(f, cfg)
-        if not p: raise HTTPException(404, 'there is no race track yet')
-        return track.load(p)
-
-    @api.get('/api/gaps', dependencies=[Depends(auth)])
-    def get_gaps(folder: str):                                                           # the stretches of the race with no clip, each with its generated map clips
-        f = folder_of(folder); return dict(gaps=gap_rows(f))
-
-    @api.post('/api/gaps/clip', dependencies=[Depends(auth)])
-    def post_gap_clip(body: dict):                                                       # {folder, gap, seconds? | speedup?, from?, to?, id?}: plan a generated map clip for a gap (or a stretch of it); rendering is a separate step
-        import datetime as dt
-        from strata360.edit import synthetic as SY
-        f = folder_of(body.get('folder')); gap = next((g for g in gap_rows(f) if g['id'] == body.get('gap')), None)
-        if gap is None: raise HTTPException(404, 'no such gap')
-        def when(x):
-            if x in (None, ''): return None
-            try: return float(x) if isinstance(x, (int, float)) else dt.datetime.fromisoformat(str(x).replace('Z', '+00:00')).timestamp()
-            except ValueError: raise HTTPException(400, 'from/to: epoch seconds or an ISO time')
-        t0, t1 = when(body.get('from')), when(body.get('to')); cid = body.get('id') or (gap['id'] if t0 is None and t1 is None else None)
-        if not cid: raise HTTPException(400, 'a stretch of a gap needs an id')
-        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid)
-        except ValueError as e: raise HTTPException(400, str(e))
-        return SY.upsert(f, clip)
-
-    @api.post('/api/gaps/render', dependencies=[Depends(auth)])
-    def post_gap_render(body: dict):                                                     # {folder, id}: render a planned generated clip in the background (`strata360 gap-clip --clip`)
-        from strata360.edit import synthetic as SY
-        f = folder_of(body.get('folder')); cid = str(body.get('id') or '')
-        if not any(c['id'] == cid for c in SY.load(f)['clips']): raise HTTPException(404, 'no such planned clip')
-        job = GAP_JOBS.get(f)
-        if job and job[1].poll() is None: return dict(started=False, reason=f'{job[0]} is already being rendered')
-        d = os.path.join(config.race_dir(f), 'synthetic'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, cid + '.log'), 'wb')
-        GAP_JOBS[f] = (cid, subprocess.Popen([*oslib.cli_command(), 'gap-clip', f, '--clip', cid], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True)); return dict(started=True)
-
-    @api.delete('/api/gaps/clip', dependencies=[Depends(auth)])
-    def delete_gap_clip(folder: str, id: str):                                           # forget a planned clip and its video
-        from strata360.edit import synthetic as SY
-        f = folder_of(folder); doc = SY.load(f); c = next((c for c in doc['clips'] if c['id'] == id), None)
-        if c is None: raise HTTPException(404, 'no such planned clip')
-        job = GAP_JOBS.get(f)
-        if job and job[1].poll() is None and job[0] == id: raise HTTPException(409, 'it is being rendered')
-        SY.remove(f, id); p = os.path.join(config.race_dir(f), c.get('file') or '-')
-        if c.get('file') and os.path.exists(p): os.remove(p)
-        return dict(removed=True)
-
-    @api.get('/api/gaps/video')
-    def get_gap_video(request: Request, folder: str, id: str):                           # the rendered video (Range requests are handled; <video> cannot send headers, so the cookie authenticates)
-        from strata360.edit import synthetic as SY
-        auth(request); f = folder_of(folder); c = next((c for c in SY.load(f)['clips'] if c['id'] == id), None); p = os.path.join(config.race_dir(f), (c or {}).get('file') or '-')
-        if not c or not os.path.exists(p): raise HTTPException(404, 'that clip has not been rendered yet')
-        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/script', dependencies=[Depends(auth)])
     def get_script(folder: str):                                                         # key status (never the key), the model list, whether a run is going, and the newest script

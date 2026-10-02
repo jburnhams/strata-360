@@ -13,7 +13,7 @@ from strata360.pipeline import guard
 import datetime as dt, hashlib, json, os, shutil, subprocess, sys, time
 import numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, flat, synthetic as SYN
+from strata360.render import camera as cam, flat
 from strata360.render.film import pieces, render_piece, layout
 from strata360.render.preview import build_audio, proxy_of
 
@@ -24,7 +24,7 @@ def final_dir(folder, key): return os.path.join(config.race_dir(folder), 'final'
 def final_key(plan, size, fps, bitrate, folder):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
     h = hashlib.sha1(json.dumps([plan['segments'], size, fps, bitrate], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
-    h.update(_overlay_sig(folder).encode()); h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
+    h.update(_overlay_sig(folder).encode()); return h.hexdigest()[:10]
 
 
 def _overlay_sig(folder):
@@ -49,9 +49,7 @@ class FinalSource:
         return self.info[clip]
 
     def frames(self, k, a0, a1, yaw_extra=None):
-        sg = self.segs[k]
-        if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, self.fps, self.W, self.H, 'rgb', np.uint16); return           # a generated clip: no lens, no overlay (it has its own)
-        ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
+        sg = self.segs[k]; ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
         path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
         ks = np.clip(np.round(t_abs * ci['src_fps']).astype(int), 0, ci['n'] - 1); quat = ci['T']['quat']; Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]

@@ -8,6 +8,7 @@ import { stubMedia } from '../utils/media'
 
 vi.mock('../../src/components/FilmPreview', () => ({ default: () => <div data-testid="film-preview" /> }))
 vi.mock('../../src/components/FinalRender', () => ({ default: () => <div data-testid="final-render" /> }))
+vi.mock('../../src/components/MusicPanel', () => ({ default: () => <div data-testid="music-panel" /> }))
 vi.mock('../../src/components/WindowPlayer', () => ({ default: () => <div data-testid="window-player" /> }))
 
 describe('Timeline', () => {
@@ -202,15 +203,5 @@ describe('Timeline', () => {
 
     expect(seenOverride).toHaveLength(1)
     expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'weight', clip: 'CAM_1', factor: 1.5 })
-  })
-
-  it('labels the windows of a plan made from the script: you, narration, b-roll', async () => {
-    const seg = (id: string, role: 'clip' | 'vo' | 'broll', i: number) => makePlanSegment({ id, clip: 'CAM_1', role, item: i, index: i, film_start_s: i * 5, options: [{ tech: 'static', score: 1 }] })
-    mockGet('/api/edit', makeEditResponse({ edit: {
-      settings: { length_s: 90, bpm: 120, bar_beats: 4, seed: 1, wpm: 150, style: 'default' }, overrides: { locked: [], tech_force: {}, bans_cands: [], bans_techs: [], clip_weight: {} },
-      plan: { source: 'script', script: 'draft-1.json', generated_at: 'utc', film: { length_s: 15, beats: 30, bpm: 120 }, segments: [seg('a', 'clip', 0), seg('b', 'vo', 1), seg('c', 'broll', 2)], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 15 }, warnings: [] } } }))
-    const { findByText, getByText } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
-    expect(await findByText(/from the script draft/)).toBeInTheDocument()
-    expect(getByText('you')).toBeInTheDocument(); expect(getByText('narration')).toBeInTheDocument(); expect(getByText('b-roll')).toBeInTheDocument()
   })
 })

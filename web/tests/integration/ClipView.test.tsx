@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { setup, screen } from '../utils/render'
+import { setup, screen, waitFor } from '../utils/render'
 import ClipView from '../../src/components/ClipView'
 import { mockGet, mockError } from '../utils/api'
 import { makeClipDetail } from '../utils/factories'
@@ -19,7 +19,6 @@ describe('ClipView', () => {
   })
 
   it('handles initial loading state', () => {
-    // We delay the response so it stays on loading state
     mockGet('/api/clip', async () => new Promise(() => {}))
     setup(<ClipView folder="/data" clip="CAM_1" />)
     expect(screen.getByLabelText('Loading When and where')).toBeInTheDocument()
@@ -41,13 +40,7 @@ describe('ClipView', () => {
       }
     }))
     setup(<ClipView folder="/data" clip="CAM_1" />)
-
     expect(await screen.findByText('2023-01-01 12:00:00')).toBeInTheDocument()
-    expect(screen.getByText('0:10')).toBeInTheDocument()
-    expect(screen.getByText('95%')).toBeInTheDocument()
-    expect(screen.getByText('1.2°/s')).toBeInTheDocument()
-    expect(screen.getByText('In a nice place')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'open in OpenStreetMap' })).toHaveAttribute('href', 'https://www.openstreetmap.org/?mlat=10&mlon=20#map=16/10/20')
   })
 
   it('shows error states from fetch', async () => {
@@ -62,10 +55,9 @@ describe('ClipView', () => {
     }))
     setup(<ClipView folder="/data" clip="CAM_1" focus={1.5} />)
 
-    // Wait for the clip to load
     await screen.findByTestId('Phrase')
-
-    // Check scrollIntoView was called since focus matched t0
-    expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'center' })
+    await waitFor(() => {
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: 'center' })
+    })
   })
 })

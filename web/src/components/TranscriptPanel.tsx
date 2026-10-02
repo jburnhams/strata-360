@@ -5,8 +5,6 @@ import { PanelSkeleton } from './Skeleton'
 import Phrase, { type Mode } from './Phrase'
 import PlayIcons from './PlayIcons'
 import Health from './Health'
-import WordMarker from './WordMarker'
-import { usedSet } from '../marks'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
@@ -17,8 +15,6 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
   const [overlay] = useThumbOverlay()
   const [ver, setVer] = useState(0)
   const data = usePoll(() => api.transcript(folder), 30000, [folder, ver])
-  const script = usePoll(() => api.script2(folder), 15000, [folder, ver])
-  const used = useMemo(() => usedSet(script?.used), [script])
   const fix = usePoll(() => api.transcriptFix(folder), 3000, [folder, ver])
   const [fixErr, setFixErr] = useState<string>()
   const running = fix?.state === 'running'
@@ -45,7 +41,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
           <button disabled={running} title="sends the words (and your notes) to Gemini, which suggests substitutions for obvious recognition errors; they show highlighted and you can change any of them" className="rounded border border-stone-300 px-2 py-0.5 text-stone-700 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300"
             onClick={async () => { setFixErr(undefined); try { await api.suggestTranscript(folder) } catch (e) { setFixErr((e as Error).message) } setVer(v => v + 1) }}>{running ? `asking Gemini… ${fix?.done ?? 0}/${fix?.total ?? '…'}` : 'suggest corrections (Gemini)'}</button>
           {fix?.state === 'done' && <span>{fix.fixes} suggested</span>}{!!fix?.calls_made && fix.state !== 'running' && <span title="new Gemini calls made, and tokens used by them">{fix.calls_made} calls ({Math.round(((fix.tokens?.input ?? 0) + (fix.tokens?.output ?? 0)) / 1000)}k tokens){fix.calls_reused ? `, ${fix.calls_reused} reused` : ''}</span>}{!!fix?.usage?.paid_calls && <span title="all Gemini calls made on the paid key for this project, at list price (an estimate; the free key costs nothing)">paid: {fix.usage.paid_calls} calls, about ${fix.usage.cost_usd.toFixed(2)}</span>}{fix?.state === 'error' && <span className="text-red-600">{fix.error}</span>}{fixErr && <span className="text-red-600">{fixErr}</span>}
-          <span title="select words to mark them: G = must use, R = never use, W = clear. Yellow words are not marked but the current draft plays them. A dotted underline is a correction (amber Gemini, blue you); hover for the original, click a word to edit"><span className="rounded bg-emerald-200 px-1 dark:bg-emerald-500/40">must</span> <span className="rounded bg-red-200 px-1 dark:bg-red-500/40">never</span> <span className="rounded bg-yellow-200 px-1 dark:bg-yellow-500/30">in draft</span> select words to mark them</span></span>
+          <span><span className="rounded bg-amber-200 px-1 dark:bg-amber-500/30">Gemini</span> <span className="rounded bg-sky-200 px-1 dark:bg-sky-500/30">you</span> hover for the original, click a word to edit</span></span>
         <span className="flex items-center gap-3 text-stone-500">{data.segments.length} phrases
           <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown" className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
             <option value="translated">translated</option><option value="original">original language</option><option value="both">both</option></select>
@@ -54,7 +50,6 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
       </div>
       <div className="mb-2"><Health h={fix?.health} /></div>
       {groups.length === 0 && <p className="text-sm text-stone-500">{filter === 'you' ? 'No phrases labelled as you yet (voices are labelled by the speakers stage).' : 'No speech recognised yet.'}</p>}
-      <WordMarker folder={folder} onSaved={() => setVer(v => v + 1)}>
       <div className="space-y-3 text-sm leading-relaxed">
         {groups.map((g, gi) => (
           <div key={gi}>
@@ -64,14 +59,13 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
                 <span key={i} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}
                   className={`mr-1 rounded px-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-950 ${s.who === 'wearer' ? 'font-medium' : ''} ${s.flagged ? 'italic opacity-50' : ''}`}>
                   <PlayIcons folder={folder} clip={s.clip} t0={s.play0 ?? s.t0} t1={s.play1 ?? s.t1} original={!!info[s.clip]?.audio_original} clean={!!info[s.clip]?.audio_clean} />
-                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`cursor-pointer ${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} onText={() => onOpen(s.clip, s.t0)} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1), used } : undefined} />
+                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`cursor-pointer ${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} onText={() => onOpen(s.clip, s.t0)} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1) } : undefined} />
                 </span>
               ))}
             </p>
           </div>
         ))}
       </div>
-      </WordMarker>
       {tip && (() => { const c = info[tip.seg.clip], t = at(tip.seg); const left = Math.min(tip.x + 16, window.innerWidth - 300), top = Math.min(tip.y + 16, window.innerHeight - 260); return (
         <div className="pointer-events-none fixed z-40 w-72 overflow-hidden rounded-lg border border-stone-300 bg-white text-xs shadow-lg dark:border-stone-700 dark:bg-stone-900" style={{ left, top }}>
           {c?.thumb && <img src={api.thumbUrl(folder, tip.seg.clip, thumbVersion(c, overlay), overlay)} alt="" className="aspect-video w-full object-cover" />}

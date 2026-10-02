@@ -1,15 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
-import { useThumbOverlay } from '../thumbOverlay'
+import { useEffect, useRef, useState } from 'react'
+import { api, type TrackOverview } from '../api'
 import { PanelSkeleton } from './Skeleton'
-import TrackMap from './TrackMap'
-import TrackCharts, { type XMode } from './TrackCharts'
-import ClipCard from './ClipCard'
-import GapsPanel from './GapsPanel'
 
-// The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
-// Hover a marker for the clip's card, click it to open the clip.
-export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe/Brussels' }: { folder: string; onOpenClip?: (clip: string) => void; tz?: string }) {
+// The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: an offline overview map and the main numbers, or an upload box; click to replace.
+export default function TrackPanel({ folder }: { folder: string }) {
   const [t, setT] = useState<TrackOverview>()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string>()
@@ -41,50 +35,37 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe
   )
   const pace = t.avg_pace_min_km ? `${Math.floor(t.avg_pace_min_km)}:${String(Math.round((t.avg_pace_min_km % 1) * 60)).padStart(2, '0')}` : null
   return (
-    <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+    <div className="mt-4 grid gap-4 rounded-xl border border-stone-200 bg-white p-4 md:grid-cols-[1fr_280px] dark:border-stone-800 dark:bg-stone-900">
       {pick}
-      <div className="mb-3 flex items-center justify-between">
-        <div><b>Race track</b> <span className="text-sm text-stone-500">{t.file} · {t.start_utc?.slice(0, 10)} → {t.end_utc?.slice(0, 10)} UTC</span></div>
-        <button disabled={busy} className="text-sm text-emerald-700 underline dark:text-emerald-400" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Replace'}</button>
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <div><b>Race track</b> <span className="text-sm text-stone-500">{t.file} · {t.start_utc?.slice(0, 10)} → {t.end_utc?.slice(0, 10)} UTC</span></div>
+          <button disabled={busy} className="text-sm text-emerald-700 underline dark:text-emerald-400" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Replace'}</button>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {stat('Distance', t.distance_km, 'km')}{stat('Duration', t.duration_h, 'h')}{stat('Moving', t.moving_h, 'h')}
+          {stat('Climb', t.ascent_m?.toLocaleString(), 'm')}{stat('Descent', t.descent_m?.toLocaleString(), 'm')}{stat('Avg pace', pace, 'min/km')}
+          {stat('Altitude', t.min_altitude_m != null ? `${t.min_altitude_m}–${t.max_altitude_m}` : null, 'm')}{stat('Heart rate', t.avg_hr != null ? `${t.avg_hr} (max ${t.max_hr})` : null)}{stat('Points', t.samples?.toLocaleString())}
+        </div>
+        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
       </div>
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-9">
-        {stat('Distance', t.distance_km, 'km')}{stat('Duration', t.duration_h, 'h')}{stat('Moving', t.moving_h, 'h')}
-        {stat('Climb', t.ascent_m?.toLocaleString(), 'm')}{stat('Descent', t.descent_m?.toLocaleString(), 'm')}{stat('Avg pace', pace, 'min/km')}
-        {stat('Altitude', t.min_altitude_m != null ? `${t.min_altitude_m}–${t.max_altitude_m}` : null, 'm')}{stat('Heart rate', t.avg_hr != null ? `${t.avg_hr} (max ${t.max_hr})` : null)}{stat('Points', t.samples?.toLocaleString())}
-      </div>
-      {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
-      <RaceView folder={folder} onOpenClip={onOpenClip} tz={tz} />
-      <GapsPanel folder={folder} />
+      <Map t={t} />
     </div>
   )
 }
 
-function RaceView({ folder, onOpenClip, tz }: { folder: string; onOpenClip: (clip: string) => void; tz: string }) {
-  const [overlay] = useThumbOverlay()
-  const [base, setBase] = useState<TrackLine>(), [series, setSeries] = useState<TrackSeries>(), [clips, setClips] = useState<TrackClip[]>([]), [hasDraft, setHasDraft] = useState(false), [err, setErr] = useState<string>()
-  const [xMode, setXMode] = useState<XMode>('time'), [cursor, setCursor] = useState<number | null>(null), [hover, setHover] = useState<{ clip: TrackClip; x: number; y: number }>()
-  useEffect(() => {
-    setErr(undefined); setBase(undefined); setSeries(undefined)
-    Promise.all([api.trackLine(folder, undefined, 4000), api.trackSeries(folder, 2000), api.trackClips(folder)])
-      .then(([b, s, c]) => { setBase(b); setSeries(s); setClips(c.clips); setHasDraft(c.has_draft) }).catch(e => setErr((e as Error).message))
-  }, [folder])
-  const hoverClip = (c: TrackClip | null, x = 0, y = 0) => setHover(c ? { clip: c, x, y } : undefined)
-  const off = useMemo(() => clips.filter(c => !c.covered), [clips])
-  if (err) return <p className="mt-3 text-sm text-amber-700">The map and charts need the track and its clips: {err}</p>
-  if (!base || !series) return <div className="mt-3 h-[420px] animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800" aria-label="Loading the race map" />
+// Offline map: the polyline in an equirectangular projection scaled by cos(latitude); start (green) and finish (red) marked.
+function Map({ t }: { t: TrackOverview }) {
+  if (!t.line?.length || !t.bbox) return null
+  const [la0, lo0, la1, lo1] = t.bbox, k = Math.cos(((la0 + la1) / 2) * Math.PI / 180)
+  const w = (lo1 - lo0) * k || 1e-6, h = (la1 - la0) || 1e-6, S = 260 / Math.max(w, h), pad = 10
+  const pt = ([la, lo]: [number, number]) => [pad + (lo - lo0) * k * S, pad + (la1 - la) * S] as const
+  const pts = t.line.map(pt), d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('')
+  const W = w * S + 2 * pad, H = h * S + 2 * pad
   return (
-    <div className="mt-3 space-y-2">
-      <TrackMap base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} />
-      <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
-        <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
-        {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#78716c' }} />not in the film</span>}
-        <span>click the map, then scroll to zoom</span>
-        <span>{clips.filter(c => c.covered).length} clips on the track{off.length ? ` · not on the track: ${off.map(c => c.label).join(', ')}` : ''}</span>
-        <span className="ml-auto flex items-center gap-1">horizontal axis
-          <select aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="time">time</option><option value="km">distance</option></select></span>
-      </div>
-      <TrackCharts series={series} clips={clips} xMode={xMode} tz={tz} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} />
-      {hover && <div className="pointer-events-none fixed z-40" style={{ left: Math.min(hover.x + 16, window.innerWidth - 280), top: Math.min(hover.y + 16, window.innerHeight - 330) }}><ClipCard folder={folder} clip={hover.clip} overlay={overlay} /></div>}
-    </div>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded-lg bg-stone-100 dark:bg-stone-950" role="img" aria-label="Track overview">
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" className="text-emerald-700 dark:text-emerald-400" />
+      <circle cx={pts[0][0]} cy={pts[0][1]} r="4" fill="#16a34a" /><circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="4" fill="#dc2626" />
+    </svg>
   )
 }
