@@ -112,7 +112,7 @@ describe('Workspace', () => {
   })
 
   it('the progress panel\'s results button opens the timeline (film preview and final render)', async () => {
-    const { user } = setup(<Workspace folder="/data" />)
+    const { user } = setup(<Workspace folder="/data/myfolder" onChange={vi.fn()} />)
     await user.click(await screen.findByRole('button', { name: 'Go to results' }))
     expect(await screen.findByTestId('Timeline')).toBeInTheDocument()
   })
