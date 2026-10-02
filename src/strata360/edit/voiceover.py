@@ -131,7 +131,7 @@ def line_durations(folder, lines, log=print):
     except RuntimeError as e: log(f'no voice: {e}'); return {}
     out = {}
     for l in lines:
-        rp = recorded_path(folder, l['seg']); sp = synth_line(folder, l['seg'], l['text'], engine, voice, st['rate']); out[l['seg']] = duration(rp if source_for(st, l['seg'], os.path.exists(rp)) == 'recorded' else sp)
+        rp = recorded_path(folder, l['seg']); sp = synth_line(folder, l['seg'], l['text'], engine, voice, st['rate']); a, b = speech_span(rp if source_for(st, l['seg'], os.path.exists(rp)) == 'recorded' else sp); out[l['seg']] = b - a
     return out
 
 
@@ -158,6 +158,15 @@ def _run(cmd):
 
 def duration(path):
     return float(_run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path]).stdout.strip())
+
+
+def speech_span(path):
+    """(start_s, end_s) of the speech in a take: the silence before and after it is not part of the line (edit/vo_measure.speech_runs: energy within 35 dB of the loudest, a breath of margin), so a line starts where its first word does
+    and its length is the speech's. The whole file when no speech is found or the file cannot be read."""
+    from strata360.edit import vo_measure as M
+    try: x, sr = M.read_audio(path); runs = M.speech_runs(x, sr)
+    except Exception: runs = []
+    return (float(runs[0][0]), float(runs[-1][1])) if runs else (0.0, duration(path))
 
 
 def _spoken(text): return re.sub(r'\s+', ' ', text.replace('—', ', ').replace('…', '...')).strip()
@@ -265,14 +274,14 @@ def _build(folder, engine=None, voice=None, rate=None, progress=None):
         sp = synth_line(folder, l['seg'], l['text'], st['engine'], st['voice'], st['rate']); rp = recorded_path(folder, l['seg']); has_rec = os.path.exists(rp)
         src = source_for(st, l['seg'], has_rec); path = rp if src == 'recorded' else sp
         nxt = lines[i + 1]['film_start_s'] if i + 1 < len(lines) else total
-        start = l['film_start_s'] + LEAD_S; avail = max(0.3, min(nxt - GAP_S, total) - start); d = duration(path); tempo = 1.0; fit = 'ok'
+        start = l['film_start_s'] + LEAD_S; avail = max(0.3, min(nxt - GAP_S, total) - start); ta, tb = speech_span(path); d = tb - ta; tempo = 1.0; fit = 'ok'
         if d > avail:
             if src == 'synth' and d / avail <= MAX_TEMPO: tempo = round(d / avail + 0.005, 3); fit = 'sped'
             elif src == 'synth': tempo = MAX_TEMPO; fit = 'over'
             else: fit = 'over'
         played = d / tempo
         out.append(dict(seg=l['seg'], text=l['text'], source=src, has_recording=has_rec, recorded=has_rec, path=os.path.relpath(path, base(folder)), film_start_s=round(start, 3), window_s=l['seconds'], room_s=round(avail, 3),
-                        natural_s=round(d, 3), played_s=round(min(played, avail) if fit == 'over' else played, 3), overrun_s=round(max(0.0, played - avail), 3), tempo=tempo, fit=fit,
+                        natural_s=round(d, 3), trim=[round(ta, 3), round(tb, 3)], choices=overflow_choices(src, d / tempo - avail), played_s=round(min(played, avail) if fit == 'over' else played, 3), overrun_s=round(max(0.0, played - avail), 3), tempo=tempo, fit=fit,
                         synth_s=round(duration(sp), 3)))
         if progress: progress(i + 1, len(lines))
     os.makedirs(track_dir(folder, key), exist_ok=True); _mix(folder, out, total, os.path.join(track_dir(folder, key), 'voiceover.wav'))
@@ -282,10 +291,18 @@ def _build(folder, engine=None, voice=None, rate=None, progress=None):
     json.dump(doc, open(tj, 'w'), indent=1); _publish(folder, key); return doc
 
 
+def overflow_choices(src, over_s):
+    """What can be done about a line that is `over_s` seconds longer than the room it has (none: []): the choices as plain sentences, the first being the cheapest."""
+    if over_s <= 0.005: return []
+    c = [f'shorten the line by about {over_s:.1f} s of speech', 'give the clip more footage for it (a longer b-roll, or the neighbouring clip)', 'let the last frame hold while it finishes (the film gets longer)']
+    return c + (['let the voice speak faster (only for the synthetic voice)'] if src == 'synth' else ['record it again, shorter'])
+
+
 def _mix(folder, out, total, dest):
     inputs = []; chains = []
     for i, o in enumerate(out):
         p = os.path.join(base(folder), o['path']); inputs += ['-i', p]; f = []
+        if o.get('trim'): f += [f"atrim={o['trim'][0]:.3f}:{o['trim'][1]:.3f}", 'asetpts=PTS-STARTPTS']
         if o['tempo'] != 1.0: f.append(f"atempo={o['tempo']}")
         if o['fit'] == 'over': f.append(f"atrim=0:{o['played_s']}"); f.append(f"afade=t=out:st={max(0.0, o['played_s'] - 0.08):.3f}:d=0.08")
         f.append(f"adelay={int(round(o['film_start_s'] * 1000))}:all=1"); chains.append(f"[{i}:a]" + ','.join(f) + f'[a{i}]')

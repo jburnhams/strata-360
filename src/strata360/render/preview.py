@@ -135,6 +135,29 @@ def window_gain(folder, g):
     return 10 ** (SE.window_mix(doc, g['clip_start_s'], g['clip_start_s'] + g['dur_s'], bool(g.get('speech')))['gain_db'] / 20.0)
 
 
+MUTE_PAD_S = 0.04            # a never-say word is silenced from this long before it starts to this long after it ends
+
+
+def never_spans(folder, clip, start_s, dur_s):
+    """[(a, b)] seconds inside the window [start_s, start_s + dur_s) of a clip where the wearer says something marked NEVER USE (red words, analysis/transcript_marks.py), as times from the window's start,
+    padded a little. The clip's own sound is silenced there whatever the script plays."""
+    from strata360.edit import script_pack as SP
+    cdir = os.path.join(config.race_dir(folder), 'clips', clip); out = []
+    for l in SP.transcript_lines(cdir, SP.label_of(clip)):
+        if l.get('mark') != 'never': continue
+        a, b = l['t0'] - MUTE_PAD_S - start_s, l['t1'] + MUTE_PAD_S - start_s
+        if b > 0 and a < dur_s: out.append((max(a, 0.0), min(b, dur_s)))
+    return out
+
+
+def role_has_speech(role): return role not in ('vo', 'broll')           # the speech-free background track has nothing to silence
+
+
+def mute_filter(spans):
+    """The ffmpeg filter that silences `spans` ([(a, b)] seconds), or '' for none."""
+    return ''.join(f",volume=enable='between(t,{a:.3f},{b:.3f})':volume=0" for a, b in spans)
+
+
 def audio_of(folder, clip, role=None):
     """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none. In a plan made from the script (windows have a `role`) the clip's voice is
     heard ONLY in dialogue windows (role 'clip', the lines the script plays); narration and b-roll windows use the speech-free background track (audio_background.flac) or, until that exists, no sound of their own."""
@@ -151,7 +174,7 @@ def build_audio(folder, plan, out, total_s):
     inputs = []; chains = []; n = 0
     for g in plan['segments']:
         p = audio_of(folder, g['clip'], g.get('role')); d = g['dur_s']; gain = window_gain(folder, g)
-        if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
+        if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain}{mute_filter(never_spans(folder, g['clip'], g['clip_start_s'], d) if role_has_speech(g.get('role')) else [])},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
         n += 1
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); chain = ';'.join(chains) + ';' + ''.join(f'[s{i}]' for i in range(n)) + f'concat=n={n}:v=0:a=1[nat]'

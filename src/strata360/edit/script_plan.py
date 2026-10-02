@@ -144,6 +144,11 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
         if p['kind'] == 'synthetic': continue                                                       # placed after the footage windows are planned (below)
         fp = foot[p['clip']]
         wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
+        if p['kind'] == 'vo' and wins:                                                                  # the narration must have picture for as long as it is spoken
+            short = p['seconds'] - sum(w[2] for w in wins)
+            if short > 1e-6:
+                c0, s0, l0 = wins[-1]; grow = min(short, max(cap_p - l0, 0.0)); wins[-1] = (c0, s0, l0 + grow)
+                warn.append(f"item {p['n'] + 1}: the narration needs {p['seconds']:.1f} s but clip {p['label']} has {p['seconds'] - short:.1f} s of footage for it; the last frame is held" + (f" for {short - grow:.1f} s more than a window allows" if short - grow > 1e-6 else '') + ' (choices: shorten the line, move it to a longer clip, or let the hold stand)')
         for c, start, length in wins:
             speech = p['kind'] == 'clip'; beats = max(1, int(math.ceil(length / beat_s - 1e-9))) if p['kind'] != 'broll' else max(1, int(round(length / beat_s)))
             dur = beats * beat_s; start = max(min(start, fp.duration - dur), 0.0)

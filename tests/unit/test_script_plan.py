@@ -128,3 +128,10 @@ def test_a_script_of_only_generated_clips_has_no_footage_windows_and_still_plans
 
 def test_a_generated_clip_has_no_words_so_a_dialogue_item_on_it_is_skipped():
     r = run(dict(wpm=150, items=[dict(type='clip', clip='G03', lines=['x']), item('broll', 2, seconds=4.0)]), {}, pack=syn_pack()); assert r['synthetic'] == [] and any('G03' in w for w in r['warnings'])
+
+
+def test_narration_longer_than_the_clips_footage_gets_the_missing_time_held_with_the_choices_named():
+    tiny = clip(3, 6.0, [cand('X', 0, 0, 3.0)]); pack = dict(race={}, clips=PACK['clips'] + [pc(tiny)])
+    d = dict(wpm=150, items=[dict(type='vo', clip='0003', text='A long line over a very short clip.')])
+    r = SPL.build(d, pack, [C1, C2, tiny], LIB, MUSIC, {0: 6.0}, st=CH.Settings(seed=1)); need = 6.0 + SPL.LEAD_S + SPL.TAIL_S
+    assert sum(s.dur_s for s in r['segs']) >= need - 1e-6 and any('narration needs' in w and 'shorten the line' in w and 'last frame is held' in w for w in r['warnings'])
