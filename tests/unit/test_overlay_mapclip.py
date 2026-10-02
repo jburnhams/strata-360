@@ -48,10 +48,8 @@ def test_the_zoom_is_closer_when_the_clip_is_slower(series, tiles):
     assert slow.z.mean() > fast.z.mean() and fast.z.min() >= MC.ZOOM[0] and slow.z.max() <= MC.ZOOM[1]
 
 
-def test_the_clock_runs_at_the_speed_up(series, tiles, monkeypatch):
-    c = clip(series, tiles); seen = []; orig = c.overlay.apply
-    monkeypatch.setattr(c.overlay, 'apply', lambda img, t: (seen.append(t), orig(img, t))[1])
-    c.frame(0); c.frame(10); assert seen[1] - seen[0] == pytest.approx(10 * c.speedup / c.fps)
+def test_the_picture_has_no_overlay_the_film_adds_its_own(series, tiles):
+    c = clip(series, tiles); assert not hasattr(c, 'overlay') and not hasattr(c, 'gap') and c.frame(3).shape == (180, 320, 3)
 
 
 def test_a_stretch_without_length_is_refused(series, tiles):

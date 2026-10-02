@@ -2,9 +2,9 @@
 import subprocess
 import cv2, numpy as np
 import pytest
-from overlay_fakes import T0, TileServer, race_track
+from overlay_fakes import T0, race_track
 from strata360 import hw
-from strata360.overlay import flyover as FO, mapclip as MC, tiles as TL
+from strata360.overlay import flyover as FO, mapclip as MC
 from strata360.overlay.series import Series
 
 
@@ -24,7 +24,7 @@ def fake_mbgl(monkeypatch, tmp_path):
     monkeypatch.setattr(FO.subprocess, 'run', run); run.calls = calls; return run
 
 
-def clip(series, seconds=4.0, fps=10.0, size=(1280, 720), tmp=None, **kw): kw.setdefault('tiles', TL.Tiles('osm', cache_dir=str(tmp / 'tiles') if tmp else None, fetch=TileServer())); return FO.FlyoverClip(series, T0 + 300, T0 + 3300, seconds, fps=fps, size=size, mbgl='/fake/mbgl-render', cache=str(tmp / 'c.db') if tmp else FO.CACHE, **kw)
+def clip(series, seconds=4.0, fps=10.0, size=(1280, 720), tmp=None, **kw): return FO.FlyoverClip(series, T0 + 300, T0 + 3300, seconds, fps=fps, size=size, mbgl='/fake/mbgl-render', cache=str(tmp / 'c.db') if tmp else FO.CACHE, **kw)
 
 
 # ---- the camera ----
@@ -119,16 +119,16 @@ def test_the_backend_is_metal_on_a_mac_and_can_be_chosen(monkeypatch):
     monkeypatch.setattr(hw.sys, 'platform', 'darwin'); assert hw.mbgl_backend() == 'metal'; monkeypatch.setenv('STRATA_MBGL_BACKEND', 'vulkan'); assert hw.mbgl_backend() == 'vulkan'
 
 
-def test_a_frame_is_a_4k_rgb_picture_cropped_from_the_taller_render_with_the_overlay_on_top(series, tmp_path, fake_mbgl):
+def test_a_frame_is_a_4k_rgb_picture_cropped_from_the_taller_render_with_only_the_imagery_credit_drawn_in(series, tmp_path, fake_mbgl):
     c = clip(series, size=(3840, 2160), tmp=tmp_path); f = c.frame(5); assert f.shape == (2160, 3840, 3) and f.dtype == np.uint8 and len(fake_mbgl.calls) == 1
     assert tuple(f[1000, 1900]) == (160, 90, 30)                                                                            # the fake's BGR (30, 90, 160) as RGB where nothing is drawn over it
-    assert (f != np.array([160, 90, 30], np.uint8)).any(axis=2).sum() > 1000                                                # the clock, distance, pace and credit were drawn
+    drawn = (f != np.array([160, 90, 30], np.uint8)).any(axis=2); ys, xs = np.nonzero(drawn); assert 50 < drawn.sum() < 150000 and ys.min() > 2000 and xs.min() > 1500                # only the credit, small, at the bottom right: the film adds the overlay
     assert len(c.style['sources']['me']['data']['features']) == 2                                                             # the marker and its halo
     c.close()
 
 
 def test_the_credit_names_the_imagery_and_the_terrain(series, tmp_path):
-    c = clip(series, tmp=tmp_path, imagery='topo'); lines = [w.lines for w in c.overlay.widgets if hasattr(w, 'lines')]; assert lines == [['Map © OpenTopoMap (CC-BY-SA), data © OpenStreetMap contributors · Terrain © Mapterhorn']]
+    c = clip(series, tmp=tmp_path, imagery='topo'); assert c.credit == 'Map © OpenTopoMap (CC-BY-SA), data © OpenStreetMap contributors · Terrain © Mapterhorn' and not hasattr(c, 'overlay')
 
 
 def test_frame_k_shows_the_race_at_speedup_times_k_over_fps(series, tmp_path):

@@ -1,4 +1,4 @@
-"""A 3D terrain flyover clip for a stretch of the race with no footage (implementation plan N2): the camera flies along the route over satellite imagery draped on terrain, with the race overlay's numbers on top.
+"""A 3D terrain flyover clip for a stretch of the race with no footage (implementation plan N2): the camera flies along the route over satellite imagery draped on terrain, with no overlay: the film adds its own (the same as on every other shot) at the race time each frame shows.
 
   clip = FlyoverClip(series, t0, t1, seconds, fps=30, size=(3840, 2160), imagery='esri', tz='Europe/Brussels')
   clip.frames -> number of frames;  clip.time(k) -> the race time (UTC seconds) frame k shows;  clip.frame(k) -> RGB uint8 picture;  mapclip.render(clip, path) -> an MP4
@@ -14,7 +14,7 @@ import numpy as np, cv2
 from scipy.interpolate import PchipInterpolator
 
 from strata360 import hw
-from strata360.overlay.gapoverlay import GapOverlay
+from strata360.overlay import draw as D
 from strata360.overlay.mapclip import frame_count
 
 BASE_W, BASE_H = 1280, 720    # the picture the camera is planned for
@@ -217,7 +217,7 @@ def check_size(size):
 
 
 class FlyoverClip:
-    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=True, mbgl=None, cache=CACHE, camera=None, tiles=None, info=None):
+    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=True, mbgl=None, cache=CACHE, camera=None):
         if not t1 > t0: raise ValueError('the stretch has no length')
         check_size(size)
         if imagery not in IMAGERY: raise ValueError(f'imagery: one of {", ".join(IMAGERY)}')
@@ -227,7 +227,7 @@ class FlyoverClip:
         self.route = route_from_series(series); self.shots = plan_shots(series, self.t0, self.t1, self.frames / self.fps); self.cam = camera or plan_camera(self.route, self.shots, self.fps, self.frames, exag)
         g, lat, lon, _ = self.route; i0, i1 = np.searchsorted(g, [self.cam['runner'].min() - 500, self.cam['runner'].max() + 3000]); sl = slice(i0, max(i1, i0 + 2))
         self.style = make_style(imagery, exag, lon[sl], lat[sl], self.scale if sharp else 1.0, self.dz)
-        self.gap = GapOverlay(series, size, self.t0, self.t1, tz, tiles, st, credit=[IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT], info=info); self.overlay = self.gap.overlay
+        self.credit = IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT; self._credit = None                                                       # the imagery's credit is drawn into the picture; the film adds its own overlay on top
         self._tmp = None
 
     def time(self, k): return self.t0 + k * self.speedup / self.fps
@@ -255,8 +255,10 @@ class FlyoverClip:
         return np.ascontiguousarray(img[:self.H, :, ::-1])             # the bottom strip (missing tiles) cropped, BGR -> RGB
 
     def frame(self, k):
-        """The picture of frame k as RGB uint8: the terrain with the race overlay on top (overlay/gapoverlay.py)."""
-        return self.gap.apply(self.still(k), self.time(k))
+        """The picture of frame k as RGB uint8: the terrain with the imagery credit; the race overlay is the film's own, added when the film is rendered (render/final.py)."""
+        img = self.still(k)
+        if self._credit is None: s_ = self.scale; rgba, pad, w = D.text(self.credit, 15 * s_, D.LABEL_FONT, (255, 255, 255), tabular=False); self._credit = (self.W - w - 24 * s_ - pad, self.H - 38 * s_ - pad, rgba)
+        return D.composite(img, [self._credit])
 
     def close(self):
         if self._tmp: shutil.rmtree(self._tmp, ignore_errors=True); self._tmp = None

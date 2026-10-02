@@ -1,5 +1,4 @@
-"""Frames of a generated clip (edit/synthetic.py, overlay/mapclip.py) for the film: a plain picture video, not a lens recording, so there is no camera and no overlay (the map clip has its own overlay baked in,
-at the clip's own speed-up: the race clock on it already runs fast, so no time map is needed here).
+"""Frames of a generated clip (edit/synthetic.py, overlay/mapclip.py) for the film: a plain picture video, not a lens recording, so there is no camera and no overlay (the film puts its own overlay on it, `race_time` says which race time each frame shows).
 
 frames(path, start_s, a0, a1, fps, W, H, order='rgb', dtype=uint8) -> iterator of pictures for frames a0 .. a1-1 of the window, which shows the video from `start_s`. Before the start of the video
 the first frame is held, after its end the last (the transition handles, as for lens footage); the video is scaled to W x H and its frames are picked at the film's rate."""
@@ -8,6 +7,13 @@ import os, subprocess
 import cv2, numpy as np
 
 from strata360.pipeline import guard
+
+
+def race_time(sg, i, fps):
+    """The race time (UTC seconds) that frame `i` of the window `sg` shows: the clip covers [utc_start, utc_end] of the race in `synthetic_seconds` of film, the window plays it from `clip_start_s` (a window longer than the clip holds its last frame)."""
+    import datetime as dt
+    t0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp(); t1 = dt.datetime.fromisoformat(sg['utc_end'].replace('Z', '+00:00')).timestamp(); secs = float(sg.get('synthetic_seconds') or sg['dur_s'])
+    return t0 + min(max(float(sg['clip_start_s']) + i / fps, 0.0), secs) / secs * (t1 - t0)
 
 
 def card(W, H, text, order='rgb', dtype=np.uint8):
