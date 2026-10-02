@@ -8,6 +8,7 @@ usable, every pin honoured); grounding is advisory (edit/script_ground.py) and o
 import datetime as dt, json, os, re, time
 
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
+from strata360.edit.script_pack import norm_label
 
 PROMPT_VERSION = 4
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
@@ -23,6 +24,7 @@ THE THREE KINDS OF ITEM, played one after another in the order you write them (n
 - "clip": the runner's own words from the recording, played as spoken with the picture of that clip. You choose them by line id: "from" and "to" are the first and last line of one unbroken stretch (inclusive); lines you do not include are cut. Whole lines only (a line may have been split into pieces such as 0023.27.1, 0023.27.2: they are lines of their own). Its length is from the start of the first line to the end of the last line (the pauses between them are kept).
 - "vo": narration the runner records afterwards and speaks over the picture of that clip. First person, natural, spoken. Its length is words / WORDS-PER-MINUTE.
 - "broll": picture of that clip with no speech (music only), for a number of seconds you choose.
+Some clips are marked NO FOOTAGE: a generated animated map for a stretch of the race the camera missed. They have no words and no sound of their own. They are optional: use one as "broll" (it plays for its whole length) or under a "vo" item where the film needs to cover that distance or time, and never as a "clip" item.
 
 RULES
 1. Length. The film must be as long as the TARGET, within 3%. Work it out item by item and keep the running total ("t"). If your total is short or long, fix it before answering: add or remove lines, narration or picture.
@@ -103,7 +105,7 @@ def check(script, pack, target_s, wpm):
     clips = {c['label']: c for c in pack['clips']}; order = {c['label']: i for i, c in enumerate(pack['clips'])}; by = {l['id']: l for c in pack['clips'] for l in c['lines']}; pos = PN.index(pack)
     items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0); words_total = 0; last_line = {}
     for n, it in enumerate(items, 1):
-        t = it.get('type'); cl = str(it.get('clip', '')).zfill(4)
+        t = it.get('type'); cl = norm_label(it.get('clip', ''))
         if cl not in clips: probs.append(f'item {n}: no such clip {cl}'); continue
         if cl != cur:
             if cur is not None: seen_done.add(cur)
@@ -113,6 +115,7 @@ def check(script, pack, target_s, wpm):
         if t == 'vo':
             w = SP.words(it.get('text', '')); d = w * 60.0 / wpm + VO_PAUSE_S; words_total += w
             if w > 45: probs.append(f'item {n}: vo of {w} words is too long (limit about 40)')
+            if clips[cl].get('synthetic'): d = max(d, clips[cl]['duration_s'])                             # narration over a generated clip plays for the whole clip
         elif t == 'clip':
             sp = span(it, pack)
             if not sp: probs.append(f"item {n}: unknown line id {it.get('from')} or {it.get('to')}"); continue
@@ -124,9 +127,9 @@ def check(script, pack, target_s, wpm):
         elif t == 'broll': d = float(it.get('seconds') or 0)
         else: probs.append(f'item {n}: unknown type {t}'); continue
         kinds[t] += d; total += d; per[cl] = per.get(cl, 0.0) + d
-    skipped = {str(s.get('clip', '')).zfill(4) for s in (script or {}).get('skipped') or []}
+    skipped = {norm_label(s.get('clip', '')) for s in (script or {}).get('skipped') or []}
     for lab, c in clips.items():
-        if lab not in per and lab not in skipped: probs.append(f'clip {lab} is neither used nor listed under skipped')
+        if lab not in per and lab not in skipped and not c.get('synthetic'): probs.append(f'clip {lab} is neither used nor listed under skipped')
         if lab in per and per[lab] > c['usable_s'] + 0.5: probs.append(f"clip {lab} gets {per[lab]:.1f} s of picture but only {c['usable_s']} s is usable")
         if lab in per and per[lab] < 2.5: probs.append(f'clip {lab} gets only {per[lab]:.1f} s')
     if abs(total - target_s) > TOLERANCE * target_s: probs.append(f'the film is {total:.0f} s by the real durations but the target is {target_s:.0f} s (allowed {(1 - TOLERANCE) * target_s:.0f} to {(1 + TOLERANCE) * target_s:.0f}): ' + ('add' if total < target_s else 'remove') + f' about {abs(target_s - total):.0f} s')

@@ -9,6 +9,7 @@ pins = {
 
 render_pack_marks(pins, pack) -> {line id: 'must' | 'never'};  render_constraints(...) -> the prompt section;  check(script, pack, pins) -> problems."""
 import re
+from strata360.edit.script_pack import norm_label
 
 MODES = ('clip', 'ordered', 'anywhere')
 
@@ -91,10 +92,10 @@ def check(script, pack, pins):
         for n, it in enumerate(items):
             if it.get('type') == 'vo':
                 got = norm(it.get('text', ''))
-                if any(got[k:k + len(want)] == want for k in range(len(got) - len(want) + 1)): hit = n; clip_of[p['id']] = str(it.get('clip', '')).zfill(4); break
+                if any(got[k:k + len(want)] == want for k in range(len(got) - len(want) + 1)): hit = n; clip_of[p['id']] = norm_label(it.get('clip', '')); break
         if hit is None: probs.append(f"user narration [{p['id']}] is missing or reworded (it must appear word for word)"); continue
         vpos[p['id']] = hit
-        if p.get('mode') == 'clip' and clip_of[p['id']] != str(p.get('clip', '')).zfill(4): probs.append(f"user narration [{p['id']}] must be in clip {p.get('clip')} but is in clip {clip_of[p['id']]}")
+        if p.get('mode') == 'clip' and clip_of[p['id']] != norm_label(p.get('clip', '')): probs.append(f"user narration [{p['id']}] must be in clip {p.get('clip')} but is in clip {clip_of[p['id']]}")
     for ph in (pins or {}).get('vo_never') or []:
         w = norm(ph)
         for n, it in enumerate(items, 1):

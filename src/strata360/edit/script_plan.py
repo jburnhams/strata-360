@@ -11,6 +11,7 @@ Narration and b-roll use the clip's free footage (not the dialogue the script pl
 filled by reusing footage, and said so in `warnings`. Every window is a whole number of beats (cuts fall on beats; a dialogue window is rounded up so it always holds its speech). The techniques are chosen by the
 same beam search as the beat planner (chrono.assign_techniques); the plan is saved as an ordinary `edit.plan`, so the timeline, the preview and the final render use it unchanged."""
 import hashlib, math
+from strata360.edit.script_pack import norm_label
 
 import numpy as np
 
@@ -34,9 +35,14 @@ def pieces(draft, pack, voice_s, wpm):
     """The script as pieces in order: [{n, kind, clip, label, seconds, ...}]. `voice_s` maps the item number to how long the narration takes to speak (missing: estimated from the words)."""
     by_label = {c['label']: c for c in pack['clips']}; lines = {l['id']: l for c in pack['clips'] for l in c['lines']}; out = []; warn = []
     for n, it in enumerate(draft['items']):
-        c = by_label.get(str(it.get('clip', '')).zfill(4))
+        c = by_label.get(norm_label(it.get('clip', '')))
         if c is None: warn.append(f"item {n + 1}: no clip {it.get('clip')}; skipped"); continue
         base = dict(n=n, clip=c['clip'], label=c['label'], duration_s=c['duration_s'])
+        if c.get('synthetic'):                                                                          # a generated clip: its whole length, picture only; narration may run over it
+            if it['type'] == 'clip': warn.append(f"item {n + 1}: {c['label']} has no words; skipped"); continue
+            text = (it.get('text') or '').strip() if it['type'] == 'vo' else ''; d = voice_s.get(n); est = d is None; d = estimated_s(text, wpm) if est else d
+            sec = c['duration_s'] if it['type'] == 'vo' else min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), c['duration_s'])
+            out.append(dict(base, kind='synthetic', role=it['type'], text=text, speak_s=d if text else 0.0, estimated=est and bool(text), seconds=max(sec, LEAD_S + d + TAIL_S if text else 0.0), seg=seg_id(c['clip'], text) if text else None)); continue
         if it['type'] == 'clip':
             ls = [lines[i] for i in it.get('lines') or [] if i in lines]
             if not ls: warn.append(f'item {n + 1}: no transcript lines; skipped'); continue
@@ -129,12 +135,13 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     voice_s = voice_s or {}; st = st or CH.Settings(seed=seed); rng = np.random.default_rng(st.seed); beat_s = music.beat_s; warn = []
     clips = sorted(clips, key=lambda c: c['start_utc']); index = {c['id']: i for i, c in enumerate(clips)}
     foot = {c['id']: Footage(c, CH.clip_candidates(c)) for c in clips}
-    ps, w0 = pieces(draft, pack, voice_s, wpm); warn += w0; ps = [p for p in ps if p['clip'] in foot]
+    ps, w0 = pieces(draft, pack, voice_s, wpm); warn += w0; ps = [p for p in ps if p['clip'] in foot or p['kind'] == 'synthetic']
     for p in ps:                                                                                    # the dialogue the script plays is not footage for narration
         if p['kind'] == 'clip': foot[p['clip']].reserved.append((p['start'], p['start'] + p['seconds']))
     cap_p = int(MAX_PICTURE_S / beat_s + 1e-9) * beat_s; cap_d = int(MAX_DIALOGUE_S / beat_s + 1e-9) * beat_s          # the longest window in WHOLE beats: rounding a window up to beats must never take it past what a technique allows
     windows = []; roles = []; first_window = {}
     for k, p in enumerate(ps):
+        if p['kind'] == 'synthetic': continue                                                       # placed after the footage windows are planned (below)
         fp = foot[p['clip']]
         wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
         for c, start, length in wins:
@@ -142,12 +149,22 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
             dur = beats * beat_s; start = max(min(start, fp.duration - dur), 0.0)
             w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
             windows.append(w); roles.append(p['kind']); first_window.setdefault(k, len(windows) - 1)
-    if not windows: raise O.Infeasible('the script has no windows: no item could be matched to footage')
+    if not windows and not any(p['kind'] == 'synthetic' for p in ps): raise O.Infeasible('the script has no windows: no item could be matched to footage')
     B = sum(w.beats for w in windows); music = O.Music(bpm=music.bpm, beats=B, bar_beats=music.bar_beats, sections=music.sections)
-    segs = CH.assign_techniques(windows, clips, lib, music, st, rng, warn, B=B)
+    segs = CH.assign_techniques(windows, clips, lib, music, st, rng, warn, B=B) if windows else []
     for sg, w in zip(segs, windows): sg.clip_start_s = round(w._start, 3); sg.in_s = round(w._start - sg.cand.start_s, 3)
-    lines = []; pos = 0; starts = []
-    for sg in segs: starts.append(pos * beat_s); pos += sg.beats
+    syn = {k: max(1, int(math.ceil(p['seconds'] / beat_s - 1e-9))) for k, p in enumerate(ps) if p['kind'] == 'synthetic'}; before = {}; run = 0              # beats of generated clips ahead of each piece
+    for k in range(len(ps)): before[k] = run; run += syn.get(k, 0)
+    for sg, w in zip(segs, windows): sg.start += before[w._piece]
+    lines = []; starts = [sg.start * beat_s for sg in segs]; synthetic = []
+    place = 0                                                                                                           # the generated clips in film order: each starts where the piece before it ends
+    for k, p in enumerate(ps):
+        n_k = syn[k] if k in syn else sum(sg.beats for sg, w in zip(segs, windows) if w._piece == k)
+        if k in syn:
+            synthetic.append(dict(piece=k, start_beat=place, beats=syn[k], clip=p['clip'], label=p['label'], seconds=round(p['seconds'], 3), role=p['role'], item=p['n']))
+            if p['text']: lines.append(dict(seg=p['seg'], text=p['text'], clip=p['clip'], item=p['n'], film_start_s=round(place * beat_s, 3), seconds=round(syn[k] * beat_s, 3), speak_s=round(p['speak_s'], 3), estimated=p['estimated']))
+        place += n_k
     for k, p in enumerate(ps):
         if p['kind'] == 'vo' and k in first_window: lines.append(dict(seg=p['seg'], text=p['text'], clip=p['clip'], item=p['n'], film_start_s=round(starts[first_window[k]], 3), seconds=round(sum(w.beats for w in windows if w._piece == k) * beat_s, 3), speak_s=round(p['speak_s'], 3), estimated=p['estimated']))
-    return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B, warnings=warn)
+    lines.sort(key=lambda l: l['film_start_s'])
+    return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B + run, synthetic=synthetic, warnings=warn)

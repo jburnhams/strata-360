@@ -51,3 +51,16 @@ def test_no_draft_and_no_candidates_are_refused_with_the_reason(make_project):
     with pytest.raises(O.Infeasible, match='no script draft'): PJ.plan_from_script(pr.folder)
     SD.save_draft(pr.folder, dict(items=[]))
     with pytest.raises(O.Infeasible, match='candidates'): PJ.plan_from_script(pr.folder)
+
+
+def test_a_generated_clip_in_the_script_becomes_a_window_that_plays_its_file(folder, monkeypatch):
+    from strata360.edit import synthetic as SY, framing as FR
+    gap = dict(id='G01', t0=1_771_754_000.0, t1=1_771_754_000.0 + 7200); clip = SY.make(gap, seconds=6.0); SY.save(folder, dict(clips=[dict(clip, status='ready', file='synthetic/G01.mp4')]))
+    d = draft_for(folder); d['items'].insert(2, dict(type='broll', clip='g01', seconds=30)); SD.save_draft(folder, d); monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.0 for l in lines})
+    p = PJ.plan_from_script(folder)['plan']; segs = p['segments']; syn = [g for g in segs if g.get('synthetic')]
+    assert len(syn) == 1 and syn[0]['clip'] == 'G01' and syn[0]['synthetic'].endswith(os.path.join('synthetic', 'G01.mp4')) and syn[0]['role'] == 'broll' and syn[0]['item'] == 2 and abs(syn[0]['dur_s'] - 6.0) < 0.6
+    assert [g['index'] for g in segs] == list(range(len(segs))) and abs(p['film']['length_s'] - sum(g['dur_s'] for g in segs)) < 1e-6
+    assert all(abs(a['film_start_s'] + a['dur_s'] - b['film_start_s']) < 0.002 for a, b in zip(segs, segs[1:]))
+    seen = []; monkeypatch.setattr(FR, 'clip_data', lambda f, c: seen.append(c) or {}); monkeypatch.setattr(FR, 'resolve_segment', lambda g, lib, data: {}); res = FR.resolve(folder, p)
+    assert syn[0]['id'] not in res and 'G01' not in seen and len(res) == len(segs) - 1                                          # a generated clip has no camera to frame
+    lines = json.load(open(os.path.join(folder, 'strata360', 'script2', 'lines.json')))['lines']; after = [g for g in segs if g['item'] == 3][0]; assert [l['text'] for l in lines][-1] == 'Then it got harder.' and lines[-1]['film_start_s'] >= syn[0]['film_start_s'] + syn[0]['dur_s'] - 0.002 and after['film_start_s'] >= syn[0]['film_start_s'] + syn[0]['dur_s'] - 0.002

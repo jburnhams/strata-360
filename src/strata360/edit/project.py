@@ -13,6 +13,7 @@ The plan is a pure function of (candidates, settings, overrides, seed): `propose
 
 A window's id (`wid`) is "<clip id>@<start in the clip, seconds, 2 decimals>"; overrides whose window no longer exists are reported as orphaned, not silently applied."""
 import datetime as dt, glob, json, os
+from strata360.edit.script_pack import norm_label
 from strata360.pipeline import config
 from strata360.edit import techniques as TQ, chrono as CH, optimise as O
 
@@ -107,6 +108,21 @@ def serialise(segs, clips, music, lib, locked_wids=()):
     return out
 
 
+def insert_synthetic(folder, ser, specs, beat_s):
+    """The plan's segments with the generated clips (edit/synthetic.py) put in their places: each is a window of the whole clip, played from its start, `synthetic` naming the video file (the film's sources play it as it is)."""
+    from strata360.edit import synthetic as SY
+    if not specs: return ser
+    docs = {c['id']: c for c in SY.load(folder)['clips']}; rd = config.race_dir(folder); out = list(ser)
+    for sp in specs:
+        c = docs[sp['clip']]; dur = round(sp['beats'] * beat_s, 3)
+        out.append(dict(id=f"{c['id']}@0.00", index=0, clip=c['id'], cand_id=f"{c['id']}:map", cand_start_s=0.0, cand_end_s=c['seconds'], film_start_s=round(sp['start_beat'] * beat_s, 3), start_beat=sp['start_beat'], beats=sp['beats'], dur_s=dur,
+                        clip_start_s=0.0, in_s=0.0, utc_start=c['t0'], utc_end=c['t1'], energy=0.5, technique='map', family='generated', hero=False, variant_seed=0, forced=False, speech=False, kind='synthetic', view=None, options=[],
+                        synthetic=os.path.join(rd, c['file']), role=sp['role'], item=sp['item'], energy_hi=False))
+    out.sort(key=lambda g: g['start_beat'])
+    for i, g in enumerate(out): g['index'] = i
+    return out
+
+
 def plan_from_script(folder, draft_name=None, log=print):
     """Make the film's plan from the whole-race script (edit/script_draft.py, edit/script_plan.py) and save it as the plan: the script's dialogue, narration and b-roll in order, in windows of whole beats, the
     narration timed by how long the voice takes to say it. Also writes script2/lines.json, the narration the voice-over builder speaks and places. Raises O.Infeasible with the reason."""
@@ -117,12 +133,13 @@ def plan_from_script(folder, draft_name=None, log=print):
     lib = TQ.load(); mus = music_info(folder, edit['settings']); bpm = float(mus['bpm']) if mus else float(edit['settings']['bpm']); bar = int(mus['bar_beats']) if mus else int(edit['settings']['bar_beats'])
     music = O.Music(bpm=bpm, beats=1, bar_beats=bar, sections=[tuple(x) for x in mus['sections']] if mus else [(0, 10 ** 9, 0.5)])
     pack = SP.build(folder); vo_items = [(n, it) for n, it in enumerate(draft['items']) if it.get('type') == 'vo' and (it.get('text') or '').strip()]
-    by_label = {c['label']: c['clip'] for c in pack['clips']}; seg_of = {n: SPL.seg_id(by_label.get(str(it.get('clip', '')).zfill(4), ''), it['text']) for n, it in vo_items}
+    by_label = {c['label']: c['clip'] for c in pack['clips']}; seg_of = {n: SPL.seg_id(by_label.get(norm_label(it.get('clip', '')), ''), it['text']) for n, it in vo_items}
     spoken = VO.line_durations(folder, [dict(seg=seg_of[n], text=it['text'].strip()) for n, it in vo_items], log); voice_s = {n: spoken[seg_of[n]] for n, _ in vo_items if seg_of[n] in spoken}
     o = edit['overrides']; st = CH.Settings(seed=int(edit['settings']['seed']), tech_force=dict(o['tech_force']), bans_techs=frozenset(o['bans_techs']))
     res = SPL.build(draft, pack, clips, lib, music, voice_s, wpm=float(draft.get('wpm') or 150.0), st=st)
     music = O.Music(bpm=bpm, beats=res['beats'], bar_beats=bar, sections=music.sections); ser = serialise(res['segs'], clips, music, lib)
     for g, role, k in zip(ser, res['roles'], res['piece_of']): g['role'] = role; g['item'] = res['pieces'][k]['n']; g['energy_hi'] = g['energy'] >= 0.6
+    ser = insert_synthetic(folder, ser, res.get('synthetic') or [], music.beat_s)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']

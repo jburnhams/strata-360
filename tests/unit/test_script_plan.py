@@ -104,3 +104,27 @@ def test_a_window_is_never_shorter_than_the_voice_needs_even_just_under_the_long
 def test_dialogue_just_under_twenty_seconds_still_fits_a_dialogue_technique():
     c = clip(1, 80.0, [cand('X', 0, 0, 80), cand('X', 1, 5, 60, 'speech', 0.7, 1.0)]); pack = dict(race={}, clips=[pc(c, [('0001.00', 6.0, 25.85)])])        # 19.85 + pads = 20.03 s: 41 beats of 0.5 s would be 20.5 s
     r = SPL.build(dict(wpm=150, items=[item('clip', 1, lines=['0001.00'])]), pack, [c], LIB, MUSIC, {}, st=CH.Settings(seed=1)); assert all(s.tech.dialogue_ok and s.dur_s <= 20.0 + 1e-9 for s in r['segs'])
+
+
+def syn_pack(): return dict(race={}, clips=PACK['clips'] + [dict(label='G03', clip='G03', duration_s=6.0, usable_s=6.0, usable=[], scene={}, note='', lines=[], synthetic=True)])
+
+
+def test_a_generated_clip_takes_its_whole_length_between_the_footage_windows_and_shifts_what_follows():
+    d = dict(wpm=150, items=[item('broll', 1, seconds=4.0), dict(type='broll', clip='G03', seconds=99), item('broll', 2, seconds=4.0)])
+    r = run(d, {}, pack=syn_pack()); syn = r['synthetic']; assert len(syn) == 1 and syn[0]['clip'] == 'G03' and syn[0]['beats'] == 12 and syn[0]['role'] == 'broll' and syn[0]['item'] == 1
+    first = [s for s, k in zip(r['segs'], r['piece_of']) if k == 0]; last = [s for s, k in zip(r['segs'], r['piece_of']) if k == 2]
+    assert syn[0]['start_beat'] == sum(s.beats for s in first) and last[0].start == syn[0]['start_beat'] + 12 and r['beats'] == sum(s.beats for s in r['segs']) + 12
+
+
+def test_narration_over_a_generated_clip_is_placed_with_it_and_longer_narration_stretches_it():
+    d = dict(wpm=150, items=[dict(type='vo', clip='G03', text='Some words over the map.'), item('broll', 2, seconds=2.0)])
+    r = run(d, {0: 9.0}, pack=syn_pack()); s = r['synthetic'][0]; assert s['beats'] * BEAT >= 9.0 + SPL.LEAD_S + SPL.TAIL_S - 1e-9 and s['start_beat'] == 0
+    assert r['lines'][0]['item'] == 0 and r['lines'][0]['film_start_s'] == 0.0 and r['lines'][0]['seconds'] == s['beats'] * BEAT
+
+
+def test_a_script_of_only_generated_clips_has_no_footage_windows_and_still_plans():
+    r = run(dict(wpm=150, items=[dict(type='broll', clip='G03')]), {}, pack=syn_pack()); assert r['segs'] == [] and r['beats'] == 12 and r['synthetic'][0]['start_beat'] == 0
+
+
+def test_a_generated_clip_has_no_words_so_a_dialogue_item_on_it_is_skipped():
+    r = run(dict(wpm=150, items=[dict(type='clip', clip='G03', lines=['x']), item('broll', 2, seconds=4.0)]), {}, pack=syn_pack()); assert r['synthetic'] == [] and any('G03' in w for w in r['warnings'])

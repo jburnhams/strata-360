@@ -8,6 +8,7 @@ Built on FastAPI (interactive API docs at /api/docs). Security model: the server
 
 API (JSON):  GET /api/roots, /api/browse?path=, /api/progress?folder=, /api/log?folder=;  POST /api/open {folder, languages?, gps?}, /api/run {folder}, /api/stop {folder}."""
 import argparse, glob, json, os, secrets, subprocess, sys, threading, time
+from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
 from strata360.pipeline import config, clips as clipmod
@@ -699,7 +700,7 @@ def create_app(roots, token=None):
         from strata360.edit import script_draft as SD, script_pack as SP
         f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f) if os.path.exists(os.path.join(rd, 'race.json')) else {}; items = GS.clips(loaded_track(f), GS.load_spans(f), cfg.get('timezone', 'Europe/Brussels'))
         draft = SD.load_draft(f); used = {}
-        for it in (draft or {}).get('items') or []: used[str(it.get('clip', '')).zfill(4)] = used.get(str(it.get('clip', '')).zfill(4), 0.0) + float(it.get('seconds') or 0)
+        for it in (draft or {}).get('items') or []: used[norm_label(it.get('clip', ''))] = used.get(norm_label(it.get('clip', '')), 0.0) + float(it.get('seconds') or 0)
         for c in items:
             d = os.path.join(rd, 'clips', c['id']); sc = (_j(d, 'scenes.json') or {}).get('summary') or {}; cd = (_j(d, 'candidates.json') or {}).get('summary') or {}
             c['label'] = SP.label_of(c['id']); c['scene'] = dict(settings=list((sc.get('settings') or {}))[:2], weather=list((sc.get('weather') or {}))[:2] if isinstance(sc.get('weather'), dict) else []); c['moments'] = cd.get('n'); c['usable_s'] = cd.get('usable_s')

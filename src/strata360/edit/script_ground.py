@@ -3,6 +3,7 @@
 Each "vo" item lists a `basis`: verbatim quotes copied from the material (or a transcript line id). check(script, pack, text) returns problems: a quote that is not in the material, a number that is nowhere in
 the material, and a "N km to go" that does not match the clip's own distance."""
 import re
+from strata360.edit.script_pack import norm_label
 
 UNITS = {w: i for i, w in enumerate('zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen'.split())}
 TENS = {w: 10 * (i + 2) for i, w in enumerate('twenty thirty forty fifty sixty seventy eighty ninety'.split())}
@@ -62,7 +63,7 @@ def check(script, pack, text, tol=1.5):
             if str(b).strip() in ids: continue
             q = norm(str(b))
             if len(q) >= 6 and q not in hay: probs.append(f'item {n}: basis "{str(b)[:60]}" is not in the material (quotes must be copied word for word)')
-        c = clips.get(str(it.get('clip', '')).zfill(4)); t = it.get('text', '').lower(); derived = [total - c['km']] if (c and c.get('km') is not None and total) else []          # the distance still to run is race distance minus the clip's own
+        c = clips.get(norm_label(it.get('clip', ''))); t = it.get('text', '').lower(); derived = [total - c['km']] if (c and c.get('km') is not None and total) else []          # the distance still to run is race distance minus the clip's own
         for v in numbers_in(it.get('text', '')):
             if not any(abs(v - x) <= tol for x in pack_nums + derived) and v > 3: probs.append(f'item {n}: the number {v:g} is not in the material')
         for m in re.finditer(r"([\w\- ]{1,30}?)\s(?:kilomet(?:er|re)s?|km)\s(?:to go|left|from the (?:end|finish)|before the (?:end|finish))", t):
