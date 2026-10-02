@@ -299,7 +299,45 @@ class TestRoughMixApi:
         d = os.path.join(project.race_dir, 'roughmix'); open(os.path.join(d, 'mix.m4a'), 'wb').write(b'x' * 12); json.dump(dict(key='k', length_s=8.0, made_at='t'), open(os.path.join(d, 'mix.json'), 'w'))
         assert client.get('/api/script2/mix/audio', params=dict(folder=f)).content == b'x' * 12
 
+    def test_reset_forgets_the_mix_unless_it_is_being_made(self, client, project, fake_popen):
+        self.plan(project); f = project.folder; d = os.path.join(project.race_dir, 'roughmix'); os.makedirs(d, exist_ok=True); open(os.path.join(d, 'mix.m4a'), 'wb').write(b'x'); json.dump(dict(key='k', parts={}), open(os.path.join(d, 'mix.json'), 'w'))
+        assert client.delete('/api/script2/mix', params=dict(folder=f)).json() == dict(reset=True) and not os.path.exists(os.path.join(d, 'mix.m4a')) and client.delete('/api/script2/mix', params=dict(folder=f)).json() == dict(reset=False)
+        client.post('/api/script2/mix', json=dict(folder=f)); assert client.delete('/api/script2/mix', params=dict(folder=f)).status_code == 409
+
     def test_a_failed_run_shows_its_real_error_not_the_interpreters_warnings(self, client, project, fake_popen):
         self.plan(project); f = project.folder; client.post('/api/script2/mix', json=dict(folder=f)); fake_popen.instances[-1].returncode = 1
         open(os.path.join(project.race_dir, 'roughmix', 'mix.log'), 'w').write('ValueError: unsupported hash type blake2s\nTraceback (most recent call last):\n  File "x", line 1\nno voice is installed: run voice setup\n')
         s = client.get('/api/script2/mix', params=dict(folder=f)).json(); assert s['building'] is False and s['error'] == 'no voice is installed: run voice setup'
+
+
+class TestMapTiles:
+    @pytest.fixture(autouse=True)
+    def keys(self, tmp_path, monkeypatch):
+        from strata360.edit import llm_remote as L
+        monkeypatch.setattr(L, 'VARS_FILE', str(tmp_path / 'secrets.env')); monkeypatch.delenv('THUNDERFOREST_API_KEY', raising=False)
+
+    def served(self, monkeypatch, fetch):
+        from strata360.server import app as A
+        monkeypatch.setattr(A, 'TILE_FETCH', fetch)
+
+    def test_a_tile_is_fetched_once_through_the_server_and_then_comes_from_the_cache(self, client, monkeypatch):
+        from overlay_fakes import TileServer
+        ts = TileServer(colour=(10, 200, 30)); self.served(monkeypatch, ts)
+        r = client.get('/api/tiles/osm/5/16/10'); assert r.status_code == 200 and r.headers['content-type'] == 'image/png' and r.content[:4] == b'\x89PNG'
+        assert client.get('/api/tiles/osm/5/16/10').status_code == 200 and len(ts.urls) == 1
+
+    def test_the_key_stays_on_the_server_and_is_never_in_what_the_browser_gets(self, client, monkeypatch):
+        from overlay_fakes import TileServer
+        monkeypatch.setenv('THUNDERFOREST_API_KEY', 'secretkey123'); ts = TileServer(); self.served(monkeypatch, ts)
+        r = client.get('/api/tiles/tf-landscape/6/32/21'); assert r.status_code == 200 and 'secretkey123' in ts.urls[0] and b'secretkey123' not in r.content
+        s = client.get('/api/tiles/status', params=dict(style='tf-landscape')).json(); assert s['ok'] is True and 'Thunderforest' in s['credit'] and 'secretkey123' not in str(s)
+
+    def test_a_missing_key_is_an_error_with_the_fix_not_an_empty_map(self, client):
+        s = client.get('/api/tiles/status', params=dict(style='tf-landscape')).json(); assert s['ok'] is False and 'THUNDERFOREST_API_KEY' in s['error']
+        r = client.get('/api/tiles/tf-landscape/6/32/21'); assert r.status_code == 503 and 'THUNDERFOREST_API_KEY' in r.json()['detail']
+
+    def test_unknown_styles_and_zooms_and_a_failing_service_are_refused_clearly(self, client, monkeypatch):
+        import urllib.error
+        assert client.get('/api/tiles/nope/5/1/1').status_code == 404 and client.get('/api/tiles/osm/40/1/1').status_code == 404
+        def boom(url): raise urllib.error.HTTPError(url, 429, 'slow down', {}, None)
+        self.served(monkeypatch, boom); r = client.get('/api/tiles/osm/5/3/3'); assert r.status_code == 502 and 'HTTP 429' in r.json()['detail']

@@ -113,7 +113,7 @@ def make_client(tmp_path, monkeypatch, fake_popen):
     from fastapi.testclient import TestClient
     from strata360.server import app
     monkeypatch.setattr(app, 'STATE', str(tmp_path / '_state.json'))
-    for table in ('JOBS', 'FINAL_JOBS', 'FILM_JOBS', 'SCRIPT_JOBS', 'SCRIPT2_JOBS', 'PLAN_JOBS', 'GAP_JOBS', 'MIX_JOBS'): monkeypatch.setattr(app, table, {})
+    for table in ('JOBS', 'FINAL_JOBS', 'FILM_JOBS', 'SCRIPT_JOBS', 'SCRIPT2_JOBS', 'PLAN_JOBS', 'GAP_JOBS', 'MIX_JOBS', 'TILES'): monkeypatch.setattr(app, table, {})
     def make(roots=None, token=None, **kw):
         rs = [os.path.realpath(str(r)) for r in (roots if roots is not None else [tmp_path])]
         return TestClient(app.create_app(rs, token=token), **kw)

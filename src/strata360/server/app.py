@@ -7,7 +7,7 @@ Built on FastAPI (interactive API docs at /api/docs). Security model: the server
 `?token=` on first visit, or as `Authorization: Bearer`). Nothing here deletes or modifies footage; the only writes are the project folders (`<footage>/strata360/`).
 
 API (JSON):  GET /api/roots, /api/browse?path=, /api/progress?folder=, /api/log?folder=;  POST /api/open {folder, languages?, gps?}, /api/run {folder}, /api/stop {folder}."""
-import argparse, glob, json, os, re, secrets, subprocess, sys, threading, time
+import argparse, glob, io, json, os, re, secrets, subprocess, sys, threading, time
 from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
@@ -19,6 +19,8 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
+TILES = {}                    # map style -> overlay.tiles.Tiles (one per style, shared by every request)
+TILE_FETCH = None             # tests replace this: fetch(url) -> bytes
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
 PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
@@ -681,6 +683,32 @@ def create_app(roots, token=None):
             except Exception as e: raise HTTPException(400, f'could not read the track: {type(e).__name__}: {e}')
         return TRACKS[key]
 
+    def tile_source(style):
+        """The Tiles of a map style. The key stays on the server (secrets.env); the browser only ever sees /api/tiles URLs. A missing key is an error (503) with the message to fix it, never an empty map."""
+        from strata360.overlay import tiles as TL
+        if style not in TL.STYLES: raise HTTPException(404, f'unknown map style {style}: one of {", ".join(sorted(TL.STYLES))}')
+        if style not in TILES:
+            try: TILES[style] = TL.Tiles(style, fetch=TILE_FETCH)
+            except TL.MissingKey as e: raise HTTPException(503, str(e))
+        return TILES[style]
+
+    @api.get('/api/tiles/status', dependencies=[Depends(auth)])
+    def get_tiles_status(style: str = 'tf-landscape'):                                  # whether the map background can be drawn (and the credit it must carry), for the overview map
+        from strata360.overlay import tiles as TL
+        try: t = tile_source(style)
+        except HTTPException as e: return dict(ok=False, style=style, error=str(e.detail))
+        return dict(ok=True, style=style, error='', credit=TL.STYLES[style]['credit'], tile_px=t.px)
+
+    @api.get('/api/tiles/{style}/{z}/{x}/{y}')
+    def get_tile(request: Request, style: str, z: int, x: int, y: int):                 # one map tile as a PNG, from the disk cache shared by every race (fetched once from the tile service, key kept here)
+        from strata360.overlay import tiles as TL
+        auth(request)
+        if not 0 <= z <= TL.MAX_ZOOM: raise HTTPException(404, 'zoom out of range')
+        t = tile_source(style)
+        try: im = t.tile(z, x, y)
+        except TL.TileError as e: raise HTTPException(502, str(e))
+        buf = io.BytesIO(); im.save(buf, 'PNG'); return Response(buf.getvalue(), media_type='image/png', headers={'Cache-Control': 'max-age=86400'})
+
     @api.get('/api/track/series', dependencies=[Depends(auth)])
     def get_track_series(folder: str, points: int = 2000):                               # the track decimated for the charts: elapsed time, km, altitude (with each bin's lowest and highest), pace of the moving part, share moving, heart rate
         from strata360.gps import series as GS
@@ -898,6 +926,13 @@ def create_app(roots, token=None):
         if not RM.status(f)['has_plan']: return dict(started=False, reason='there is no film plan yet: make the film from a script first')
         os.makedirs(RM.dir_of(f), exist_ok=True); log = open(os.path.join(RM.dir_of(f), 'mix.log'), 'wb')
         MIX_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'rough-mix', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.delete('/api/script2/mix', dependencies=[Depends(auth)])
+    def delete_rough_mix(folder: str):                                                   # reset: forget the mix, so it is made again from scratch
+        from strata360.edit import roughmix as RM
+        f = folder_of(folder); job = MIX_JOBS.get(f)
+        if job and job.poll() is None: raise HTTPException(409, 'the rough mix is being made')
+        return dict(reset=RM.reset(f))
 
     @api.get('/api/script2/mix/audio')
     def get_rough_mix_audio(request: Request, folder: str):                              # the mix (Range requests are handled, so seeking works); <audio> cannot send headers, so the cookie authenticates

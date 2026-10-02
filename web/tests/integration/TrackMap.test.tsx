@@ -11,6 +11,14 @@ const props = () => ({ base: makeTrackLine(), clips: [makeTrackClip(), makeTrack
   cursor: null as number | null, onCursor: vi.fn(), onHoverClip: vi.fn(), onOpenClip: vi.fn(), fetchDetail: vi.fn(async () => makeTrackLine()) })
 
 describe('TrackMap', () => {
+  it('puts the server\'s map tiles behind the track when there is a background, and none otherwise', () => {
+    const { container, rerender } = setup(<TrackMap {...props()} />)
+    expect(container.querySelector('.leaflet-tile-pane .leaflet-layer')).toBeNull()
+    rerender(<TrackMap {...props()} background={{ url: '/api/tiles/tf-landscape/{z}/{x}/{y}', tilePx: 512 }} />)
+    expect(container.querySelector('.leaflet-tile-pane .leaflet-layer')).not.toBeNull()
+    rerender(<TrackMap {...props()} />); expect(container.querySelector('.leaflet-tile-pane .leaflet-layer')).toBeNull()
+  })
+
   it('draws the map with a marker for each clip on the track, labelled with its number, and none for a clip that is not on it', () => {
     setup(<TrackMap {...props()} />)
     expect(screen.getByRole('application', { name: 'Race map' })).toBeInTheDocument()

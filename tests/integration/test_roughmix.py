@@ -22,7 +22,7 @@ def levels(path, a, b):
 
 
 def test_the_rough_mix_is_made_with_the_music_turned_down_and_is_then_up_to_date(folder):
-    assert RM.status(folder) == dict(has_plan=True, exists=False, stale=False, length_s=None, made_at=None, source='script')
+    assert RM.status(folder) == dict(has_plan=True, exists=False, stale=False, stale_because=[], length_s=None, made_at=None, source='script')
     log = []; st = RM.build(folder, log=log.append); p = RM.path_of(folder)
     assert st['exists'] and not st['stale'] and st['length_s'] == 8.0 and abs(V.duration(p) - 8.0) < 0.2 and os.path.exists(os.path.join(RM.dir_of(folder), 'mix.json')) and not os.path.exists(os.path.join(RM.dir_of(folder), 'mix.part.wav'))
     full = os.path.join(folder, 'full.wav'); from strata360.render import preview as PV; PV.build_audio(folder, PJ.load(folder)['plan'], full, 8.0)
@@ -31,13 +31,18 @@ def test_the_rough_mix_is_made_with_the_music_turned_down_and_is_then_up_to_date
 
 def test_a_changed_plan_or_voice_over_makes_the_mix_stale(folder):
     RM.build(folder); assert not RM.status(folder)['stale']
-    edit = PJ.load(folder); edit['plan']['segments'][0]['dur_s'] = 3.5; PJ.save(folder, edit); assert RM.status(folder)['stale'] is True
+    edit = PJ.load(folder); edit['plan']['segments'][0]['dur_s'] = 3.5; PJ.save(folder, edit); st = RM.status(folder); assert st['stale'] is True and st['stale_because'] == ['plan']
     RM.build(folder); assert RM.status(folder)['stale'] is False
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=3', vo], check=True); os.utime(vo, (4102444800, 4102444800))
-    assert RM.status(folder)['stale'] is True
+    st = RM.status(folder); assert st['stale'] is True and st['stale_because'] == ['voice-over']
 
 
 def test_with_no_plan_it_says_so(tmp_path):
     f = str(tmp_path / 'empty'); os.makedirs(config.race_dir(f))
     assert RM.status(f)['has_plan'] is False
     with pytest.raises(RuntimeError, match='no film plan'): RM.build(f)
+
+
+def test_reset_forgets_the_mix_and_a_new_version_makes_every_mix_stale(folder, monkeypatch):
+    RM.build(folder); assert RM.reset(folder) is True and not RM.status(folder)['exists'] and not os.path.exists(RM.path_of(folder)) and RM.reset(folder) is False
+    RM.build(folder); monkeypatch.setattr(RM, 'VERSION', RM.VERSION + 1); st = RM.status(folder); assert st['stale'] is True and st['stale_because'] == ['settings']

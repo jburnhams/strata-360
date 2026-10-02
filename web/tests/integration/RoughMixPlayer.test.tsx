@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import RoughMixPlayer from '../../src/components/RoughMixPlayer'
 import { screen, setup, waitFor } from '../utils/render'
 import { makeRoughMix } from '../utils/factories'
-import { mockGet, mockPost, recordRequests } from '../utils/api'
+import { mockGet, mockPost, mockDelete, recordRequests } from '../utils/api'
 import { axe } from 'vitest-axe'
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
@@ -33,12 +33,19 @@ describe('RoughMixPlayer', () => {
   })
 
   it('plays a finished mix and says when it is out of date', async () => {
-    mockGet('/api/script2/mix', makeRoughMix({ exists: true, stale: true, length_s: 248, made_at: '2026-10-02T09:00:00' }))
+    mockGet('/api/script2/mix', makeRoughMix({ exists: true, stale: true, stale_because: ['plan', 'voice-over'], length_s: 248, made_at: '2026-10-02T09:00:00' }))
     setup(<RoughMixPlayer folder="/data" />)
     const audio = await screen.findByLabelText('Rough mix')
     expect(audio).toHaveAttribute('src', '/api/script2/mix/audio?folder=%2Fdata&v=2026-10-02T09%3A00%3A00')
-    expect(screen.getByText(/out of date/)).toBeInTheDocument()
+    expect(screen.getByText(/out of date: plan, voice-over changed since it was made/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Make the rough mix again' })).toBeInTheDocument()
+  })
+
+  it('can reset a finished mix', async () => {
+    mockGet('/api/script2/mix', makeRoughMix({ exists: true, made_at: 'x' })); const del = recordRequests('/api/script2/mix'); mockDelete('/api/script2/mix', { reset: true })
+    const { user } = setup(<RoughMixPlayer folder="/data" />)
+    await user.click(await screen.findByRole('button', { name: 'Reset' }))
+    await waitFor(() => expect(del.some(r => r.method === 'DELETE')).toBe(true))
   })
 
   it('shows the reason a start was refused and the error of a failed run', async () => {

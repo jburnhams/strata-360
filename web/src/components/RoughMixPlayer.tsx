@@ -14,6 +14,7 @@ export default function RoughMixPlayer({ folder, version = 0 }: { folder: string
     try { const r = await api.makeRoughMix(folder); if (!r.started) setErr(r.reason ?? 'could not start') } catch (e) { setErr((e as Error).message) }
     setTick(t => t + 1)
   }
+  const reset = async () => { setErr(undefined); try { await api.resetRoughMix(folder) } catch (e) { setErr((e as Error).message) } setTick(t => t + 1) }
   return (
     <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
       <button disabled={mix.building} className="rounded-lg border border-stone-400 px-3 py-1.5 disabled:opacity-50" title="the film's sound alone: music and clip background quiet, voice-over and speech up" onClick={() => void make()}>
@@ -21,7 +22,8 @@ export default function RoughMixPlayer({ folder, version = 0 }: { folder: string
       </button>
       {mix.building && <span className="font-mono text-xs text-stone-500">{mix.log}</span>}
       {mix.exists && <audio aria-label="Rough mix" controls preload="none" src={api.roughMixUrl(folder, mix.made_at ?? '')} className="h-9" />}
-      {mix.exists && mix.stale && !mix.building && <span className="text-xs text-amber-700">out of date: the plan, voice-over or music has changed since</span>}
+      {mix.exists && mix.stale && !mix.building && <span className="text-xs text-amber-700">out of date: {mix.stale_because.join(', ')} changed since it was made</span>}
+      {mix.exists && !mix.building && <button className="text-xs text-stone-500 underline" title="forget this mix; it is made again from scratch next time" onClick={() => void reset()}>Reset</button>}
       {(err || (!mix.building && mix.error)) && <span role="alert" className="text-xs text-red-600">{err ?? `The rough mix failed: ${mix.error}`}</span>}
     </div>
   )

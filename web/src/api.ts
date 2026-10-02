@@ -29,7 +29,8 @@ export interface Gap {
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
-export interface RoughMix { has_plan: boolean; exists: boolean; stale: boolean; length_s: number | null; made_at: string | null; source?: string | null; building: boolean; error: string; log: string }
+export interface RoughMix { has_plan: boolean; exists: boolean; stale: boolean; stale_because: string[]; length_s: number | null; made_at: string | null; source?: string | null; building: boolean; error: string; log: string }
+export interface TileStatus { ok: boolean; style: string; error: string; credit?: string; tile_px?: number }
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
@@ -107,6 +108,8 @@ export const api = {
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
   trackSeries: (folder: string, points = 2000) => call<TrackSeries>('/api/track/series?' + q({ folder, points: String(points) })),
   trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000) => call<TrackLine>('/api/track/line?' + q(bbox ? { folder, bbox: bbox.join(','), limit: String(limit) } : { folder, limit: String(limit) })),
+  tilesStatus: (style = 'tf-landscape') => call<TileStatus>('/api/tiles/status?' + q({ style })),
+  tileUrl: (style = 'tf-landscape') => `/api/tiles/${style}/{z}/{x}/{y}`,
   trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
   gaps: (folder: string) => call<{ gaps: Gap[] }>('/api/gaps?' + q({ folder })),
   planGapClip: (folder: string, gap: string, seconds: number) => call<GapClip>('/api/gaps/clip', { folder, gap, seconds }),
@@ -136,6 +139,7 @@ export const api = {
   planScript2: (folder: string, draft?: string) => call<{ started: boolean; reason?: string }>('/api/script2/plan', { folder, draft }),
   roughMix: (folder: string) => call<RoughMix>('/api/script2/mix?' + q({ folder })),
   makeRoughMix: (folder: string) => call<{ started: boolean; reason?: string }>('/api/script2/mix', { folder }),
+  resetRoughMix: (folder: string) => fetch('/api/script2/mix?' + q({ folder }), { method: 'DELETE' }),
   roughMixUrl: (folder: string, v = '') => '/api/script2/mix/audio?' + q({ folder, v }),
   generateScript2: (folder: string, o: { revise?: boolean; target_s?: number; auto?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/script2/generate', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),

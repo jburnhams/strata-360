@@ -40,6 +40,7 @@ export const handlers = [
   http.post('/api/final/start', () => HttpResponse.json({ started: true })),
   http.post('/api/final/stop', () => HttpResponse.json({ ok: true })),
   http.get('/api/script2/mix', () => HttpResponse.json(makeRoughMix({ has_plan: false }))),
+  http.get('/api/tiles/status', () => HttpResponse.json({ ok: true, style: 'tf-landscape', error: '', credit: 'Maps © Thunderforest, data © OpenStreetMap contributors', tile_px: 512 })),
   http.get('/api/gaps', () => HttpResponse.json({ gaps: [] })),
   http.get('/api/track/clips', () => HttpResponse.json({ clips: [makeTrackClip()], has_draft: true })),
   http.get('/api/script2', () => HttpResponse.json(makeScript2State())),

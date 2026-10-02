@@ -19,11 +19,11 @@ function spread(m: L.Map, markers: L.Marker[]) {
 }
 const DETAIL_ZOOM_STEPS = 1.5          // this far in from the first view the map asks for the track in more detail
 
-// The race on a Leaflet map (no background tiles: the offline default is the track on a plain ground). Zoom with the buttons, the wheel, a double click or touch; drag to pan; the arrows button resets the view.
+// The race on a Leaflet map (the background is the server's map tiles when `background` is given, else the track on a plain ground). Zoom with the buttons, the wheel, a double click or touch; drag to pan; the arrows button resets the view.
 // Every clip has a marker at the middle of its stretch of track (the stretch is drawn thick; green = the newest script draft plays it), hover for its card, click to open it. Zooming in fetches the track for the
 // part in view in more detail. Hovering the track moves the cursor shared with the charts.
-export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, onOpenClip, fetchDetail }: {
-  base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
+export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, onOpenClip, fetchDetail, background }: {
+  background?: { url: string; tilePx: number }; base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
   onOpenClip: (id: string) => void; fetchDetail: (bbox: [number, number, number, number]) => Promise<TrackLine>
 }) {
   const el = useRef<HTMLDivElement>(null), marks = useRef<L.Marker[]>([]), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.Marker | null>(null), detail = useRef<L.Polyline | null>(null)
@@ -60,6 +60,13 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
     return () => { window.clearTimeout(timer); m.remove(); map.current = null; layer.current = null; dot.current = null; detail.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base])
+
+  useEffect(() => {                                                                             // the map tiles behind the track (the server fetches and caches them; the key never reaches the browser)
+    const m = map.current; if (!m || !background) return
+    const retina = background.tilePx === 512
+    const t = L.tileLayer(background.url, { tileSize: background.tilePx, zoomOffset: retina ? -1 : 0, maxZoom: 19, maxNativeZoom: retina ? 19 : 18, keepBuffer: 2 }).addTo(m); t.setZIndex(0)
+    return () => { t.remove() }
+  }, [background?.url, background?.tilePx, base])         // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {                                                                             // the clips: the stretch each covers, and a marker with the clip number
     const g = layer.current; if (!g) return; g.clearLayers(); marks.current = []
