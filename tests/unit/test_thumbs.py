@@ -32,10 +32,11 @@ def test_overlay_drawn_at_the_thumbnail_moment(clip, tmp_path):
     assert TH.overlay_fresh(d) and json.load(open(os.path.join(d, 'thumb_overlay.json')))['maps'] is True
 
 
-def test_without_a_map_key_the_numbers_only(clip):
-    p, d, track = clip; out = TH.with_overlay(d, {}, track)
-    im = np.asarray(Image.open(os.path.join(d, 'thumb_overlay.jpg')))
-    assert out['maps'] is False and 'THUNDERFOREST_API_KEY' in out['why'] and np.abs(im[150:280, 820:950].astype(int) - 90).mean() < 3 and np.abs(im[10:60, 0:110].astype(int) - 90).mean() > 5
+def test_without_a_map_key_it_fails_loudly_and_writes_nothing(clip):
+    from strata360.overlay.tiles import MissingKey
+    p, d, track = clip
+    with pytest.raises(MissingKey, match='THUNDERFOREST_API_KEY'): TH.with_overlay(d, {}, track)
+    assert not os.path.exists(os.path.join(d, 'thumb_overlay.jpg')) and not os.path.exists(os.path.join(d, 'thumb_overlay.json'))
 
 
 def test_uses_the_quick_thumbnail_when_there_is_no_best(clip, tmp_path):
