@@ -240,3 +240,8 @@ def test_broll_is_never_stretched_past_its_clips_own_length():
     assert SPL.flex(dict(kind='broll', seconds=3.7, duration_s=4.8)) == (2.0, 4.6)                     # a 4.8 s clip: no more than the clip, not the doubled 7.4 s
     assert SPL.flex(dict(kind='broll', seconds=3.7, duration_s=60.0)) == (2.0, 9.7)                    # a long clip: as before (6 s more)
     assert SPL.flex(dict(kind='broll', seconds=5.0, duration_s=4.8)) == (2.0, 5.0)                     # already longer than the clip: not shortened by the cap
+
+
+def test_usable_footage_counts_overlapping_candidates_once():
+    from types import SimpleNamespace as NS
+    assert SPL.usable_s([NS(start_s=0.0, end_s=4.0), NS(start_s=0.0, end_s=3.0), NS(start_s=3.5, end_s=5.0), NS(start_s=10.0, end_s=11.0)]) == 6.0 and SPL.usable_s([]) == 0.0

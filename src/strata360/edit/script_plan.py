@@ -112,6 +112,14 @@ def pieces(draft, pack, voice_s, wpm):
     return out, warn
 
 
+def usable_s(cands):
+    """How many seconds of the clip the candidates cover together (overlaps counted once)."""
+    total = 0.0; end = -1e9
+    for a, b in sorted((c.start_s, c.end_s) for c in cands):
+        a = max(a, end); total += max(b - a, 0.0); end = max(end, b)
+    return total
+
+
 class Footage:
     """The usable footage of one clip: `reserved` is the dialogue the script plays (narration keeps off it), `occ` what earlier windows have taken."""
     def __init__(self, clip, cands):
@@ -302,6 +310,8 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     clips = sorted(clips, key=lambda c: c['start_utc']); index = {c['id']: i for i, c in enumerate(clips)}
     foot = {c['id']: Footage(c, CH.clip_candidates(c)) for c in clips}
     ps, w0 = pieces(draft, pack, voice_s, wpm); warn += w0; ps = [p for p in ps if p['clip'] in foot or p['kind'] == 'synthetic']
+    for p in ps:                                                                                    # b-roll is never stretched past the clip's usable footage (flex() reads `duration_s`)
+        if p['kind'] == 'broll' and p['clip'] in foot: p['duration_s'] = min(float(p.get('duration_s') or 1e9), usable_s(foot[p['clip']].cands))
     fit, anchors = fit_and_anchor(ps, draft, music, target_s, warn)
     auto = auto_gaps(ps, pack, music, target_s, warn) if target_s else []
     if auto: fit['after_s'] = round(sum(est_beats(p, beat_s) for p in ps) * beat_s, 2); anchors = anchor_pass(ps, draft, music, [])           # (the gaps added ahead of an anchored item shift it: placed again)
