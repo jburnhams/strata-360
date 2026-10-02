@@ -175,7 +175,10 @@ DUCK_RAMP_S = 0.25
 
 def music_duck(plan):
     """An ffmpeg `volume` expression (per frame, `t` in film seconds) that turns the music down to DUCK_GAIN, with a short ramp each side, wherever the script plays the runner's own words (windows with role `clip`); '' when there are none."""
-    parts = [f"(1-{1 - DUCK_GAIN:g}*clip(min((t-{g['film_start_s']:.3f})/{DUCK_RAMP_S},({g['film_start_s'] + g['dur_s']:.3f}-t)/{DUCK_RAMP_S}),0,1))" for g in plan['segments'] if g.get('role') == 'clip']
+    parts = []; run = 0.0
+    for g in plan['segments']:
+        a = float(g['film_start_s']) if g.get('film_start_s') is not None else run; b = a + float(g['dur_s']); run = b                    # (a plan without film_start_s is read as windows end to end)
+        if g.get('role') == 'clip': parts.append(f"(1-{1 - DUCK_GAIN:g}*clip(min((t-{a:.3f})/{DUCK_RAMP_S},({b:.3f}-t)/{DUCK_RAMP_S}),0,1))")
     return _nest(parts) if parts else ''
 
 
