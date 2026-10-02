@@ -2,9 +2,9 @@
 import subprocess
 import cv2, numpy as np
 import pytest
-from overlay_fakes import T0, race_track
+from overlay_fakes import T0, TileServer, race_track
 from strata360 import hw
-from strata360.overlay import flyover as FO, mapclip as MC
+from strata360.overlay import flyover as FO, mapclip as MC, tiles as TL
 from strata360.overlay.series import Series
 
 
@@ -24,7 +24,7 @@ def fake_mbgl(monkeypatch, tmp_path):
     monkeypatch.setattr(FO.subprocess, 'run', run); run.calls = calls; return run
 
 
-def clip(series, seconds=4.0, fps=10.0, size=(1280, 720), tmp=None, **kw): return FO.FlyoverClip(series, T0 + 300, T0 + 3300, seconds, fps=fps, size=size, mbgl='/fake/mbgl-render', cache=str(tmp / 'c.db') if tmp else FO.CACHE, **kw)
+def clip(series, seconds=4.0, fps=10.0, size=(1280, 720), tmp=None, **kw): kw.setdefault('tiles', TL.Tiles('osm', cache_dir=str(tmp / 'tiles') if tmp else None, fetch=TileServer())); return FO.FlyoverClip(series, T0 + 300, T0 + 3300, seconds, fps=fps, size=size, mbgl='/fake/mbgl-render', cache=str(tmp / 'c.db') if tmp else FO.CACHE, **kw)
 
 
 # ---- the camera ----

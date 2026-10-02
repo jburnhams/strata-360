@@ -13,7 +13,8 @@ import numpy as np, cv2
 
 from strata360 import hw
 from strata360.overlay import draw as D
-from strata360.overlay.layout import Overlay, REF_W, REF_H, settings
+from strata360.overlay.gapoverlay import GapOverlay
+from strata360.overlay.layout import REF_W, REF_H
 from strata360.overlay.series import _smooth
 from strata360.overlay.tiles import Tiles, world
 
@@ -22,7 +23,6 @@ CAMERA_S = 1.5                # the camera follows the runner smoothed over this
 ZOOM_S = 4.0                  # and its zoom over this much
 ZOOM = (9.0, 16.0)            # the closest and widest the map goes
 ELEMENTS = ['clock', 'distance', 'pace', 'route_map', 'credit']
-PROFILE_H = 0.13              # the elevation profile's height as a share of the frame height
 
 
 DEFAULT_STYLE = 'tf-landscape'      # plain landscape map; needs THUNDERFOREST_API_KEY (a missing key is an error, never a quiet change of map; `--style osm` chooses the key-free map on purpose)
@@ -32,14 +32,14 @@ def frame_count(seconds, fps): return max(1, int(round(float(seconds) * float(fp
 
 
 class MapClip:
-    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(1920, 1080), tiles=None, tz='Europe/Brussels', zoom=ZOOM, st=None):
+    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(1920, 1080), tiles=None, tz='Europe/Brussels', zoom=ZOOM, st=None, info=None):
         if not t1 > t0: raise ValueError('the stretch has no length')
         self.series, self.fps, self.size, self.zoom_limits = series, float(fps), tuple(size), zoom; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H)
         self.frames = frame_count(seconds, fps); self.t0, self.t1 = float(t0), float(t1); self.speedup = (self.t1 - self.t0) / (self.frames / self.fps)
         self.tiles = tiles or Tiles(DEFAULT_STYLE); self.rw = world(series.route_lat, series.route_lon); self.rt = series._pt
         ts = self.times(); lat = np.interp(ts, series._pt, series.route_lat); lon = np.interp(ts, series._pt, series.route_lon); self.pos = world(lat, lon)
         n = max(3, int(round(CAMERA_S * self.fps)) | 1); self.cam = (_smooth(self.pos[0], n), _smooth(self.pos[1], n)); self.z = self._zoom_profile()
-        self.overlay = Overlay(series, size, settings({**(st or {}), 'elements': ELEMENTS, 'style': self.tiles.style}), tz, self.tiles); self._strip = self._profile_strip()
+        self.gap = GapOverlay(series, size, self.t0, self.t1, tz, self.tiles, st, info=info); self.overlay = self.gap.overlay
 
     def times(self): return self.t0 + np.arange(self.frames) * self.speedup / self.fps
 
@@ -52,17 +52,6 @@ class MapClip:
         with np.errstate(divide='ignore'): z = np.log2(PX_PER_FRAME * self.W / np.maximum(step, 1e-12))
         return _smooth(np.clip(z, lo, hi), max(3, int(round(ZOOM_S * self.fps)) | 1))
 
-    def _profile_strip(self):
-        """The elevation profile of the stretch as an RGBA strip along the bottom (drawn once), and the pixel x/y of its line for the cursor."""
-        h = int(round(self.H * PROFILE_H)); g = self.series.grid; ok = (g >= self.t0) & (g <= self.t1) & np.isfinite(self.series.cols['alt_m'])
-        self.profile_h = h
-        if ok.sum() < 2: self.profile_xy = None; return None
-        a = self.series.cols['alt_m'][ok]; t = g[ok]; lo, hi = float(a.min()), float(a.max()); span = max(hi - lo, 20.0); pad = 0.12 * h
-        x = (t - self.t0) / (self.t1 - self.t0) * (self.W - 1); y = h - pad - (a - lo) / span * (h - 2 * pad); self.profile_xy = (x, y)
-        img = np.zeros((h, self.W, 4), np.uint8); poly = np.concatenate([np.stack([x, y], 1), [[x[-1], h], [x[0], h]]]).round().astype(np.int32)
-        cv2.fillPoly(img, [poly.reshape(-1, 1, 2)], (0, 0, 0, 130)); line = np.stack([x, y], 1).round().astype(np.int32).reshape(-1, 1, 2)
-        cv2.polylines(img, [line], False, (255, 255, 255, 255), max(1, int(round(2 * self.s))), cv2.LINE_AA); return img
-
     def frame(self, k):
         """The picture of frame k as RGB uint8."""
         t = self.time(k); W, H = self.W, self.H; z = float(self.z[k]); kk = 2.0 ** z; cx, cy = float(self.cam[0][k]), float(self.cam[1][k])
@@ -71,14 +60,8 @@ class MapClip:
         ub, vb = np.append(u[behind], here[0]), np.append(v[behind], here[1]); ua, va = np.insert(u[ahead], 0, here[0]), np.insert(v[ahead], 0, here[1])
         D.route_line(img, np.where(inside, u, np.nan), np.where(inside, v, np.nan), colour=(0, 0, 0), width=w + 3 * self.s)
         D.route_line(img, ua, va, colour=(250, 250, 250), width=w); D.route_line(img, ub, vb, colour=(230, 20, 20), width=w + self.s)
-        dot = D.marker(11 * self.s); r = dot.shape[0] / 2; patches = [(here[0] - r, here[1] - r, dot)]
-        if self._strip is not None: patches.insert(0, (0, H - self.profile_h, self._strip))
-        D.composite(img, patches)
-        if self.profile_xy is not None:
-            f = (t - self.t0) / (self.t1 - self.t0); x = f * (self.W - 1); y = float(np.interp(x, *self.profile_xy)) + H - self.profile_h; x, y = int(round(x)), int(round(y))
-            cv2.line(img, (x, H - self.profile_h), (x, H), (255, 255, 255), max(1, int(round(self.s))), cv2.LINE_AA); cv2.circle(img, (x, y), max(3, int(round(6 * self.s))), (230, 20, 20), -1, cv2.LINE_AA)
-            cv2.circle(img, (x, y), max(3, int(round(6 * self.s))), (255, 255, 255), max(1, int(round(self.s))), cv2.LINE_AA)
-        return self.overlay.apply(img, t)
+        dot = D.marker(11 * self.s); r = dot.shape[0] / 2; D.composite(img, [(here[0] - r, here[1] - r, dot)])
+        return self.gap.apply(img, t)
 
 
 def render(clip, path, progress=None, bitrate='12M'):

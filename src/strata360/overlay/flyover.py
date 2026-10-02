@@ -14,15 +14,13 @@ import numpy as np, cv2
 from scipy.interpolate import PchipInterpolator
 
 from strata360 import hw
-from strata360.overlay.layout import Overlay, Credit, settings
+from strata360.overlay.gapoverlay import GapOverlay
 from strata360.overlay.mapclip import frame_count
 
 BASE_W, BASE_H = 1280, 720    # the picture the camera is planned for
 RENDER_H = 820                # rendered this tall at BASE_W, and the bottom cropped: the draft branch leaves a wedge of missing tiles along the bottom edge
 EXAGGERATION = 1.5
 BACKGROUND = '#26381f'        # what shows where a tile is missing: matches the forest
-ELEMENTS = ['clock', 'distance', 'pace', 'credit']
-CREDIT_LAYOUT = {'credit': dict(x=1900, y=1064, v='bottom', h='right')}
 CACHE = os.path.join(os.path.expanduser('~'), '.strata360', 'flyover-cache.db')
 MBGL_DEFAULT = os.path.join(os.path.expanduser('~'), 'Code', 'maplibre-native-terrain', 'build', 'bin', 'mbgl-render')
 FOV = 0.6435011               # mbgl's default vertical field of view (radians)
@@ -219,7 +217,7 @@ def check_size(size):
 
 
 class FlyoverClip:
-    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=True, mbgl=None, cache=CACHE, camera=None):
+    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=True, mbgl=None, cache=CACHE, camera=None, tiles=None, info=None):
         if not t1 > t0: raise ValueError('the stretch has no length')
         check_size(size)
         if imagery not in IMAGERY: raise ValueError(f'imagery: one of {", ".join(IMAGERY)}')
@@ -229,9 +227,7 @@ class FlyoverClip:
         self.route = route_from_series(series); self.shots = plan_shots(series, self.t0, self.t1, self.frames / self.fps); self.cam = camera or plan_camera(self.route, self.shots, self.fps, self.frames, exag)
         g, lat, lon, _ = self.route; i0, i1 = np.searchsorted(g, [self.cam['runner'].min() - 500, self.cam['runner'].max() + 3000]); sl = slice(i0, max(i1, i0 + 2))
         self.style = make_style(imagery, exag, lon[sl], lat[sl], self.scale if sharp else 1.0, self.dz)
-        self.overlay = Overlay(series, size, settings({**(st or {}), 'elements': ELEMENTS, 'layout': {**CREDIT_LAYOUT, **(st or {}).get('layout', {})}}), tz, None)
-        for w in self.overlay.widgets:
-            if isinstance(w, Credit): w.lines = [IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT]
+        self.gap = GapOverlay(series, size, self.t0, self.t1, tz, tiles, st, credit=[IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT], info=info); self.overlay = self.gap.overlay
         self._tmp = None
 
     def time(self, k): return self.t0 + k * self.speedup / self.fps
@@ -259,8 +255,8 @@ class FlyoverClip:
         return np.ascontiguousarray(img[:self.H, :, ::-1])             # the bottom strip (missing tiles) cropped, BGR -> RGB
 
     def frame(self, k):
-        """The picture of frame k as RGB uint8: the terrain with the race overlay on top."""
-        return self.overlay.apply(self.still(k), self.time(k))
+        """The picture of frame k as RGB uint8: the terrain with the race overlay on top (overlay/gapoverlay.py)."""
+        return self.gap.apply(self.still(k), self.time(k))
 
     def close(self):
         if self._tmp: shutil.rmtree(self._tmp, ignore_errors=True); self._tmp = None
