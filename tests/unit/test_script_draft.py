@@ -140,3 +140,15 @@ def test_with_the_tempo_known_every_item_counts_in_whole_beats_so_the_writers_to
     s = dict(items=[clipitem('0001', '0001.00', '0001.01'), broll('0002', 5), vo('0003', 'a ' * 20), clipitem('0003', '0003.00', '0003.00')], skipped=[])
     bare, _ = SD.check(s, PACK, 60, 150); beat = 60.0 / 97.0; timed, _ = SD.check(s, dict(PACK, music=dict(bpm=97.0)), 60, 150)
     assert timed['total_s'] > bare['total_s'] and timed['total_s'] - bare['total_s'] < 4 * beat + 0.2
+
+
+def test_an_unreadable_last_attempt_keeps_the_best_earlier_one_and_says_so():
+    long = dict(GOOD, items=GOOD['items'] + [broll('0002', 5), broll('0002', 5)]); logs = []
+    chat = Chat(long, long, 'Sorry, here is some text but no JSON'); d = SD.write(PACK, 25.6, 150, chat=chat, retries=2, log=logs.append)
+    assert d['items'] and d['title'] == 'T' and any('could not be read' in l for l in logs) and d['runs'][2]['problems'] == ['not valid JSON'] and d['runs'][2]['raw_head'].startswith('Sorry')
+    assert d['problems'] and all('JSON' not in p for p in d['problems'])                                                             # the kept draft shows ITS problems, not the failed attempt's
+
+
+def test_a_length_problem_sends_back_the_real_length_of_every_item():
+    long = dict(GOOD, items=GOOD['items'] + [broll('0002', 9)]); chat = Chat(long, GOOD); SD.write(PACK, 25.6, 150, chat=chat, retries=1, log=lambda m: None)
+    msg = chat.calls[1][-1]['content']; assert 'the film is' in msg and 'The real length of each of your items' in msg and '  1. clip 0001:' in msg and '  5. broll 0002: 9.0 s' in msg and 'no commentary' in msg

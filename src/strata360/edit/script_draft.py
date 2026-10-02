@@ -115,7 +115,7 @@ def check(script, pack, target_s, wpm):
     """(report, problems): durations are recomputed from the pack (the model's arithmetic is not used); `problems` are structural and drive a retry."""
     beat_s = 60.0 / pack['music']['bpm'] if (pack.get('music') or {}).get('bpm') else None
     clips = {c['label']: c for c in pack['clips']}; order = {c['label']: i for i, c in enumerate(pack['clips'])}; by = {l['id']: l for c in pack['clips'] for l in c['lines']}; pos = PN.index(pack)
-    items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0); words_total = 0; last_line = {}
+    rows = []; items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0); words_total = 0; last_line = {}
     for n, it in enumerate(items, 1):
         t = it.get('type'); cl = norm_label(it.get('clip', ''))
         if cl not in clips: probs.append(f'item {n}: no such clip {cl}'); continue
@@ -145,7 +145,7 @@ def check(script, pack, target_s, wpm):
             if not MIN_GAP_S <= d <= MAX_GAP_S: probs.append(f'item {n}: a gap plays for {MIN_GAP_S:g} to {MAX_GAP_S:g} seconds, not {d:g}')
         else: probs.append(f'item {n}: unknown type {t}'); continue
         if it.get('anchor') is not None and not (isinstance(it['anchor'], dict) and isinstance(it['anchor'].get('film_s'), (int, float))): probs.append(f'item {n}: an anchor is {{"film_s": seconds, "why": "reason"}}')
-        d = on_beats(d, t, beat_s); kinds[t] += d; total += d; per[cl] = per.get(cl, 0.0) + d
+        d = on_beats(d, t, beat_s); kinds[t] += d; total += d; per[cl] = per.get(cl, 0.0) + d; rows.append((n, t, cl, d, total))
     skipped = {norm_label(s.get('clip', '')) for s in (script or {}).get('skipped') or []}
     for lab, c in clips.items():
         if lab not in per and lab not in skipped and not c.get('synthetic'): probs.append(f'clip {lab} is neither used nor listed under skipped')
@@ -153,7 +153,7 @@ def check(script, pack, target_s, wpm):
         if lab in per and per[lab] < 2.5: probs.append(f'clip {lab} gets only {per[lab]:.1f} s')
     if abs(total - target_s) > TOLERANCE * target_s: probs.append(f'the film is {total:.0f} s by the real durations but the target is {target_s:.0f} s (allowed {(1 - TOLERANCE) * target_s:.0f} to {(1 + TOLERANCE) * target_s:.0f}): ' + ('add' if total < target_s else 'remove') + f' about {abs(target_s - total):.0f} s')
     rep = dict(total_s=round(total, 1), target_s=round(target_s, 1), vo_s=round(kinds['vo'], 1), clip_s=round(kinds['clip'], 1), broll_s=round(kinds['broll'], 1), gap_s=round(kinds['gap'], 1), vo_words=words_total, claimed_total=(script or {}).get('total_s'),
-               clips_used=len(per), clips_skipped=len(skipped), per_clip={k: round(v, 1) for k, v in sorted(per.items())})
+               clips_used=len(per), clips_skipped=len(skipped), per_clip={k: round(v, 1) for k, v in sorted(per.items())}, rows=[(n, t, cl, round(d, 1), round(tot, 1)) for n, t, cl, d, tot in rows])
     return rep, probs
 
 
@@ -198,16 +198,21 @@ def write(pack, target_s, wpm, pins=None, draft=None, chat=None, retries=2, mode
     (replaced in tests). Returns the draft document: the script (items resolved) plus the report, advisory warnings, the pins used and what each attempt cost."""
     if chat is None:
         from strata360.edit import llm_remote; chat = llm_remote.chat
-    msgs, ptxt = build_messages(pack, target_s, wpm, pins, draft); runs = []; script = None; rep = {}; probs = []
+    msgs, ptxt = build_messages(pack, target_s, wpm, pins, draft); runs = []; script = None; rep = {}; probs = []; best = None
     for attempt in range(retries + 1):
         r = chat(msgs, model, 30000, temperature, timeout=600, provider=provider, thinking=thinking); script = parse(r['text']) or {}
         if script:
             rep, probs = check(script, pack, target_s, wpm)
             if pins: probs = probs + PN.check(script, pack, pins)
         else: rep, probs = {}, ['not valid JSON']
-        runs.append(dict(attempt=attempt, seconds=r.get('seconds'), tokens=r.get('tokens'), total_s=rep.get('total_s'), problems=probs)); log(f"attempt {attempt}: {r.get('seconds')} s, total {rep.get('total_s')} s of {target_s:.0f}, {len(probs)} problem(s)")
+        if script and (best is None or (len(probs), abs(rep.get('total_s', 0) - target_s)) < best[3]): best = (script, rep, probs, (len(probs), abs(rep.get('total_s', 0) - target_s)))         # the best valid attempt so far (fewest problems, then nearest the length), kept in case a later one is unusable
+        runs.append(dict(attempt=attempt, seconds=r.get('seconds'), tokens=r.get('tokens'), total_s=rep.get('total_s'), problems=probs, **({} if script else dict(raw_head=(r['text'] or '')[:300])))); log(f"attempt {attempt}: {r.get('seconds')} s, total {rep.get('total_s')} s of {target_s:.0f}, {len(probs)} problem(s)")
         if not probs or attempt == retries: break
-        msgs = msgs + [dict(role='assistant', content=r['text']), dict(role='user', content='Your script has these problems, checked against the real durations (your own arithmetic is not used):\n- ' + '\n- '.join(probs) + '\nReturn the corrected script as the same JSON object, nothing else.')]
+        table = ''
+        if any(p.startswith('the film is') for p in probs) and rep.get('rows'):                   # the real length of every item, so the writer can see where the time goes
+            table = '\nThe real length of each of your items (whole beats) and the running total:\n' + '\n'.join(f"  {n}. {t} {cl}: {d:.1f} s (total {tot:.1f} s)" for n, t, cl, d, tot in rep['rows']) + '\n'
+        msgs = msgs + [dict(role='assistant', content=r['text'] or '(nothing)'), dict(role='user', content='Your script has these problems, checked against the real durations (your own arithmetic is not used):\n- ' + '\n- '.join(probs) + table + '\nReturn the corrected script as the same JSON object, nothing else: a single JSON object, no commentary.')]
+    if not script and best is not None: script, rep, probs = best[:3]; log('the last attempt could not be read: keeping the closest earlier one')
     warns = GR.check(script, pack, ptxt) if script else []
     resolve(script, pack, wpm); warns = warns + (director_notes(script, pack) if script else [])
     return dict(version=1, prompt_version=PROMPT_VERSION, created=dt.datetime.now().isoformat(timespec='seconds'), model=model, provider=provider, target_s=round(target_s, 1), wpm=wpm, title=script.get('title'), story=script.get('story'),
