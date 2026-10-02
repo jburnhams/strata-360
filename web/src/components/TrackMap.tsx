@@ -26,7 +26,7 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
   base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
   onOpenClip: (id: string) => void; fetchDetail: (bbox: [number, number, number, number]) => Promise<TrackLine>
 }) {
-  const el = useRef<HTMLDivElement>(null), marks = useRef<L.Marker[]>([]), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.CircleMarker | null>(null), detail = useRef<L.Polyline | null>(null)
+  const el = useRef<HTMLDivElement>(null), marks = useRef<L.Marker[]>([]), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.Marker | null>(null), detail = useRef<L.Polyline | null>(null)
   const props = useRef({ base, onCursor, onHoverClip, onOpenClip, fetchDetail }); props.current = { base, onCursor, onHoverClip, onOpenClip, fetchDetail }   // handlers read the latest props without rebuilding the map
 
   useEffect(() => {
@@ -79,7 +79,8 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
     const m = map.current; if (!m) return
     if (cursor == null) { dot.current?.remove(); dot.current = null; return }
     const i = nearestIndex(base.t, cursor), ll: [number, number] = [base.lat[i], base.lon[i]]
-    if (dot.current) dot.current.setLatLng(ll); else dot.current = L.circleMarker(ll, { radius: 6, color: '#fff', weight: 2, fillColor: '#f59e0b', fillOpacity: 1, interactive: false }).addTo(m)
+    if (dot.current) dot.current.setLatLng(ll)
+    else dot.current = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div data-cursor-dot="" style="width:14px;height:14px;border-radius:50%;background:#f59e0b;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.6)"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(m)
   }, [cursor, base])
 
   return <div ref={el} className="h-[420px] w-full rounded-lg bg-stone-100 dark:bg-stone-950" role="application" aria-label="Race map" />

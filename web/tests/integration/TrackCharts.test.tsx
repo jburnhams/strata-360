@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent } from '@testing-library/react'
 import TrackCharts from '../../src/components/TrackCharts'
 import { screen, setup, within } from '../utils/render'
-import { stubLayout } from '../utils/media'
+import { stubRect } from '../utils/media'
 import { makeTrackClip, makeTrackSeries } from '../utils/factories'
 
 const base = { series: makeTrackSeries(), clips: [makeTrackClip(), makeTrackClip({ id: 'CAM_20260222210000_0024_D', label: '0024', t_mid: 20000, used: false, used_s: 0 }), makeTrackClip({ id: 'CAM_20260221170000_0001_D', label: '0001', covered: false, t_mid: undefined })],
@@ -32,7 +32,7 @@ describe('TrackCharts', () => {
   })
 
   it('moves the cursor with the mouse over a chart, to the point under it', () => {
-    const unstub = stubLayout(1000, 150); const cur = vi.fn(); setup(<TrackCharts {...base} onCursor={cur} />)
+    const unstub = stubRect(1000, 150); const cur = vi.fn(); setup(<TrackCharts {...base} onCursor={cur} />)
     const rect = screen.getByRole('group', { name: 'Elevation chart' }).querySelector('rect[fill="transparent"]')!
     fireEvent.mouseMove(rect, { clientX: 54 + (1000 - 54 - 12) / 2 })                                          // the middle of the plot
     const t = cur.mock.calls.at(-1)![0] as number; expect(t).toBeGreaterThan(14000); expect(t).toBeLessThan(22000)

@@ -2,12 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent } from '@testing-library/react'
 import TrackMap from '../../src/components/TrackMap'
 import { screen, setup } from '../utils/render'
-import { stubLayout } from '../utils/media'
 import { makeTrackClip, makeTrackLine } from '../utils/factories'
 
-let unstub = () => {}
-beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); unstub = stubLayout() })
-afterEach(() => { unstub(); vi.useRealTimers() })
+beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
+afterEach(() => { vi.useRealTimers() })
 
 const props = () => ({ base: makeTrackLine(), clips: [makeTrackClip(), makeTrackClip({ id: 'CAM_B', label: '0024', used: false, lat: 50.15, lon: 5.2 }), makeTrackClip({ id: 'CAM_C', label: '0001', covered: false, lat: undefined, lon: undefined })],
   cursor: null as number | null, onCursor: vi.fn(), onHoverClip: vi.fn(), onOpenClip: vi.fn(), fetchDetail: vi.fn(async () => makeTrackLine()) })
@@ -46,9 +44,10 @@ describe('TrackMap', () => {
   })
 
   it('shows the shared cursor as a dot on the track and removes it', () => {
-    const p = props(); const { rerender, container } = setup(<TrackMap {...p} />); const paths = () => container.querySelectorAll('.leaflet-overlay-pane path').length; const before = paths()
-    rerender(<TrackMap {...p} cursor={2000} />); expect(paths()).toBe(before + 1)
-    rerender(<TrackMap {...p} cursor={null} />); expect(paths()).toBe(before)
+    const p = props(); const { rerender, container } = setup(<TrackMap {...p} />); const dots = () => container.querySelectorAll('[data-cursor-dot]').length
+    expect(dots()).toBe(0); rerender(<TrackMap {...p} cursor={2000} />); expect(dots()).toBe(1)
+    rerender(<TrackMap {...p} cursor={4000} />); expect(dots()).toBe(1)                                              // moved, not added again
+    rerender(<TrackMap {...p} cursor={null} />); expect(dots()).toBe(0)
   })
 
   it('draws nothing, and does not fail, for a track with no points', () => {

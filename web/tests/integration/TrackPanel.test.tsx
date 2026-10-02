@@ -4,11 +4,9 @@ import { screen, setup, waitFor } from '../utils/render'
 import { makeTrackClip, makeTrackOverview } from '../utils/factories'
 import { mockGet, mockPost, mockError, recordRequests, mockPending } from '../utils/api'
 import { axe } from 'vitest-axe'
-import { stubLayout } from '../utils/media'
 
-let unstub = () => {}
-beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); unstub = stubLayout() })
-afterEach(() => { unstub(); vi.useRealTimers(); vi.clearAllMocks() })
+beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
+afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
 
 describe('TrackPanel', () => {
   it('renders a skeleton while loading', () => {
