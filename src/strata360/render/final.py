@@ -10,7 +10,7 @@ stopped or crashed render continues where it left off. The pieces are joined wit
 
 Cost: 4K at 50 frames a second takes of the order of a second per frame on this kind of Mac; the preview (render/preview.py) is for judging the cut, this for delivering it."""
 from strata360.pipeline import guard
-import datetime as dt, hashlib, json, os, shutil, subprocess, sys, time
+import datetime as dt, hashlib, json, math, os, shutil, subprocess, sys, time
 import numpy as np
 from strata360.pipeline import config
 from strata360.render import camera as cam, flat, synthetic as SYN
@@ -48,7 +48,7 @@ class FinalSource:
             self.info[clip] = dict(osv=osv, src_fps=float(cj['video']['nominal_fps']), n=int(cj['video']['source_frames']), R=flat.Renderer(osv, self.W, self.H, 90.0, self.interp), T=read_frames(osv))
         return self.info[clip]
 
-    def frames(self, k, a0, a1, yaw_extra=None):
+    def frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
         sg = self.segs[k]
         if sg.get('synthetic'):                                                                                    # a generated clip: no lens; the film's own overlay goes on it, at the race time each frame shows
             frames = SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, self.fps, self.W, self.H, 'rgb', np.uint16)
@@ -70,8 +70,8 @@ class FinalSource:
                     cur_m, cur_s = a, b; k_dec += 1
                 if cur_m is None: raise RuntimeError(f"could not read {ci['osv']} at {t_abs[i]:.2f} s")
                 if k_dec != last_seam: R.update_seam(cur_m, cur_s); last_seam = k_dec                             # one seam per source frame
-                R.set_fov(P['fov'][i], P['dist'][i], P['disc'][i] if P['use_disc'] else None)
-                yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0); d = cam.direction(yaw, P['pitch'][i]); M = Ms[i]
+                R.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], P['disc'][i] if P['use_disc'] else None)
+                yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0); d = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); M = Ms[i]
                 img = R.render(cur_m, cur_s, d if P['ref'] == 'body' else M @ d, M @ ez, float(P['roll'][i]))
                 yield img if self.overlay is None else self.overlay.apply(img, utc0 + times[i])           # before any transition blend, so a dissolve cross-fades the two overlays too
         finally:
@@ -106,6 +106,8 @@ def render_final(*a, **k):
 
 def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='100M', limit_pieces=None, out=None, progress=None):
     """Render (or continue) the final film; returns the path of the film. `limit_pieces` renders only the first pieces and does not assemble (for trying things out)."""
+    from strata360.edit import pans as PN
+    plan = dict(plan, segments=PN.apply_pans(plan['segments'], framing)[0])                                   # (the glides the film will use are part of its key)
     key = final_key(plan, list(size), fps, bitrate, folder); d = final_dir(folder, key); os.makedirs(d, exist_ok=True); segs = plan['segments']; ps = pieces(segs, fps); W, H = size
     total = sum(p['frames'] for p in ps); t0 = time.time(); done_frames = 0
     def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=done_frames, frames_total=total, pieces_done=sum(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))

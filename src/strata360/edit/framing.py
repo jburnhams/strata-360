@@ -100,15 +100,27 @@ def scenery_path(g, T, t0, rng, v):
     return dict(ref='world', keyframes=kf, subject='scenery', why=why)
 
 
+PAN_MIN_S = 3.0              # a free view of at least this long may pan between two poses
+PAN_MAX_DEG = 60.0           # by at most this much yaw: a drift, not a sweep
+PAN_KEEP = 0.85              # and only when both ends look at least this good compared with the best fixed view
+
+
+def _best_pose(grid, a, b, rng, k=3):
+    """The (score, yaw, pitch, hfov) of the view that looks best over [a, b], one of the top `k` picked at random (the seeded variety)."""
+    best = [(VQ.window_score(grid, a, b, yaw, pitch, hfov, 16 / 9, step=1.0)['score'], yaw, pitch, hfov) for yaw in range(-180, 180, 15) for pitch in FREE_PITCHES for hfov in FREE_HFOVS]
+    best.sort(reverse=True); return best[int(rng.integers(0, min(k, len(best))))]
+
+
 def free_path(g, T, t0, rng, v):
-    """A fixed pose (a free camera, edit/view_quality.py): the view that looks best over the whole window, one of the top few at random (the seeded variety); people are not avoided. None without a quality grid."""
+    """A free camera (edit/view_quality.py): a fixed pose, the view that looks best over the whole window, or, in a window of 3 s or more, a slow pan from the best pose at its start to the best pose at its end when those are different (15 to 60 degrees apart) and
+    each looks nearly as good as the fixed one; one of the top few at random (the seeded variety). People are not avoided. None without a quality grid."""
     if not v or v.get('grid') is None: return None
-    best = []
-    for yaw in range(-180, 180, 15):
-        for pitch in FREE_PITCHES:
-            for hfov in FREE_HFOVS: best.append((VQ.window_score(v['grid'], t0, t0 + T, yaw, pitch, hfov, 16 / 9, step=1.0)['score'], yaw, pitch, hfov))
-    best.sort(reverse=True); sc, yaw, pitch, hfov = best[int(rng.integers(0, min(3, len(best))))]
-    return dict(ref='world', keyframes=[dict(t=0.0, yaw=float(yaw), pitch=float(pitch), fov=float(hfov), ease='linear'), dict(t=round(float(T), 3), yaw=float(yaw), pitch=float(pitch), fov=float(hfov), ease='linear')], subject='free', why=f'a fixed view chosen for its detail and exposure (score {sc:.2f})')
+    grid = v['grid']; sc, yaw, pitch, hfov = _best_pose(grid, t0, t0 + T, rng); kf = lambda t, y, p, f: dict(t=round(float(t), 3), yaw=float(y), pitch=float(p), fov=float(f), ease='linear')
+    if T >= PAN_MIN_S:
+        win = min(1.5, T / 3.0); s0, y0, p0, f0 = _best_pose(grid, t0, t0 + win, rng, 1); s1, y1, p1, f1 = _best_pose(grid, t0 + T - win, t0 + T, rng, 1); d = abs(float(CV.wrap(y1 - y0)))
+        if 15.0 <= d <= PAN_MAX_DEG and min(s0, s1) >= PAN_KEEP * sc:
+            return dict(ref='world', keyframes=[kf(0.0, y0, p0, f0), kf(T, y0 + float(CV.wrap(y1 - y0)), p1, f1)], subject='free', why=f'a slow pan of {d:.0f} degrees between the best pose at the start and at the end (score {min(s0, s1):.2f})')
+    return dict(ref='world', keyframes=[kf(0.0, yaw, pitch, hfov), kf(T, yaw, pitch, hfov)], subject='free', why=f'a fixed view chosen for its detail and exposure (score {sc:.2f})')
 
 
 def resolve_segment(g, lib, data):
@@ -143,7 +155,9 @@ def resolve_segment(g, lib, data):
         kf = [dict(t=round(float(tt), 3), yaw=round(float(np.degrees(ev['yaw'][i]) + fy[i] - fy[0]), 2), pitch=round(float(np.clip(fp[i], -60, 60)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')
               for i, tt in enumerate(times)]
         path = dict(ref='world', keyframes=kf)
-    path['subject'] = subject; path['why'] = why; return path
+    path['subject'] = subject; path['why'] = why
+    if subject in ('person', 'you'): path['track'] = [dict(t=round(float(t_), 3), yaw=round(float(np.degrees(y_)), 2), pitch=round(float(np.degrees(p_)), 2)) for t_, y_, p_ in zip(times, y, p)]       # where the subject is, for the pan transitions (edit/pans.py)
+    return path
 
 
 def resolve(folder, plan, lib=None):
