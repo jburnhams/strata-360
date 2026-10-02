@@ -57,17 +57,15 @@ def current(d):
 
 
 def with_overlay(d, cfg, track, tiles=None):
-    """Write thumb_overlay.jpg: the current thumbnail with the race overlay at its moment. Without a map key the maps are left out (the numbers and clock are still drawn)."""
+    """Write thumb_overlay.jpg: the current thumbnail with the race overlay at its moment. A missing map key is an error (overlay/tiles.MissingKey), not a reason to draw less: the stage fails with the message."""
     import datetime as dt
     from PIL import Image
     from strata360.overlay import build
-    from strata360.overlay.tiles import MissingKey
     name, info = current(d)
     if not name: raise RuntimeError('no thumbnail yet')
     clip = _load(d, 'clip.json'); t_s = float(info.get('t_s', 0.0)); t = dt.datetime.fromisoformat(clip['time']['start_utc'].replace('Z', '+00:00')).timestamp() + t_s
     img = np.asarray(Image.open(os.path.join(d, name)).convert('RGB')).copy(); size = (img.shape[1], img.shape[0]); why = None
-    try: ov = build(cfg, track, size, tiles)
-    except MissingKey as e: ov = build(cfg, track, size, tiles, maps=False); why = f'maps left out: {e}'
+    ov = build(cfg, track, size, tiles)
     Image.fromarray(ov.apply(img, t)).save(os.path.join(d, 'thumb_overlay.jpg.part'), 'JPEG', quality=90); os.replace(os.path.join(d, 'thumb_overlay.jpg.part'), os.path.join(d, 'thumb_overlay.jpg'))
     out = dict(source=name, source_mtime=os.path.getmtime(os.path.join(d, name)), t_s=round(t_s, 2), utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).isoformat(), maps=why is None, why=why)
     json.dump(out, open(os.path.join(d, 'thumb_overlay.json'), 'w')); return out

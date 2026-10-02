@@ -1,5 +1,5 @@
 """Voice-over timing, fitting and recorded replacements with a fake speech engine (the `fake_engine` fixture: runs on any platform with ffmpeg, no TTS model)."""
-import json, os
+import json, os, shutil
 import pytest
 from library import duration, make_tone
 
@@ -47,6 +47,20 @@ class TestReuseAndRecordings:
         assert o[1]['source'] == 'recorded' and o[1]['natural_s'] == pytest.approx(1.5, abs=0.1) and o[0]['source'] == 'synth'
         st = V.load_state(f); st['use']['1'] = 'synth'; V.save_state(f, st)
         assert by_seg(V.build(f))[1]['source'] == 'synth'
+
+    def test_a_recording_is_trimmed_to_its_speech_so_the_line_starts_with_the_first_word(self, speech, fake_engine, tmp_path):
+        import subprocess
+        V = fake_engine; f = speech([L(0, 'one two', 0.0, 4.0)]); tone = make_tone(tmp_path / 'tone.wav', 1.0, 500); take = str(tmp_path / 'padded.wav')
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-i', tone, '-af', 'adelay=1500:all=1,apad=pad_dur=1.0', take], check=True)             # 1.5 s of silence, 1 s of sound, 1 s of silence
+        os.makedirs(os.path.dirname(V.recorded_path(f, 0)), exist_ok=True); shutil.copy(take, V.recorded_path(f, 0)); o = by_seg(V.build(f))[0]                      # as if a file with silence reached the folder untrimmed
+        assert o['natural_s'] == pytest.approx(1.0, abs=0.12) and o['trim'][0] == pytest.approx(1.5, abs=0.1) and o['trim'][1] == pytest.approx(2.5, abs=0.1)
+        assert V.line_durations(f, [dict(seg=0, text='one two')], log=lambda *a: None)[0] == pytest.approx(1.0, abs=0.12)
+        out = os.path.join(V.base(f), 'voiceover.wav'); import numpy as np; from strata360.edit import vo_measure as M
+        x, sr = M.read_audio(out); first = float(np.argmax(np.abs(x) > 0.02)) / sr; assert first < 0.3                                              # the first sound is at the line's start (its lead-in), not 1.5 s later
+
+    def test_a_line_that_does_not_fit_says_what_can_be_done_about_it(self, speech, fake_engine, tmp_path):
+        V = fake_engine; f = speech([L(0, 'one two', 0.0, 1.0), L(1, 'three', 1.0, 1.0)]); V.save_recording(f, 0, make_tone(tmp_path / 'long.wav', 3.0, 500)); o = by_seg(V.build(f))[0]
+        assert o['fit'] == 'over' and o['overrun_s'] > 1.5 and any('shorten' in c for c in o['choices']) and any('record it again' in c for c in o['choices']) and not any('faster' in c for c in o['choices'])
 
     def test_a_recording_can_be_deleted(self, speech, fake_engine, tmp_path):
         V = fake_engine; f = speech([L(0, 'one two', 0.0, 3.0)]); V.save_recording(f, 0, make_tone(tmp_path / 'take.wav', 1.0))

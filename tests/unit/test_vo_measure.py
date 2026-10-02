@@ -134,3 +134,10 @@ def test_a_line_without_audio_is_missing(proj):
 
 
 def test_load_without_a_file(proj): assert M.load(proj.folder) is None
+
+
+def test_overflow_choices_name_what_can_be_done_and_are_empty_when_it_fits():
+    from strata360.edit import voiceover as V
+    assert V.overflow_choices('synth', 0.0) == [] and V.overflow_choices('recorded', 0.004) == []
+    s = V.overflow_choices('synth', 2.0); r = V.overflow_choices('recorded', 2.0)
+    assert 'about 2.0 s' in s[0] and any('faster' in c for c in s) and not any('faster' in c for c in r) and any('record it again' in c for c in r)

@@ -25,10 +25,7 @@ ELEMENTS = ['clock', 'distance', 'pace', 'route_map', 'credit']
 PROFILE_H = 0.13              # the elevation profile's height as a share of the frame height
 
 
-def default_style():
-    """The map style for a gap clip: the plain landscape map when a Thunderforest key is set (secrets.env or the environment), else the OpenStreetMap one, which needs none."""
-    from strata360.edit.llm_remote import secret
-    return 'tf-landscape' if secret('THUNDERFOREST_API_KEY') else 'osm'
+DEFAULT_STYLE = 'tf-landscape'      # plain landscape map; needs THUNDERFOREST_API_KEY (a missing key is an error, never a quiet change of map; `--style osm` chooses the key-free map on purpose)
 
 
 def frame_count(seconds, fps): return max(1, int(round(float(seconds) * float(fps))))
@@ -39,7 +36,7 @@ class MapClip:
         if not t1 > t0: raise ValueError('the stretch has no length')
         self.series, self.fps, self.size, self.zoom_limits = series, float(fps), tuple(size), zoom; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H)
         self.frames = frame_count(seconds, fps); self.t0, self.t1 = float(t0), float(t1); self.speedup = (self.t1 - self.t0) / (self.frames / self.fps)
-        self.tiles = tiles or Tiles(default_style()); self.rw = world(series.route_lat, series.route_lon); self.rt = series._pt
+        self.tiles = tiles or Tiles(DEFAULT_STYLE); self.rw = world(series.route_lat, series.route_lon); self.rt = series._pt
         ts = self.times(); lat = np.interp(ts, series._pt, series.route_lat); lon = np.interp(ts, series._pt, series.route_lon); self.pos = world(lat, lon)
         n = max(3, int(round(CAMERA_S * self.fps)) | 1); self.cam = (_smooth(self.pos[0], n), _smooth(self.pos[1], n)); self.z = self._zoom_profile()
         self.overlay = Overlay(series, size, settings({**(st or {}), 'elements': ELEMENTS, 'style': self.tiles.style}), tz, self.tiles); self._strip = self._profile_strip()
