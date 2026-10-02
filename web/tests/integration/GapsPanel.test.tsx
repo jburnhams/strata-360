@@ -47,6 +47,12 @@ describe('GapsPanel', () => {
     expect(screen.queryByRole('button', { name: 'Remove G01 clip' })).not.toBeInTheDocument()
   })
 
+  it('shows why the last render failed', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap({ clips: [makeGapClip({ error: 'strata360.overlay.tiles.MissingKey: the map style tf-landscape needs a key' })] })] })
+    setup(<GapsPanel folder="/data" />)
+    expect(await screen.findByLabelText('G01 state')).toHaveTextContent('failed: strata360.overlay.tiles.MissingKey')
+  })
+
   it('plays a rendered clip and can remove it', async () => {
     mockGet('/api/gaps', { gaps: [makeGap({ clips: [makeGapClip({ exists: true, status: 'ready' })] })] })
     const del = recordRequests('/api/gaps/clip'); mockDelete('/api/gaps/clip', { removed: true })

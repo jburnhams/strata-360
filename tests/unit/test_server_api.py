@@ -273,3 +273,12 @@ class TestGapClipsApi(TestRaceMapData):
         doc = SY.load(f); doc['clips'][0].update(status='ready', file='synthetic/G01.mp4'); SY.save(f, doc)
         assert client.get('/api/gaps/video', params=dict(folder=f, id='G01')).content == b'x' * 10 and client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['exists'] is True
         assert client.delete('/api/gaps/clip', params=dict(folder=f, id='G01')).json() == dict(removed=True) and not os.path.exists(os.path.join(project.race_dir, 'synthetic', 'G01.mp4')) and SY.load(f)['clips'] == [] and c
+
+    def test_progress_ignores_start_up_warnings_and_a_failure_shows_its_real_error(self, client, project, fake_popen):
+        self.with_gap(project); f = project.folder; client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10)); client.post('/api/gaps/render', json=dict(folder=f, id='G01'))
+        log = os.path.join(project.race_dir, 'synthetic', 'G01.log'); noise = 'ValueError: unsupported hash type blake2s\n'
+        open(log, 'w').write('  G01: 40/300 frames\n' + noise); g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert g['progress'] == 'G01: 40/300 frames' and g['error'] == ''
+        open(log, 'w').write(noise); assert client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['progress'] == 'starting…'
+        from strata360.server import app as A
+        A.GAP_JOBS.clear(); open(log, 'w').write(noise + 'Traceback (most recent call last):\nstrata360.overlay.tiles.MissingKey: the map style tf-landscape needs a key\n' + noise)
+        c = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert c['rendering'] is False and c['error'].startswith('strata360.overlay.tiles.MissingKey')

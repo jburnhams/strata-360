@@ -20,7 +20,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
     if (!r.started) throw new Error(r.reason || 'could not start')
   })
   const hours = (g: Gap) => `${(g.duration_s / 3600).toFixed(1)} h`
-  const state = (c: GapClip) => c.rendering ? (c.progress || 'rendering…') : c.exists ? `ready · ${c.seconds} s for ${(c.duration_s / 3600).toFixed(1)} h (x${c.speedup})` : 'planned'
+  const state = (c: GapClip) => c.rendering ? (c.progress || 'rendering…') : c.error ? `failed: ${c.error}` : c.exists ? `ready · ${c.seconds} s for ${(c.duration_s / 3600).toFixed(1)} h (x${c.speedup})` : 'planned'
   return (
     <div className="mt-4">
       <div className="mb-1 flex items-baseline gap-2"><b>Gaps in the footage</b><span className="text-xs text-stone-500">{data.gaps.length} · a map clip can fill each one</span></div>
@@ -35,7 +35,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
                 <span>{g.local_start} → {g.local_end}</span>
                 <span className="text-stone-500">{hours(g)} · km {g.km_start}–{g.km_end} · +{g.ascent_m} m{g.daylight ? ` · ${g.daylight}` : ''}</span>
                 <span className="ml-auto flex items-center gap-2">
-                  {c && <span className="text-xs text-stone-500" aria-label={`${g.id} state`}>{state(c)}</span>}
+                  {c && <span className={`text-xs ${c.error && !c.rendering ? 'text-red-600' : 'text-stone-500'}`} aria-label={`${g.id} state`}>{state(c)}</span>}
                   <label className="flex items-center gap-1 text-xs text-stone-500">seconds
                     <input aria-label={`Seconds for ${g.id}`} type="number" min={2} step={1} className="w-16 rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"
                       value={seconds[g.id] ?? String(c?.seconds ?? g.default_seconds)} onChange={e => setSeconds({ ...seconds, [g.id]: e.target.value })} />

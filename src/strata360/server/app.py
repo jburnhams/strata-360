@@ -7,7 +7,7 @@ Built on FastAPI (interactive API docs at /api/docs). Security model: the server
 `?token=` on first visit, or as `Authorization: Bearer`). Nothing here deletes or modifies footage; the only writes are the project folders (`<footage>/strata360/`).
 
 API (JSON):  GET /api/roots, /api/browse?path=, /api/progress?folder=, /api/log?folder=;  POST /api/open {folder, languages?, gps?}, /api/run {folder}, /api/stop {folder}."""
-import argparse, glob, json, os, secrets, subprocess, sys, threading, time
+import argparse, glob, json, os, re, secrets, subprocess, sys, threading, time
 from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
@@ -808,10 +808,20 @@ def create_app(roots, token=None):
         from strata360.edit import synthetic as SY
         cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.find_gaps(GP.load_spans(f), loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
         job = GAP_JOBS.get(f); running = job[0] if job and job[1].poll() is None else None
-        def prog(cid):
-            try: tail = open(os.path.join(rd, 'synthetic', cid + '.log')).read().strip().splitlines()[-1]; return tail
-            except (OSError, IndexError): return ''
-        for c in docs: c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
+        def log_lines(cid):
+            try: return open(os.path.join(rd, 'synthetic', cid + '.log'), errors='replace').read().strip().splitlines()
+            except OSError: return []
+        def prog(cid):                                                               # the newest "n/m frames" line (the log also holds start-up warnings that say nothing about the render)
+            for l in reversed(log_lines(cid)):
+                if re.search(r'\d+/\d+ frames', l): return l.strip()
+            return 'starting…'
+        def failure(cid):                                                            # why the last render stopped: the last real error line, not the interpreter's hashlib warnings
+            for l in reversed(log_lines(cid)):
+                if re.match(r'^[\w.]*(Error|Exception|Busy|MissingKey)\b', l) and 'unsupported hash type' not in l: return l.strip()[:300]
+            return ''
+        for c in docs:
+            c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
+            c['error'] = '' if c['rendering'] or c['exists'] else failure(c['id'])
         for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]
         return gaps
 
