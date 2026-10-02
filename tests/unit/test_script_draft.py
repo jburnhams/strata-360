@@ -107,7 +107,7 @@ def gap(label, kind='map', seconds=12, **kw): return dict(type='gap', clip=label
 
 def test_a_gap_item_counts_in_the_film_and_is_never_asked_to_be_used():
     items = [clipitem('0001', '0001.00', '0001.01'), gap('G01', 'flyover', 12), broll('0002', 6), clipitem('0003', '0003.00', '0003.00')]
-    rep, probs = SD.check(dict(items=items, skipped=[]), DPACK, 40, 150); assert rep['gap_s'] == 12.0 and not [p for p in probs if 'G01' in p or 'gap' in p]
+    rep, probs = SD.check(dict(items=items, skipped=[]), DPACK, 40, 150); assert rep['gap_s'] == 12.4 and not [p for p in probs if 'G01' in p or 'gap' in p]                            # 12 s at 97 bpm is 20 beats: 12.4 s
     rep, probs = SD.check(dict(items=[i for i in items if i['type'] != 'gap'], skipped=[]), DPACK, 40, 150); assert not [p for p in probs if 'G01' in p]                    # leaving the gap out is allowed
 
 
@@ -132,4 +132,11 @@ def test_notes_say_when_an_anchor_cannot_be_met_but_say_nothing_about_narration_
 def test_the_request_carries_the_music_and_the_gap_choices_and_the_prompt_explains_gap_items_and_anchors():
     msgs, text = SD.build_messages(DPACK, 245, 150); sys_, user = msgs[0]['content'], msgs[1]['content']
     assert 'THE MUSIC (times are FILM seconds' in user and 'Sung (en): 30-60 s' in user and '=== CLIP G01' in user and 'NO FOOTAGE: a gap of 1.0 h' in user and '"type": "gap"' in user and '"anchor"' in user
-    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 6
+    assert '"gap": a generated clip' in sys_ and '"flyover"' in sys_ and 'must approve its render' in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 7 and 'paraphrase freely' in sys_
+
+
+def test_with_the_tempo_known_every_item_counts_in_whole_beats_so_the_writers_total_matches_the_plan():
+    assert SD.on_beats(3.1, 'vo', 0.5) == 3.5 and SD.on_beats(3.1, 'clip', 0.5) == 3.5 and SD.on_beats(3.1, 'broll', 0.5) == 3.0 and SD.on_beats(3.3, 'broll', 0.5) == 3.5 and SD.on_beats(0.1, 'vo', 0.5) == 0.5 and SD.on_beats(3.1, 'vo', None) == 3.1
+    s = dict(items=[clipitem('0001', '0001.00', '0001.01'), broll('0002', 5), vo('0003', 'a ' * 20), clipitem('0003', '0003.00', '0003.00')], skipped=[])
+    bare, _ = SD.check(s, PACK, 60, 150); beat = 60.0 / 97.0; timed, _ = SD.check(s, dict(PACK, music=dict(bpm=97.0)), 60, 150)
+    assert timed['total_s'] > bare['total_s'] and timed['total_s'] - bare['total_s'] < 4 * beat + 0.2

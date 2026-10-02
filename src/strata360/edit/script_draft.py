@@ -5,12 +5,12 @@
 The writer (an LLM: Gemini 3.1 Pro by default) gets the whole context pack (edit/script_pack.py) and returns a script of items played one after another: `clip` (the runner's own lines, by line id), `vo` (narration, with a
 `basis`), `broll` (picture only). Structure is checked in code against the real durations and drives a retry that sends the problems back (length within 3%, shooting order, one run per clip, no more picture than a clip has
 usable, every pin honoured); grounding is advisory (edit/script_ground.py) and only becomes warnings. Drafts are kept in <race dir>/script2/ (the last three), pins in script2/pins.json."""
-import datetime as dt, json, os, re, time
+import datetime as dt, json, math, os, re, time
 
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
 from strata360.edit.script_pack import norm_label
 
-PROMPT_VERSION = 6
+PROMPT_VERSION = 7
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
 VO_PAUSE_S = 0.25             # breathing room after a narration item
 MIN_GAP_S = 2.0               # a gap item plays for this long at least,
@@ -35,7 +35,7 @@ RULES
 3. Every clip with usable picture should get at least a moment (3 s or more) unless there is a real reason to leave it out; list any clip you leave out under "skipped" with the reason. Never give a clip more picture than its usable seconds. Give more time to clips that matter to the story and little to the dull ones; do not spread time evenly.
 4. Choose the runner's own words for what they carry: the story, emotion, humour, surprise, the stakes. Leave out filler ("um", "right so", false starts), repeats, and logistics that do not matter. Prefer unbroken stretches of about 4 to 20 seconds. Where the runner's words are good, let them do the telling: your narration must set up and link, never repeat or explain what a clip item says.
 5. Narration (vo) is a real voice in the film, not a caption: aim for roughly 20 to 30 percent of the film, in short pieces that bridge the runner's recordings, set up what is coming, carry the passage of time and distance, and give the clips that have no speech a reason to be there. Keep each vo item under 40 words, so the film breathes between narration and the runner's voice. Honest, understated, dry; no cliches, no hype, no motivational lines, no exclamations. Short spoken sentences.
-6. Facts. Base narration on the material: when you state a fact, take it from the clip's own time, distance, pace, place, what the camera sees, the runner's notes or the runner's own words, and do not state as fact what the material does not say; modest is better than invented. Never invent names, events or numbers. Put a fact only on the clip it belongs to: take times and distances from THAT clip's own track line (a clip 90% of the way through a long race is not "ten kilometres to go" if that is far more than a tenth of the distance left); the runner's notes describe the whole race, and what they say about the end belongs to the last clips only. Give each narration item a short "basis" (quotes or transcript line ids it rests on): this is a FIRST DRAFT that the user will read, check and improve, and the basis helps them. Where a claim is shown by the runner's own words, prefer to put those words right next to the narration (a "clip" item just before or after it).
+6. Facts. Base narration on the material: when you state a fact, take it from the clip's own time, distance, pace, place, what the camera sees, the runner's notes or the runner's own words, and do not state as fact what the material does not say; modest is better than invented. Never invent names, events or numbers. Put a fact only on the clip it belongs to: take times and distances from THAT clip's own track line (a clip 90% of the way through a long race is not "ten kilometres to go" if that is far more than a tenth of the distance left); the runner's notes describe the whole race, and what they say about the end belongs to the last clips only. Give each narration item a short "basis" (what it rests on: a short quote or a paraphrase of the runner's notes or words, or transcript line ids; paraphrase freely, only the user's MUST INCLUDE narration is used word for word): this is a FIRST DRAFT that the user will read, check and improve, and the basis helps them. Where a claim is shown by the runner's own words, prefer to put those words right next to the narration (a "clip" item just before or after it).
 7. The runner's recordings are made on the move, sometimes days after the events they describe: what the runner says about "last night" is a recollection. Narrate in a way that keeps the timeline honest.
 8. Build an arc: set the scene, let the race grow, make the hard middle felt, and give the ending room: the last part of the film should be the strongest and mostly in the runner's own words.
 9. REVISING. When a CURRENT DRAFT is supplied, you are revising it, not starting again: keep every item the new constraints do not touch, with the same wording and the same choice of lines, and change only what the constraints and the target length require. Return the whole revised script.
@@ -48,7 +48,7 @@ SCHEMA = '''Return ONE JSON object and nothing else:
   "title": "short film title",
   "story": "two or three sentences: the arc you chose and why",
   "items": [
-    {"type": "vo",    "clip": "0004", "text": "narration the runner speaks over the picture of that clip", "words": 23, "basis": ["word-for-word quote from the material", "another quote or a transcript line id such as 0008.03"], "t": 12.5},
+    {"type": "vo",    "clip": "0004", "text": "narration the runner speaks over the picture of that clip", "words": 23, "basis": ["a short quote or paraphrase of what the narration rests on (the notes, the track line, the runner's words)", "or a transcript line id such as 0008.03"], "t": 12.5},
     {"type": "clip",  "clip": "0008", "from": "0008.01", "to": "0008.03", "why": "why these lines belong", "t": 31.0},
     {"type": "broll", "clip": "0009", "seconds": 3.5, "why": "what the picture shows / why it is worth a moment", "t": 34.5},
     {"type": "gap",   "clip": "G03", "kind": "map" or "flyover", "seconds": 12, "why": "what the gap holds and why it is shown", "t": 46.5, "anchor": {"film_s": 100, "why": "optional: the chorus starts here"}}
@@ -105,8 +105,15 @@ def span(it, pack):
     return (a[0], b[-1]) if a and b else None
 
 
+def on_beats(d, kind, beat_s):
+    """An item's length as the film will have it: every window is a whole number of beats (b-roll rounds, everything else rounds up), so with the music's tempo known the writer's arithmetic uses these lengths, not the bare ones (33 items lose about a third of a beat each: ten seconds in a film)."""
+    if not beat_s or d <= 0: return d
+    n = round(d / beat_s) if kind == 'broll' else math.ceil(d / beat_s - 1e-9); return max(1, n) * beat_s
+
+
 def check(script, pack, target_s, wpm):
     """(report, problems): durations are recomputed from the pack (the model's arithmetic is not used); `problems` are structural and drive a retry."""
+    beat_s = 60.0 / pack['music']['bpm'] if (pack.get('music') or {}).get('bpm') else None
     clips = {c['label']: c for c in pack['clips']}; order = {c['label']: i for i, c in enumerate(pack['clips'])}; by = {l['id']: l for c in pack['clips'] for l in c['lines']}; pos = PN.index(pack)
     items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0); words_total = 0; last_line = {}
     for n, it in enumerate(items, 1):
@@ -138,7 +145,7 @@ def check(script, pack, target_s, wpm):
             if not MIN_GAP_S <= d <= MAX_GAP_S: probs.append(f'item {n}: a gap plays for {MIN_GAP_S:g} to {MAX_GAP_S:g} seconds, not {d:g}')
         else: probs.append(f'item {n}: unknown type {t}'); continue
         if it.get('anchor') is not None and not (isinstance(it['anchor'], dict) and isinstance(it['anchor'].get('film_s'), (int, float))): probs.append(f'item {n}: an anchor is {{"film_s": seconds, "why": "reason"}}')
-        kinds[t] += d; total += d; per[cl] = per.get(cl, 0.0) + d
+        d = on_beats(d, t, beat_s); kinds[t] += d; total += d; per[cl] = per.get(cl, 0.0) + d
     skipped = {norm_label(s.get('clip', '')) for s in (script or {}).get('skipped') or []}
     for lab, c in clips.items():
         if lab not in per and lab not in skipped and not c.get('synthetic'): probs.append(f'clip {lab} is neither used nor listed under skipped')

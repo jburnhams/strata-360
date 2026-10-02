@@ -158,7 +158,7 @@ def plan_from_script(folder, draft_name=None, log=print):
     by_label = {c['label']: c['clip'] for c in pack['clips']}; seg_of = {n: SPL.seg_id(by_label.get(norm_label(it.get('clip', '')), ''), it['text']) for n, it in vo_items}
     spoken = VO.line_durations(folder, [dict(seg=seg_of[n], text=it['text'].strip()) for n, it in vo_items], log); voice_s = {n: spoken[seg_of[n]] for n, _ in vo_items if seg_of[n] in spoken}
     o = edit['overrides']; st = CH.Settings(seed=int(edit['settings']['seed']), tech_force=dict(o['tech_force']), bans_techs=frozenset(o['bans_techs']))
-    res = SPL.build(draft, pack, clips, lib, music, voice_s, wpm=float(draft.get('wpm') or 150.0), st=st)
+    res = SPL.build(draft, pack, clips, lib, music, voice_s, wpm=float(draft.get('wpm') or 150.0), st=st, target_s=((pack.get('music') or {}).get('length_s')))
     music = O.Music(bpm=bpm, beats=res['beats'], bar_beats=bar, sections=music.sections); ser = serialise(res['segs'], clips, music, lib)
     for g, role, k in zip(ser, res['roles'], res['piece_of']): g['role'] = role; g['item'] = res['pieces'][k]['n']; g['energy_hi'] = g['energy'] >= 0.6
     ser = insert_synthetic(folder, ser, res.get('synthetic') or [], music.beat_s)
@@ -169,7 +169,7 @@ def plan_from_script(folder, draft_name=None, log=print):
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
     now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     edit['plan'] = dict(generated_at=now, source='script', script=name, film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=bpm, bar_beats=bar, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
-                        segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [])
+                        segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [], fit=res.get('fit'))
     save(folder, edit); rd = config.race_dir(folder); os.makedirs(os.path.join(rd, 'script2'), exist_ok=True); p = os.path.join(rd, VO.SCRIPT2_LINES); json.dump(dict(draft=name, generated_at=now, lines=res['lines']), open(p + '.tmp', 'w'), indent=1); os.replace(p + '.tmp', p)
     return edit
 

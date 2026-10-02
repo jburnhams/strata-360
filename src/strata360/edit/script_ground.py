@@ -1,7 +1,7 @@
 """Checking that narration in a script is grounded in the material the writer was given (implementation plan V2): no invented facts.
 
-Each "vo" item lists a `basis`: verbatim quotes copied from the material (or a transcript line id). check(script, pack, text) returns problems: a quote that is not in the material, a number that is nowhere in
-the material, and a "N km to go" that does not match the clip's own distance."""
+Each "vo" item lists a `basis`: what it rests on, as a short quote or a PARAPHRASE of the material (the notes are meant to be paraphrased: only MUST INCLUDE narration is used word for word, which script_pins checks) or a transcript line id. check(script, pack, text) returns problems: a basis that has
+nothing to do with the material (most of its words, in a basis of three or more, occur nowhere in it), a number that is nowhere in the material, and a "N km to go" that does not match the clip's own distance."""
 import re
 from strata360.edit.script_pack import norm_label
 
@@ -61,8 +61,8 @@ def check(script, pack, text, tol=1.5):
         if not basis: probs.append(f'item {n}: narration has no basis (quote the material it rests on)')
         for b in basis:
             if str(b).strip() in ids: continue
-            q = norm(str(b))
-            if len(q) >= 6 and q not in hay: probs.append(f'item {n}: basis "{str(b)[:60]}" is not in the material (quotes must be copied word for word)')
+            q = norm(str(b)); words = [w for w in re.findall(r'[a-z]{4,}', q)]
+            if len(q) >= 6 and len(words) >= 3 and q not in hay and sum(w[:5] in hay for w in words) < 0.3 * len(words): probs.append(f'item {n}: basis "{str(b)[:60]}" does not seem to come from the material')       # a paraphrase of the notes is fine; this catches a basis that is invented
         c = clips.get(norm_label(it.get('clip', ''))); t = it.get('text', '').lower(); derived = [total - c['km']] if (c and c.get('km') is not None and total) else []          # the distance still to run is race distance minus the clip's own
         for v in numbers_in(it.get('text', '')):
             if not any(abs(v - x) <= tol for x in pack_nums + derived) and v > 3: probs.append(f'item {n}: the number {v:g} is not in the material')
