@@ -32,6 +32,7 @@ export const handlers = [
   http.post('/api/who', () => HttpResponse.json({ ok: true })),
   http.get('/api/track/line', () => HttpResponse.json(makeTrackLine())),
   http.get('/api/track/series', () => HttpResponse.json(makeTrackSeries())),
+  http.get('/api/gaps', () => HttpResponse.json({ gaps: [] })),
   http.get('/api/track/clips', () => HttpResponse.json({ clips: [makeTrackClip()], has_draft: true })),
   http.get('/api/script2', () => HttpResponse.json(makeScript2State())),
   http.post('/api/script2/pins', async ({ request }) => HttpResponse.json(await request.json())),

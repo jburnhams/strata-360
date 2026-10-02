@@ -5,6 +5,7 @@ import { PanelSkeleton } from './Skeleton'
 import TrackMap from './TrackMap'
 import TrackCharts, { type XMode } from './TrackCharts'
 import ClipCard from './ClipCard'
+import GapsPanel from './GapsPanel'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
 // Hover a marker for the clip's card, click it to open the clip.
@@ -53,6 +54,7 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe
       </div>
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
       <RaceView folder={folder} onOpenClip={onOpenClip} tz={tz} />
+      <GapsPanel folder={folder} />
     </div>
   )
 }

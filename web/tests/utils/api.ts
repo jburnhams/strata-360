@@ -6,6 +6,7 @@ type Body = JsonBodyType | ((req: Request) => JsonBodyType | Promise<JsonBodyTyp
 const resolve = (body: Body) => async ({ request }: { request: Request }) => HttpResponse.json(typeof body === 'function' ? await body(request) : body)
 
 export const mockGet = (path: string, body: Body) => server.use(http.get(path, resolve(body)))
+export const mockDelete = (path: string, body: Body) => server.use(http.delete(path, resolve(body)))
 export const mockPost = (path: string, body: Body) => server.use(http.post(path, resolve(body)))
 /** A JSON error the way FastAPI sends it: `{ detail }` with the given status. */
 export const mockError = (path: string, status: number, detail?: string, method: 'get' | 'post' = 'get') =>

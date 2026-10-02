@@ -1,4 +1,4 @@
-import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState } from '../../src/api'
+import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip } from '../../src/api'
 
 // Typed builders for API payloads: sensible defaults, override what the test cares about (`makeBrowse({ can_create: false })`).
 // Add one per interface in src/api.ts as tests need it. Keep the defaults boring and valid.
@@ -56,3 +56,9 @@ export const makeTrackClip = (o: Partial<import('../../src/api').TrackClip> = {}
   id: 'CAM_20260222190000_0023_D', label: '0023', start_utc: '2026-02-22T19:00:00Z', end_utc: '2026-02-22T19:03:35Z', duration_s: 215, covered: true, used: true, used_s: 16.5, moments: 7, usable_s: 117, scene: { settings: ['trail'], weather: ['fog'] },
   t_mid: 3600, t0: 3500, t1: 3700, lat: 50.09, lon: 5.135, stretch: [[50.089, 5.134], [50.091, 5.136]],
   facts: { local: 'Sun 22 Feb 20:01', daylight: 'night', elapsed_h: 1.0, distance_km: 12.3, percent: 16, pace_min_km: 5.75, gradient_pct: 4, altitude_m: 569, heart_rate: 141, text: 'x' }, ...o })
+
+export const makeGapClip = (o: Partial<GapClip> = {}): GapClip => ({ id: 'G01', gap: 'G01', kind: 'map', t0: '2026-02-19T17:17:00Z', t1: '2026-02-19T20:47:00Z', duration_s: 12600, seconds: 14, speedup: 900, status: 'planned', rendering: false, progress: '', exists: false, ...o })
+export const makeGap = (o: Partial<Gap> = {}): Gap => ({
+  id: 'G01', t0: 1771521420, t1: 1771534020, duration_s: 12600, local_start: 'Thu 19 Feb 18:17', local_end: 'Thu 19 Feb 21:47', km_start: 2.5, km_end: 27, distance_km: 24.5, moving_share: 0.99, ascent_m: 860,
+  daylight: 'twilight->night', before: 'a', after: 'b', default_seconds: 14, clips: [], ...o,
+})
