@@ -200,6 +200,23 @@ The reference (kept in `scripts/overlay/`: `layout.xml` and the command line use
 - Record what looks wrong (seams, grade, framing, sound) as issues; they feed milestone C.
 - **Done when:** a finished film with overlay exists, and `progress.md` has the timings and the list of defects.
 
+### V7. The script writer as director (design 3 Oct, from the user; to build)
+The writer stops being only a script editor and becomes the **director of a rough draft of the whole film**: it is told about the music, its words, the gaps and what can fill them, and answers with the order, the narration, the gap fills and where things should land. Deterministic rules then fix the precise timings; the user tweaks with the same tools as today (pins, marks, items). The model decides *what and roughly where*; code decides *exactly when*.
+
+**What the director is given (text only, one call, as now):**
+- the pack as today (clips, lines with marks, notes, pins);
+- **the music**: its length (the film's length target, D7), tempo, bars and the section list with energy (`music.json`), and **the lyrics with times** (L1 below): sung stretches and phrases, with a confidence, so it can see "the verse is rapped from 100 to 140 s, the chorus hook at 150 s";
+- **the gaps** (`gps/gaps.py`): each with its time, km range, elapsed time, climb, share moving, daylight at each end and the clips either side, and the **options** for filling it: a 2D map clip or a 3D flyover (kind `map` | `flyover`), the default seconds, and the stats that would be on screen (distance, pace, altitude, clock). It chooses a kind and a length per gap (or none);
+- the rules it must respect (shooting order, one run per clip, whole-film length, narration not over sung words unless it says why).
+
+**What it returns (the draft, as today plus):** items `clip` / `vo` / `broll` as now, new items `gap` (the gap id, `kind`, `seconds`, `why`), and optional soft **anchors** on any item: `{music_s, why}` ("land the start of the night section on the chorus", "this line should be the last thing before the hook"). Anchors are hints with reasons, never exact times.
+
+**What the rules do with it:** build or reuse the synthetic clips it asked for (rendering is queued, 3D only after the user approves the cost); place items in whole beats on bars (as `script_plan` does), move anchored items to the nearest bar line inside a tolerance and report the ones that cannot land; keep narration out of sung stretches by moving it to the nearest instrumental one or ducking the music (A3), and warn when speech from a clip overlaps sung words; check the film length against the music (D7) and report the shortfall; keep every user pin and mark.
+
+**Build order:** **L1** a project-level `lyrics` step (`edit/lyrics.py`, like the rough mix: key of the track and settings, stale, reset; faster-whisper without the voice filter, the experiment `scripts/lyrics_spike.py` found words only that way; stores phrases, words, a vocal-activity curve and a per-phrase confidence; the user may correct or delete phrases because the recogniser mishears) and a **vocal span** list from it; **L2** the music facts and gap options in the pack (`script_pack`), and the gap items in the draft schema, the checks and the retry; **L3** the director prompt; **L4** the rules (anchor snapping, the narration-versus-vocals pass, gap clips requested by the draft created in `synthetic.json`, 3D held for approval); **L5** the mix ducks the music under voice-over and speech and keeps vocals clear where wanted (A3), with the vocal spans drawn on the music waveform in the GUI.
+**Done when:** on Legends the draft contains gap items with kinds and lengths and anchors for at least the start, the finish and the chorus; the plan puts no narration over sung words (or says why); a gap item that asks for a 3D flyover waits for approval; the whole film is within a beat of the music's length.
+**Open:** whether anchors should ever be hard (the user pins one); how to treat a track with no words (the step records "instrumental"); the licence of showing the lyrics (they are used for timing only, never printed in the film).
+
 ## Milestone K: virtual cameras, quality signals and the optimiser (design 1 Oct; feeds V1's preferred content and V5's cuts)
 
 The idea: for each clip, a list of **virtual cameras** in order of quality. A camera has a start and an end time (it need not cover the clip) and is either a **tracking** or a **free** camera:
