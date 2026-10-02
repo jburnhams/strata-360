@@ -13,7 +13,7 @@ from strata360.pipeline import guard
 import hashlib, json, os, shutil, subprocess, sys, time
 import cv2, numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam
+from strata360.render import camera as cam, synthetic as SYN
 from strata360.render.flat import Globe, projection, view_rays
 from strata360.render.film import compose, layout
 
@@ -25,7 +25,8 @@ def film_dir(folder, key): return os.path.join(config.race_dir(folder), 'preview
 
 def plan_key(folder, plan):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
-    h = hashlib.sha1(json.dumps(plan['segments'], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode()); return h.hexdigest()[:10]
+    h = hashlib.sha1(json.dumps(plan['segments'], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
+    h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
 
 
 class EquirectView(Globe):
@@ -80,8 +81,10 @@ class PreviewSource:
         return self.info[clip]
 
     def frames(self, k, a0, a1, yaw_extra=None):
-        sg = self.segs[k]; clip = sg['clip']; ci = self._clip(clip); m = a1 - a0
+        sg = self.segs[k]; m = a1 - a0
         if m <= 0: return
+        if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, FPS, self.w, self.h, 'bgr'); return           # a generated clip: its pictures as they are
+        clip = sg['clip']; ci = self._clip(clip)
         if not ci['proxy']:
             for _ in range(m): yield card(self.w, self.h, f'{clip[-9:]}: proxy not made yet')
             return
@@ -132,9 +135,12 @@ def window_gain(folder, g):
     return 10 ** (SE.window_mix(doc, g['clip_start_s'], g['clip_start_s'] + g['dur_s'], bool(g.get('speech')))['gain_db'] / 20.0)
 
 
-def audio_of(folder, clip):
-    """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none."""
+def audio_of(folder, clip, role=None):
+    """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none. In a plan made from the script (windows have a `role`) the clip's voice is
+    heard ONLY in dialogue windows (role 'clip', the lines the script plays); narration and b-roll windows use the speech-free background track (audio_background.flac) or, until that exists, no sound of their own."""
     d = os.path.join(config.race_dir(folder), 'clips', clip)
+    if role in ('vo', 'broll'):
+        b = os.path.join(d, 'audio_background.flac'); return b if os.path.exists(b) else None
     for n in ('audio_clean.flac', 'audio_original.flac'):
         if os.path.exists(os.path.join(d, n)): return os.path.join(d, n)
     p = proxy_of(folder, clip); return p if p and has_audio(p) else None
@@ -144,7 +150,7 @@ def build_audio(folder, plan, out, total_s):
     """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track."""
     inputs = []; chains = []; n = 0
     for g in plan['segments']:
-        p = audio_of(folder, g['clip']); d = g['dur_s']; gain = window_gain(folder, g)
+        p = audio_of(folder, g['clip'], g.get('role')); d = g['dur_s']; gain = window_gain(folder, g)
         if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
         n += 1
@@ -167,7 +173,7 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
     from strata360.analysis import views
     key = plan_key(folder, plan); d = film_dir(folder, key); os.makedirs(d, exist_ok=True); w = px; h = px * 9 // 16 // 2 * 2
     segs = plan['segments']; bounds = [int(round((g['film_start_s'] + g['dur_s']) * FPS)) for g in segs]; starts = [0] + bounds[:-1]; total = bounds[-1]; total_s = total / FPS
-    placeholders = sorted({g['clip'] for g in segs if not proxy_of(folder, g['clip'])}); status = lambda state, n, **kw: json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=n, frames_total=total, placeholders=placeholders, started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')) or os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
+    placeholders = sorted({g['clip'] for g in segs if not g.get('synthetic') and not proxy_of(folder, g['clip'])}); status = lambda state, n, **kw: json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=n, frames_total=total, placeholders=placeholders, started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')) or os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
     t0 = time.time(); status('audio', 0); build_audio(folder, plan, os.path.join(d, 'audio.wav'), total_s)
     enc = guard.popen(['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', str(FPS), '-i', '-', '-i', os.path.join(d, 'audio.wav'), '-map', '0:v', '-map', '1:a', *encoder_args(),
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',

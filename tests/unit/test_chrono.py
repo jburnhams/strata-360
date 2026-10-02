@@ -106,3 +106,11 @@ if __name__ == '__main__':
         try: f(); print('ok  ', f.__name__)
         except (AssertionError, O.Infeasible) as e: bad += 1; print('FAIL', f.__name__, repr(e)[:300])
     print(f'{len(fns) - bad}/{len(fns)} passed'); sys.exit(bad)
+
+
+def test_millisecond_rounding_of_back_to_back_windows_is_not_an_overlap():
+    clips = make_clips([200, 40, 40, 40]); m = music(bpm=97, seconds=50); p = C.plan(clips, LIB, m, C.Settings(seed=2))
+    pairs = [(a, b) for a, b in zip(p, p[1:]) if a.cand.clip == b.cand.clip]; assert pairs, 'need two windows from one clip'
+    a, b = pairs[0]; end = a.clip_start_s + a.beats * m.beat_s
+    b.clip_start_s = round(end - 0.0008, 3); assert C.violations(p, LIB, m, clips) == []                      # 0.8 ms: what rounding to the millisecond produces (seen on Legends at 97 bpm)
+    b.clip_start_s = end - 0.02; assert any('overlap or disorder' in v for v in C.violations(p, LIB, m, clips))   # a real overlap is still caught

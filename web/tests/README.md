@@ -24,6 +24,8 @@ Move anything two tests share into `utils/`. Refactor older tests onto the helpe
 
 ## Conventions
 
+- **Leaflet components run on `leaflet-node` in the integration tests** (`vitest.config.ts` aliases `leaflet` to it for that project only; the app and the build use plain `leaflet`). It supplies the layout and the canvas jsdom lacks, so a map component is tested as it is: no size stubs, real zoom buttons, markers, events. Do not count SVG paths in tests (with a real canvas Leaflet draws lines and circles on it); use DOM markers (`divIcon`) for anything a test must see. `stubRect` in `utils/media.ts` is only for plain elements whose code reads `getBoundingClientRect`.
+
 - Test what a user or caller sees: query by role/label/text; assert on outgoing requests with `recordRequests`. No class-name queries, no snapshots.
 - One concept per `it`, named as a sentence. Cover happy path, loading, empty, server error (4xx/5xx), dropped connection, edge values, interaction.
 - No arbitrary sleeps: `findBy*`, `vi.waitFor`, and fake timers (`vi.useFakeTimers({ shouldAdvanceTime: true })` with user-event) for debounces and polling.
@@ -53,14 +55,11 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/usePoll.ts` | 100% | done |
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
-| `src/components/FilmDetails.tsx` | 93.75% | done (jsdom/RTL bug with `input[type="date"]` drops onChange events, making it flaky to test saving date correctly. Gap justified) |
-| `src/components/FilmPreview.tsx` | 63.15% | partial (testing HLS native media functionality is out of scope/difficult in jsdom) |
-| `src/components/FinalRender.tsx` | 100% | done |
 | every other file in `src/` | 0% | todo
 | `src/components/Timeline.tsx` | 77.55% | partial (interactions and edge cases)
 | `src/components/Moments.tsx` | 100% | done |
 
 ### Helpers Added
 
-* `makeEditResponse`, `makePlanSegment`, `makeFilmState`, `makeFinalState` in `factories.ts` to mock endpoints.
-* default handlers added to `handlers.ts` to support API calls specific to `Timeline`, `FilmDetails`, `FilmPreview`, `FinalRender`.
+* `makeEditResponse`, `makePlanSegment` in `factories.ts` to mock Timeline data.
+* `extraHandlers` in `handlers.ts` to support API calls specific to `Timeline` such as `/api/edit`, `/api/edit/propose` and `/api/edit/override`.

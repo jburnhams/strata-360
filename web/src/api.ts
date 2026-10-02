@@ -17,13 +17,33 @@ export interface TrackOverview {
   ascent_m?: number; descent_m?: number; avg_speed_kmh?: number | null; avg_pace_min_km?: number | null; max_altitude_m?: number | null; min_altitude_m?: number | null
   avg_hr?: number | null; max_hr?: number | null; gaps_over_10s?: number; bbox?: [number, number, number, number]; line?: [number, number][]
 }
+export interface TrackSeries { points: number; start_utc: string; end_utc: string; duration_s: number; distance_km: number | null; t: number[]; km: (number | null)[]; alt: (number | null)[]; alt_lo: (number | null)[]; alt_hi: (number | null)[]; pace: (number | null)[]; moving: number[]; hr: (number | null)[] }
+export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
+export interface TrackClipFacts { local: string; daylight: string | null; elapsed_h: number | null; distance_km: number | null; percent: number | null; pace_min_km: number | null; gradient_pct: number | null; altitude_m: number | null; heart_rate: number | null; text: string }
+export interface TrackClip {
+  id: string; label: string; start_utc: string; end_utc: string; duration_s: number; covered: boolean; used: boolean; used_s: number; moments?: number | null; usable_s?: number | null; scene?: { settings: string[]; weather: string[] }
+  t_mid?: number; t0?: number; t1?: number; lat?: number; lon?: number; stretch?: [number, number][]; facts?: TrackClipFacts
+}
+export interface GapClip { id: string; gap: string; kind: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; file?: string }
+export interface Gap {
+  id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
+  daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
+}
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
-  timezone?: string; title: string | null; date: string | null; results: Results
+  timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
+export interface ScriptItem { type: 'vo' | 'clip' | 'broll'; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
+export interface ScriptDraft {
+  title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
+  problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null
+}
+export interface PlanInfo { source: 'script' | 'beats'; script: string | null; windows: number; length_s: number | null; warnings: string[]; generated_at: string | null }
+export interface Script2State { plan?: PlanInfo | null; plan_running?: boolean; plan_exit?: number | null; plan_log?: string[]; draft: ScriptDraft | null; drafts: string[]; pins: ScriptPins; running: boolean; last_exit: number | null; log: string[]; used: string[]; key_configured: boolean }
 export interface WordEdit { orig: string; src: 'user' | 'gemini'; why?: string | null; user_text?: string | null; gemini_text?: string | null }
-export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit }
+export type WordMark = 'must' | 'never'
+export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit; m?: WordMark }
 export interface Seg { si: number; part?: number; play0?: number; play1?: number; words: WordT[]; clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface ScriptLine { says?: string[]; seg: number; film_start_s: number; seconds: number; clip: string; text: string; words: number; est_speak_s: number; budget_words: number }
 export interface ScriptDoc { file: string; title: string | null; provider?: string; model?: string; target_s: number; wpm: number; style?: string; lines: ScriptLine[]; total_words: number; total_speak_s: number; remaining_problems: { seg: number; problem: string }[]; seconds_llm?: number }
@@ -31,19 +51,20 @@ export interface ScriptState { key_configured: boolean; providers: Record<string
 export interface PlanOption { tech: string; score: number }
 export interface PlanSegment {
   id: string; index: number; clip: string; cand_id: string; film_start_s: number; beats: number; dur_s: number; clip_start_s: number; utc_start: string; utc_end: string
-  technique: string; family: string; hero: boolean; forced: boolean; speech: boolean; locked: boolean; options: PlanOption[]
+  technique: string; family: string; hero: boolean; forced: boolean; speech: boolean; locked: boolean; options: PlanOption[]; role?: 'clip' | 'vo' | 'broll'; item?: number
   sound?: { gain_db: number; why: string[] }; kind?: string; view?: string; transition?: { type: 'cut' | 'dissolve' | 'dip' | 'whip'; beats: number; dur_s: number; why: string }
 }
 export interface EditState {
   settings: { length_s: number; bpm: number; bar_beats: number; seed: number; wpm: number; style: string }
   overrides: { locked: { wid: string }[]; tech_force: Record<string, string>; bans_cands: string[]; bans_techs: string[]; clip_weight: Record<string, number>; transitions?: Record<string, string> }
-  plan: null | { generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[] }
+  plan: null | { source?: 'script' | 'beats'; script?: string; generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[] }
 }
 export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
 export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
 export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | 'rendering' | 'done' | 'error'; running: boolean; key?: string; frames_done?: number; frames_total?: number; placeholders?: string[]; error?: string | null; length_s?: number }
 export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; bitrate: string }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean }
-export interface MusicState { file: string | null; analysis: { bpm: number; offset_s: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number } | null }
+export interface MusicAnalysis { bpm: number; offset_s: number; bar_beats?: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number }
+export interface MusicState { file: string | null; name?: string | null; analysis: MusicAnalysis | null; waveform?: number[] | null; spectrogram?: boolean }
 export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
 export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
@@ -64,7 +85,9 @@ export interface ClipDetail {
   transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; clarity?: { t: number; yaw: number; pitch: number; score?: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
   places?: Places | null; exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string; overlay?: boolean } | null; track?: Record<string, any>; track_text?: string
 }
-export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string> }
+export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string>; vo_must?: { folder: string; folder_ordered: boolean; clips: Record<string, string> } }
+export interface VoPin { id: string; text: string; mode: 'clip' | 'ordered' | 'anywhere'; clip?: string }
+export interface ScriptPins { include?: string[]; exclude?: string[]; vo?: VoPin[]; vo_never?: string[] }
 
 async function call<T>(path: string, body?: unknown): Promise<T> {
   const r = await fetch(path, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -81,6 +104,14 @@ export const api = {
   progress: (folder: string) => call<Progress>('/api/progress?' + q({ folder })),
   coverage: (folder: string) => call<Coverage>('/api/coverage?' + q({ folder })),
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
+  trackSeries: (folder: string, points = 2000) => call<TrackSeries>('/api/track/series?' + q({ folder, points: String(points) })),
+  trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000) => call<TrackLine>('/api/track/line?' + q(bbox ? { folder, bbox: bbox.join(','), limit: String(limit) } : { folder, limit: String(limit) })),
+  trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
+  gaps: (folder: string) => call<{ gaps: Gap[] }>('/api/gaps?' + q({ folder })),
+  planGapClip: (folder: string, gap: string, seconds: number) => call<GapClip>('/api/gaps/clip', { folder, gap, seconds }),
+  renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
+  deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),
+  gapVideoUrl: (folder: string, id: string) => '/api/gaps/video?' + q({ folder, id }),
   track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
   uploadTrack: async (folder: string, file: File) => {
     const r = await fetch('/api/track?' + q({ folder, filename: file.name }), { method: 'POST', body: file })
@@ -92,13 +123,17 @@ export const api = {
   previewUrl: (folder: string, clip: string) => '/api/preview?' + q({ folder, clip }),
   thumbUrl: (folder: string, clip: string, v: string, overlay = false) => '/api/thumb?' + q({ folder, clip, v, ...(overlay ? { overlay: '1' } : {}) }),     // v: busts the browser cache when the picture changes
   meta: (folder: string) => call<Meta>('/api/meta?' + q({ folder })),
-  saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
+  saveMeta: (folder: string, patch: Partial<Pick<Meta, 'title' | 'date' | 'distance_km'>> & { results?: Partial<Results> }) => call<Meta>('/api/meta', { folder, ...patch }),
   transcript: (folder: string) => call<{ segments: Seg[] }>('/api/transcript?' + q({ folder })),
   script: (folder: string) => call<ScriptState>('/api/script?' + q({ folder })),
   setKey: (key: string, provider = 'vertex') => call<{ configured: boolean }>('/api/llm/key', { key, provider }),
   generateScript: (folder: string, o: { length: number; wpm?: number; style?: string; model?: string; provider?: string }) => call<{ started: boolean }>('/api/script/generate', { folder, ...o }),
   voiceover: (folder: string) => call<VoiceoverState>('/api/voiceover?' + q({ folder })),
   buildVoiceover: (folder: string, o: { engine?: string; voice?: string; rate?: number } = {}) => call<{ started: boolean }>('/api/voiceover/build', { folder, ...o }),
+  markWords: (folder: string, clip: string, spans: { seg: number; from: number; to: number }[], state: 'must' | 'never' | 'none') => call<{ ok: boolean; marked: number }>('/api/transcript/mark', { folder, clip, spans, state }),
+  script2: (folder: string, name = '') => call<Script2State>('/api/script2?' + q(name ? { folder, name } : { folder })),
+  planScript2: (folder: string, draft?: string) => call<{ started: boolean; reason?: string }>('/api/script2/plan', { folder, draft }),
+  generateScript2: (folder: string, o: { revise?: boolean; target_s?: number; auto?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/script2/generate', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
@@ -125,6 +160,8 @@ export const api = {
     if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
     return j as MusicState & { warning?: string }
   },
+  musicAudioUrl: (folder: string) => '/api/music/audio?' + q({ folder }),
+  musicSpectrogramUrl: (folder: string, v: string) => '/api/music/spectrogram?' + q({ folder, v }),
   removeMusic: (folder: string) => fetch('/api/music?' + q({ folder }), { method: 'DELETE' }),
   clock: (folder: string) => call<ClockState>('/api/clock?' + q({ folder })),
   clockSuggest: (folder: string) => call<{ current: number; suggestions: { offset_s: number; votes: number; confidence: number; score: number; clips?: string[] }[] }>('/api/clock/suggest?' + q({ folder })),
@@ -139,6 +176,8 @@ export const api = {
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),
+  saveVo: (folder: string, text: string, clip?: string, ordered?: boolean) => call<Notes>('/api/notes', { folder, kind: 'vo', text, clip, ordered }),
+  saveScriptPins: (folder: string, pins: ScriptPins) => call<ScriptPins>('/api/script2/pins', { folder, ...pins }),
   open: (folder: string, extra: { languages?: string; gps?: string } = {}) => call<{ started: boolean }>('/api/open', { folder, ...extra }),
   run: (folder: string) => call<{ started: boolean }>('/api/run', { folder }),
   state: (folder: string) => call<StateMatrix>('/api/state?' + q({ folder })),
