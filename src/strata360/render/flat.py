@@ -189,7 +189,7 @@ class Renderer(Globe):
             out.append((uu.reshape(self.gh, self.gw), vv.reshape(self.gh, self.gw), np.degrees(th).reshape(self.gh, self.gw)))
         return out
 
-    def update_seam(self, L_master, L_slave, reset=False):
+    def update_seam(self, L_master, L_slave, reset=False, people=None):
         """Carve the seam for this frame (the previous one steadies it: `reset` forgets it, after a jump in time). A no-op unless carve_seam is on."""
         if not (self.carve_seam or self.parallax): return
         from strata360.render import seam as SM, parallax as PX
@@ -197,7 +197,7 @@ class Renderer(Globe):
         if self.parallax:                                                                                    # 1. measure how far the lenses disagree and move them toward each other where that helps
             (A, cA), (B, cB) = self._carver.band(L_master, L_slave); self.warp = PX.measure(A, B, cA, cB, None if (reset or self.warp is None) else self.warp)
         else: self.warp = None
-        if self.carve_seam: self.seam = self._carver.carve(L_master, L_slave, None if (reset or self.seam is None) else self.seam, self.warp)     # 2. the seam is carved through the corrected bands
+        if self.carve_seam: self.seam = self._carver.carve(L_master, L_slave, None if (reset or self.seam is None) else self.seam, self.warp, people)     # 2. the seam is carved through the corrected bands
 
     def set_gains(self, g_master, g_slave):
         self.gain_m, self.gain_s = np.asarray(g_master, float), np.asarray(g_slave, float)

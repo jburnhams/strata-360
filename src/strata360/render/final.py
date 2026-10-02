@@ -13,7 +13,7 @@ from strata360.pipeline import guard
 import datetime as dt, hashlib, json, math, os, shutil, subprocess, sys, time
 import numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, flat, synthetic as SYN
+from strata360.render import camera as cam, flat, seam as SM, synthetic as SYN
 from strata360.render.film import pieces, render_piece, layout
 from strata360.render.preview import build_audio, proxy_of
 
@@ -41,11 +41,17 @@ class FinalSource:
     def __init__(self, folder, segs, framing, W, H, fps, interp='cubic', overlay=None):
         self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp, self.overlay = folder, segs, framing, W, H, fps, interp, overlay; self.info = {}; self.done = 0
 
+    def _boxes(self, clip, osv):
+        """t -> [(yaw, pitch, height_deg)] of the people seen near t (edit/clip_views.py), for a seam that goes round them; None when off (`STRATA_SEAM_PEOPLE=0`) or the clip has no people records."""
+        if os.environ.get('STRATA_SEAM_PEOPLE') == '0': return None
+        from strata360.edit import clip_views as CV
+        return CV.load(os.path.join(config.race_dir(self.folder), 'clips', clip), osv)['boxes']
+
     def _clip(self, clip):
         if clip not in self.info:
             from strata360.osv.telemetry import read_frames
             cj = json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json'))); osv = cj['source_files']['osv']
-            self.info[clip] = dict(osv=osv, src_fps=float(cj['video']['nominal_fps']), n=int(cj['video']['source_frames']), R=flat.Renderer(osv, self.W, self.H, 90.0, self.interp), T=read_frames(osv))
+            self.info[clip] = dict(boxes=self._boxes(clip, osv), osv=osv, src_fps=float(cj['video']['nominal_fps']), n=int(cj['video']['source_frames']), R=flat.Renderer(osv, self.W, self.H, 90.0, self.interp), T=read_frames(osv))
         return self.info[clip]
 
     def frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
@@ -69,7 +75,7 @@ class FinalSource:
                     if a is None or b is None: break                                              # past the end of the clip: the last frame is held
                     cur_m, cur_s = a, b; k_dec += 1
                 if cur_m is None: raise RuntimeError(f"could not read {ci['osv']} at {t_abs[i]:.2f} s")
-                if k_dec != last_seam: R.update_seam(cur_m, cur_s); last_seam = k_dec                             # one seam per source frame
+                if k_dec != last_seam: R.update_seam(cur_m, cur_s, people=SM.people_in_layout(ci['boxes'](float(t_abs[i])), lambda d, M=Ms[i]: M @ d) if ci['boxes'] else None); last_seam = k_dec                             # one seam per source frame
                 R.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], (float(pose_extra[i][3]) if pose_extra is not None and len(pose_extra[i]) > 3 and pose_extra[i][3] > 0 else (P['disc'][i] if P['use_disc'] else None)))
                 yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0); d = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); M = Ms[i]
                 img = R.render(cur_m, cur_s, d if P['ref'] == 'body' else M @ d, M @ ez, float(P['roll'][i]))
