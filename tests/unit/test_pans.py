@@ -121,3 +121,8 @@ def test_a_glide_whose_middle_shows_mostly_sky_is_refused_and_a_good_one_keeps_i
     assert PN.plan(seg(0, 0.0), seg(1, 4.0), a, b, sky)[0] is None and 'poor views' in PN.plan(seg(0, 0.0), seg(1, 4.0), a, b, sky)[1]
     assert PN.plan(seg(0, 0.0), seg(1, 4.0), globe_path(), path(0.0, pitch=-10.0), lambda y, p, f, t: 0.02 if abs(p + 50) < 30 else 0.5)[0] is None            # a globe glide is judged the same way
     assert PN.plan(seg(0, 0.0), seg(1, 4.0), a, b, lambda *x: None)[0]                                                                                      # no grid for the clip: not judged
+
+
+def test_the_planner_guess_of_which_techniques_can_glide_into_each_other():
+    assert PN.glide_pair('hold_wide', 'push_in') and PN.glide_pair('selfie_hold', 'selfie_close') and PN.glide_pair('globe_shrink', 'hold_wide')
+    assert not PN.glide_pair('selfie_far', 'selfie_close') and not PN.glide_pair('follow_runner', 'hold_wide') and not PN.glide_pair('globe_shrink', 'globe_shrink') and not PN.glide_pair('spin_roll', 'hold_wide')

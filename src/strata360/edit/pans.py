@@ -29,6 +29,16 @@ def smooth(u): return u * u * (3 - 2 * u)
 def vfov(fov): return math.degrees(2 * math.atan(math.tan(math.radians(fov) / 2) / ASPECT))
 
 
+GLIDE_FOV = dict(hold_wide=(100, 100), scenery=(95, 95), free_view=(90, 90), selfie_hold=(85, 85), selfie_close=(50, 50), selfie_far=(130, 130), push_in=(100, 65), pull_out=(65, 100), dialogue_hold=(70, 65), globe_shrink=None)     # the techniques whose shots can be glided to and from, with the field of view at their start and end (the planner's guess before the real framing exists; None: any)
+
+
+def glide_pair(ta, tb, limit=60.0):
+    """Could a shot of technique `ta` glide into one of `tb` (same clip, back to back)? A guess from the techniques alone (the real test is `plan`, on the framing): both must be glideable and the field of view at the end of the first close to the start of the second."""
+    a, b = GLIDE_FOV.get(ta, 'no'), GLIDE_FOV.get(tb, 'no')
+    if a == 'no' or b == 'no' or ta == tb == 'globe_shrink': return False
+    return a is None or b is None or abs(a[1] - b[0]) <= limit
+
+
 def is_globe(kf): return any('disc' in k for k in kf)
 
 

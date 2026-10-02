@@ -15,7 +15,7 @@ inside its usable stretches; (3) beam search over the ordered windows for the te
 import heapq, math
 from dataclasses import dataclass, field
 import numpy as np
-from strata360.edit import optimise as O
+from strata360.edit import optimise as O, pans as PN
 
 MIN_SEG_S = 2.0          # shortest window (the shortest everyday technique needs 2 s; whip pans are transitions, not windows)
 MAX_SEG_S = 8.0          # longest window: longer ones are split into adjacent windows, each with its own view
@@ -27,7 +27,7 @@ class Settings:
     seed: int = 0
     beam: int = 30
     temperature: float = 0.15
-    w_quality: float = 1.0; w_fit: float = 0.8; w_dur: float = 0.5; w_energy: float = 0.6; w_first: float = 0.4
+    w_quality: float = 1.0; w_fit: float = 0.8; w_dur: float = 0.5; w_energy: float = 0.6; w_first: float = 0.4; w_glide: float = 0.3
     dur_power: float = 0.6
     pen_recent: float = 0.8; recent_decay: float = 0.7; pen_family: float = 0.25; pen_scale: float = 0.15; pen_share: float = 6.0
     hero_share: float = 0.2
@@ -261,6 +261,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
     starts = []; pos = 0
     for w in windows: starts.append(pos); pos += w.beats
     wids = [wid_of(clips[w.clip_index]['id'], w.abs_start) for w in windows]; options = []
+    joined = [k > 0 and windows[k].clip_index == windows[k - 1].clip_index and abs(windows[k].abs_start - (windows[k - 1].abs_start + windows[k - 1].beats * beat_s)) <= PN.CONTIGUOUS_S for k in range(len(windows))]          # back to back in one clip: a glide can join them (edit/pans.py)
     for k, w in enumerate(windows):
         d = w.beats * beat_s; c = getattr(w.cand, 'orig', None) or w.cand; en = music.energy_at(starts[k]); opts = []
         for tid in ids:
@@ -304,8 +305,9 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
                       pt = lib[seq[-1]]; pen += (st.pen_family if pt.family == t.family else 0.0) + (st.pen_scale if pt.scale == t.scale else 0.0)
                   share = (b['secs'].get(tid, 0.0) + d) / (B * beat_s); cap = st.share_caps.get(tid, t.max_share) * 0.7
                   pen += st.pen_share * max(0.0, share - cap) ** 2 * d ** st.dur_power
+                  glide = st.w_glide if joined[k] and seq and PN.glide_pair(seq[-1], tid) else 0.0                 # two shots of one clip that can glide: no hard cut needed on the beat
                   first = st.w_first if tid not in b['uses'] else 0.0; keep = st.w_keep if st.prefer.get(wids[k]) == tid else 0.0
-                  sc = b['true'] + base - pen + first + keep
+                  sc = b['true'] + base - pen + first + keep + glide
                   nxt.append((sc + st.temperature * rng.gumbel(), sc, b, tid, d))
           if nxt: break
         if not nxt: raise O.Infeasible('every technique hit a limit (cooldown, caps): loosen the caps or add clips')
