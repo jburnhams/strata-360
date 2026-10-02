@@ -5,7 +5,7 @@ Defaults come from the footage: the title from the folder name (without a leadin
 import datetime as dt, glob, json, os, re
 from strata360.pipeline import config
 
-DEFAULTS = dict(title=None, date=None, results=dict(starters=None, finishers=None, finished=None, position=None))
+DEFAULTS = dict(title=None, date=None, distance_km=None, results=dict(starters=None, finishers=None, finished=None, position=None))
 
 
 def _path(folder): return os.path.join(config.race_dir(folder), 'project.json')
@@ -39,6 +39,9 @@ def save(folder, patch):
     p = _path(folder); d = json.load(open(p)) if os.path.exists(p) else {}
     for k in ('title', 'date'):
         if k in patch: v = (patch[k] or '').strip() or None; d[k] = v
+    if 'distance_km' in patch:
+        v = patch['distance_km']; d['distance_km'] = None if v in (None, '') else float(v)
+        if d['distance_km'] is not None and not 0 < d['distance_km'] <= 5000: raise ValueError('distance_km must be between 0 and 5000')
     if 'date' in d and d['date'] is not None:
         try: dt.date.fromisoformat(d['date'])
         except ValueError: raise ValueError('date must be YYYY-MM-DD')
@@ -61,6 +64,7 @@ def describe(folder):
     m = load(folder); e = m['effective']; r = m['results']; bits = []
     if e['title']: bits.append(f"Title: {e['title']}.")
     if e['date']: bits.append(f"Date: {e['date']}.")
+    if m.get('distance_km'): bits.append(f"Official race distance: {m['distance_km']:g} km (the runner's GPS track can read longer: detours and wrong turns add distance).")
     if r.get('starters') is not None: bits.append(f"{r['starters']} runners started" + (f" and {r['finishers']} finished." if r.get('finishers') is not None else '.'))
     if r.get('finished') is True: bits.append('The runner finished' + (f", in position {r['position']}." if r.get('position') else '.'))
     elif r.get('finished') is False: bits.append('The runner did not finish (DNF).')

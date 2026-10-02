@@ -1,5 +1,5 @@
 """Music analysis on a synthetic track."""
-import os, subprocess, shutil
+import json, os, subprocess, shutil
 import numpy as np
 import pytest
 from strata360.edit import music as M
@@ -23,3 +23,35 @@ def test_the_film_sound_mixes_music_under_the_voice_over(tmp_path):
     out = os.path.join(f, 'a.wav'); PV.build_audio(f, plan, out, 8.0)
     assert abs(V.duration(out) - 8.0) < 0.05
     raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', out, '-f', 'f32le', '-ac', '1', '-ar', '8000', '-'], capture_output=True).stdout; a = np.frombuffer(raw, np.float32); assert np.abs(a[8000:16000]).max() > 0.05 and np.abs(a[-4000:]).max() < np.abs(a[8000:16000]).max()   # music is there; it fades at the end
+
+
+class TestMusicRecord:
+    """music.json: the track's file name and its analysis, waveform and spectrogram, saved when it is uploaded."""
+
+    def test_store_writes_the_record_and_the_spectrogram(self, tmp_path):
+        rd = str(tmp_path); data = open(make_track(str(tmp_path / 'src.wav'), 124.0, 1.3, 30), 'rb').read()
+        rec = M.store(rd, data, '.wav', 'my song.wav')
+        saved = json.load(open(os.path.join(rd, 'music.json')))
+        assert saved['file'] == 'music/track.wav' and saved['name'] == 'my song.wav' and abs(saved['analysis']['bpm'] - 124.0) < 0.6 and rec['analysis'] == saved['analysis']
+        assert len(saved['waveform']) == M.PEAKS and max(saved['waveform']) == 1.0
+        assert open(os.path.join(rd, saved['spectrogram']), 'rb').read(8) == b'\x89PNG\r\n\x1a\n'
+
+    def test_info_reuses_the_record_until_the_file_changes(self, tmp_path):
+        rd = str(tmp_path); M.store(rd, open(make_track(str(tmp_path / 'src.wav'), 124.0, 1.3, 30), 'rb').read(), '.wav', 'a.wav')
+        mj = os.path.join(rd, 'music.json'); stamp = os.stat(mj).st_mtime_ns
+        assert M.info(rd, 'music/track.wav')['name'] == 'a.wav' and os.stat(mj).st_mtime_ns == stamp
+        make_track(os.path.join(rd, 'music', 'track.wav'), 100.0, 0.5, 30)                          # the file is replaced behind our back
+        r = M.info(rd, 'music/track.wav'); assert abs(r['analysis']['bpm'] - 100.0) < 0.6 and r['name'] == 'a.wav'
+
+    def test_an_unreadable_upload_leaves_the_current_track_alone(self, tmp_path):
+        rd = str(tmp_path); M.store(rd, open(make_track(str(tmp_path / 'src.wav'), 124.0, 1.3, 30), 'rb').read(), '.wav', 'good.wav')
+        with pytest.raises(RuntimeError): M.store(rd, b'not audio at all' * 500, '.mp3', 'bad.mp3')
+        assert json.load(open(os.path.join(rd, 'music.json')))['name'] == 'good.wav' and not os.path.exists(os.path.join(rd, 'music', 'incoming.mp3')) and os.path.exists(os.path.join(rd, 'music', 'track.wav'))
+
+    def test_a_new_track_keeps_the_old_one_aside(self, tmp_path):
+        rd = str(tmp_path); a = open(make_track(str(tmp_path / 'a.wav'), 124.0, 1.3, 30), 'rb').read(); M.store(rd, a, '.wav', 'a.wav'); M.store(rd, a, '.wav', 'b.wav')
+        assert os.path.exists(os.path.join(rd, 'music', 'track.wav.replaced')) and json.load(open(os.path.join(rd, 'music.json')))['name'] == 'b.wav'
+
+    def test_remove_forgets_the_record(self, tmp_path):
+        rd = str(tmp_path); M.store(rd, open(make_track(str(tmp_path / 'a.wav'), 124.0, 1.3, 30), 'rb').read(), '.wav', 'a.wav'); M.remove(rd)
+        assert not os.path.exists(os.path.join(rd, 'music.json')) and not os.path.exists(os.path.join(rd, 'music', 'spectrogram.png'))

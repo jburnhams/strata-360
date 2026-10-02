@@ -14,7 +14,7 @@ export const makeTranscriptFix = (o: Partial<{ usage?: { calls: number; input: n
 
 export const makeBrowse = (o: Partial<Browse> = {}): Browse => ({ path: '/data', parent: null, footage_here: 0, is_project: false, can_create: false, entries: [], ...o })
 
-export const makeNotes = (o: Partial<Notes> = {}): Notes => ({ folder: '', clips: {}, updated: {}, ...o })
+export const makeNotes = (o: Partial<Notes> = {}): Notes => ({ folder: '', clips: {}, updated: {}, vo_must: { folder: '', folder_ordered: true, clips: {} }, ...o })
 
 export const makeProgress = (o: Partial<Progress> = {}): Progress => ({ state: 'new', folder: '/data', project: 'test', job_running: false, ...o })
 
@@ -33,3 +33,14 @@ export const makeEditState = (o: Partial<import('../../src/api').EditState> = {}
 export const makeEditResponse = (o: Partial<import('../../src/api').EditResponse> = {}): import('../../src/api').EditResponse => ({ edit: makeEditState(), techniques: [], script: {}, ...o })
 export const makeFilmState = (o: Partial<import('../../src/api').FilmState> = {}): import('../../src/api').FilmState => ({ has_index: true, duration_s: 120, status: 'ready', ...o })
 export const makeFinalState = (o: Partial<import('../../src/api').FinalState> = {}): import('../../src/api').FinalState => ({ status: 'missing', size: '1080p', fps: 30, progress: 0, file: null, ...o })
+
+export const makeScript2State = (o: Partial<import('../../src/api').Script2State> = {}): import('../../src/api').Script2State => ({ draft: null, drafts: [], pins: {}, running: false, last_exit: null, log: [], used: [], key_configured: true, ...o })
+
+export const makeScriptDraft = (o: Partial<import('../../src/api').ScriptDraft> = {}): import('../../src/api').ScriptDraft => ({
+  title: 'A Film', story: 'It starts, it gets hard, it ends.', skipped: [], problems: [], warnings: [], created: '2026-10-02T01:00:00', target_s: 60, target_source: 'music', wpm: 170, model: 'gemini-3.1-pro-preview', revised: false, draft_of: null,
+  report: { total_s: 61.2, target_s: 60, vo_s: 8, clip_s: 40, broll_s: 13.2, vo_words: 22, clips_used: 2, clips_skipped: 0 },
+  items: [
+    { type: 'vo', clip: '0023', text: 'It is Sunday afternoon.', basis: ['Sun 22 Feb 14:04'], seconds: 4 },
+    { type: 'clip', clip: '0023', from: '0023.00', to: '0023.00', lines: ['0023.00'], text: 'we are fine', seconds: 3.2, refs: [{ clip: 'CAM_20260222130830_0023_D', si: 0, w0: 0, w1: 3 }] },
+    { type: 'broll', clip: '0024', seconds: 5, why: 'a foggy trail' },
+  ], ...o })

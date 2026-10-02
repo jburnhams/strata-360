@@ -4,9 +4,14 @@ energy (quiet intro, louder middle), and the film's sound mixes the track in fro
 analyse(path) -> dict(bpm, offset_s, bar_beats, duration_s, usable_beats, sections=[(start_beat, end_beat, energy 0..1)], confidence, ...)
   offset_s   where the first downbeat is in the track: the track is played from there, so film time 0 is a downbeat
   sections   energy per stretch of whole bars, from the loudness of each bar, merged when similar
-The tempo is assumed constant (most dance and pop tracks); a track with tempo changes is reported with low confidence."""
+The tempo is assumed constant (most dance and pop tracks); a track with tempo changes is reported with low confidence.
+
+The project's track is recorded in <race dir>/music.json: {version, file (relative to the race dir), name (as uploaded), sig, analysis, waveform (peaks 0..1), spectrogram (file under music/)}.
+store() saves an upload; info() reads the record and redoes the analysis only when the file or the format changed."""
 import json, os, subprocess
 import numpy as np
+
+VERSION = 2; PEAKS = 1000; SPEC_BANDS = 96; SPEC_COLS = 1600
 
 SR = 22050; N_FFT = 1024; HOP = 256
 
@@ -38,7 +43,11 @@ def tempo_and_phase(env, fps, lo=70.0, hi=180.0):
 
 
 def analyse(path, bar_beats=4):
-    x = decode(path); fps = SR / HOP; S = spectrogram(x); env, low = onset_envelope(S); bpm, phase, score = tempo_and_phase(env, fps); period = fps * 60.0 / bpm
+    return analyse_samples(decode(path), bar_beats)
+
+
+def analyse_samples(x, bar_beats=4, S=None):
+    fps = SR / HOP; S = spectrogram(x) if S is None else S; env, low = onset_envelope(S); bpm, phase, score = tempo_and_phase(env, fps); period = fps * 60.0 / bpm
     beats = np.arange(phase, len(env) - 1, period); idx = np.round(beats).astype(int); lowb = np.array([low[i] for i in idx])
     sums = [lowb[k::bar_beats].sum() for k in range(bar_beats)]; bar0 = int(np.argmax(sums)); first = beats[bar0]                            # the bar line: the beat phase with the most low-frequency attack
     rms = np.sqrt(np.convolve(x.astype(np.float64) ** 2, np.ones(SR // 10) / (SR // 10), 'same')); bar_s = 60.0 / bpm * bar_beats; t0 = first / fps; nb = int((len(x) / SR - t0) // bar_s)
@@ -52,11 +61,65 @@ def analyse(path, bar_beats=4):
     return dict(bpm=round(float(bpm), 2), offset_s=round(float(t0), 3), bar_beats=bar_beats, duration_s=round(len(x) / SR, 2), usable_beats=nb * bar_beats, sections=sections, confidence=round(float(min(score / 6.0, 1.0)), 2))
 
 
-def cached(folder_rd, path):
-    """analyse() with the result saved next to the project (music/analysis.json); redone when the file changes."""
-    out = os.path.join(folder_rd, 'music', 'analysis.json'); sig = [os.path.getsize(path), int(os.path.getmtime(path))]
+def waveform(x, n=PEAKS):
+    """Loudest absolute sample in each of n equal pieces of the track, scaled so the biggest is 1."""
+    n = max(1, min(n, len(x))); p = np.array([np.abs(c).max() for c in np.array_split(x, n)]); return [round(float(v), 3) for v in p / max(float(p.max()), 1e-9)]
+
+
+def spectrogram_png(S, sr=SR):
+    """The spectrogram as a PNG (bytes): SPEC_BANDS log-spaced frequency bands (40 Hz to 10 kHz, low at the bottom) by at most SPEC_COLS columns of time, in decibels, in colour."""
+    import cv2
+    freqs = np.fft.rfftfreq(N_FFT, 1.0 / sr); edges = np.geomspace(40.0, min(10000.0, sr / 2 - 1), SPEC_BANDS + 1); rows = []
+    for a, b in zip(edges[:-1], edges[1:]):
+        m = (freqs >= a) & (freqs < b)
+        if not m.any(): m = np.zeros(len(freqs), bool); m[int(np.argmin(np.abs(freqs - (a + b) / 2)))] = True
+        rows.append(S[:, m].mean(1))
+    M = 20.0 * np.log10(np.array(rows) + 1e-6); cols = min(SPEC_COLS, M.shape[1]); M = np.stack([c.max(1) for c in np.array_split(M, cols, axis=1)], 1)
+    lo, hi = np.percentile(M, 5), np.percentile(M, 99.5); img = (np.clip((M - lo) / max(hi - lo, 1e-9), 0, 1) * 255).astype(np.uint8)[::-1]
+    return cv2.imencode('.png', cv2.applyColorMap(img, cv2.COLORMAP_INFERNO))[1].tobytes()
+
+
+def _sig(path): st = os.stat(path); return [st.st_size, st.st_mtime_ns]
+
+
+def _measure(path):
+    x = decode(path); S = spectrogram(x); return x, S
+
+
+def info(rd, rel):
+    """The record of the track `rel` (inside the race dir): music.json when it is for this file and still current, else the track is analysed again and music.json rewritten. RuntimeError if it cannot be read."""
+    p = os.path.join(rd, rel)
     try:
-        d = json.load(open(out))
-        if d.get('sig') == sig and d.get('file') == path: return d
-    except (OSError, ValueError): pass
-    d = analyse(path); d.update(sig=sig, file=path); os.makedirs(os.path.dirname(out), exist_ok=True); json.dump(d, open(out, 'w'), indent=1); return d
+        r = json.load(open(os.path.join(rd, 'music.json')))
+        if r.get('version') == VERSION and r.get('file') == rel and r.get('sig') == _sig(p) and os.path.exists(os.path.join(rd, r['spectrogram'])): return r
+    except (OSError, ValueError, KeyError): r = {}
+    x, S = _measure(p); return _record_with(rd, rel, r.get('name') if r.get('file') == rel else None, x, S)
+
+
+def _record_with(rd, rel, name, x, S, analysis=None):
+    d = os.path.join(rd, 'music'); os.makedirs(d, exist_ok=True); open(os.path.join(d, 'spectrogram.png'), 'wb').write(spectrogram_png(S))
+    rec = dict(version=VERSION, file=rel, name=name or os.path.basename(rel), sig=_sig(os.path.join(rd, rel)), analysis=analysis or analyse_samples(x, S=S), waveform=waveform(x), spectrogram='music/spectrogram.png')
+    json.dump(rec, open(os.path.join(rd, 'music.json'), 'w'), indent=1); return json.loads(json.dumps(rec))      # as it will read back (lists, not tuples)
+
+
+def store(rd, data, ext, name):
+    """Save an uploaded track as music/track<ext> and record it in music.json. The track is analysed first, so one that cannot be read (RuntimeError) leaves the current one alone; the old file is kept as track.<ext>.replaced."""
+    d = os.path.join(rd, 'music'); os.makedirs(d, exist_ok=True); tmp = os.path.join(d, 'incoming' + ext); open(tmp, 'wb').write(data)
+    try: x, S = _measure(tmp); an = analyse_samples(x, S=S)
+    except Exception:
+        os.remove(tmp); raise
+    for old in os.listdir(d):
+        if old.startswith('track.') and not old.endswith('.replaced'): os.replace(os.path.join(d, old), os.path.join(d, old + '.replaced'))
+    rel = 'music/track' + ext; os.replace(tmp, os.path.join(rd, rel)); return _record_with(rd, rel, name, x, S, an)
+
+
+def remove(rd):
+    """Forget the track: music.json and the spectrogram go (the audio file stays in music/ as it was)."""
+    for n in ('music.json', os.path.join('music', 'spectrogram.png')):
+        try: os.remove(os.path.join(rd, n))
+        except OSError: pass
+
+
+def cached(folder_rd, path):
+    """The analysis dict of the track at `path` (inside the race dir), from music.json when current."""
+    return info(folder_rd, os.path.relpath(path, folder_rd))['analysis']

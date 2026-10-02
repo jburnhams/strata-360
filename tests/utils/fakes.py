@@ -66,3 +66,60 @@ class FakeRun:
         return subprocess.CompletedProcess(cmd, self.code, out, b'')
     def check_output(self, cmd, *a, **kw):
         self.calls.append(list(cmd)); return self._out(cmd)
+
+class FakeTorchNoGrad:
+    def __enter__(self): pass
+    def __exit__(self, *args): pass
+
+class FakeTorchTensor:
+    def __init__(self, x): self.x = x
+    @property
+    def logits(self): return self
+    def numpy(self):
+        import numpy as np
+        return np.zeros((10, 4)) if self.x is None else self.x
+    def astype(self, t): return self.x
+
+def mock_torch(monkeypatch):
+    import sys, types
+    fake_torch = types.ModuleType('torch')
+    fake_torch.no_grad = FakeTorchNoGrad
+    fake_torch.from_numpy = lambda x: x
+    def fake_log_softmax(logits, dim): return [FakeTorchTensor(None)]
+    fake_torch.log_softmax = fake_log_softmax
+    monkeypatch.setitem(sys.modules, 'torch', fake_torch)
+
+class FakeHuggingFaceModel:
+    def __init__(self): pass
+    def generate(self, input_ids, **kw):
+        return [input_ids[0] + '_TRANSLATED']
+    @classmethod
+    def from_pretrained(cls, name):
+        class M:
+            def eval(self):
+                class Ev:
+                    def __call__(self, x):
+                        return FakeTorchTensor(x)
+                    def generate(self, input_ids, **kw):
+                        return [input_ids[0] + '_TRANSLATED']
+                return Ev()
+        return M()
+
+class FakeHuggingFaceTokenizer:
+    def __init__(self): pass
+    def __call__(self, text, **kw):
+        return {'input_ids': text}
+    def decode(self, out, **kw):
+        return out.upper()
+    @classmethod
+    def from_pretrained(cls, name):
+        return cls()
+
+def mock_transformers(monkeypatch):
+    import sys, types
+    fake_transformers = types.ModuleType('transformers')
+    fake_transformers.MarianMTModel = FakeHuggingFaceModel
+    fake_transformers.MarianTokenizer = FakeHuggingFaceTokenizer
+    fake_transformers.Wav2Vec2ForCTC = FakeHuggingFaceModel
+    fake_transformers.Wav2Vec2Processor = FakeHuggingFaceTokenizer
+    monkeypatch.setitem(sys.modules, 'transformers', fake_transformers)

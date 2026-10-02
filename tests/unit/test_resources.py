@@ -50,3 +50,11 @@ def test_no_resource_limits_switch_skips_the_waiting(monkeypatch):
     monkeypatch.setattr(R, 'mem_available_gb', lambda: 0.1); monkeypatch.setenv('STRATA_NO_RESOURCE_LIMITS', '1')
     assert R.wait_for_headroom('exposure', None, None, log=lambda *_: None, max_wait=0) is True               # with no memory at all it still goes ahead
     monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS'); assert R.wait_for_headroom('exposure', None, None, log=lambda *_: None, poll=0, max_wait=0) is False
+
+
+def test_the_cli_does_not_start_a_second_worker_without_the_memory_for_it(monkeypatch, capsys):
+    from strata360 import cli
+    monkeypatch.setattr(config, 'load', lambda name: {}); monkeypatch.setattr(runner, 'workers', lambda name: [4242])
+    monkeypatch.setattr(R, 'mem_available_gb', lambda: 5.0); monkeypatch.setattr(R, 'busy', lambda cfg=None: False)
+    assert not cli.worker_allowed('p') and 'already running (pid 4242)' in capsys.readouterr().out
+    monkeypatch.setattr(runner, 'workers', lambda name: []); assert cli.worker_allowed('p')                                          # the first worker is always allowed

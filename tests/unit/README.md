@@ -24,7 +24,10 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network |
 | `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
 | `pipeline/ingest.py` | 98% | done |
-| `audio/dsp.py`, `audio/wordtimes.py`, `audio/speech.py`, `edit/voiceover.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
+| `audio/speech.py` | 86% | partial: 101-112 (CLI) todo |
+| `audio/wordtimes.py` | 96% | done: pure math and logic covered |
+| `audio/dsp.py` | 53% | partial: signal metrics and basic functions done; heavy ffmpeg filters todo |
+| `edit/voiceover.py`, `cli.py` | 0-10% | todo: mostly pure numpy/parsing: good candidates |
 | `osv/*` | >= 91% | done |
 | `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
 | `pipeline/coverage.py` | 100% | done: stage states, blocked decisions, CLI, API (`unit/test_coverage.py`) |
@@ -39,3 +42,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 - Several old files assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); `restore_globals` papers over a few of them. Convert them to `monkeypatch` when you touch them.
 - `test_workers.py` starts real processes and sleeps (about 5 s).
 - Integration-side issues (slow `test_edit.py`, the exposure overflow warning) are listed in `tests/integration/README.md`.
+
+
+### Added by unit work
+
+- `FakeTorchTensor`, `mock_torch`, `FakeHuggingFaceModel`, `mock_transformers` in `tests/utils/fakes.py`: Mock the PyTorch inference graph and transformers dependencies to avoid deep disk loading and processing in the unit suite.
