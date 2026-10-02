@@ -21,6 +21,7 @@ MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
 TILES = {}                    # map style -> overlay.tiles.Tiles (one per style, shared by every request)
 TILE_FETCH = None             # tests replace this: fetch(url) -> bytes
+LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
 PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
@@ -911,6 +912,40 @@ def create_app(roots, token=None):
         auth(request); f = folder_of(folder); c = next((c for c in SY.load(f)['clips'] if c['id'] == id), None); p = os.path.join(config.race_dir(f), (c or {}).get('file') or '-')
         if not c or not os.path.exists(p): raise HTTPException(404, 'that clip has not been rendered yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/lyrics', dependencies=[Depends(auth)])
+    def get_lyrics(folder: str):                                                         # the words found in the music track: where it is sung, with your corrections, and whether a run is going or failed
+        from strata360.edit import lyrics as LY
+        f = folder_of(folder); job = LYRICS_JOBS.get(f); running = bool(job and job.poll() is None); log = os.path.join(config.race_dir(f), 'lyrics.log')
+        try: lines = [l for l in open(log, errors='replace').read().strip().splitlines() if 'unsupported hash type' not in l]
+        except OSError: lines = []
+        err = ''
+        if job and not running and job.returncode: err = next((l for l in reversed(lines) if l.strip() and not l.startswith(('Traceback', '  File', '    '))), 'failed')[:300]
+        v = LY.view(f) or {}
+        return dict(LY.status(f), building=running, error=err, log=lines[-1] if lines else '', phrases_list=v.get('phrases', []), vocal_spans=v.get('vocal_spans', []))
+
+    @api.post('/api/lyrics', dependencies=[Depends(auth)])
+    def post_lyrics(body: dict):                                                         # {folder}: listen to the track in the background (`strata360 lyrics`)
+        from strata360.edit import lyrics as LY
+        f = folder_of(body.get('folder')); job = LYRICS_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='the lyrics are already being found')
+        if not LY.status(f)['has_track']: return dict(started=False, reason='there is no music track yet: add one first')
+        log = open(os.path.join(config.race_dir(f), 'lyrics.log'), 'wb')
+        LYRICS_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'lyrics', f], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.post('/api/lyrics/phrase', dependencies=[Depends(auth)])
+    def post_lyrics_phrase(body: dict):                                                  # {folder, key, text?, deleted?, keep?}: correct one phrase (new words, not sung, or counts as sung after all)
+        from strata360.edit import lyrics as LY
+        p = LY.edit(folder_of(body.get('folder')), str(body.get('key') or ''), body.get('text'), body.get('deleted'), body.get('keep'))
+        if p is None: raise HTTPException(404, 'no such phrase')
+        return p
+
+    @api.delete('/api/lyrics', dependencies=[Depends(auth)])
+    def delete_lyrics(folder: str, corrections: bool = False):                           # reset: forget the record (and your corrections with ?corrections=true)
+        from strata360.edit import lyrics as LY
+        f = folder_of(folder); job = LYRICS_JOBS.get(f)
+        if job and job.poll() is None: raise HTTPException(409, 'the lyrics are being found')
+        return dict(reset=LY.reset(f, corrections))
 
     @api.get('/api/script2/mix', dependencies=[Depends(auth)])
     def get_rough_mix(folder: str):                                                      # the rough mix of the film plan: whether there is one, whether it is out of date, whether it is being made and how the last try went

@@ -349,3 +349,30 @@ class TestMapTiles:
         assert client.get('/api/tiles/nope/5/1/1').status_code == 404 and client.get('/api/tiles/osm/40/1/1').status_code == 404
         def boom(url): raise urllib.error.HTTPError(url, 429, 'slow down', {}, None)
         self.served(monkeypatch, boom); r = client.get('/api/tiles/osm/5/3/3'); assert r.status_code == 502 and 'HTTP 429' in r.json()['detail']
+
+
+class TestLyricsApi:
+    def track(self, project):
+        os.makedirs(os.path.join(project.race_dir, 'music'), exist_ok=True); open(os.path.join(project.race_dir, 'music', 'track.mp3'), 'wb').write(b'x'); json.dump(dict(file='music/track.mp3', sig=[1, 2]), open(os.path.join(project.race_dir, 'music.json'), 'w'))
+
+    def record(self, project):
+        from strata360.edit import lyrics as LY
+        ph = lambda a, b, t: dict(t0=a, t1=b, text=t, avg_logprob=-0.4, no_speech=0.3, words=[])
+        LY.build(project.folder, log=lambda m: None, transcriber=lambda p: ([ph(10.0, 14.0, 'one'), ph(14.5, 20.0, 'two')], dict(language='en', language_probability=0.9, duration_s=60.0)))
+
+    def test_without_a_track_nothing_is_started(self, client, project, fake_popen):
+        f = project.folder; assert client.get('/api/lyrics', params=dict(folder=f)).json()['has_track'] is False
+        r = client.post('/api/lyrics', json=dict(folder=f)).json(); assert r['started'] is False and 'no music track' in r['reason'] and not fake_popen.instances
+
+    def test_finding_the_lyrics_runs_the_command_once_and_a_failure_shows_its_real_error(self, client, project, fake_popen):
+        self.track(project); f = project.folder; assert client.post('/api/lyrics', json=dict(folder=f)).json() == dict(started=True)
+        assert 'lyrics' in fake_popen.instances[-1].cmd and client.post('/api/lyrics', json=dict(folder=f)).json()['started'] is False and client.get('/api/lyrics', params=dict(folder=f)).json()['building'] is True
+        fake_popen.instances[-1].returncode = 1; open(os.path.join(project.race_dir, 'lyrics.log'), 'w').write('ValueError: unsupported hash type blake2s\nTraceback (most recent call last):\n  File "x", line 1\nModuleNotFoundError: No module named faster_whisper\n')
+        s = client.get('/api/lyrics', params=dict(folder=f)).json(); assert s['building'] is False and s['error'] == 'ModuleNotFoundError: No module named faster_whisper'
+
+    def test_the_phrases_and_sung_stretches_come_back_and_can_be_corrected_and_reset(self, client, project):
+        self.track(project); self.record(project); f = project.folder; g = client.get('/api/lyrics', params=dict(folder=f)).json()
+        assert g['exists'] and [p['key'] for p in g['phrases_list']] == ['10.0-14.0', '14.5-20.0'] and g['vocal_spans'] == [[9.7, 20.3]]
+        r = client.post('/api/lyrics/phrase', json=dict(folder=f, key='14.5-20.0', deleted=True)).json(); assert r['deleted'] is True and client.get('/api/lyrics', params=dict(folder=f)).json()['vocal_spans'] == [[9.7, 14.3]]
+        assert client.post('/api/lyrics/phrase', json=dict(folder=f, key='9.0-9.5', deleted=True)).status_code == 404
+        assert client.delete('/api/lyrics', params=dict(folder=f)).json() == dict(reset=True) and client.get('/api/lyrics', params=dict(folder=f)).json()['exists'] is False

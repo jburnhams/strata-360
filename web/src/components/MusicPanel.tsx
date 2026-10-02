@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type MusicAnalysis } from '../api'
 import { usePoll } from '../usePoll'
+import LyricsPanel from './LyricsPanel'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
@@ -28,6 +29,7 @@ export default function MusicPanel({ folder, onChanged }: { folder: string; onCh
       {st?.file && !a && <p className="mt-2 text-sm text-amber-700">This track could not be read; try another file.</p>}
       {msg && <p className="mt-2 text-sm text-amber-700">{msg}</p>}
       {st && !st.file && <p className="mt-2 text-xs text-stone-500">Optional. Without a track the plan uses a steady 120 bpm.</p>}
+      {st?.file && a && <LyricsPanel folder={folder} />}
     </section>
   )
 }

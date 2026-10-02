@@ -32,6 +32,11 @@ export interface Gap {
 }
 export interface RoughMix { has_plan: boolean; exists: boolean; stale: boolean; stale_because: string[]; length_s: number | null; made_at: string | null; source?: string | null; building: boolean; error: string; log: string }
 export interface TileStatus { ok: boolean; style: string; error: string; credit?: string; tile_px?: number }
+export interface LyricPhrase { key: string; id: string; t0: number; t1: number; text: string; heard: string; conf: number; doubtful: boolean; deleted: boolean; edited: boolean; counts: boolean }
+export interface Lyrics {
+  has_track: boolean; exists: boolean; stale: boolean; instrumental: boolean; phrases: number; sung_s: number | null; duration_s: number | null; made_at: string | null; language: string | null
+  building: boolean; error: string; log: string; phrases_list: LyricPhrase[]; vocal_spans: [number, number][]
+}
 export interface Results { starters: number | null; finishers: number | null; finished: boolean | null; position: number | null }
 export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
@@ -138,6 +143,10 @@ export const api = {
   markWords: (folder: string, clip: string, spans: { seg: number; from: number; to: number }[], state: 'must' | 'never' | 'none') => call<{ ok: boolean; marked: number }>('/api/transcript/mark', { folder, clip, spans, state }),
   script2: (folder: string, name = '') => call<Script2State>('/api/script2?' + q(name ? { folder, name } : { folder })),
   planScript2: (folder: string, draft?: string) => call<{ started: boolean; reason?: string }>('/api/script2/plan', { folder, draft }),
+  lyrics: (folder: string) => call<Lyrics>('/api/lyrics?' + q({ folder })),
+  findLyrics: (folder: string) => call<{ started: boolean; reason?: string }>('/api/lyrics', { folder }),
+  editLyric: (folder: string, key: string, change: { text?: string; deleted?: boolean; keep?: boolean }) => call<LyricPhrase>('/api/lyrics/phrase', { folder, key, ...change }),
+  resetLyrics: (folder: string) => fetch('/api/lyrics?' + q({ folder }), { method: 'DELETE' }),
   roughMix: (folder: string) => call<RoughMix>('/api/script2/mix?' + q({ folder })),
   makeRoughMix: (folder: string) => call<{ started: boolean; reason?: string }>('/api/script2/mix', { folder }),
   resetRoughMix: (folder: string) => fetch('/api/script2/mix?' + q({ folder }), { method: 'DELETE' }),

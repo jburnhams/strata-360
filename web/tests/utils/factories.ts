@@ -1,4 +1,4 @@
-import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, RoughMix } from '../../src/api'
+import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, RoughMix, Lyrics, LyricPhrase } from '../../src/api'
 
 // Typed builders for API payloads: sensible defaults, override what the test cares about (`makeBrowse({ can_create: false })`).
 // Add one per interface in src/api.ts as tests need it. Keep the defaults boring and valid.
@@ -65,3 +65,5 @@ export const makeGap = (o: Partial<Gap> = {}): Gap => ({
 export const makeFilmState = (o: Partial<FilmState> = {}): FilmState => ({ state: 'none', running: false, ...o })
 export const makeFinalState = (o: Partial<FinalState> = {}): FinalState => ({ state: 'none', running: false, settings: { size: '1080p', fps: 30, bitrate: '20M' }, ...o })
 export const makeRoughMix = (o: Partial<RoughMix> = {}): RoughMix => ({ has_plan: true, exists: false, stale: false, stale_because: [], length_s: null, made_at: null, source: 'script', building: false, error: '', log: '', ...o })
+export const makeLyricPhrase = (o: Partial<LyricPhrase> = {}): LyricPhrase => ({ key: '100.0-103.0', id: 'L01', t0: 100, t1: 103, text: 'line one', heard: 'line one', conf: 0.6, doubtful: false, deleted: false, edited: false, counts: true, ...o })
+export const makeLyrics = (o: Partial<Lyrics> = {}): Lyrics => ({ has_track: true, exists: false, stale: false, instrumental: false, phrases: 0, sung_s: null, duration_s: null, made_at: null, language: null, building: false, error: '', log: '', phrases_list: [], vocal_spans: [], ...o })
