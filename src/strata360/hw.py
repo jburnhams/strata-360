@@ -90,3 +90,8 @@ def gpu_throttled(fn, device=None):
         if dev != 'cpu': gpu_pause(time.time() - t0)
         return out
     return run
+
+
+def mbgl_backend():
+    """Graphics backend for `mbgl-render` (the 3D flyover): Metal on macOS, OpenGL elsewhere; STRATA_MBGL_BACKEND=metal|opengl|vulkan overrides."""
+    return os.environ.get('STRATA_MBGL_BACKEND') or ('metal' if sys.platform == 'darwin' else 'opengl')

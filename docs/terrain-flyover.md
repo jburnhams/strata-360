@@ -1,6 +1,6 @@
 # 3D terrain flyover (plan item N2): what was built and learned, 2 Oct 2026
 
-Status: **a working prototype, camera approved by the user on 2 Oct** (v7 clips on Legends km 20 to 70). Not yet wired into the film: nothing turns a gap into a camera plan, and there are no tests. Code: `scripts/flyover/` (`render.py`, `styles.py`).
+Status: **productionised (2 Oct)**: the approved prototype camera is now `src/strata360/overlay/flyover.py` (`FlyoverClip`, the same interface as the 2D `MapClip`), a gap kind `flyover` in `edit/synthetic.py` (4K by default), `strata360 gap-clip --kind flyover`, `kind` on the gaps API and a **2D map / 3D flyover (4K)** dropdown for each gap in the Gaps panel. It enters the film as a synthetic clip exactly as the map clip does. Unit tests cover the camera maths, the style, the `mbgl-render` command line and the frames (with `mbgl-render` faked). **Not yet run end to end here:** this session had no `mbgl-render` (no Mac), so the real 4K render, its speed and its look are unchecked; see "4K" below. The prototype script (`scripts/flyover/render.py`, presets and `--shots`) was removed: it is in git history (commit 9ca0208), and its camera is the module's `plan_camera`.
 
 ## Decision: MapLibre Native, not MapLibre GL JS in a browser
 
@@ -23,14 +23,24 @@ The binary is `build/bin/mbgl-render` (`MBGL_RENDER` overrides the path). Tiles 
 ## Running it
 
 ```
-python scripts/flyover/render.py <track.fit> --preset dive --start-km 20 --out dive.mp4
-python scripts/flyover/render.py <track.fit> --shots shots.json --out clip.mp4    # [{"t":0,"km":20,"zoom":11.5,"pitch":55}, ...]
-python scripts/flyover/render.py <track.fit> --preset dive --dry-run --verbose    # the camera and its statistics, no rendering
+strata360 gap-clip RACE --gap G03 --kind flyover                      # 4K (3840x2160), 30 fps, esri imagery, default length for the gap
+strata360 gap-clip RACE --gap G03 --kind flyover --seconds 20 --size 1920x1080 --imagery topo --sharp
 ```
 
-Presets (`PRESETS` in `render.py`): `fast` (50 km in 20 s, zoom 11.5, pitch 55), `medium` (3 km in 8 s, zoom 13, pitch 45), `slow` (0.5 km in 10 s, zoom 14.5, pitch 30), `dive` (overview, slows into a close pass, back out: 18 s). The camera is **keyframes over film time** (route km, zoom, pitch), eased with a monotone cubic (PCHIP), so zoom and pitch animate and the camera never runs backwards. Speed (zoom in for the voice-over, out for a night) is the slope of the km curve.
+or choose *3D flyover (4K)* in the dropdown beside a gap in the race view's Gaps panel and press Generate. `mbgl-render` is found from `MBGL_RENDER`, then the PATH, then `~/Code/maplibre-native-terrain/build/bin/mbgl-render`; without it the command stops with the build pointer and the panel greys the option (`GET /api/gaps` says `flyover.available`). `STRATA_MBGL_BACKEND=metal|opengl|vulkan` overrides the backend (`hw.mbgl_backend()`: Metal on macOS, OpenGL elsewhere, **untested off the Mac**). Tiles are cached in `~/.strata360/flyover-cache.db`.
 
-Cost: about 0.4 s a frame at 1280x720 on the M4 (a 30 s clip is about 5 minutes), run at `nice 19`, one process at a time.
+**The camera comes from the gap, not from keyframes written by hand** (`plan_shots`): film time maps linearly to race time (the speed-up), so the camera is at the runner's real distance at every second (a stop at an aid station is a pause), and zoom and pitch follow the speed across the screen (`zoom_pitch_for`: 2.5 km of route per film second gives zoom 11.5 and pitch 55, 0.4 km/s gives 13 and 45, below 0.05 km/s 14.5 and 30, smoothed over a few seconds). The camera is then planned as in the next section (`plan_camera`; about a second of numpy per 100 frames). The race overlay's clock, distance and pace are drawn on top, with the imagery and terrain credit bottom right (`IMAGERY` holds each source's credit).
+
+Cost (measured at 1280x720 on the M4 in the prototype): about 0.4 s a frame, run at low priority, one process at a time.
+
+## 4K
+
+The camera is always planned for a 1280x720 picture. Sizes are 16:9 and a multiple of 640 wide (1280x720, 1920x1080, 2560x1440, 3840x2160). Two ways to draw the same view at 4K:
+
+- **Default: pixel ratio.** `mbgl-render -r 3` draws the 1280x(820) view with 3x the pixels. The framing, tile choice and near-camera behaviour are exactly the approved 720p ones; the imagery is the same detail, enlarged, so it is softer than a native 4K picture.
+- **`--sharp`:** `-r 1` at 3840x2460 with the zoom raised by log2(3), so finer imagery and terrain tiles are used (Esri goes to zoom 19; the line widths are scaled to match). Same ground in view, real 4K detail. Untested on the draft branch: closer-in tiles may show more of its near-camera holes (see Limits), so try it on a short clip first.
+
+Either way each picture is rendered 820 px tall at 720p scale and the bottom 100 px cropped (the missing-tile wedge). Expect a 4K frame to cost several times the 720p 0.4 s (nine times the pixels; **unmeasured**), so a 30 s clip at 30 fps (900 frames) is likely tens of minutes. The clip is encoded at 12 Mbit/s per 1080p worth of pixels (48 Mbit/s at 4K) with the hardware H.264 encoder where there is one. The film's final render scales a generated clip to the film's size (`render/synthetic.py`).
 
 ## What the camera does, and why (each step was a user comment on a rendered clip)
 
@@ -49,10 +59,10 @@ Measured on the approved clips (closest the route gets to a side or the bottom, 
 ## Limits and open items
 
 - **Draft branch gaps** (its own list): symbols, circles and lines are not elevated correctly, 3D buildings are not started, tiles covering more than one terrain tile are not supported, `coveringTiles()` ignores terrain, performance was only tested in static mode. Our use (draped raster, a draped line and a draped polygon, static renders) avoids them, but the near-camera holes remain, hence the crop and the pitch limits.
-- **Not done:** the route line fills in progressively (it is drawn whole); the keyframes are not connected to the film (a gap to a camera plan, a rendered clip as a synthetic source for the script pack and planner, as the plan's "How a generated clip enters the edit" describes); 1080p and 4K renders and a persistent render process (the per-frame start-up is part of the 0.4 s); a run on a different stretch than km 20 to 70 (a night section with another shape of route); the Wallonia orthophotos; the `--shots` file format has no tests; no unit tests for `project`, `fit_bearing_screen`, `deadband`, `optimise_centre` (all pure functions of arrays, so easy to test).
+- **Not done:** the route line fills in progressively (it is drawn whole); a persistent render process (the per-frame start-up is part of the 0.4 s); a real 4K run (speed, `--sharp` against the default); a run on a stretch with another shape of route (a night section, a gap with a long stop); the Wallonia orthophotos; hairpin handling in the close pass; the elevation strip of the map clip is not drawn on the flyover; an end-to-end test of the `gap-clip --kind flyover` command (the pieces are unit tested).
 - **Python 3.13 under pyenv here prints `ValueError: unsupported hash type blake2b/blake2s` at start-up** (hashlib built without OpenSSL); harmless for these scripts.
 - **Imagery licence:** unread for Esri World Imagery (what Komoot uses), Sentinel-2 and the Wallonia orthophotos; needed before any film that is shared.
 
 ## Status in the plan
 
-This note's summary has been moved into `docs/implementation-plan.md` (N2, 2 Oct): it supersedes the earlier "MapLibre GL JS in headless Chromium now, Native later" decision. Keep the build steps, camera findings and open items here; the plan holds the next steps (connect to the film as a synthetic clip, progressive route line, tests, imagery licence).
+This note's summary is in `docs/implementation-plan.md` (N2, 2 Oct): it supersedes the earlier "MapLibre GL JS in headless Chromium now, Native later" decision. Keep the build steps, camera findings and open items here; the plan holds the next steps (connect to the film as a synthetic clip, progressive route line, tests, imagery licence).

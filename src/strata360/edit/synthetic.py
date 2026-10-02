@@ -1,11 +1,12 @@
 """Synthetic clips (implementation plan N1): clips the project makes itself for the gaps in the footage, such as an animated map of the route for a stretch with no camera footage.
 
 `<race dir>/synthetic.json` = {"clips": [{id, kind, t0, t1, duration_s, seconds, speedup, fps, style, key, status, file?}]}. A synthetic clip covers [t0, t1] of the race (UTC, ISO) and is shown in
-`seconds` of film: its speed-up is duration_s / seconds. `key` identifies what would be rendered (the span, the length, the kind, the style, the frame rate), so a render is reused while it is unchanged."""
+`seconds` of film: its speed-up is duration_s / seconds. `key` identifies what would be rendered (the span, the length, the kind, the style, the frame rate and, when set, the size), so a render is reused while it is unchanged."""
 import datetime as dt, hashlib, json, math, os
 
 FILE = 'synthetic.json'
-KINDS = ('map',)
+KINDS = ('map', 'flyover')          # the animated 2D map (overlay/mapclip.py) and the 3D terrain flyover (overlay/flyover.py)
+SIZES = {'flyover': '3840x2160'}    # the picture size a kind is made at when none is asked for (the 2D map: the renderer's 1920x1080); 4K for the flyover
 MIN_SECONDS = 2.0
 
 
@@ -18,11 +19,11 @@ def default_seconds(duration_s):
 
 
 def key_of(c):
-    blob = json.dumps([c['kind'], c['t0'], c['t1'], round(c['seconds'], 2), c['fps'], c.get('style') or {}], sort_keys=True)
+    blob = json.dumps([c['kind'], c['t0'], c['t1'], round(c['seconds'], 2), c['fps'], c.get('style') or {}] + ([c['size']] if c.get('size') else []), sort_keys=True)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=None, t1=None, id=None):
+def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=None, t1=None, id=None, size=None):
     """The clip for a gap (or for a stretch of it: `t0` and `t1` in epoch seconds), by length in the film or by speed-up (not both; neither gives the default)."""
     if kind not in KINDS: raise ValueError(f'kind: one of {KINDS}')
     if seconds is not None and speedup is not None: raise ValueError('give the length in the film or the speed-up, not both')
@@ -35,6 +36,12 @@ def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=N
     elif seconds is None: seconds = default_seconds(dur)
     if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
     c = dict(id=id or gap['id'], kind=kind, gap=gap['id'], t0=_iso(a), t1=_iso(b), duration_s=round(dur, 1), seconds=round(float(seconds), 2), speedup=round(dur / float(seconds), 1), fps=float(fps), style=style or {}, status='planned')
+    size = size or SIZES.get(kind)
+    if size:
+        try: w, h = (int(x) for x in str(size).lower().split('x'))
+        except ValueError: raise ValueError('size: WIDTHxHEIGHT, such as 3840x2160')
+        if w < 320 or h < 180: raise ValueError('size: at least 320x180')
+        c['size'] = f'{w}x{h}'
     c['key'] = key_of(dict(c, t0=round(a), t1=round(b))); return c
 
 
