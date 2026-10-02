@@ -5,15 +5,15 @@
   popen(cmd, ...)      subprocess.Popen for ffmpeg and friends: refuses to start another ffmpeg when `STRATA_MAX_FFMPEG` (6) are already running anywhere, and remembers the child so it is
                        killed when the job ends, fails or is interrupted (a render that crashed used to leave its decoders and encoder running for hours).
   heavy(label, gb)     the context manager that does both and then WATCHES the job: every few seconds it compares the machine's load and free memory (and this job's own memory) with the limits and, when
-                       they are passed, kills the job's whole process tree and stops it with an explanation: `STRATA_KILL_LOAD` (load per CPU, default 1.5), `STRATA_KILL_FREE_GB` (1.5), `STRATA_KILL_SWAP_GB`
-                       (3), the system's memory-pressure level (macOS: warning or critical), `max_gb` (the job's cap). It polls every 2 s: memory runs out in seconds, not minutes.
+                       they are passed, kills the job's whole process tree and stops it with an explanation: `STRATA_KILL_LOAD` (load per CPU, default 1.5), `STRATA_KILL_FREE_GB` (1.5), `STRATA_KILL_SWAP_PCT`
+                       (20 percent of memory; and `STRATA_START_SWAP_PCT`, 15, for starting), the system's memory-pressure level (macOS: warning or critical), `max_gb` (the job's cap). It polls every 2 s: memory runs out in seconds, not minutes.
   watch(label)         the same watchdog without the start check, for things that are not one job (the test run).
   panic()              kill every ffmpeg/ffprobe/pytest/strata360 process of this user except the server and this one (`./strata360 stop-all`).
 STRATA_NO_RESOURCE_LIMITS=1 turns all of it off (tests, CI). Limits can be set per call."""
 import atexit, contextlib, os, signal, subprocess, sys, threading, time
 from strata360.pipeline import resources as RS
 
-MAX_FFMPEG = 8; KILL_LOAD = 1.5; KILL_FREE_GB = 1.5; KILL_SWAP_GB = 3.0; POLL_S = 2.0; START_SWAP_GB = 1.5
+MAX_FFMPEG = 8; KILL_LOAD = 1.5; KILL_FREE_GB = 1.5; KILL_SWAP_PCT = 20.0; POLL_S = 2.0; START_SWAP_PCT = 15.0
 _CHILDREN = []; _LOCK = threading.Lock()
 
 
@@ -69,6 +69,13 @@ def pressure_level():
     except Exception: return 1
 
 
+def swap_limit_gb(kind):
+    """The swap limit in GB: a share of the machine's physical memory (so a 16 GB and a 64 GB machine are judged alike). `kind` is 'start' (no new heavy job above it, 15 percent: 2.4 GB on 16 GB) or 'kill' (a running job
+    is stopped above it, 20 percent: 3.2 GB on 16 GB). `STRATA_START_SWAP_PCT` / `STRATA_KILL_SWAP_PCT` change the share; `STRATA_KILL_SWAP_GB` still sets the kill limit in GB."""
+    if kind == 'kill' and os.environ.get('STRATA_KILL_SWAP_GB'): return _env_f('STRATA_KILL_SWAP_GB', 0.0)
+    pct = _env_f('STRATA_START_SWAP_PCT', START_SWAP_PCT) if kind == 'start' else _env_f('STRATA_KILL_SWAP_PCT', KILL_SWAP_PCT); return pct / 100.0 * RS.mem_total_gb()
+
+
 def swap_used_gb():
     """Swap in use, GB (macOS `vm.swapusage`); 0 where it cannot be read."""
     if sys.platform != 'darwin': return 0.0
@@ -92,7 +99,7 @@ def check(label, gb=1.0, cfg=None, max_ffmpeg=None):
     if free < need: rows = processes(); problems.append(f'only {free:.1f} GB of memory is free, {label} needs about {need:.1f} GB (including a {float(v["reserve_gb"]):.0f} GB reserve); biggest: {top(rows)}')
     lvl = pressure_level(); sw = swap_used_gb()
     if lvl >= 2: rows = rows or processes(); problems.append(f'the system reports memory pressure (level {lvl}); biggest: {top(rows)}')
-    elif sw > START_SWAP_GB: rows = rows or processes(); problems.append(f'{sw:.1f} GB of swap is in use already; biggest: {top(rows)}')
+    elif sw > swap_limit_gb('start'): rows = rows or processes(); problems.append(f"{sw:.1f} GB of swap is in use already (limit {swap_limit_gb('start'):.1f} GB, {_env_f('STRATA_START_SWAP_PCT', START_SWAP_PCT):.0f}% of memory); biggest: {top(rows)}")
     lim = float(v['busy_load_fraction'])
     if load_per_cpu() > lim:
         rows = rows or processes(); problems.append(f'the machine is busy (load {_load1():.0f} on {os.cpu_count()} CPUs, limit {lim * (os.cpu_count() or 4):.0f}); busiest: {top(rows, by="cpu")}')
@@ -174,7 +181,7 @@ def verdict(max_gb=None, kill_load=None, kill_free_gb=None, rows=None):
     kl = _env_f('STRATA_KILL_LOAD', KILL_LOAD) if kill_load is None else kill_load; kf = _env_f('STRATA_KILL_FREE_GB', KILL_FREE_GB) if kill_free_gb is None else kill_free_gb
     lvl = pressure_level()
     if lvl >= 2: return f'the system reports memory pressure (level {lvl})'
-    sw = swap_used_gb(); ks = _env_f('STRATA_KILL_SWAP_GB', KILL_SWAP_GB)
+    sw = swap_used_gb(); ks = swap_limit_gb('kill')
     if sw > ks: return f'swap is filling up ({sw:.1f} GB used, limit {ks:.1f} GB)'
     if load_per_cpu() > kl: return f'the machine is overloaded (load {_load1():.0f} on {os.cpu_count()} CPUs, limit {kl * (os.cpu_count() or 4):.0f})'
     free = RS.mem_available_gb()

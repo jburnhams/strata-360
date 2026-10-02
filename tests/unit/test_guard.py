@@ -55,7 +55,7 @@ def test_memory_pressure_and_swap_stop_a_job_and_block_a_start(monkeypatch):
     assert 'memory pressure' in G.verdict(rows=[])
     with pytest.raises(G.ResourceBusy) as e: G.check('x', 1.0)
     assert 'memory pressure' in str(e.value)
-    monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 4.0); assert 'swap is filling up' in G.verdict(rows=[])
+    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 4.0); assert 'swap is filling up' in G.verdict(rows=[])
     with pytest.raises(G.ResourceBusy): G.check('x', 1.0)
     monkeypatch.setattr(G, 'swap_used_gb', lambda: 0.0); assert G.verdict(rows=[]) is None
 
@@ -73,3 +73,23 @@ def test_kill_tree_and_panic_stop_leftovers_but_not_the_server(monkeypatch):
     rows_ = [(900, 1, 0.0, 10, '1:00', '.venv/bin/python -m strata360 serve --port 8360'), (901, 1, 0.0, 10, '1:00', 'ffmpeg -i x'), (902, 1, 0.0, 10, '1:00', '/bin/ls')]
     monkeypatch.setattr(G, 'processes', lambda: rows_); killed = []; monkeypatch.setattr(G.os, 'kill', lambda pid, sig: killed.append(pid))
     assert G.panic() == [901] and killed == [901]                                                    # ffmpeg goes; the server and unrelated processes stay
+
+
+def test_the_swap_limits_are_shares_of_the_machines_memory(monkeypatch):
+    for k in ('STRATA_START_SWAP_PCT', 'STRATA_KILL_SWAP_PCT', 'STRATA_KILL_SWAP_GB'): monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); assert G.swap_limit_gb('start') == pytest.approx(2.4) and G.swap_limit_gb('kill') == pytest.approx(3.2)
+    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 64.0); assert G.swap_limit_gb('start') == pytest.approx(9.6)                                    # the same share on a bigger machine
+    monkeypatch.setenv('STRATA_START_SWAP_PCT', '10'); assert G.swap_limit_gb('start') == pytest.approx(6.4)
+    monkeypatch.setenv('STRATA_KILL_SWAP_GB', '5'); assert G.swap_limit_gb('kill') == 5.0
+
+
+def test_a_start_is_blocked_only_above_the_start_share(monkeypatch):
+    monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS', raising=False); monkeypatch.delenv('STRATA_START_SWAP_PCT', raising=False); monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); monkeypatch.setattr(RS, 'mem_available_gb', lambda: 8.0)
+    monkeypatch.setattr(G, 'load_per_cpu', lambda: 0.1); monkeypatch.setattr(G, 'processes', lambda: []); monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 1.9)
+    G.check('x', 1.0)                                                                                                                                  # 1.9 GB of 16 GB is under 15 percent
+    monkeypatch.setattr(G, 'swap_used_gb', lambda: 2.6)
+    with pytest.raises(G.ResourceBusy, match=r'limit 2\.4 GB, 15% of memory'): G.check('x', 1.0)
+
+
+def test_the_machines_memory_is_read_in_gb():
+    assert RS.mem_total_gb() > 1.0

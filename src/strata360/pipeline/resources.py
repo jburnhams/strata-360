@@ -46,6 +46,17 @@ def mem_available_gb():
         except Exception: return 1e3
 
 
+def mem_total_gb():
+    """The machine's physical memory, GB (macOS `hw.memsize`, /proc/meminfo, Windows GlobalMemoryStatusEx); 16 where it cannot be read."""
+    if oslib.WIN:
+        try: return oslib.windows_total_gb()
+        except Exception: return 16.0
+    try: return int(run_text(['sysctl', '-n', 'hw.memsize'], 5).strip()) / 1e9
+    except Exception:
+        try: return int(re.search(r'MemTotal:\s+(\d+) kB', open('/proc/meminfo').read()).group(1)) / 1e6
+        except Exception: return 16.0
+
+
 def busy(cfg=None):
     """True when the 1-minute load average is above the allowed share of the CPUs."""
     load = oslib.load_average()
