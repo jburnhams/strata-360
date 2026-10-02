@@ -53,6 +53,10 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/usePoll.ts` | 100% | done |
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
+| `src/components/ClipView.tsx` | 75% | partial (some UI branches hard to hit) |
+| `src/components/PlayIcons.tsx` | 100% | done |
+| `src/components/ScriptPanel.tsx` | 86.2% | partial (edge branches missing) |
+| `src/components/VoiceoverPanel.tsx` | 70.58% | partial (playback interactions missing) |
 | every other file in `src/` | 0% | todo
 | `src/components/Timeline.tsx` | 77.55% | partial (interactions and edge cases)
 | `src/components/Moments.tsx` | 100% | done |
@@ -61,3 +65,5 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 
 * `makeEditResponse`, `makePlanSegment` in `factories.ts` to mock Timeline data.
 * `extraHandlers` in `handlers.ts` to support API calls specific to `Timeline` such as `/api/edit`, `/api/edit/propose` and `/api/edit/override`.
+
+* `makeScriptState`, `makeScriptDoc`, `makeScriptLine`, `makeVoiceoverState`, `makeVoiceLine`, `makeClipDetail` in `factories.ts` and respective handlers in `handlers.ts` to mock script and voiceover APIs.

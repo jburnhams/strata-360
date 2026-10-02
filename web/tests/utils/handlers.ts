@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse } from './factories'
+import { makeBrowse, makeNotes, makeScriptState, makeVoiceoverState, makeClipDetail, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeEditResponse } from './factories'
 
 // Default happy-path handlers, one per endpoint. Only the endpoints the tests so far need are here: when a test hits an endpoint that is missing,
 // msw fails it loudly (onUnhandledFrame: 'error'), so add the handler here (with a factory in factories.ts) rather than inline in the test.
@@ -35,5 +35,16 @@ export const handlers = [
   http.delete('/api/music', () => HttpResponse.json({ ok: true })),
   http.get('/api/edit', () => HttpResponse.json(makeEditResponse())),
   http.post('/api/edit/propose', () => HttpResponse.json({ edit: makeEditResponse().edit })),
-  http.post('/api/edit/override', () => HttpResponse.json({ edit: makeEditResponse().edit }))
+  http.post('/api/edit/override', () => HttpResponse.json({ edit: makeEditResponse().edit })),
+
+  http.get('/api/script', () => HttpResponse.json(makeScriptState())),
+  http.post('/api/llm/key', () => HttpResponse.json({ configured: true })),
+  http.post('/api/script/generate', () => HttpResponse.json({ started: true })),
+  http.post('/api/script/edit', () => HttpResponse.json({ saved: 'saved', speaking: true })),
+  http.get('/api/voiceover', () => HttpResponse.json(makeVoiceoverState())),
+  http.post('/api/voiceover/build', () => HttpResponse.json({ started: true })),
+  http.post('/api/voiceover/record', () => HttpResponse.json({})),
+  http.delete('/api/voiceover/record', () => HttpResponse.json({})),
+  http.post('/api/voiceover/use', () => HttpResponse.json({ ok: true })),
+  http.get('/api/clip', () => HttpResponse.json(makeClipDetail())),
 ]
