@@ -399,3 +399,11 @@ class TestClipSounds:
         p = make_project(config=True); p.add_clip(CLIP_ID); open(os.path.join(p.clip_dir(), 'audio_background.flac'), 'wb').write(b'x')
         d = client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()
         assert d['audio_files'] == dict(original=False, clean=False, background=True)
+
+
+def test_the_interpreters_hashlib_noise_never_reaches_a_job_log_shown_in_the_web():
+    from strata360.server import app as SRV
+    noisy = ['ERROR:root:code for hash blake2s was not found.', 'Traceback (most recent call last):', '  File "/x/lib/python3.13/hashlib.py", line 247, in <module>', '    globals()[__func_name] = __get_hash(__func_name)',
+             '                             ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^', 'ValueError: unsupported hash type blake2s', 'writing draft 2 of 3', 'Traceback (most recent call last):', '  File "script_draft.py", line 9, in main', 'KeyError: gemini']
+    assert SRV.clean_log(noisy) == ['writing draft 2 of 3', 'Traceback (most recent call last):', '  File "script_draft.py", line 9, in main', 'KeyError: gemini']      # a real traceback stays
+    assert SRV.clean_log([]) == []

@@ -21,6 +21,19 @@ MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
 TILES = {}                    # map style -> overlay.tiles.Tiles (one per style, shared by every request)
 TILE_FETCH = None             # tests replace this: fetch(url) -> bytes
+_NOISE = ('unsupported hash type', 'code for hash', 'hashlib.py', 'globals()[__func_name]', '__get_builtin_constructor', '__get_openssl_constructor')
+
+
+def clean_log(lines):
+    """Log lines without the interpreter's start-up noise (a pyenv Python 3.13 without blake2 prints a hashlib traceback into every job's log): the web panels show the last line, which must be the job's own."""
+    lines = list(lines); out = []
+    for i, l in enumerate(lines):
+        if any(n in l for n in _NOISE) or set(l.strip()) <= set('^~') and l.strip(): continue
+        if l.startswith('Traceback') and i + 1 < len(lines) and 'hashlib.py' in lines[i + 1]: continue
+        out.append(l)
+    return out
+
+
 def scenic_samples(d, osv):
     """The Scenic aim's samples for a clip ([{t, yaw, pitch}], edit/scenery.py `samples`), cached in `scenic_view.json` and made again when the quality grid is newer; [] without a grid."""
     from strata360.analysis import quality_grid as QG
@@ -820,7 +833,7 @@ def create_app(roots, token=None):
         from strata360.edit import project as PJ
         pj = PLAN_JOBS.get(f); plan = (PJ.load(f).get('plan') or {}); ppath = os.path.join(SD._dir(f), 'plan.log')
         plan_info = dict(source=plan.get('source', 'beats'), script=plan.get('script'), windows=len(plan.get('segments') or []), length_s=(plan.get('film') or {}).get('length_s'), warnings=plan.get('warnings') or [], generated_at=plan.get('generated_at')) if plan else None
-        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, plan=plan_info, plan_running=bool(pj and pj.poll() is None), plan_exit=(None if pj is None or pj.poll() is None else pj.returncode), plan_log=(open(ppath).read().splitlines()[-6:] if os.path.exists(ppath) else []), last_exit=(None if running or j is None else j.returncode), log=(open(lp).read().splitlines()[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
+        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, plan=plan_info, plan_running=bool(pj and pj.poll() is None), plan_exit=(None if pj is None or pj.poll() is None else pj.returncode), plan_log=(clean_log(open(ppath).read().splitlines())[-6:] if os.path.exists(ppath) else []), last_exit=(None if running or j is None else j.returncode), log=(clean_log(open(lp).read().splitlines())[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
 
     def _llm_key(f):
         from strata360.edit import llm_remote
@@ -1018,7 +1031,7 @@ def create_app(roots, token=None):
                 latest.pop('facts', None); latest['file'] = os.path.basename(files[-1])
             except ValueError: latest = None
         log = ''
-        try: log = open(os.path.join(rd, 'script_job.log')).read()[-600:]
+        try: log = '\n'.join(clean_log(open(os.path.join(rd, 'script_job.log')).read().splitlines()))[-600:]
         except OSError: pass
         cfg = config.load(f).get('llm', {}) if os.path.exists(os.path.join(rd, 'race.json')) else {}
         prov = cfg.get('provider', 'vertex'); providers = {k: dict(models=v['models'], default=v['default'], configured=LR.key_configured(k)) for k, v in LR.PROVIDERS.items()}
