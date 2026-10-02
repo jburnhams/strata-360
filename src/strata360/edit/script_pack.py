@@ -83,6 +83,15 @@ MAX_GAP_S = 45.0                       # the longest a gap is shown in the film 
 FLYOVER_NOTE = 'a 3D terrain flyover: needs the user\'s approval to render, minutes of machine time'
 
 
+def you_views(cands):
+    """How much of a clip's usable time has each view of you (K6): {mid, close, far} as shares 0..1 (edit/techniques selfie_hold, selfie_close, selfie_far), from the candidates' features weighted by their length; None when you are hardly in the clip."""
+    spans = [c for c in cands if c.get('kind', 'span') == 'span' and c['end_s'] > c['start_s']] or list(cands); tot = sum(c['end_s'] - c['start_s'] for c in spans)
+    if not tot: return None
+    share = lambda k: sum((c['end_s'] - c['start_s']) * (c.get('features') or {}).get(k, 0.0) for c in spans) / tot
+    mid, close, far = share('protagonist'), share('you_close'), share('you_far')
+    return None if mid < 0.1 else dict(mid=round(mid, 2), close=round(close, 2), far=round(far, 2))
+
+
 def gap_clips(folder, tr, tz):
     """Every gap in the footage (gps/gaps.py: 20 minutes or more between clips on the track) as a pack clip `G01`..., in time order: no footage, no words, picture only, with the choices for filling it (the animated 2D map, or
     a 3D flyover with the same numbers on screen), the length it gets by default and the state of any clip already planned for it (edit/synthetic.py)."""
@@ -128,7 +137,7 @@ def build(folder, tz=None):
     for c in sorted(clips, key=lambda c: c['start_utc']):
         cdir = os.path.join(rd, 'clips', c['id']); label = label_of(c['id']); t0 = dt.datetime.fromisoformat(c['start_utc'].replace('Z', '+00:00')).timestamp(); dur = float(c['duration_s'])
         usable = merge([(x['start_s'], x['end_s']) for x in c['candidates']]); usable_s = sum(b - a for a, b in usable)
-        d = dict(label=label, clip=c['id'], start_utc=c['start_utc'], duration_s=round(dur, 1), usable_s=round(usable_s, 1), usable=[(round(a, 1), round(b, 1)) for a, b in usable])
+        d = dict(label=label, clip=c['id'], start_utc=c['start_utc'], duration_s=round(dur, 1), usable_s=round(usable_s, 1), usable=[(round(a, 1), round(b, 1)) for a, b in usable], you_views=you_views(c['candidates']))
         if tr is not None:
             ctx = X.context_at(tr, t0, t0 + dur, tz); d['track'] = X.describe(ctx)
             if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
@@ -172,6 +181,8 @@ def render(pack, with_usable=False, marks=None):
         if c.get('place'): L.append('place: ' + c['place'])
         s = c.get('scene') or {}
         if s: L.append('camera sees: ' + '; '.join(x for x in [', '.join(s.get('settings') or []), ('weather ' + ', '.join(s['weather'])) if s.get('weather') else '', ('lighting ' + ', '.join(s['lighting'])) if s.get('lighting') else '', ('crowd ' + ', '.join(s['crowd'])) if s.get('crowd') and s['crowd'] != ['none'] else '', ('; '.join(s['seen'])) if s.get('seen') else '', ('lens problems: ' + ', '.join(s['lens_problems'])) if s.get('lens_problems') else ''] if x))
+        yv = c.get('you_views')
+        if yv and (yv['close'] >= 0.3 or yv['far'] >= 0.3): L.append(f"views of you (ask for one with \"view\" on a clip or b-roll item): mid {yv['mid'] * 100:.0f}% of the usable time, close (a face zoom) {yv['close'] * 100:.0f}%, far (ultra wide, the whole body and the surroundings) {yv['far'] * 100:.0f}%")
         if c.get('note'): L.append("runner's note: " + c['note'])
         if with_usable and c.get('usable'): L.append('usable stretches (s): ' + ', '.join(f'{a}-{b}' for a, b in c['usable']))
         if c['lines']:

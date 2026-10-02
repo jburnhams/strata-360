@@ -34,6 +34,12 @@ def aim_pitch(pitch, height, vfov, head_top=None):
     return max(lowest, pitch)
 
 
+def aim_face(pitch, height, head_top=None):
+    """Pitch (degrees) that centres the HEAD in the frame, for the close view of you: the top of the head (`head_top`, else the top of the box) less about 7 percent of the person's height, the middle of the head."""
+    h = 45.0 if not height else float(height); top = head_top if head_top is not None else pitch + h / 2
+    return top - 0.07 * h
+
+
 class Follower:
     """step(target_yaw, target_pitch, dt) -> (yaw, pitch): the camera's view, one step."""
     def __init__(self, yaw, pitch):

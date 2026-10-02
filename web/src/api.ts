@@ -42,7 +42,7 @@ export interface Meta {
   timezone?: string; title: string | null; date: string | null; distance_km?: number | null; results: Results
   defaults: { title: string | null; date: string | null; earliest_capture_utc: string | null }; effective: { title: string | null; date: string | null }
 }
-export interface ScriptItem { type: 'vo' | 'clip' | 'broll' | 'gap'; kind?: GapKind | string; anchor?: { film_s: number; why?: string }; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
+export interface ScriptItem { type: 'vo' | 'clip' | 'broll' | 'gap'; kind?: GapKind | string; anchor?: { film_s: number; why?: string }; view?: 'mid' | 'close' | 'far'; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
 export interface ScriptDraft {
   title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
   problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null

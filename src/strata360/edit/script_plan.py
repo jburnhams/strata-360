@@ -32,6 +32,28 @@ def seg_id(clip, text):
 def estimated_s(text, wpm): return len(text.split()) * 60.0 / wpm
 
 
+SPLIT_FROM_S = 9.0           # a talking stretch at least this long is cut into several shots (different views of you) when the footage has more than one
+SPLIT_TARGET_S = 6.0         # each about this long, the cuts in the pauses between the lines
+SPLIT_MIN_S = 3.0
+
+
+def _pauses(ls, a, b):
+    """The middles of the pauses between consecutive lines (inside [a, b]) that last at least 0.25 s: where a cut inside a talking stretch costs no words."""
+    ls = sorted(ls, key=lambda l: l['t0']); return [round((x['t1'] + y['t0']) / 2.0, 3) for x, y in zip(ls, ls[1:]) if y['t0'] - x['t1'] >= 0.25 and a < (x['t1'] + y['t0']) / 2.0 < b]
+
+
+def split_points(start, seconds, pauses, target=SPLIT_TARGET_S, floor=SPLIT_MIN_S):
+    """Where to cut a talking stretch [start, start + seconds] into shots of about `target` s: the pauses nearest to each multiple of the target, no shot under `floor`; [] when it is short or has no usable pause."""
+    if seconds < SPLIT_FROM_S or not pauses: return []
+    cuts = []; last = start
+    for k in range(1, int(seconds // target) + 1):
+        want = start + k * target; ok = [x for x in pauses if x - last >= floor and start + seconds - x >= floor]
+        if not ok: break
+        c = min(ok, key=lambda x: abs(x - want))
+        if c > last: cuts.append(c); last = c
+    return cuts
+
+
 def pieces(draft, pack, voice_s, wpm):
     """The script as pieces in order: [{n, kind, clip, label, seconds, ...}]. `voice_s` maps the item number to how long the narration takes to speak (missing: estimated from the words)."""
     by_label = {c['label']: c for c in pack['clips']}; lines = {l['id']: l for c in pack['clips'] for l in c['lines']}; out = []; warn = []
@@ -49,11 +71,11 @@ def pieces(draft, pack, voice_s, wpm):
             ls = [lines[i] for i in it.get('lines') or [] if i in lines]
             if not ls: warn.append(f'item {n + 1}: no transcript lines; skipped'); continue
             a = max(min(l['t0'] for l in ls) - BL.PAD_BEFORE_S, 0.0); b = min(max(l['t1'] for l in ls) + BL.PAD_AFTER_S, c['duration_s'])
-            out.append(dict(base, kind='clip', start=a, seconds=b - a))
+            out.append(dict(base, kind='clip', start=a, seconds=b - a, view=it.get('view'), pauses=_pauses(ls, a, b)))
         elif it['type'] == 'vo':
             text = (it.get('text') or '').strip(); d = voice_s.get(n); est = d is None; d = estimated_s(text, wpm) if est else d
             out.append(dict(base, kind='vo', text=text, speak_s=d, estimated=est, seconds=LEAD_S + d + TAIL_S, seg=seg_id(c['clip'], text)))
-        elif it['type'] == 'broll': out.append(dict(base, kind='broll', seconds=float(it.get('seconds') or 0)))
+        elif it['type'] == 'broll': out.append(dict(base, kind='broll', seconds=float(it.get('seconds') or 0), view=it.get('view')))
     return out, warn
 
 
@@ -71,6 +93,11 @@ class Footage:
             score = ov + (0.5 if getattr(c, 'kind', '') == 'speech' else 0.0) + 0.01 * c.quality
             if score > bs: best, bs = c, score
         return best
+
+    def views_ok(self, a, b):
+        """Whether the footage under [a, b] has a close or a far view of you (K6): there is something to cut between."""
+        c = self.candidate_at(a, b); f = (getattr(c, 'features', None) or {}) if c is not None else {}
+        return max(f.get('you_close', 0.0), f.get('you_far', 0.0)) >= 0.5
 
     def free(self, speech_ok):
         """[(candidate, start, end)] of footage nobody has taken and the script does not play, best candidates first; speech stretches only when `speech_ok`."""
@@ -110,9 +137,18 @@ def take(fp, seconds, warn, label, cap=MAX_PICTURE_S):
     return wins
 
 
-def dialogue_windows(fp, start, seconds, warn, label, cap=MAX_DIALOGUE_S):
-    """Windows [(cand, start, length)] for a dialogue span: one up to 20 s, else equal contiguous parts, each at least 2 s (a short span is extended after its end, or before it at the end of the clip)."""
-    seconds = max(seconds, CH.MIN_SEG_S); start = max(min(start, fp.duration - seconds), 0.0); out = []; n = int(math.ceil(seconds / cap - 1e-9)); size = seconds / n
+def dialogue_windows(fp, start, seconds, warn, label, cap=MAX_DIALOGUE_S, cuts=()):
+    """Windows [(cand, start, length)] for a dialogue span: one up to 20 s, else equal contiguous parts, each at least 2 s (a short span is extended after its end, or before it at the end of the clip). `cuts` (times inside the span, in
+    the pauses between lines) split it into shots there instead, so a long talking stretch is not one picture."""
+    seconds = max(seconds, CH.MIN_SEG_S); start = max(min(start, fp.duration - seconds), 0.0); out = []
+    edges = [start] + [c for c in cuts if start < c < start + seconds] + [start + seconds]
+    if len(edges) > 2:
+        for a, b in zip(edges, edges[1:]):
+            c = fp.candidate_at(a, b)
+            if c is None: warn.append(f'clip {label}: no candidate under the dialogue at {a:.1f} s'); continue
+            fp.occ.append((a, b)); out.append((c, a, b - a))
+        return out
+    n = int(math.ceil(seconds / cap - 1e-9)); size = seconds / n
     for k in range(n):
         a = start + k * size; c = fp.candidate_at(a, a + size)
         if c is None: warn.append(f'clip {label}: no candidate under the dialogue at {a:.1f} s'); continue
@@ -198,7 +234,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     for k, p in enumerate(ps):
         if p['kind'] == 'synthetic': continue                                                       # placed after the footage windows are planned (below)
         fp = foot[p['clip']]
-        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
+        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=split_points(p['start'], p['seconds'], p.get('pauses') or []) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
         if p['kind'] == 'vo' and wins:                                                                  # the narration must have picture for as long as it is spoken
             short = p['seconds'] - sum(w[2] for w in wins)
             if short > 1e-6:
@@ -207,7 +243,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
         for c, start, length in wins:
             speech = p['kind'] == 'clip'; beats = max(1, int(math.ceil(length / beat_s - 1e-9))) if p['kind'] != 'broll' else max(1, int(round(length / beat_s)))
             dur = beats * beat_s; start = max(min(start, fp.duration - dur), 0.0)
-            w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
+            w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.view = p.get('view'); w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
             windows.append(w); roles.append(p['kind']); first_window.setdefault(k, len(windows) - 1)
     if not windows and not any(p['kind'] == 'synthetic' for p in ps): raise O.Infeasible('the script has no windows: no item could be matched to footage')
     B = sum(w.beats for w in windows); music = O.Music(bpm=music.bpm, beats=B, bar_beats=music.bar_beats, sections=music.sections)

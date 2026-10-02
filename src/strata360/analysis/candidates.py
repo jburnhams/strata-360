@@ -11,7 +11,7 @@ import json, os
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIN_LEN = 1.5
 MAX_STRETCH = 45.0
 
@@ -35,6 +35,17 @@ def low_fraction(vq):
     det, con = vq['detail'].astype(np.float32), vq['contrast'].astype(np.float32); ok = np.isfinite(det) & np.isfinite(con); gh = det.shape[1]
     wlat = np.cos(np.radians(90.0 - (np.arange(gh) + 0.5) * 180.0 / gh))[None, :, None]; w = ok * wlat; low = ((det < GRID_LOW_DETAIL) & (con < GRID_LOW_CONTRAST)) * w
     return low.sum((1, 2)) / np.maximum(w.sum((1, 2)), 1e-9)
+
+
+CLOSE_MAX_H = 72.0     # the views of you (K6): you appear at most this tall (degrees) in the rear view for a face zoom to add anything (nearer, you already fill the frame)
+FAR_MAX_H = 60.0       # and at most this tall for the whole body to fit in an ultra wide frame with a margin
+
+
+def you_view_arrays(me, h):
+    """(close, far): per second, 0 or 1 (fractions where `me` is): whether a close view (a face zoom) and a far view (ultra wide, the whole body) of you are possible. `me` is how much you are found, `h` your apparent height in degrees
+    per second (NaN where unknown). Close needs you found and not already filling the frame (an unknown height counts as fine); far needs you found and a KNOWN height small enough for the whole body to fit."""
+    me = np.asarray(me, float); h = np.asarray(h, float); found = me >= 0.5
+    return np.where(found & (np.isnan(h) | (h <= CLOSE_MAX_H)), me, 0.0), np.where(found & ~np.isnan(h) & (h <= FAR_MAX_H), me, 0.0)
 
 
 def timeline(d):
@@ -61,6 +72,11 @@ def timeline(d):
     me = np.zeros(n); people = np.zeros(n)
     if idn and idn['samples']:
         ts = [r['t_s'] for r in idn['samples']]; me = at(ts, [1.0 if r['me'] else 0.0 for r in idn['samples']], 0.0); people = at(ts, [r['n_people'] for r in idn['samples']], 0.0)
+    you_h = np.full(n, np.nan)
+    if idn and idn['samples']:
+        hs = [(r['t_s'], r['me']['height_deg']) for r in idn['samples'] if r.get('me') and r['me'].get('height_deg')]
+        if hs: you_h = np.interp(t, [a for a, _ in hs], [b for _, b in hs])
+    you_close, you_far = you_view_arrays(me, you_h)
     scenic = np.full(n, 0.5); sen = np.full(n, 0.5); blocked = np.zeros(n); setting = [None] * n; canopy = np.zeros(n); open_ground = np.full(n, 0.5)
     if sc:
         fr = [i for i in sc['items'] if i['ok'] and i['view'] == 'front']; ts = [i['t_s'] for i in fr]
@@ -77,7 +93,7 @@ def timeline(d):
     except ImportError: pass
     if vq is not None and len(vq['t']):                                                               # a double check on "the lens is blocked or fogged": the vision model says so AND most of the sphere has no detail or contrast; if the picture as a whole still has something in it, the stretch stays usable
         grid_low = at(vq['t'], low_fraction(vq), 0.0); hard = blocked > 0.5; blocked = np.where(hard & (grid_low > GRID_BAD_FRAC), blocked, np.where(hard, 0.4, blocked))
-    return dict(n=n, t=t, dur=dur, grid_low=grid_low, has_quality=vq is not None, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, people=people, scenic=scenic, blocked=blocked, canopy=canopy, open_ground=open_ground,
+    return dict(n=n, t=t, dur=dur, grid_low=grid_low, has_quality=vq is not None, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, you_close=you_close, you_far=you_far, people=people, scenic=scenic, blocked=blocked, canopy=canopy, open_ground=open_ground,
                 setting=setting, missing=missing, clip=clip, tr=tr, al=al, sc=sc, mo=mo)
 
 
@@ -155,7 +171,7 @@ def build(d, thr=None):
     for c, (i0, i1, kind, k) in enumerate(found):
         sl = slice(i0, i1); qq = float(q[sl].mean()); s_ = float(T['steady'][sl].mean()); nad = float(np.clip(1.0 - T['blocked'][sl].max() * 0.8, 0, 1)); sp = kind == 'speech'
         feats = dict(steady=round(s_, 3), clear_nadir=round(nad, 3), open_ground=round(float(T['open_ground'][sl].mean()), 3), canopy=round(float(T['canopy'][sl].mean()), 3),
-                     subject=round(float(np.clip(T['me'][sl].mean() * 0.7 + min(T['people'][sl].mean(), 3) / 3 * 0.5, 0, 1)), 3), speech=1.0 if sp else 0.0, protagonist=round(float(T['me'][sl].mean()), 3),
+                     subject=round(float(np.clip(T['me'][sl].mean() * 0.7 + min(T['people'][sl].mean(), 3) / 3 * 0.5, 0, 1)), 3), speech=1.0 if sp else 0.0, protagonist=round(float(T['me'][sl].mean()), 3), you_close=round(float(T['you_close'][sl].mean()), 3), you_far=round(float(T['you_far'][sl].mean()), 3),
                      low_obstruction=round(float(1 - T['blocked'][sl].mean()), 3), chatter=round(float(T['chatter'][sl].mean()), 3), resolution=round(float(np.clip(0.55 + 0.45 * T['expo'][sl].mean(), 0, 1)), 3))
         s0, s1 = spans[k]; before = why_bad[s0 - 1] if s0 > 0 else None; after = why_bad[s1] if s1 < n else None
         if kind == 'span': sb = f'usable again after a problem ({before})' if before else 'start of the clip'; eb = f'a problem begins ({after})' if after else 'end of the clip'

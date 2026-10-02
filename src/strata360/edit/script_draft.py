@@ -10,7 +10,7 @@ import datetime as dt, json, math, os, re, time
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
 from strata360.edit.script_pack import norm_label
 
-PROMPT_VERSION = 8
+PROMPT_VERSION = 9
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
 VO_PAUSE_S = 0.25             # breathing room after a narration item
 ANCHOR_SLACK_S = 8.0          # an anchor further than this from where the items put it is sent back (the editor stretches b-roll for small differences)
@@ -28,6 +28,7 @@ THE KINDS OF ITEM, played one after another in the order you write them (never a
 - "vo": narration the runner records afterwards and speaks over the picture of that clip. First person, natural, spoken. Its length is words / WORDS-PER-MINUTE.
 - "broll": picture of that clip with no speech (music only), for a number of seconds you choose.
 - "gap": a generated clip for a gap in the footage (a clip marked NO FOOTAGE): "clip" is its name (G01, G02 ...), "kind" is "map" (the route drawn on a 2D map as the runner moves along it) or "flyover" (a 3D terrain flyover: more striking, but the user must approve its render, so use it for a few gaps that matter, such as a big climb or a night), and "seconds" is how long it plays (2 to 45): the gap is shown very fast, the clock, distance, pace and altitude on screen. You may put "vo" over a gap clip. Gaps are optional: where the camera missed hours of the race, a gap clip carries the passage of time and distance and gives narration something to sit on; leave a gap out when the story does not need it. A gap is never a "clip" item.
+A "clip" or "broll" item may carry "view": "mid" (the usual view of the runner), "close" (a face zoom: for an emotional or intimate line) or "far" (ultra wide: the whole body and the surroundings, for the sense of place, effort or loneliness). A clip lists which views it has ("views of you") and for how much of its time; ask only for a view it has. Without a "view" the editor chooses, and cuts a long talking stretch between the views itself, so ask for one only where it matters.
 Any item may carry "anchor": {"film_s": number, "why": "reason"}: where in the film (in seconds) it should start, when it matters (the start of a sung chorus, the music's biggest section, the last line before the end). An anchor is a wish with a reason, not an exact time; the editor snaps items to the music's bars afterwards and keeps what it can.
 
 RULES
@@ -50,7 +51,7 @@ SCHEMA = '''Return ONE JSON object and nothing else:
   "story": "two or three sentences: the arc you chose and why",
   "items": [
     {"type": "vo",    "clip": "0004", "text": "narration the runner speaks over the picture of that clip", "words": 23, "basis": ["a short quote or paraphrase of what the narration rests on (the notes, the track line, the runner's words)", "or a transcript line id such as 0008.03"], "t": 12.5},
-    {"type": "clip",  "clip": "0008", "from": "0008.01", "to": "0008.03", "why": "why these lines belong", "t": 31.0},
+    {"type": "clip",  "clip": "0008", "from": "0008.01", "to": "0008.03", "why": "why these lines belong", "t": 31.0, "view": "close" (optional: mid | close | far)},
     {"type": "broll", "clip": "0009", "seconds": 3.5, "why": "what the picture shows / why it is worth a moment", "t": 34.5},
     {"type": "gap",   "clip": "G03", "kind": "map" or "flyover", "seconds": 12, "why": "what the gap holds and why it is shown", "t": 46.5, "anchor": {"film_s": 100, "why": "optional: the chorus starts here"}}
   ],
@@ -146,6 +147,11 @@ def check(script, pack, target_s, wpm):
             if it.get('kind') not in kinds_ok: probs.append(f"item {n}: gap kind must be one of {', '.join(kinds_ok)}, not {it.get('kind')}")
             if not MIN_GAP_S <= d <= MAX_GAP_S: probs.append(f'item {n}: a gap plays for {MIN_GAP_S:g} to {MAX_GAP_S:g} seconds, not {d:g}')
         else: probs.append(f'item {n}: unknown type {t}'); continue
+        if it.get('view') is not None:
+            yv = clips[cl].get('you_views') or {}
+            if t not in ('clip', 'broll'): probs.append(f'item {n}: only clip and broll items take a "view"')
+            elif it['view'] not in ('mid', 'close', 'far'): probs.append(f"item {n}: view must be mid, close or far, not {it['view']}")
+            elif yv.get(it['view'], 0.0) < 0.3: probs.append(f"item {n}: clip {cl} has no {it['view']} view of you (it has {', '.join(f'{k} {v * 100:.0f}%' for k, v in yv.items()) or 'none'} of its time): leave the view out or choose another")
         if it.get('anchor') is not None and not (isinstance(it['anchor'], dict) and isinstance(it['anchor'].get('film_s'), (int, float))): probs.append(f'item {n}: an anchor is {{"film_s": seconds, "why": "reason"}}')
         if isinstance(it.get('anchor'), dict) and isinstance(it['anchor'].get('film_s'), (int, float)): anchors.append((n, float(it['anchor']['film_s']), total_before))
         d = on_beats(d, t, beat_s); kinds[t] += d; total += d; per[cl] = per.get(cl, 0.0) + d; rows.append((n, t, cl, d, total))
