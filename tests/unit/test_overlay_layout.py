@@ -360,7 +360,7 @@ class TestStageProgress:
     def test_a_run_that_followed_the_route_shows_only_the_distance_run_over_the_route(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)       # the track runs 3 m/s: 900 m of a 2000 m route, and the route says the same
-        assert ('0.9/', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['2.0 km'] and '11m' not in [x for x, _ in seen]          # (nothing red but the length of a stage the run did not finish; its total time is not shown: it is not known yet)
+        assert ('0.9/', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['2.0 km'] and '00:11:40' not in [x for x, _ in seen]          # (nothing red but the length of a stage the run did not finish; its total time is not shown: it is not known yet)
 
     def test_a_run_that_strayed_shows_the_routes_progress_first_and_the_distance_run_in_red(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
@@ -371,7 +371,7 @@ class TestStageProgress:
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'Checkpoint 1'), (T0 + 900, 'After Race')]
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress={'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)
-        assert ('5m', (255, 255, 255)) in seen and ('2.0 km', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)] and '11m' not in [x for x, _ in seen]
+        assert ('00:05:00', (255, 255, 255)) in seen and ('2.0 km', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)] and '00:11:40' not in [x for x, _ in seen]
 
 
 class TestRouteElapsed:
@@ -423,8 +423,8 @@ class TestCutoffsOnTheOverlay:
     def test_a_stage_shows_the_time_so_far_over_its_cut_off_in_red_and_never_its_total_time(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); RED = (235, 40, 40)
         self.ov(series, tiles, ['stage'], self.cut).patches(T0 + 400)                       # 300 s into stage 1, which started at T0 + 100; its cut-off is 1200 s after the start of the run: 1100 s for the stage
-        assert ('5m', (255, 255, 255)) in seen and ('18m', RED) in seen and '8m' not in [x for x, _ in seen]
-        seen.clear(); self.ov(series, tiles, ['stage']).patches(T0 + 400); assert ('5m', (255, 255, 255)) in seen and not [1 for _, f in seen if f == RED]            # no cut-off: just the time so far
+        assert ('00:05:00', (255, 255, 255)) in seen and ('00:18:20', RED) in seen and '00:11:40' not in [x for x, _ in seen]
+        seen.clear(); self.ov(series, tiles, ['stage']).patches(T0 + 400); assert ('00:05:00', (255, 255, 255)) in seen and not [1 for _, f in seen if f == RED]            # no cut-off: just the time so far
 
     def test_the_cut_off_line_sits_between_the_elapsed_time_and_the_day_and_pushes_the_rest_down(self, series, tiles):
         ys = lambda ov: [p[1] for p in ov.patches(T0 + 200)]

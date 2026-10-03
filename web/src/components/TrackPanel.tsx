@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { api, type ExtraLine, type TileStatus, type TrackKind, type TracksListing, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
+import { api, type Cutoff, type ExtraLine, type TileStatus, type TrackKind, type TracksListing, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
 import { useThumbOverlay } from '../thumbOverlay'
 import { PanelSkeleton } from './Skeleton'
 import TrackMap from './TrackMap'
@@ -127,11 +127,37 @@ function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle
 // The project's tracks: every uploaded FIT / GPX file marked a run (merged into the one race track) or a route (the course, shown on the map for planning only).
 const pace = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 const stamp = (t: number, tz: string) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(',', '') } catch { return new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') } }
+const KIND_TEXT = { since_start: 'total time', since_last: 'since the previous checkpoint', clock: 'time of day' } as const
+/** The cut-off typed for a checkpoint or the finish: free text ("27h", "5:30 from last", "Sat 14:00"), saved when Enter is pressed or the box is left; beside it how it was read and the time to spare (or late) when the run got there. */
+function CutoffBox({ label, cutoff, save }: { label: string; cutoff?: Cutoff; save: (text: string) => Promise<void> }) {
+  const [draft, setDraft] = useState(cutoff?.text ?? ''), [err, setErr] = useState<string>(), [busy, setBusy] = useState(false)
+  useEffect(() => { setDraft(cutoff?.text ?? '') }, [cutoff?.text])
+  const commit = async () => {
+    if (draft.trim() === (cutoff?.text ?? '')) { setErr(undefined); return }
+    setBusy(true); setErr(undefined)
+    try { await save(draft.trim()) } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+  const m = cutoff?.margin_s
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 text-xs">
+      <input aria-label={`Cut-off for ${label}`} value={draft} disabled={busy} placeholder="cut-off" title="Cut-off time: 27h (total), 5:30 from last, Sat 14:00, 21/02 08:30" size={9}
+        onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setDraft(cutoff?.text ?? ''); setErr(undefined) } }}
+        className="rounded border border-stone-300 bg-transparent px-1 py-0.5 text-black dark:border-stone-700 dark:text-white" />
+      {err && <span role="alert" className="text-red-600">{err}</span>}
+      {!err && cutoff?.error && <span role="alert" className="text-red-600">{cutoff.error}</span>}
+      {!err && cutoff?.kind && cutoff.elapsed_s != null && (
+        <span className="text-stone-500" data-cutoff-read="">read as {KIND_TEXT[cutoff.kind]}: {hms(cutoff.elapsed_s)} since the start
+          {m != null && <b className={`ml-2 ${m >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600'}`}>{hms(Math.abs(m))} {m >= 0 ? 'to spare' : 'late'}</b>}</span>
+      )}
+    </span>
+  )
+}
 const hms = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}`
 function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz }: { folder: string; listing?: TracksListing; onChange: () => Promise<void>; tz: string } & Pick) {
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string>(), input = useRef<HTMLInputElement>(null)
   const act = async (f: () => Promise<unknown>) => { setBusy(true); setErr(undefined); try { await f() } catch (e) { setErr((e as Error).message) } finally { try { await onChange() } finally { setBusy(false) } } }
   const add = (files: FileList | File[] | null) => act(async () => { for (const f of Array.from(files ?? [])) await api.addTrack(folder, f) })
+  const setCut = (key: string) => async (text: string) => { await api.setCutoff(folder, key, text); await onChange() }                                       // saved, then the list is read again for how it was understood
   const rows = listing?.tracks ?? [], tm = listing?.timing, lastRun = rows.reduce((a, r, i) => (r.kind === 'run' ? i : a), -1)
   const cpTime = tm ? Object.values(tm.checkpoints).reduce((a, b) => a + b, 0) : 0, runTime = tm ? tm.total_s - cpTime : 0, ranKm = tm?.ran_m ? Object.values(tm.ran_m).reduce((a, b) => a + b, 0) / 1000 : 0
   return (
@@ -160,7 +186,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
             <li data-checkpoint-row="" data-highlighted={hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? '' : undefined} onMouseEnter={() => setHot(`cp:${x.order}`)} onMouseLeave={() => setHot(null)}
               className={`flex items-center gap-x-3 rounded px-1 text-xs ${hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : 'text-blue-800 dark:text-blue-300'}`}>
               <span className="w-6 text-center"><span className="inline-block h-4 min-w-4 rounded-full bg-blue-700 px-1 text-center text-[10px] font-bold leading-4 text-white">{x.order}</span></span>
-              <button type="button" aria-pressed={pinned.includes(`cp:${x.order}`)} aria-label={`Highlight checkpoint ${x.order} on the map`} className="flex-1 cursor-pointer text-left" onClick={() => toggle(`cp:${x.order}`)}>Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-stone-500" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</button><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
+              <button type="button" aria-pressed={pinned.includes(`cp:${x.order}`)} aria-label={`Highlight checkpoint ${x.order} on the map`} className="flex-1 cursor-pointer text-left" onClick={() => toggle(`cp:${x.order}`)}>Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-stone-500" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</button><CutoffBox label={`checkpoint ${x.order}`} cutoff={listing.cutoffs?.[`cp:${x.order}`]} save={setCut(`cp:${x.order}`)} /><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
             </li>
           )}
           {tm && x.kind === 'run' && ix === lastRun && (
@@ -183,6 +209,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
             <button type="button" aria-pressed={pinned.includes('finish')} aria-label="Highlight the finish on the map" className="flex-1 cursor-pointer text-left" onClick={() => toggle('finish')}>
               Finish{listing.finish.reached ? '' : ' (not reached)'}
               <span className="ml-3 opacity-80" title="the finish line of the routes">{listing.finish.reached && listing.finish.km != null ? `km ${listing.finish.km} · ${hms(listing.finish.elapsed_s ?? 0)} since start · arrived ${stamp(listing.finish.t ?? 0, tz)} · ` : ''}routes {(listing.finish.route_m / 1000).toFixed(1)} km{listing.finish.reached ? '' : `, covered ${(listing.finish.covered_m / 1000).toFixed(1)} km`}</span></button>
+            <CutoffBox label="the finish" cutoff={listing.cutoffs?.finish} save={setCut('finish')} />
             {listing.finish.time_s != null && <span className="text-sm tabular-nums" title="time at the finish, to the end of the run">{hms(listing.finish.time_s)}</span>}
           </li>
         )}

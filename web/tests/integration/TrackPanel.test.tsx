@@ -166,6 +166,21 @@ describe('TrackPanel', () => {
       const row = (await screen.findByText(/^Finish/)).closest('li')!; expect(row).toHaveTextContent('km 99.5 · 2:00:00 since start · arrived Sat 21 Feb'); expect(row).toHaveTextContent('0:10:00'); expect(row).not.toHaveTextContent('not reached')
     })
 
+    it('takes a cut-off for a checkpoint and the finish, shows how it was read and the time to spare, and says why when it is not understood', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.timing = { total_s: 5000, start: 0, end: 1, checkpoints: { '1': 600 }, sections: { t2: 4400 }, consistent: true }
+      l.finish = { reached: false, route_m: 349300, covered_m: 336800, t: null, elapsed_s: null, km: null, time_s: null }
+      let cutoffs: Record<string, any> = {}; const seen = recordRequests('/api/tracks/cutoff')
+      mockGet('/api/tracks', () => ({ ...l, cutoffs })); mockPost('/api/tracks/cutoff', async (req: Request) => {
+        const b = await req.json() as { key: string; text: string }; cutoffs = { [b.key]: { text: b.text, kind: 'since_start', elapsed_s: 7200, arrival_s: 5000, margin_s: 2200 } }; return { ...l, cutoffs }
+      })
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const box = await screen.findByLabelText('Cut-off for checkpoint 1'); await user.type(box, '2h{Enter}')
+      await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', key: 'cp:1', text: '2h' }))
+      const read = await screen.findByText(/read as total time: 2:00:00 since the start/); expect(read).toHaveTextContent('0:36:40 to spare'); expect(screen.getByLabelText('Cut-off for the finish')).toHaveValue('')
+      server.use(http.post('/api/tracks/cutoff', () => HttpResponse.json({ detail: 'could not read "abc" as a time' }, { status: 400 })))
+      await user.type(screen.getByLabelText('Cut-off for the finish'), 'abc{Enter}'); expect(await screen.findByRole('alert')).toHaveTextContent('could not read "abc" as a time')
+    })
+
     it('marks a track a run, refreshing the race track and the list', async () => {
       present(); const seen = recordRequests('/api/tracks/kind'); let marked = false
       const after = makeTracksListing({ runs: 2, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'run' })], merged: { runs: ['main', 't2'], samples: 200, start_utc: '', end_utc: '', distance_km: 90 } })

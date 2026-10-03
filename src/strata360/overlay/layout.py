@@ -141,6 +141,11 @@ class Clock:
         return out
 
 
+def _clock(seconds):
+    """01:23:45 (hours, minutes, seconds, each two digits)."""
+    s = max(0, int(seconds)); return f'{s // 3600:02d}:{s % 3600 // 60:02d}:{s % 60:02d}'
+
+
 def _hm(seconds):
     """3h4m, or 23m under an hour."""
     m = int(seconds // 60); return f'{m // 60}h{m % 60}m' if m >= 60 else f'{m}m'
@@ -165,7 +170,7 @@ class Stage:
                 cut = self.c.cutoffs.get('stage', {}).get(name)                                                  # not the stage's total time (that is only known afterwards): the cut-off for the stage, in red, from leaving the previous checkpoint
                 end = RED if final else WHITE                                                                  # the stage's length is red too when the run did not get to the end of it
                 dist = [(f'{p:.1f}/', WHITE), (f'{L:.1f} km', end), (f'  ran {run:.1f} km', RED)] if abs(run - p) > max(0.10 * max(run, p), 0.5) else [(f'{run:.1f}/', WHITE), (f'{L:.1f} km', end)]
-                return out + self.c.runs(e, e['x'], e['y'] + 38, dist + [('  ·  ', WHITE), (_hm(max(0.0, min(t, b) - a)), WHITE)] + ([('/', WHITE), (_hm(cut - (a - self.c.cutoffs['start'])), RED)] if cut is not None else []), 22)
+                return out + self.c.runs(e, e['x'], e['y'] + 38, dist + [('  ·  ', WHITE), (_clock(min(t, b) - a), WHITE)] + ([('/', WHITE), (_clock(cut - (a - self.c.cutoffs['start'])), RED)] if cut is not None else []), 22)
             if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
             else: km = f'{(self._dist(a) - self._dist(self.times[1] if len(self.times) > 1 else a)) / 1000:.1f} km'          # the way from the start of the run to the checkpoint
             out.append(self.c.text(e, e['x'], e['y'] + 38, f'{km}  ·  {_hm(max(0.0, min(t, b) - a))} / {_hm(b - a)}', 22))
