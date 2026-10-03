@@ -45,6 +45,7 @@ export const handlers = [
   http.get('/api/lyrics', () => HttpResponse.json(makeLyrics({ has_track: false }))),
   http.get('/api/photos', () => HttpResponse.json({ photos: [], tz: 'Europe/Brussels' })),
   http.get('/api/gaps', () => HttpResponse.json({ gaps: [] })),
+  http.get('/api/streetview/video', () => HttpResponse.json({ exists: false, running: false, log: [], error: '', seconds: 12 })),
   http.get('/api/track/clips', () => HttpResponse.json({ clips: [makeTrackClip()], has_draft: true })),
   http.get('/api/script2', () => HttpResponse.json(makeScript2State())),
   http.post('/api/script2/pins', async ({ request }) => HttpResponse.json(await request.json())),

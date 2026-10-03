@@ -40,7 +40,8 @@ export interface SvRoads { id: string; total_km: number; stretches: SvStretch[];
 export interface SvStageStatus { done: boolean; stale?: boolean; stretches?: number; sections?: number; scored?: number; frames?: number; km: number }
 export type SvChoice = 'possible' | 'must'
 /** A section with what the page needs: a key that survives the stage being run again, whether it could make a clip (and why not), how long it plays at 15 pictures a second and how fast that looks, the sections over the same road, and your choice. */
-export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
+export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; filmed: [number, number] | null; passed: [number, number] | null; has_video: boolean; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
+export interface SvVideo { exists: boolean; running: boolean; log: string[]; error: string; seconds: number }
 export interface StreetView {
   status: Record<'roads' | SvProvider | 'quality', SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { frames: number; km: number } | null>; sections: SvSectionInfo[]
   job: PhotoJob; keys: { mapillary: boolean; google: boolean }
@@ -179,6 +180,9 @@ export const api = {
   streetview: (folder: string) => call<StreetView>('/api/streetview?' + q({ folder })),
   runStreetview: (folder: string, body: { stages?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/streetview/run', { folder, ...body }),
   setStreetviewChoice: (folder: string, key: string, choice: SvChoice | 'none') => call<{ key: string; choice: SvChoice | null }>('/api/streetview/choice', { folder, key, choice }),
+  svVideo: (folder: string, key: string) => call<SvVideo>('/api/streetview/video?' + q({ folder, key })),
+  makeSvVideo: (folder: string, key: string) => call<{ started: boolean; reason?: string }>('/api/streetview/video', { folder, key }),
+  svVideoUrl: (folder: string, key: string) => '/api/streetview/video/file?' + q({ folder, key }),
   streetviewImage: (folder: string, provider: SvProvider, id: string, w = 256) => '/api/streetview/image?' + q({ folder, provider, id, w: String(w) }),
   photos: (folder: string) => call<{ photos: Photo[]; tz: string; job?: PhotoJob }>('/api/photos?' + q({ folder })),
   photoMotion: (folder: string, id: string, p: Partial<MotionSettings> = {}) => call<MotionPlan>('/api/photos/motion?' + q({ folder, id, ...(p.style ? { style: p.style } : {}), ...(p.seconds != null ? { seconds: String(p.seconds) } : {}), ...(p.seed != null ? { seed: String(p.seed) } : {}) })),

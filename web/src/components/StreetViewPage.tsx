@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
-import type { StreetView, SvChoice, SvProvider, SvSection, SvSectionInfo, SvStretch, TileStatus, TrackClip } from '../api'
+import type { StreetView, SvChoice, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
@@ -18,6 +18,22 @@ export function rampColour(d: number, lo: number, hi: number) {
   return '#' + a.map((v, k) => Math.round(v + (b[k] - v) * f).toString(16).padStart(2, '0')).join('')
 }
 export const dur = (sec: number) => (sec < 90 ? `${Math.round(sec)} s` : sec < 5400 ? `${Math.round(sec / 60)} min` : `${(sec / 3600).toFixed(1)} h`)
+/** A time of day in the race's time zone: "Thu 7 Mar 2024 18:44". */
+export const when = (t: number | null | undefined, tz: string) => {
+  if (t == null) return '–'
+  try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(/,/g, '') } catch { return new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') }
+}
+
+/** The quality filters: each key is a box in the Filters menu (true: sections like that are shown). */
+export const FILTERS: { title: string; items: [string, string][] }[] = [
+  { title: 'Quality of the clip', items: [['q:good', 'Good'], ['q:fair', 'Fair'], ['q:poor', 'Poor'], ['q:none', 'Not checked']] },
+  { title: 'How steady the camera is kept', items: [['s:exact', 'Exact (360°, true rotation)'], ['s:estimated', 'Estimated (360°, levelled from the picture)'], ['s:by matching only', 'By matching only (flat camera)']] },
+  { title: 'Light', items: [['l:fits', 'Light fits the race'], ['l:warn', 'Daytime view for a night stretch (or the reverse)']] },
+  { title: 'Usable', items: [['plausible', 'Only sections with enough pictures to make a clip']] },
+]
+export const DEFAULT_FILTERS: Record<string, boolean> = Object.fromEntries(FILTERS.flatMap(g => g.items.map(([k]) => [k, k !== 'plausible'])))
+export const passes = (s: SvSectionInfo, f: Record<string, boolean>) =>
+  !!f[`q:${s.quality?.grade ?? 'none'}`] && !!f[`s:${s.steadied}`] && !!f[`l:${s.light?.warning ? 'warn' : 'fits'}`] && !(f.plausible && !s.plausible)
 const km = (v: number) => v.toFixed(2).replace(/\.?0+$/, '')
 const span = (s: { km0: number; km1: number }) => `km ${km(s.km0)} to ${km(s.km1)}`
 const metres = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`)
@@ -35,19 +51,19 @@ function previews(s: SvSection) {
 
 // The street view page: the stages that find the road parts of the run and the street-level imagery on them (Mapillary, Panoramax, Google), a map of the road parts (click one) with a marker for each
 // stretch of imagery found (click for its pictures), and the same sections as a list underneath.
-export default function StreetViewPage({ folder }: { folder: string }) {
+export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { folder: string; tz?: string }) {
   const [tick, setTick] = useState(0)
   const data = usePoll(() => api.streetview(folder), 5000, [folder, tick])
   const [tiles, setTiles] = useState<TileStatus>()
   const [sel, setSel] = useState<{ kind: 'section' | 'stretch'; id: string }>()
   const [shown, setShown] = useState<Record<string, boolean>>({ mapillary: true, panoramax: true, google: true, '360': true, '2d': true, clips: true })
-  const [err, setErr] = useState<string>(), [clips, setClips] = useState<TrackClip[]>([])
+  const [err, setErr] = useState<string>(), [clips, setClips] = useState<TrackClip[]>([]), [filters, setFilters] = useState<Record<string, boolean>>(DEFAULT_FILTERS)
   useEffect(() => { api.trackClips(folder).then(r => setClips(r.clips.filter(c => c.covered && c.stretch?.length))).catch(() => setClips([])) }, [folder])
   useEffect(() => { api.tilesStatus().then(setTiles).catch(() => setTiles({ ok: false, style: 'tf-landscape', error: 'no map background' })) }, [])
   useEffect(() => { setSel(undefined) }, [folder])
   const roads = useMemo(() => data?.roads, [data?.roads?.id])                                // (a new copy comes with every poll: the map is only rebuilt when the road parts really change)
   const sections = useMemo(() => data?.sections ?? [], [data])
-  const visible = sections.filter(s => shown[s.provider] && shown[s.kind])
+  const visible = sections.filter(s => shown[s.provider] && shown[s.kind] && passes(s, filters))
   const scale = useMemo(() => { const d = [...clips.map(c => c.duration_s), ...sections.map(x => x.max_s)].filter(v => v > 0); return d.length ? { lo: Math.min(...d), hi: Math.max(...d) } : { lo: 1, hi: 60 } }, [clips, sections])
   const stretch = (id: string) => roads?.stretches.find(s => s.id === id)
   const run = async (stages?: string[], force = false) => {
@@ -63,10 +79,10 @@ export default function StreetViewPage({ folder }: { folder: string }) {
         <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">Where the run was on a road, and the street-level pictures there are of those roads: a gap in the film could be shown as the view along the road.</p>
         {!data ? <p className="text-sm text-stone-500">Loading…</p> : <Stages data={data} onRun={run} err={err} />}
       </div>
-      {data && roads && sections.length > 0 && <Candidates folder={folder} sections={sections} sel={sel} onSel={setSel} onChoose={async (key, c) => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }} />}
+      {data && roads && sections.length > 0 && <Candidates folder={folder} tz={tz} sections={visible} all={sections} sel={sel} onSel={setSel} onChoose={async (key, c) => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }} />}
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
-          <Filters shown={shown} setShown={setShown} data={data} />
+          <Filters shown={shown} setShown={setShown} data={data} filters={filters} setFilters={setFilters} total={sections.length} showing={visible.length} />
           <SvMap roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
           <Legend scale={scale} hasClips={clips.length > 0} />
           <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-stone-600 dark:text-stone-400">
@@ -76,8 +92,8 @@ export default function StreetViewPage({ folder }: { folder: string }) {
           </p>
         </div>
       )}
-      {(section || chosenStretch) && <Detail folder={folder} section={section} stretch={chosenStretch} sections={sections.filter(s => s.stretch === chosenStretch?.id)} onSel={setSel} />}
-      {roads && <List title="Every section found" sections={visible} sel={sel} onSel={setSel} none={sections.length === 0} />}
+      {(section || chosenStretch) && <Detail folder={folder} tz={tz} section={section} stretch={chosenStretch} sections={sections.filter(s => s.stretch === chosenStretch?.id)} onSel={setSel} />}
+      {roads && <List title="Every section found" tz={tz} sections={visible} sel={sel} onSel={setSel} none={sections.length === 0} />}
     </section>
   )
 }
@@ -117,11 +133,28 @@ function Stages({ data, onRun, err }: { data: StreetView; onRun: (stages?: strin
   )
 }
 
-function Filters({ shown, setShown, data }: { shown: Record<string, boolean>; setShown: (f: Record<string, boolean>) => void; data: StreetView }) {
+function Filters({ shown, setShown, data, filters, setFilters, total, showing }: { shown: Record<string, boolean>; setShown: (f: Record<string, boolean>) => void; data: StreetView; filters: Record<string, boolean>; setFilters: (f: Record<string, boolean>) => void; total: number; showing: number }) {
+  const [open, setOpen] = useState(false)
   const box = (k: string, label: string, colour?: string) => (
     <label key={k} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={shown[k]} onChange={e => setShown({ ...shown, [k]: e.target.checked })} />{colour && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colour }} />}{label}</label>
   )
-  return <div className="mb-2 flex flex-wrap gap-4">{PROVIDERS.map(p => box(p, `${NAME[p]}${data.providers[p] ? ` (${data.sections.filter(s => s.provider === p).length})` : ''}`, COLOUR[p]))}{box('360', '360° cameras')}{box('2d', '2D cameras')}{box('clips', 'Camera clips')}</div>
+  const off = Object.entries(filters).filter(([k, v]) => (k === 'plausible' ? v : !v)).length
+  return (
+    <div className="relative mb-2 flex flex-wrap items-center gap-4">
+      {PROVIDERS.map(p => box(p, `${NAME[p]}${data.providers[p] ? ` (${data.sections.filter(s => s.provider === p).length})` : ''}`, COLOUR[p]))}{box('360', '360° cameras')}{box('2d', '2D cameras')}{box('clips', 'Camera clips')}
+      <button type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(o => !o)} className="rounded border border-stone-300 px-2 py-0.5 text-sm dark:border-stone-600">Filters{off ? ` (${off})` : ''} ▾</button>
+      <span className="text-xs text-stone-500" aria-live="polite">{showing} of {total} sections shown</span>
+      {open && (
+        <div role="group" aria-label="Filters" className="absolute left-0 top-full z-[1000] mt-1 w-96 max-w-full space-y-2 rounded-lg border border-stone-300 bg-white p-3 text-sm shadow-lg dark:border-stone-600 dark:bg-stone-900">
+          {FILTERS.map(g => (
+            <fieldset key={g.title}><legend className="text-xs font-semibold uppercase tracking-wide text-stone-500">{g.title}</legend>
+              {g.items.map(([k, label]) => <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={!!filters[k]} onChange={e => setFilters({ ...filters, [k]: e.target.checked })} />{label}</label>)}</fieldset>
+          ))}
+          <button type="button" className="text-xs underline" onClick={() => setFilters(DEFAULT_FILTERS)}>Show everything again</button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function SvMap({ roads, run, sections, clips, scale, sel, onSel, background }: { roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
@@ -167,7 +200,7 @@ function SvMap({ roads, run, sections, clips, scale, sel, onSel, background }: {
   return <div ref={el} role="application" aria-label="Map of the road parts and street view coverage" className="h-[480px] w-full overflow-hidden rounded-lg bg-stone-200 dark:bg-stone-800" />
 }
 
-function Detail({ folder, section, stretch, sections, onSel }: { folder: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
+function Detail({ folder, tz, section, stretch, sections, onSel }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
   const [big, setBig] = useState<{ provider: SvProvider; id: string }>()
   useEffect(() => { setBig(undefined) }, [section?.id])
   return (
@@ -179,7 +212,9 @@ function Detail({ folder, section, stretch, sections, onSel }: { folder: string;
         <div className="mt-2">
           <div className="text-sm"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[section.provider] }} /><span className="font-medium">{NAME[section.provider]} · {kindLabel(section)}</span> · {span(section)} · {metres(section.length_m)} · {section.frames} pictures{section.spacing_m != null ? `, one every ${section.spacing_m} m` : ''}
             {section.years.length > 0 && ` · ${section.years.join(', ')}`}{section.camera && ` · ${section.camera}`}{section.size && ` · ${section.size[0]}×${section.size[1]}`}</div>
+          <div className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(section.filmed?.[0], tz)}{section.filmed && section.filmed[1] - section.filmed[0] > 60 ? ` to ${when(section.filmed[1], tz)}` : ''} · you pass it {when(section.passed?.[0], tz)}{section.passed ? ` to ${when(section.passed[1], tz).split(' ').slice(-1)[0]}` : ''}</div>
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
+          <SectionVideo folder={folder} section={section} />
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
               <li key={it.id}><button onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>
@@ -193,18 +228,18 @@ function Detail({ folder, section, stretch, sections, onSel }: { folder: string;
   )
 }
 
-function List({ title, sections, sel, onSel, none }: { title: string; sections: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; none: boolean }) {
+function List({ title, tz, sections, sel, onSel, none }: { title: string; tz: string; sections: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; none: boolean }) {
   if (!sections.length) return <p className="rounded-lg bg-white p-4 text-sm text-stone-600 shadow-sm dark:bg-stone-900 dark:text-stone-400">{none ? 'No street view sections yet: run a provider above.' : 'Nothing matches the filters.'}</p>
   return (
     <div className="overflow-x-auto rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
       <h3 className="mb-1 text-sm font-semibold">{title}</h3>
       <table className="w-full text-left text-sm">
-        <thead className="text-xs text-stone-500"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th className="pr-3">Quality</th><th>Overlaps</th></tr></thead>
+        <thead className="text-xs text-stone-500"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th className="pr-3">Quality</th><th className="pr-3">Filmed</th><th className="pr-3">You passed</th><th>Overlaps</th></tr></thead>
         <tbody>
           {sections.map(s => (
             <tr key={s.id} onClick={() => onSel({ kind: 'section', id: s.id })} className={`cursor-pointer border-t border-stone-200 dark:border-stone-700 ${sel?.kind === 'section' && sel.id === s.id ? 'bg-emerald-100 dark:bg-emerald-950' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
               <td className="pr-3"><button className="underline" onClick={e => { e.stopPropagation(); onSel({ kind: 'section', id: s.id }) }}>{NAME[s.provider]} {s.id}</button></td><td className="pr-3">{kindLabel(s)}</td><td className="pr-3">{span(s)} <span className="text-stone-500">({s.stretch})</span></td>
-              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td>{s.overlaps.length ? <span className="text-amber-700 dark:text-amber-400">{s.overlaps.join(', ')}</span> : '–'}</td>
+              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td className="pr-3">{when(s.filmed?.[0], tz)}</td><td className="pr-3">{when(s.passed?.[0], tz)}</td><td>{s.overlaps.length ? <span className="text-amber-700 dark:text-amber-400">{s.overlaps.join(', ')}</span> : '–'}</td>
             </tr>
           ))}
         </tbody>
@@ -217,17 +252,17 @@ const SLOWEST = 4
 const CHOICES: { v: SvChoice | 'none'; label: string }[] = [{ v: 'none', label: 'Not used' }, { v: 'possible', label: 'Possible' }, { v: 'must', label: 'Must include' }]
 
 /** The sections that could make a clip, each with its pictures and a choice for the film: not used, possible (the writer may use it) or must include. Sections over the same road say so. */
-function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string; sections: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section'; id: string }) => void; onChoose: (key: string, c: SvChoice | 'none') => void }) {
+function Candidates({ folder, tz, sections, all, sel, onSel, onChoose }: { folder: string; tz: string; sections: SvSectionInfo[]; all: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section'; id: string }) => void; onChoose: (key: string, c: SvChoice | 'none') => void }) {
   const [order, setOrder] = useState<'quality' | 'route'>('quality')
-  const by = new Map(sections.map(s => [s.id, s])), chosen = sections.filter(s => s.plausible && s.choice)
+  const by = new Map(all.map(s => [s.id, s])), chosen = all.filter(s => s.plausible && s.choice)
   const ok = sections.filter(s => s.plausible).sort((a, b) => order === 'route' ? a.km0 - b.km0 : (b.quality?.score ?? -1) - (a.quality?.score ?? -1) || a.km0 - b.km0)                 // best first; the ones not scored yet last
   return (
     <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Sections that could be used">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Sections that could be used in the film</h3>
         <label className="flex items-center gap-1 text-xs">Order <select value={order} onChange={e => setOrder(e.target.value as 'quality' | 'route')} className="rounded border border-stone-300 bg-white px-1 py-0.5 dark:border-stone-600 dark:bg-stone-900"><option value="quality">best quality first</option><option value="route">along the route</option></select></label></div>
-      <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">{ok.length} of {sections.length} sections have enough pictures, close enough together, to make a clip. Mark the ones the film may use: only those are shown to the script writer, and the plan makes a clip of any it picks.
+      <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">{all.filter(s => s.plausible).length} of {all.length} sections have enough pictures, close enough together, to make a clip. Mark the ones the film may use: only those are shown to the script writer, and the plan makes a clip of any it picks.
         {chosen.length > 0 && ` Chosen: ${chosen.length} (${chosen.filter(s => s.choice === 'must').length} must include).`} Pictures are credited CC BY-SA to Mapillary and Panoramax contributors.</p>
-      {ok.length === 0 && <p className="text-sm text-stone-600 dark:text-stone-400">None of the sections found has enough pictures yet.</p>}
+      {ok.length === 0 && <p className="text-sm text-stone-600 dark:text-stone-400">{all.some(s => s.plausible) ? 'No candidate matches the filters.' : 'None of the sections found has enough pictures yet.'}</p>}
       <ul className="space-y-2">
         {ok.map(s => (
           <li key={s.key} data-section={s.id} className={`rounded-lg border p-2 ${sel?.id === s.id ? 'border-emerald-600' : 'border-stone-200 dark:border-stone-700'}`}>
@@ -240,6 +275,7 @@ function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string
               {s.label && <span className="rounded bg-emerald-700 px-1.5 text-xs text-white">called {s.label} in the script</span>}
             </div>
             {s.light?.warning && <p className="text-xs font-medium text-red-700 dark:text-red-400" role="note" data-light>⚠ {s.light.warning}</p>}
+            <p className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(s.filmed?.[0], tz)} · you pass it {when(s.passed?.[0], tz)}{s.has_video && <span className="ml-2 rounded bg-sky-700 px-1.5 text-white">preview video ready</span>}</p>
             {s.overlaps.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               <ul className="flex gap-1">{previews(s).filter((_, i, a) => a.length <= 3 || i % Math.ceil(a.length / 3) === 0).slice(0, 3).map(({ it, label }) => <li key={it.id}><img loading="lazy" src={api.streetviewImage(folder, s.provider, it.id, 256)} alt={`${NAME[s.provider]} ${s.id} ${label}`} className="h-16 w-24 rounded object-cover" /></li>)}</ul>
@@ -250,7 +286,7 @@ function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string
           </li>
         ))}
       </ul>
-      {sections.length > ok.length && <p className="mt-2 text-xs text-stone-500">{sections.length - ok.length} more sections are too short or too sparse to use; they are in the list below.</p>}
+      {all.length > all.filter(s => s.plausible).length && <p className="mt-2 text-xs text-stone-500">{all.length - all.filter(s => s.plausible).length} more sections are too short or too sparse to use; they are in the list below.</p>}
     </div>
   )
 }
@@ -271,6 +307,27 @@ function Legend({ scale, hasClips }: { scale: { lo: number; hi: number }; hasCli
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-600 dark:text-stone-400" aria-label="Duration colours">
       <span>Colour = duration:</span><span>{dur(scale.lo)}</span><span className="h-2.5 w-40 rounded" style={{ background: `linear-gradient(to right, ${RAMP.join(',')})` }} /><span>{dur(scale.hi)}</span>
       <span>· {hasClips ? 'numbered stretches are the camera clips (their length); ' : ''}the coloured lines with a letter badge are street view sections (the longest clip each can make)</span>
+    </div>
+  )
+}
+
+/** The preview video of a section: shown when it has been made, else a button to make it (in the background; kept, so it is made once). */
+function SectionVideo({ folder, section }: { folder: string; section: SvSectionInfo }) {
+  const [st, setSt] = useState<SvVideo>(), [err, setErr] = useState<string>(), running = !!st?.running
+  useEffect(() => {
+    let live = true; setSt(undefined); setErr(undefined)
+    const tick = () => api.svVideo(folder, section.key).then(v => live && setSt(v)).catch(e => live && setErr((e as Error).message))
+    tick(); const id = setInterval(tick, running ? 2500 : 30000); return () => { live = false; clearInterval(id) }
+  }, [folder, section.key, running])
+  const make = async () => { setErr(undefined); try { const r = await api.makeSvVideo(folder, section.key); if (!r.started && r.reason) setErr(r.reason); setSt(await api.svVideo(folder, section.key)) } catch (e) { setErr((e as Error).message) } }
+  if (section.provider === 'google') return <p className="mt-2 text-xs text-stone-500">Google's terms do not allow its pictures in a video.</p>
+  return (
+    <div className="mt-2" aria-label="Preview video">
+      {st?.exists && <video controls preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />}
+      {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">Make a preview video</button>}
+      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept</span>}
+      {running && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Making the video… {st?.log.slice(-1)[0] ?? ''}</p>}
+      {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}
     </div>
   )
 }

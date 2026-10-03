@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { fireEvent } from '@testing-library/react'
 import { screen, setup, waitFor, within } from '../utils/render'
-import StreetViewPage, { dur, rampColour } from '../../src/components/StreetViewPage'
+import StreetViewPage, { DEFAULT_FILTERS, dur, passes, rampColour, when } from '../../src/components/StreetViewPage'
 import Workspace from '../../src/components/Workspace'
 import { makeStreetView, makeSvSection, makeTrackClip } from '../utils/factories'
 import { recordRequests } from '../utils/api'
@@ -179,6 +179,98 @@ describe('duration colours and the camera clips on the map', () => {
 
   it('hides the camera clips when their box is cleared', async () => {
     serve(); const { user } = setup(<StreetViewPage folder="/data" />); await screen.findByTitle(/Clip 0023/); await user.click(screen.getByLabelText('Camera clips')); expect(screen.queryByTitle(/Clip 0023/)).toBeNull()
+  })
+})
+
+describe('filtering by quality factors', () => {
+  const mixed = () => {
+    const sv = makeStreetView(); const q = (score: number | null, grade: 'good' | 'fair' | 'poor' | null) => (score == null ? null : { score, grade, psnr: 15, jerk: 0.2, roll: 0.2 })
+    sv.sections = [makeSvSection({ id: 'M1', key: 'a', km0: 1, quality: q(80, 'good'), steadied: 'exact' }), makeSvSection({ id: 'M2', key: 'b', km0: 2, quality: q(50, 'fair'), steadied: 'estimated' }),
+      makeSvSection({ id: 'M3', key: 'c', km0: 3, quality: q(9, 'poor'), steadied: 'by matching only', light: { captured: 'day', race: 'night', warning: 'Filmed in daylight, but the runner passes here at night: it would look wrong in the film.' } }),
+      makeSvSection({ id: 'M4', key: 'd', km0: 4, quality: null, steadied: 'estimated', plausible: false, why_not: 'only 5 pictures (needs 30)' })]; return sv
+  }
+  const ids = () => [...document.querySelectorAll('tbody tr')].map(r => r.querySelector('td button')?.textContent?.replace('Mapillary ', ''))
+
+  it('has a Filters drop down with boxes for the quality, the steadiness, the light and usable sections, all on at first', async () => {
+    serve(mixed()); const { user } = setup(<StreetViewPage folder="/data" />); await screen.findAllByRole('row'); expect(screen.queryByRole('group', { name: 'Filters' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: /Filters/ })); const g = screen.getByRole('group', { name: 'Filters' })
+    for (const l of ['Good', 'Fair', 'Poor', 'Not checked', 'Exact (360°, true rotation)', 'Estimated (360°, levelled from the picture)', 'By matching only (flat camera)', 'Light fits the race', 'Daytime view for a night stretch (or the reverse)']) expect(within(g).getByLabelText(l)).toBeChecked()
+    expect(within(g).getByLabelText('Only sections with enough pictures to make a clip')).not.toBeChecked(); expect(screen.getByText('4 of 4 sections shown')).toBeInTheDocument()
+  })
+
+  it('hides the sections of an unchecked quality, in the list, the candidates and the count', async () => {
+    serve(mixed()); const { user } = setup(<StreetViewPage folder="/data" />); await screen.findAllByRole('row'); expect(ids()).toEqual(['M1', 'M2', 'M3', 'M4'])
+    await user.click(screen.getByRole('button', { name: /Filters/ })); await user.click(screen.getByLabelText('Poor')); expect(ids()).toEqual(['M1', 'M2', 'M4']); expect(screen.getByText('3 of 4 sections shown')).toBeInTheDocument(); expect(document.querySelector('[data-section="M3"]')).toBeNull()
+    await user.click(screen.getByLabelText('Not checked')); expect(ids()).toEqual(['M1', 'M2']); expect(screen.getByRole('button', { name: /Filters \(2\)/ })).toBeInTheDocument()
+    await user.click(screen.getByText('Show everything again')); expect(ids()).toEqual(['M1', 'M2', 'M3', 'M4'])
+  })
+
+  it('filters by how steady the camera is kept, by the light and by usable', async () => {
+    serve(mixed()); const { user } = setup(<StreetViewPage folder="/data" />); await screen.findAllByRole('row'); await user.click(screen.getByRole('button', { name: /Filters/ }))
+    await user.click(screen.getByLabelText('By matching only (flat camera)')); expect(ids()).toEqual(['M1', 'M2', 'M4']); await user.click(screen.getByLabelText('By matching only (flat camera)'))
+    await user.click(screen.getByLabelText('Daytime view for a night stretch (or the reverse)')); expect(ids()).toEqual(['M1', 'M2', 'M4']); await user.click(screen.getByLabelText('Daytime view for a night stretch (or the reverse)'))
+    await user.click(screen.getByLabelText('Exact (360°, true rotation)')); expect(ids()).toEqual(['M2', 'M3', 'M4']); await user.click(screen.getByLabelText('Exact (360°, true rotation)'))
+    await user.click(screen.getByLabelText('Only sections with enough pictures to make a clip')); expect(ids()).toEqual(['M1', 'M2', 'M3'])
+  })
+
+  it('says when no candidate matches the filters', async () => {
+    serve(mixed()); const { user } = setup(<StreetViewPage folder="/data" />); await screen.findAllByRole('row'); await user.click(screen.getByRole('button', { name: /Filters/ }))
+    for (const l of ['Good', 'Fair', 'Poor', 'Not checked']) await user.click(screen.getByLabelText(l))
+    expect(screen.getByText('No candidate matches the filters.')).toBeInTheDocument(); expect(screen.getByText('Nothing matches the filters.')).toBeInTheDocument()
+  })
+
+  it('has a pure rule for what passes', () => {
+    const s = makeSvSection({ quality: { score: 80, grade: 'good', psnr: 1 }, steadied: 'exact' }); expect(passes(s, DEFAULT_FILTERS)).toBe(true); expect(passes(s, { ...DEFAULT_FILTERS, 'q:good': false })).toBe(false)
+    expect(passes({ ...s, plausible: false }, { ...DEFAULT_FILTERS, plausible: true })).toBe(false); expect(passes({ ...s, light: { captured: 'day', race: 'night', warning: 'x' } }, { ...DEFAULT_FILTERS, 'l:warn': false })).toBe(false)
+  })
+})
+
+describe('when each section was filmed and when the runner passed it', () => {
+  it('writes the time in the race time zone', () => {
+    expect(when(1_709_812_800, 'UTC')).toBe('Thu 7 Mar 2024 12:00'); expect(when(1_709_812_800, 'Europe/Brussels')).toBe('Thu 7 Mar 2024 13:00'); expect(when(null, 'UTC')).toBe('–'); expect(when(1_709_812_800, 'No/Such_Zone')).toBe('2024-03-07 12:00')
+  })
+
+  it('shows both times on each candidate, in the detail and in the table', async () => {
+    const sv = makeStreetView(); sv.sections[0].filmed = [1_709_812_800, 1_709_812_830]; sv.sections[0].passed = [1_771_754_460, 1_771_754_700]; serve(sv)
+    const { user } = setup(<StreetViewPage folder="/data" tz="UTC" />); const card = (await screen.findByLabelText('Sections that could be used')).querySelector('[data-section="M1"] [data-times]')!
+    expect(card).toHaveTextContent('Filmed Thu 7 Mar 2024 12:00 · you pass it Sun 22 Feb 2026 10:01')
+    const row = screen.getAllByRole('row')[1]; expect(row).toHaveTextContent('Thu 7 Mar 2024 12:00'); expect(row).toHaveTextContent('Sun 22 Feb 2026 10:01'); expect(screen.getByText('You passed')).toBeInTheDocument(); expect(screen.getByText('Filmed')).toBeInTheDocument()
+    await user.click(row); const detail = document.querySelectorAll('[data-times]'); expect([...detail].some(d => d.textContent?.includes('you pass it Sun 22 Feb 2026 10:01 to 10:05'))).toBe(true)
+  })
+})
+
+describe('the preview video of a section', () => {
+  const pick = async (sv = makeStreetView()) => { serve(sv); const r = setup(<StreetViewPage folder="/data" />); await r.user.click((await screen.findAllByRole('row'))[1]); return r }
+
+  it('offers to make it when it is not there, and starts it in the background', async () => {
+    const seen = recordRequests('/api/streetview/video'); server.use(http.post('/api/streetview/video', () => HttpResponse.json({ started: true })))
+    const { user } = await pick(); await user.click(await screen.findByRole('button', { name: 'Make a preview video' })); expect(screen.getByText(/about 12 s long, made in the background and kept/)).toBeInTheDocument()
+    await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen.find(r => r.method === 'POST')!.body).toEqual({ folder: '/data', key: 'mapillary:s1:1.20' })
+  })
+
+  it('shows that it is being made, with the last line of its log', async () => {
+    server.use(http.get('/api/streetview/video', () => HttpResponse.json({ exists: false, running: true, log: ['fetching', 'M1: 90 frames'], error: '', seconds: 12 }))); await pick()
+    expect(await screen.findByRole('status')).toHaveTextContent('Making the video… M1: 90 frames'); expect(screen.queryByRole('button', { name: 'Make a preview video' })).toBeNull()
+  })
+
+  it('plays it when it exists', async () => {
+    server.use(http.get('/api/streetview/video', () => HttpResponse.json({ exists: true, running: false, log: [], error: '', seconds: 12 }))); await pick()
+    const v = await screen.findByLabelText('Preview video of this section'); expect(v.tagName).toBe('VIDEO'); expect(v.getAttribute('src')).toBe('/api/streetview/video/file?folder=%2Fdata&key=mapillary%3As1%3A1.20'); expect(screen.queryByRole('button', { name: 'Make a preview video' })).toBeNull()
+  })
+
+  it('shows why the last try failed and offers to try again; and refuses a second at once', async () => {
+    server.use(http.get('/api/streetview/video', () => HttpResponse.json({ exists: false, running: false, log: [], error: 'streetview-video: mapillary answered 500', seconds: 12 }))); const { user } = await pick()
+    expect(await screen.findByRole('alert')).toHaveTextContent('answered 500'); server.use(http.post('/api/streetview/video', () => HttpResponse.json({ started: false, reason: 'another preview video is being made' })))
+    await user.click(screen.getByRole('button', { name: 'Make a preview video' })); await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('another preview video is being made'))
+  })
+
+  it('does not offer a video for Google, and says why', async () => {
+    const sv = makeStreetView(); sv.sections[0] = makeSvSection({ id: 'G1', key: 'google:g:1.20', provider: 'google', kind: '360', angles: null }); await pick(sv)
+    expect(await screen.findByText("Google's terms do not allow its pictures in a video.")).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Make a preview video' })).toBeNull()
+  })
+
+  it('marks a candidate whose preview video is ready', async () => {
+    const sv = makeStreetView(); sv.sections[0].has_video = true; serve(sv); setup(<StreetViewPage folder="/data" />); expect(await screen.findByText('preview video ready')).toBeInTheDocument()
   })
 })
 
