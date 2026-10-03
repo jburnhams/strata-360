@@ -23,10 +23,10 @@ def _schedule(rd, stamp):
     from strata360.gps import tracks
     try:
         sched = tuple(tracks.stage_schedule(rd))
-        try: dnf = tracks.dnf_info(rd)
-        except Exception as e:                                              # without it the last stage reads as if it finished (dropped loudly)
-            print(f'overlay: no real length for the unfinished stage: {type(e).__name__}: {e}'); dnf = None
-        return sched, dnf
+        try: prog = tracks.stage_progress(rd)
+        except Exception as e:                                              # without it a stage shows only the distance run, never the route's progress beside it (dropped loudly)
+            print(f'overlay: no route progress for the stages: {type(e).__name__}: {e}'); prog = {}
+        return sched, prog
     except Exception as e:                                                  # the stage text is dropped (loudly), the rest of the overlay stays
         print(f'overlay: no stage text: {type(e).__name__}: {e}'); return (), None
 
@@ -46,8 +46,8 @@ def build(cfg, track, size, tiles=None, maps=True):
     from strata360.overlay.layout import Overlay, settings
     st = settings(cfg.get('overlay'))
     if not maps: st = {**st, 'elements': [e for e in st['elements'] if e not in ('route_map', 'local_map', 'credit')]}
-    stages, dnf = _stages(track) if 'stage' in st['elements'] else ((), None)
-    return Overlay(_series(track, os.path.getmtime(track)), size, st, tz=cfg.get('timezone') or 'Europe/Brussels', tiles=tiles, stages=stages, dnf=dnf)
+    stages, progress = _stages(track) if 'stage' in st['elements'] else ((), None)
+    return Overlay(_series(track, os.path.getmtime(track)), size, st, tz=cfg.get('timezone') or 'Europe/Brussels', tiles=tiles, stages=stages, progress=progress)
 
 
 def for_project(folder, size, tiles=None):

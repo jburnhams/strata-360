@@ -346,16 +346,29 @@ class TestRouteBearing:
         u = np.array([0, 0.0]); v = np.array([0, 0.0]); assert LY.route_bearing(u, v, 2, 0.0, 0.0, 5.0, previous=135.0) == 135.0
 
 
-class TestUnfinishedStage:
-    def test_the_last_stage_of_a_run_that_did_not_finish_shows_its_end_in_red_and_the_real_length_beside_it(self, series, tiles, texts, monkeypatch):
+class TestStageProgress:
+    """A stage shows the distance run over the length of its route; where the run strayed from the route, the route's progress comes first and what was run follows in red."""
+    def spy(self, monkeypatch):
         seen = []; real = D.text
-        def spy(s, *a, **kw): seen.append((s, kw.get('fill'), kw.get('shadow'))); return real(s, *a, **kw)
-        monkeypatch.setattr(D, 'text', spy)
+        def spy(s, *a, **kw): seen.append((s, kw.get('fill'))); return real(s, *a, **kw)
+        monkeypatch.setattr(D, 'text', spy); return seen
+
+    def overlay(self, series, tiles, prog):
         stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'After Race')]
-        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, dnf=dict(remaining_m=900))               # the track runs 3 m/s: 2.1 km in the stage
-        patches = ov.patches(T0 + 400)
-        red = [s for s, f, _ in seen if f == (235, 40, 40)]; black = [(s, sh) for s, f, sh in seen if f == (0, 0, 0)]
-        assert red == ['2.1', '11m'] and (' /3.0 km', (255, 255, 255)) in black                         # the stage's end (distance and time) in red; the real 2.1 + 0.9 km in black with a light halo
-        assert len(patches) == 1 + 7                                                                      # the name, and the seven pieces of the second line
-        seen.clear(); ov.c._text.clear(); LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages).patches(T0 + 400)
-        assert not [1 for _, f, _ in seen if f == (235, 40, 40)]                                           # a stage that was finished (no dnf) is all white
+        return LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress=prog)
+
+    def test_a_run_that_followed_the_route_shows_only_the_distance_run_over_the_route(self, series, tiles, monkeypatch):
+        seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
+        ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)       # the track runs 3 m/s: 900 m of a 2000 m route, and the route says the same
+        assert ('0.9/2.0 km', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['11m']          # (nothing red but the time of a stage the run did not finish)
+
+    def test_a_run_that_strayed_shows_the_routes_progress_first_and_the_distance_run_in_red(self, series, tiles, monkeypatch):
+        seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
+        ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=np.minimum((ts - ts[0]) * 3.0, 300.0))}); ov.patches(T0 + 400)       # on the route for 100 s, then off it: the route says 300 m, 900 m were run
+        assert ('0.3/2.0 km', (255, 255, 255)) in seen and ('  ran 0.9 km', (235, 40, 40)) in seen and ('11m', (235, 40, 40)) in seen           # (the stage was the last and not finished: its time is red too)
+
+    def test_a_finished_stage_total_time_is_white(self, series, tiles, monkeypatch):
+        seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
+        stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'Checkpoint 1'), (T0 + 900, 'After Race')]
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress={'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)
+        assert ('11m', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)]

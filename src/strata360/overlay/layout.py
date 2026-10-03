@@ -53,8 +53,8 @@ METRIC = dict(dist='dist_m', pace='pace_s_km', alt='alt_m', slope='slope_pct', h
 
 class _Ctx:
     """What the widgets share: frame size and scale, fonts, the series, the tiles, the time zone and a cache of drawn text."""
-    def __init__(self, series, size, st, tz, tiles, stages=(), dnf=None):
-        self.stages = list(stages); self.dnf = dnf; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
+    def __init__(self, series, size, st, tz, tiles, stages=(), progress=None):
+        self.stages = list(stages); self.progress = progress or {}; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
         self._tiles = tiles if callable(tiles) and not isinstance(tiles, Tiles) else (lambda style: tiles) if tiles is not None else None; self._made = {}
         self.vfont, self.lfont = st.get('font') or D.VALUE_FONT, st.get('label_font') or st.get('font') or D.LABEL_FONT; self._text = {}
 
@@ -132,9 +132,12 @@ class Stage:
         e = self.el; i = max(0, bisect.bisect_right(self.times, t) - 1); name = self.names[i]; out = [self.c.text(e, e['x'], e['y'], name.upper(), 30)]
         if name.startswith(('Stage', 'Checkpoint')) and i + 1 < len(self.times):
             a, b = self.times[i], self.times[i + 1]                                                                # a stage runs to the next checkpoint's arrival, a checkpoint to the departure
-            if name.startswith('Stage') and self.c.dnf and self.names[i + 1] == 'After Race':                      # the stage the run did not finish: its end is where the run stopped, not a finish, so it is in red, and the real length (run in it plus what was left of the route from the last point on it) is beside it in black
-                x, y = e['x'], e['y'] + 38; run = (self._dist(b) - self._dist(a)) / 1000; real = run + self.c.dnf['remaining_m'] / 1000; so_far = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; RED, BLACK, WHITE = (235, 40, 40), (0, 0, 0), (255, 255, 255)
-                return out + self.c.runs(e, x, y, [(f'{so_far:.1f}/', WHITE), (f'{run:.1f}', RED), (' km', WHITE), (f' /{real:.1f} km', BLACK, WHITE), ('  ·  ', WHITE), (f'{_hm(max(0.0, min(t, b) - a))}/', WHITE), (_hm(b - a), RED)], 22)
+            pr = self.c.progress.get(name) if name.startswith('Stage') else None
+            if pr is not None:                                                                                # the distance run so far over the length of the stage's route; where the run went off the route, the route's own progress comes first and what was actually run follows in red
+                run = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; L = pr['route_m'] / 1000; p = float(np.interp(t, pr['t'], pr['prog'])) / 1000; RED, WHITE = (235, 40, 40), (255, 255, 255)
+                final = self.names[i + 1] == 'After Race' and 'At Finish' not in self.names                    # the run stopped in this stage: its total time is only how long it lasted, in red
+                dist = [(f'{p:.1f}/{L:.1f} km', WHITE), (f'  ran {run:.1f} km', RED)] if abs(run - p) > max(0.10 * max(run, p), 0.5) else [(f'{run:.1f}/{L:.1f} km', WHITE)]
+                return out + self.c.runs(e, e['x'], e['y'] + 38, dist + [('  ·  ', WHITE), (f'{_hm(max(0.0, min(t, b) - a))}/', WHITE), (_hm(b - a), RED if final else WHITE)], 22)
             if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
             else: km = f'{(self._dist(a) - self._dist(self.times[1] if len(self.times) > 1 else a)) / 1000:.1f} km'          # the way from the start of the run to the checkpoint
             out.append(self.c.text(e, e['x'], e['y'] + 38, f'{km}  ·  {_hm(max(0.0, min(t, b) - a))} / {_hm(b - a)}', 22))
@@ -319,8 +322,8 @@ def settings(st=None):
 class Overlay:
     """overlay.apply(frame, t) draws the overlay for UTC seconds t onto an RGB frame (uint8 or uint16) in place. `tiles` defaults to the configured style (fetched and cached on first use)."""
 
-    def __init__(self, series, size, st=None, tz='Europe/Brussels', tiles=None, stages=(), dnf=None):
-        self.st = settings(st); self.c = _Ctx(series, size, self.st, tz, tiles, stages, dnf)
+    def __init__(self, series, size, st=None, tz='Europe/Brussels', tiles=None, stages=(), progress=None):
+        self.st = settings(st); self.c = _Ctx(series, size, self.st, tz, tiles, stages, progress)
         els = {n: {**ELEMENTS[n], **self.st['layout'].get(n, {})} for n in self.st['elements']}
         styles = [self.c.style(e) for e in els.values() if e['kind'] in ('route_map', 'local_map')]
         for st_ in styles: self.c.tiles(st_)                                                                        # a missing map key is reported now, not hours into a render

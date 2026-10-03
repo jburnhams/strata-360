@@ -225,19 +225,15 @@ def test_without_routes_the_stage_between_start_and_end_is_on_course(tmp_path):
     assert TK.stage_schedule(str(tmp_path / 'none')) == []
 
 
-def test_a_run_that_stopped_short_of_the_end_of_the_last_route_says_how_much_was_left(tmp_path):
-    rd = str(tmp_path); _stop_run(rd, [('one.gpx', (0, 121)), ('two.gpx', (121, 361))])                                    # the run ends 2670 m into the second route (7170 m long)
-    d = TK.dnf_info(rd); assert d['stage'] == 'Stage 2' and 7160 <= d['route_m'] <= 7180 and 4480 <= d['remaining_m'] <= 4520 and d['progress_m'] + d['remaining_m'] == d['route_m']
-    rd2 = str(tmp_path / 'fin'); os.makedirs(rd2); _stop_run(rd2, [('one.gpx', (0, 121)), ('two.gpx', (121, 211))]); assert TK.dnf_info(rd2) is None     # it finished
-    assert TK.dnf_info(str(tmp_path / 'none')) is None
-
-
-def test_going_off_course_leaves_the_progress_where_the_run_last_was_on_the_route(tmp_path):
+def test_progress_along_the_route_holds_where_the_run_left_it_while_the_run_is_off_course(tmp_path):
     from datetime import datetime, timezone
     rd = str(tmp_path); t0 = 1_770_000_000; rows = []; y = 0.0
     for i in range(600): y += 3.0; rows.append((i, y, 0.0))                                                                 # along the route to 1800 m
-    for i in range(300): rows.append((600 + i, y, 0.0045 * (i + 1) / 300))                                                  # then east, off it by ~320 m
+    for i in range(300): rows.append((600 + i, y, 0.0045 * (i + 1) / 300))                                                  # then east, off it by up to ~320 m
     body = ''.join(f'<trkpt lat="{50.0 + m / 110540.0}" lon="{5.0 + x}"><time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time></trkpt>' for i, m, x in rows)
     TK.add(rd, 'run.gpx', f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode())
     TK.add(rd, 'only.gpx', gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(0, 201)], route=True, timed=False))             # 6000 m long
-    d = TK.dnf_info(rd); assert 1700 <= d['progress_m'] <= 1900 and 4100 <= d['remaining_m'] <= 4300 and d['left_t'] < t0 + 700
+    p = TK.stage_progress(rd)['Stage 1']; assert 5990 <= p['route_m'] <= 6010 and len(p['t']) > 100
+    on = p['prog'][p['t'] < t0 + 580]; assert on[-1] > 1600 and np.all(np.diff(on) >= -1)                                       # moving along the route
+    off = p['prog'][p['t'] > t0 + 800]; assert off.max() - off.min() < 50 and 1700 <= off[-1] <= 1900                          # then it stays where the run left the route
+    assert TK.stage_progress(str(tmp_path / 'none')) == {}
