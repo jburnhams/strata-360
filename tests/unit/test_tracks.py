@@ -135,6 +135,36 @@ def test_stops_at_a_checkpoint_count_only_the_time_standing_still(tmp_path):
     route = lambda a, b: gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(a, b)], route=True, timed=False)
     TK.add(rd, 'one.gpx', route(0, 121)); TK.add(rd, 'two.gpx', route(121, 241))                                         # they join at 3600 m, where the run stood
     s = TK.checkpoint_stops(rd); assert list(s) == [1]; c = s[1]
-    assert 880 <= c['stopped_s'] <= 900 and c['zone_s'] >= c['stopped_s'] and c['zone_s'] < 900 + 2 * 300 / 3 + 60 and c['arrived'] > c['zone_in'] and c['left'] < c['zone_out']        # the run-in and run-out at 3 m/s inside the zone are not counted
+    assert 880 <= c['stopped_s'] <= 900        # the run-in and run-out at 3 m/s inside the zone are not counted
     cp = [p for p in TK.listing(rd)['pois'] if p['sym'] == 'checkpoint'][0]; assert cp['stop']['stopped_s'] == c['stopped_s']
     assert TK.checkpoint_stops(str(tmp_path / 'none')) == {}
+
+
+def test_only_one_visit_counts_when_the_run_comes_back_to_the_same_place(tmp_path):
+    from datetime import datetime, timezone
+    rd = str(tmp_path); t0 = 1_770_000_000; pts = []; y = 0.0
+    # north at 3 m/s; stand 600 s at 3600 m; go on; after 1800 s come back (south) to 3600 m and stand 900 s there (a loop back to the same place)
+    for i in range(1200): y += 3.0; pts.append(y)
+    pts += [y] * 600
+    for i in range(600): y += 3.0; pts.append(y)
+    for i in range(1000): y -= 3.0; pts.append(y)              # back down to ~3600 m... 
+    pts += [y] * 900
+    body = ''.join(f'<trkpt lat="{50.0 + m / 110540.0}" lon="5.0"><time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time></trkpt>' for i, m in enumerate(pts))
+    TK.add(rd, 'run.gpx', f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode())
+    route = lambda a, b: gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(a, b)], route=True, timed=False)
+    TK.add(rd, 'one.gpx', route(0, 121)); TK.add(rd, 'two.gpx', route(121, 241))
+    c = TK.checkpoint_stops(rd)[1]; assert 580 <= c['stopped_s'] <= 600                                                  # the first stop, not the 900 s one after the return nor the two together
+
+
+def test_a_paused_watch_at_the_stop_is_still_one_visit_and_counts_as_standing_still(tmp_path):
+    from datetime import datetime, timezone
+    rd = str(tmp_path); t0 = 1_770_000_000; rows = []; y = 0.0
+    for i in range(1200): y += 3.0; rows.append((i, y))
+    rows += [(1200 + k, y) for k in range(60)]                                                                           # 1 min still, then the watch is off for 20 min
+    base = 1200 + 60 + 1200; rows += [(base + k, y) for k in range(60)]
+    for k in range(600): y += 3.0; rows.append((base + 60 + k, y))
+    body = ''.join(f'<trkpt lat="{50.0 + m / 110540.0}" lon="5.0"><time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time></trkpt>' for i, m in rows)
+    TK.add(rd, 'run.gpx', f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode())
+    route = lambda a, b: gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(a, b)], route=True, timed=False)
+    TK.add(rd, 'one.gpx', route(0, 121)); TK.add(rd, 'two.gpx', route(121, 241))
+    assert 1300 <= TK.checkpoint_stops(rd)[1]['stopped_s'] <= 1400

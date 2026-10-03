@@ -330,12 +330,13 @@ def route_order(rd, step_m=10.0, reach_m=150.0):
 
 STOP_MS = 0.7                  # slower than this (m/s, over half a minute either side) is standing still
 ZONE_M = 300.0                 # a checkpoint's zone: the race track inside it is the visit
+VISIT_GAP_S = 120.0            # out of the zone (with samples there) for longer than this and coming back is another visit (shorter is the track wobbling at the edge)
 
 
 def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
-    """How long the run stood still at each checkpoint: {checkpoint n: {zone_in, zone_out, zone_s, arrived, left, stopped_s, radius_m}} (times are UTC epoch seconds; checkpoints the run did not reach are left out).
-    The visit is the pass of the race track through the zone (radius_m round the checkpoint) nearest to where the routes join along the race; the race can pass the same place twice. The zone is large because the stop is often not exactly at the point, and time spent still moving on the way in or out is not counted:
-    `arrived` is the first sample in the visit that is slower than STOP_MS and `left` the last one (speed over 2 x window_s round it, so a gap in the recording while the watch was paused counts as standing still), `stopped_s` the time between them, 0 when the run never slowed."""
+    """How long the run spent at each checkpoint: {checkpoint n: {arrived, left, stopped_s, radius_m}} (times are UTC epoch seconds; checkpoints the run did not reach are left out).
+    The visit is ONE pass of the race track through the zone (radius_m round the checkpoint): the one nearest to where the routes join along the race (the race can pass the same place again later; a return after more than VISIT_GAP_S outside is another visit and is not counted). The zone is large because the stop is often not exactly at the point,
+    and time spent still moving on the way in or out is not counted: `arrived` is the first sample in the visit that is slower than STOP_MS and `left` the last one of the visit (speed over 2 x window_s round it, so a gap in the recording while the watch was paused counts as standing still), `stopped_s` the time between them, 0 when the run never slowed."""
     order, marks = route_order(rd); cur = current_path(rd)
     if not marks or not cur: return {}
     from scipy.spatial import cKDTree
@@ -346,10 +347,10 @@ def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
     for c in marks:
         cp = np.array([(c['lon'] - 5.0) * kx, (c['lat'] - lat0) * ky]); idx = np.sort(np.array(tree.query_ball_point(cp, radius_m), int))
         if not len(idx): continue
-        visits = np.split(idx, np.flatnonzero(np.diff(t[idx]) > 1800.0) + 1); want = (km[c['before']]['km_end'] + km[c['after']]['km_start']) * 500.0       # (half the sum of two km, as metres)
+        visits = np.split(idx, np.flatnonzero((np.diff(idx) > 1) & (np.diff(t[idx]) > VISIT_GAP_S)) + 1); want = (km[c['before']]['km_end'] + km[c['after']]['km_start']) * 500.0       # (half the sum of two km, as metres); a gap of more than VISIT_GAP_S needs samples outside the zone between to be another visit: a gap with no samples at all is the watch paused, still the same visit
         v = min(visits, key=lambda g: abs(float(cum[g[len(g) // 2]]) - want)); tv = t[v]
         a = np.interp(tv - window_s, t, P[:, 0]), np.interp(tv - window_s, t, P[:, 1]); b = np.interp(tv + window_s, t, P[:, 0]), np.interp(tv + window_s, t, P[:, 1])
         speed = np.hypot(b[0] - a[0], b[1] - a[1]) / (2 * window_s); slow = np.flatnonzero(speed < STOP_MS)
         arrived, left = (float(tv[slow[0]]), float(tv[slow[-1]])) if len(slow) else (None, None)
-        out[c['n']] = dict(zone_in=float(tv[0]), zone_out=float(tv[-1]), zone_s=round(float(tv[-1] - tv[0])), arrived=arrived, left=left, stopped_s=round(left - arrived) if arrived is not None else 0, radius_m=round(radius_m))
+        out[c['n']] = dict(arrived=arrived, left=left, stopped_s=round(left - arrived) if arrived is not None else 0, radius_m=round(radius_m))
     return out

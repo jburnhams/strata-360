@@ -56,10 +56,9 @@ describe('TrackMap', () => {
 
   it('shows how long the run stood still at a checkpoint when it is hovered', async () => {
     const t = 1_771_700_000
-    const { user } = setup(<TrackMap {...props()} tz="UTC" pois={[{ name: 'Checkpoint 1', lat: 50.05, lon: 5.05, ele: null, sym: 'checkpoint', desc: 'a.gpx → b.gpx', track: 'checkpoint', n: 1, stop: { zone_in: t, zone_out: t + 3600, zone_s: 3600, arrived: t + 300, left: t + 2400, stopped_s: 2100, radius_m: 300 } }, { name: 'Checkpoint 2', lat: 50.1, lon: 5.1, ele: null, sym: 'checkpoint', desc: '', track: 'checkpoint', n: 2, stop: { zone_in: t, zone_out: t + 60, zone_s: 60, arrived: null, left: null, stopped_s: 0, radius_m: 300 } }]} />)
-    await user.hover(screen.getByTitle('Checkpoint 1')); const tip = await screen.findByText(/Stood still 35 min 00 s/); expect(tip).toHaveTextContent('(18:58 to 19:33)')
-    expect(tip.parentElement).toHaveTextContent('Within 300 m for 1 h 00 min'); await user.unhover(screen.getByTitle('Checkpoint 1'))
-    await user.hover(screen.getByTitle('Checkpoint 2')); expect(await screen.findByText('Did not stop')).toBeInTheDocument()
+    const { user } = setup(<TrackMap {...props()} tz="UTC" pois={[{ name: 'Checkpoint 1', lat: 50.05, lon: 5.05, ele: null, sym: 'checkpoint', desc: 'a.gpx → b.gpx', track: 'checkpoint', n: 1, stop: { arrived: t + 300, left: t + 2400, stopped_s: 2100, radius_m: 300 } }, { name: 'Checkpoint 2', lat: 50.1, lon: 5.1, ele: null, sym: 'checkpoint', desc: '', track: 'checkpoint', n: 2, stop: { arrived: null, left: null, stopped_s: 0, radius_m: 300 } }]} />)
+    await user.hover(screen.getByTitle('Checkpoint 1')); const tip = await screen.findByText(/Time here 35 min 00 s/); expect(tip).toHaveTextContent('(18:58 to 19:33)'); await user.unhover(screen.getByTitle('Checkpoint 1'))
+    await user.hover(screen.getByTitle('Checkpoint 2')); expect(await screen.findByText('Did not slow down within 300 m')).toBeInTheDocument()
   })
 
   it('colours a marker green when the draft plays the clip and grey when it does not', () => {

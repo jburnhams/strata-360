@@ -24,9 +24,8 @@ function checkpointTip(name: string, desc: string, stop: Stop | undefined, tz: s
   const clock = (t: number) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t * 1000)) } catch { return new Date(t * 1000).toISOString().slice(11, 16) } }
   line(name, true); if (desc) line(desc)
   if (stop) {
-    if (stop.arrived != null && stop.left != null) line(`Stood still ${dur(stop.stopped_s)} (${clock(stop.arrived)} to ${clock(stop.left)})`, true)
-    else line('Did not stop')
-    line(`Within ${stop.radius_m} m for ${dur(stop.zone_s)} (${clock(stop.zone_in)} to ${clock(stop.zone_out)})`)
+    if (stop.arrived != null && stop.left != null) line(`Time here ${dur(stop.stopped_s)} (${clock(stop.arrived)} to ${clock(stop.left)})`, true)
+    else line(`Did not slow down within ${stop.radius_m} m`)
   }
   return el
 }
