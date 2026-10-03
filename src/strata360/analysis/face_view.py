@@ -1,7 +1,7 @@
 """`face_view` stage: how clearly the wearer's FACE is seen, once a second, for the close view of you (implementation plan: the close view is for clear face shots, not the top of the head).
 
-At every second the wearer was found (identity.json, as the `focus_samples`), a stabilised crop of the proxy video around them is taken (analysis/head_track.py) and YOLO pose is run on it (analysis/head_detect.py, in `.venv-vision`). The face is clear when the nose and BOTH eyes are found with confidence: a view of the top of the head, a face turned down or away, or a hat over the eyes does not give them.
-Output `face_view.json`: samples [{t, score}] with score = the lowest confidence of nose, left eye and right eye (0 when the wearer or a keypoint is missing)."""
+At every second the wearer was found (identity.json, as the `focus_samples`), a stabilised crop of the proxy video around them is taken (analysis/head_track.py) and YOLO pose is run on it (analysis/head_detect.py, in `.venv-vision`). The face is clear when its head pose says it is looking towards the camera: not tilted forward (the picture is then the top of the head) and not in profile.
+Output `face_view.json`: samples [{t, score, pitch, yaw}]: the HEAD POSE of the wearer's face (insightface 3D landmarks, in the crop) and score 1.0 when it is clear (found, pitch not below MIN_PITCH, yaw within MAX_YAW), 0.3 when found but tilted down or turned away, 0 when no face is found. (Ears are no use: a hat or a hood hides them.)"""
 import json, os, subprocess, tempfile
 
 import cv2, numpy as np
@@ -9,6 +9,14 @@ import cv2, numpy as np
 from strata360.analysis import head_track as HT, views
 
 CLEAR = 0.5                   # a sample counts as a clear face from this score
+MIN_DET, MIN_PITCH, MAX_YAW = 0.5, -50.0, 45.0   # a face is clear when it is found (det score), not tilted forward (head pitch as the crop sees it: a face looking at the camera from below the stick reads about -10 to -30; looking down at the ground, -60 and beyond) and not turned away (yaw)
+
+
+def verdict(face):
+    """(score, pitch, yaw) for one detected face {box, score, pose}: score 1.0 when it is clear (found well enough, pitch not below MIN_PITCH, yaw within MAX_YAW), else 0.3; (0.0, None, None) when there is no face."""
+    if not face: return 0.0, None, None
+    pitch, yaw = face['pose'][0], face['pose'][1]
+    return (1.0 if (face['score'] >= MIN_DET and pitch >= MIN_PITCH and abs(yaw) <= MAX_YAW) else 0.3), pitch, yaw
 
 
 def analyse(clip_dir, osv, log=print):
@@ -23,16 +31,17 @@ def analyse(clip_dir, osv, log=print):
         fr = np.frombuffer(r.stdout, np.uint8)[:W * H * 3].reshape(H, W, 3); x = samples[idx.index(k)]; mx, my = HT.crop_map(x['yaw'], x['pitch'], W, H)
         cv2.imwrite(os.path.join(tmp, f'c{where[k]:05d}.jpg'), cv2.remap(fr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP), [cv2.IMWRITE_JPEG_QUALITY, 92]); crops[k] = where[k]
     py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..'); out_json = os.path.join(tmp, 'det.json')
-    subprocess.run([py, '-m', 'strata360.analysis.head_detect', tmp, out_json], check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
+    subprocess.run([py, '-m', 'strata360.analysis.head_detect', tmp, out_json, '--pose'], check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
     det = json.load(open(out_json))['frames']; out = []
     for x, k in zip(samples, idx):
-        score = 0.0
+        score = 0.0; pitch = yaw = None
         if k in crops:
-            best = None
-            for p in det.get(str(crops[k]), []):                                                          # the person nearest the middle of the crop
-                kp = p['kp'][:3]; c = np.hypot((p['box'][0] + p['box'][2]) / 2 - HT.CROP_PX / 2, (p['box'][1] + p['box'][3]) / 2 - HT.CROP_PX / 2)
-                if best is None or c < best[0]: best = (c, min(q[2] for q in kp))
-            score = 0.0 if best is None else float(best[1])
-        out.append(dict(t=x['t'], score=round(score, 2)))
+            d = det.get(str(crops[k]), {}); faces = d.get('faces', []); ppl = d.get('people', [])
+            head = HT.head_from_people(ppl)                                                                                      # where the pose model puts the head (nose and eyes), else the middle of the crop
+            ref = (head[0], head[1]) if head else (HT.CROP_PX / 2, HT.CROP_PX / 2)
+            if faces:
+                f = min(faces, key=lambda f: np.hypot((f['box'][0] + f['box'][2]) / 2 - ref[0], (f['box'][1] + f['box'][3]) / 2 - ref[1])); pitch, yaw = f['pose'][0], f['pose'][1]
+                score, pitch, yaw = verdict(f)
+        out.append(dict(t=x['t'], score=round(score, 2), pitch=None if pitch is None else round(pitch, 1), yaw=None if yaw is None else round(yaw, 1)))
     log(f'face_view: {sum(1 for o in out if o["score"] >= CLEAR)} of {len(out)} seconds with a clear face')
     return dict(samples=out, clear=CLEAR)

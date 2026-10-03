@@ -58,6 +58,11 @@ def snap_cuts(cuts, spans, start, beat_s, end=None, reach=2.5):
     return out
 
 
+def _steady_of(fp, p):
+    """The `steady` feature of the footage under a dialogue piece, or None."""
+    return (getattr(fp.candidate_at(p['start'], p['start'] + p['seconds']), 'features', None) or {}).get('steady')
+
+
 def join_runs(segs, windows, ps, beat_s):
     """Where a talking stretch was cut into shots inside a pause and the first shot (whole beats) runs a little past the cut, start the second shot where the first ends, so the two are one continuous run of the clip (nothing repeated, and a glide can join them). Only as far as the pause allows: the second shot never starts later than the end of the pause, so no word is lost. Segments are changed in place."""
     for a, b, wa, wb in zip(segs, segs[1:], windows, windows[1:]):
@@ -65,8 +70,7 @@ def join_runs(segs, windows, ps, beat_s):
         end = a.clip_start_s + a.beats * beat_s; over = end - b.clip_start_s
         if over <= 1e-6: continue
         hi = next((h for lo, h in ps[wb._piece].get('pause_spans') or [] if lo - 1e-6 <= b.clip_start_s <= h + 1e-6), None)
-        if hi is None: continue
-        move = min(over, max(hi - b.clip_start_s, 0.0))
+        move = min(over, max(hi - b.clip_start_s, 0.0)) if hi is not None else min(over, beat_s)                  # a cut in a pause moves no further than the pause; a cut inside speech (busy footage) runs on exactly: the first shot's tail has the words the second would have started with
         if move > 1e-6: wb._start += move; b.clip_start_s = round(wb._start, 3); b.in_s = round(wb._start - b.cand.start_s, 3)
 
 
@@ -75,14 +79,14 @@ def _pauses(ls, a, b):
     ls = sorted(ls, key=lambda l: l['t0']); return [round((x['t1'] + y['t0']) / 2.0, 3) for x, y in zip(ls, ls[1:]) if y['t0'] - x['t1'] >= 0.25 and a < (x['t1'] + y['t0']) / 2.0 < b]
 
 
-def split_points(start, seconds, pauses, target=SPLIT_TARGET_S, floor=SPLIT_MIN_S):
-    """Where to cut a talking stretch [start, start + seconds] into shots of about `target` s: the pauses nearest to each multiple of the target, no shot under `floor`; [] when it is short or has no usable pause."""
-    if seconds < SPLIT_FROM_S or not pauses: return []
-    cuts = []; last = start
+def split_points(start, seconds, pauses, target=SPLIT_TARGET_S, floor=SPLIT_MIN_S, free=False):
+    """Where to cut a talking stretch [start, start + seconds] into shots of about `target` s: the pauses nearest to each multiple of the target, no shot under `floor`; [] when it is short or has no usable pause. With `free` (busy footage: quick cuts) a cut may also fall inside speech, half a second grid, a pause still preferred: the picture cuts and the clip's sound runs on."""
+    if seconds < SPLIT_FROM_S or not (pauses or free): return []
+    grid = [round(start + 0.5 * i, 3) for i in range(1, int(seconds / 0.5))] if free else []; cuts = []; last = start
     for k in range(1, int(seconds // target) + 1):
-        want = start + k * target; ok = [x for x in pauses if x - last >= floor and start + seconds - x >= floor]
+        want = start + k * target; ok = [x for x in list(pauses) + grid if x - last >= floor and start + seconds - x >= floor]
         if not ok: break
-        c = min(ok, key=lambda x: abs(x - want))
+        c = min(ok, key=lambda x: abs(x - want) + (0.0 if x in pauses else 0.8))                                          # a pause when there is one near, else anywhere (the picture cuts, the clip's sound runs on)
         if c > last: cuts.append(c); last = c
     return cuts
 
@@ -376,7 +380,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     for k, p in enumerate(ps):
         if p['kind'] == 'synthetic': continue                                                       # placed after the footage windows are planned (below)
         fp = foot[p['clip']]
-        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=snap_cuts(split_points(p['start'], p['seconds'], p.get('pauses') or [], target=SPLIT_TARGET_S * (0.5 + 0.5 * CH.calm((getattr(fp.candidate_at(p['start'], p['start'] + p['seconds']), 'features', None) or {}).get('steady')))), p.get('pause_spans') or [], p['start'], beat_s, end=p['start'] + p['seconds']) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
+        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=snap_cuts(split_points(p['start'], p['seconds'], p.get('pauses') or [], target=SPLIT_TARGET_S * (0.5 + 0.5 * CH.calm(_steady_of(fp, p))), free=CH.calm(_steady_of(fp, p)) < 0.7), p.get('pause_spans') or [], p['start'], beat_s, end=p['start'] + p['seconds']) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
         if p['kind'] == 'vo' and wins:                                                                  # the narration must have picture for as long as it is spoken
             short = p['seconds'] - sum(w[2] for w in wins)
             if short > 1e-6:

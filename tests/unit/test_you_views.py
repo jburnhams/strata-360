@@ -64,7 +64,8 @@ def plan_one(view, **ft):
 
 
 def test_a_requested_view_is_used_when_the_footage_has_it_and_said_not_to_be_when_it_does_not():
-    assert plan_one('close', you_close=0.9, you_far=0.9)[0] == 'selfie_close' and plan_one('far', you_close=0.9, you_far=0.9)[0] == 'selfie_far' and plan_one('mid', you_close=0.9, you_far=0.9)[0] == 'selfie_hold'
+    assert plan_one('far', you_close=0.9, you_far=0.9)[0] == 'selfie_far' and plan_one('mid', you_close=0.9, you_far=0.9)[0] == 'selfie_hold'
+    tech, warns = plan_one('close', you_close=0.9, you_far=0.9); assert tech != 'selfie_close' and any('close view of you was asked for' in w and 'mid view of you next to it' in w for w in warns)             # a lone window has no mid view next to it to glide with: the close view is only for the windows of a talking stretch cut into shots
     tech, warns = plan_one('far', you_close=0.9)
     assert tech != 'selfie_far' and any('far view of you was asked for' in w for w in warns)
 
@@ -109,7 +110,7 @@ def test_join_runs_starts_the_second_shot_where_the_first_ends_but_never_past_th
         wa, wb = NS(_piece=0, _start=10.0), NS(_piece=0, _start=start_b); SPL.join_runs([a, b], [wa, wb], [dict(pause_spans=spans)], 0.6); return b
     assert pair(15.7, [(15.4, 16.2)]).clip_start_s == 16.0                       # the first runs to 16.0 (10 beats of 0.6 s): the second starts there
     assert pair(15.7, [(15.4, 15.8)]).clip_start_s == 15.8                       # only to the end of the pause
-    assert pair(15.7, []).clip_start_s == 15.7                                   # no pause known: left alone
+    assert pair(15.7, []).clip_start_s == 16.0                                   # no pause (a cut inside speech, busy footage): the second shot runs straight on from the first
 
 
 def test_the_face_centre_comes_from_the_face_box_inside_the_person_box():

@@ -332,8 +332,13 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
         for noisy, sc, b, tid, d_ in nxt[:st.beam * 3]:
             t = lib[tid]; new.append(dict(score=noisy, true=sc, seq=b['seq'] + [tid], uses={**b['uses'], tid: b['uses'].get(tid, 0) + 1}, secs={**b['secs'], tid: b['secs'].get(tid, 0.0) + d_}, hero=b['hero'] + (d_ if t.hero else 0.0)))
         beams = sorted(new, key=lambda x: -x['score'])[:st.beam]
-    best = max(beams, key=lambda x: x['true']); out = []
-    for k, (w, tid) in enumerate(zip(windows, best['seq'])):
+    best = max(beams, key=lambda x: x['true']); out = []; seq = list(best['seq'])
+    for k, tid in enumerate(seq):                                                                          # a close view of you with no mid view next to it (the search had to relax its rules) is a mid view: it is for gliding in or out of one
+        if tid != 'selfie_close' or windows[k].fixed or st.tech_force.get(wids[k]) == 'selfie_close': continue
+        if not ((joined[k] and k > 0 and seq[k - 1] == 'selfie_hold') or (k + 1 < len(seq) and joined[k + 1] and seq[k + 1] == 'selfie_hold')) and any(o[0] == 'selfie_hold' for o in options[k]):
+            seq[k] = 'selfie_hold'
+            if getattr(windows[k], 'view', None) == 'close': warnings.append(f"{wids[k]}: the close view of you was asked for but there is no mid view of you next to it to glide with (the close view is for the windows of a talking stretch cut into shots); the planner chose the mid view")
+    for k, (w, tid) in enumerate(zip(windows, seq)):
         orig = getattr(w.cand, 'orig', None) or w.cand; cs = round(w.abs_start, 3)
         sg = Seg(start=starts[k], beats=w.beats, cand=orig, tech=lib[tid], in_s=round(cs - orig.start_s, 3), clip_index=w.clip_index, clip_start_s=cs, variant_seed=int(rng.integers(0, 2 ** 31 - 1)), forced=w.forced)
         sg._beat_s = beat_s; sg.parts = dict(wid=wids[k], speech=bool(getattr(w, 'speech', False)), options=[dict(tech=o[0], score=round(o[1], 3)) for o in options[k]], fixed=w.fixed, warnings=warnings if k == 0 else []); out.append(sg)

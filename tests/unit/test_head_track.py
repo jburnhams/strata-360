@@ -100,3 +100,11 @@ def test_dialogue_is_cut_into_shorter_shots_the_busier_the_footage():
     pauses = [float(x) for x in range(3, 40, 2)]
     calm_cuts = SPL.split_points(0.0, 40.0, pauses, target=SPL.SPLIT_TARGET_S); busy_cuts = SPL.split_points(0.0, 40.0, pauses, target=SPL.SPLIT_TARGET_S * 0.5)
     assert len(busy_cuts) > len(calm_cuts) and all(b - a >= SPL.SPLIT_MIN_S - 1e-9 for a, b in zip([0.0] + busy_cuts, busy_cuts + [40.0]))
+
+
+def test_a_face_is_clear_when_found_well_not_tilted_forward_and_not_in_profile():
+    from strata360.analysis import face_view as FV
+    face = lambda s, p, y: dict(box=[0, 0, 10, 10], score=s, pose=[p, y, 0.0])
+    assert FV.verdict(face(0.85, -25.4, 27.4))[0] == 1.0 and FV.verdict(face(0.86, -12.0, 5.4))[0] == 1.0 and FV.verdict(face(0.73, -30.7, 21.2))[0] == 1.0                    # the moments marked good (0023 at 0:10, 0:33, 2:40)
+    assert FV.verdict(face(0.65, -43.0, 74.5))[0] == 0.3 and FV.verdict(face(0.63, -74.0, 36.7))[0] == 0.3 and FV.verdict(face(0.72, -59.7, -28.9))[0] == 0.3                 # and bad (0:34 in profile, 0:35 and 2:41 looking down)
+    assert FV.verdict(face(0.4, -10.0, 0.0))[0] == 0.3 and FV.verdict(None) == (0.0, None, None) and FV.verdict(face(0.9, -20.0, -30.0)) == (1.0, -20.0, -30.0)
