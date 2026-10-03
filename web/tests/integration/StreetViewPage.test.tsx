@@ -68,7 +68,7 @@ describe('StreetViewPage', () => {
 
   it('shows the pictures of a 360° section when its marker on the map is clicked', async () => {
     serve(); setup(<StreetViewPage folder="/data" />)
-    await screen.findAllByRole('row'); fireEvent.click(screen.getByTitle('Mapillary 360° km 2.1 to 2.3'))
+    await screen.findAllByRole('row'); fireEvent.click(await screen.findByTitle('Mapillary 360° km 2.1 to 2.3'))
     expect(await screen.findByText(/A 360° camera/)).toBeInTheDocument(); expect(screen.getAllByRole('img').filter(i => i.getAttribute('alt')?.startsWith('Mapillary km'))).toHaveLength(2)
     expect(screen.getByText(/Rue A|Unnamed road/)).toBeInTheDocument()
   })
