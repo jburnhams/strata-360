@@ -51,6 +51,7 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+STREETVIEW_VIDEO_JOBS = {}    # (folder, section key) -> Popen of a running `strata360 streetview-video`
 STREETVIEW_JOBS = {}          # folder -> Popen of a running `strata360 streetview`
 PHOTO_JOBS = {}               # folder -> Popen of a running `strata360 photos-analyse`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
@@ -1033,6 +1034,42 @@ def create_app(roots, token=None):
         try: SV.set_choice(rd, key, choice)
         except ValueError as ex: raise HTTPException(400, str(ex))
         return dict(key=key, choice=None if choice == 'none' else choice)
+
+    def sv_section(f, key):
+        """The annotated street view section with this key, or a 404."""
+        from strata360 import streetview as SV
+        rd = config.race_dir(f); s = next((x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key), None)
+        if s is None: raise HTTPException(404, 'no such street view section')
+        return rd, s
+
+    def sv_video_state(f, key):
+        from strata360 import streetview as SV
+        rd, s = sv_section(f, key); job = STREETVIEW_VIDEO_JOBS.get((f, key)); running = bool(job and job.poll() is None); lines = []
+        try: lines = open(os.path.splitext(SV.video_path(rd, s))[0] + '.log', errors='replace').read().strip().splitlines()
+        except OSError: pass
+        fail = next((l for l in reversed(lines) if l.startswith('streetview-video:')), '')
+        return dict(exists=os.path.exists(SV.video_path(rd, s)), running=running, log=lines[-4:], error='' if running else fail[:400], seconds=SV.default_seconds(s))
+
+    @api.get('/api/streetview/video', dependencies=[Depends(auth)])
+    def get_streetview_video(folder: str, key: str):                                      # whether the section's preview video exists, is being made, or failed
+        return sv_video_state(folder_of(folder), key)
+
+    @api.post('/api/streetview/video', dependencies=[Depends(auth)])
+    def post_streetview_video(body: dict):                                                # {folder, key}: make the preview video in the background (nothing to do when it exists)
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd, s = sv_section(f, key)
+        if s['provider'] == 'google': raise HTTPException(400, "Google's terms do not allow its pictures in a video")
+        if os.path.exists(SV.video_path(rd, s)): return dict(started=False, reason='the video is already made')
+        if any(p.poll() is None for (ff, _), p in STREETVIEW_VIDEO_JOBS.items() if ff == f): return dict(started=False, reason='another preview video is being made')
+        out = SV.video_path(rd, s); os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
+        STREETVIEW_VIDEO_JOBS[(f, key)] = subprocess.Popen([*oslib.cli_command(), 'streetview-video', f, key], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/streetview/video/file')
+    def get_streetview_video_file(request: Request, folder: str, key: str):               # the video itself (a <video> cannot send headers: the cookie / query token authenticates)
+        from strata360 import streetview as SV
+        auth(request); rd, s = sv_section(folder_of(folder), key); p = SV.video_path(rd, s)
+        if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
+        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
 
     @api.get('/api/streetview/image')
     def get_streetview_image(request: Request, folder: str, provider: str, id: str, w: int = 640):   # one frame as a JPEG (an <img> cannot send headers: the cookie / query token authenticates); only frames the stage found can be asked for

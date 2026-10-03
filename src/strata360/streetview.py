@@ -373,13 +373,44 @@ def light(sec, tr):
     return dict(captured=cap, race=race, warning=warn)
 
 
+def passed(s, tr):
+    """[start, end] (epoch seconds) of the time the runner took over the section, from the race track."""
+    d, t = track_dist(tr); return [float(np.interp(s['km0'] * 1000, d, t)), float(np.interp(s['km1'] * 1000, d, t))]
+
+
 def annotate(rd, docs, tr=None):
     """Every section of the provider docs {provider: doc or None} (and, with the race track `tr`, the light they were filmed in against the race's there) with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
     out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']; qs = quality_of(rd)
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
+        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
+
+
+VIDEO_VERSION = 1                 # bumped when the camera changes so the preview videos are made again
+PREVIEW_MS = 25.0                 # the road speed a preview video plays at (m/s), within the clip lengths the section can make
+PREVIEW_SIZE = (960, 540)
+
+
+def default_seconds(s):
+    """How long the preview video of a section is: its stretch at PREVIEW_MS, held to what the section can play."""
+    lo, hi = clip_range(s); return round(max(lo, min(s['length_m'] / PREVIEW_MS, hi)), 1)
+
+
+def video_path(rd, s):
+    """Where the preview video of a (annotated) section is kept: named by the section and by what it is made from, so a changed section or camera gets a new one."""
+    h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}.mp4")
+
+
+def make_video(rd, s, log=print):
+    """Make the preview video of an (annotated) Mapillary or Panoramax section with the app's own camera, from the smaller copies of its pictures; kept (a finished one is not made again). Returns the path."""
+    from strata360.edit import streetview_cam as CAM
+    if s['provider'] == 'google': raise RuntimeError("Google's terms do not allow its pictures in a film or a video")
+    out = video_path(rd, s)
+    if os.path.exists(out): return out
+    roads = load(rd, 'roads') or {'stretches': []}; st = next((x for x in roads['stretches'] if x['id'] == s['stretch']), None)
+    CAM.fetch(rd, s, token=_key('MAPILLARY_TOKEN'), log=log, preview=True); os.makedirs(os.path.dirname(out), exist_ok=True)
+    CAM.render(rd, s, default_seconds(s), out, road=dict(line=st['line'], km0=st['km0']) if st else None, size=PREVIEW_SIZE, preview=True, log=log); return out
 
 
 def chosen(rd, docs):

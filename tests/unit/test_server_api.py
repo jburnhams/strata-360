@@ -637,3 +637,42 @@ class TestOverlaysAreMadeAgain(TestTracksCollection):
         os.makedirs(PA.adir(project.race_dir), exist_ok=True); o = os.path.join(PA.adir(project.race_dir), 'p1-overlay.jpg'); open(o, 'wb').write(b'x'); q = dict(folder=project.folder)
         client.post('/api/tracks', params=dict(q, filename='a.gpx'), content=self.gpx()); assert not os.path.exists(o)
         assert any('photos-analyse' in i.cmd and 'thumb_overlay' in i.cmd for i in fake_popen.instances)
+
+
+class TestStreetViewVideoApi(TestStreetViewApi):
+    def key(self, project):
+        self.make_docs(project); return 'mapillary:s:1.00'
+
+    def test_the_state_of_a_sections_video_and_making_it_in_the_background(self, client, project, fake_popen):
+        key = self.key(project); q = dict(folder=project.folder, key=key)
+        s = client.get('/api/streetview/video', params=q).json(); assert s['exists'] is False and s['running'] is False and s['error'] == '' and s['seconds'] >= 2
+        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key=key)).json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'streetview-video' in cmd and cmd[-1] == key
+        assert client.get('/api/streetview/video', params=q).json()['running'] is True
+        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key=key)).json()['started'] is False
+
+    def test_a_finished_video_is_served_and_not_made_again_and_a_failure_is_shown(self, client, project, fake_popen):
+        from strata360 import streetview as SV
+        key = self.key(project); q = dict(folder=project.folder, key=key); rd = project.race_dir
+        assert client.get('/api/streetview/video/file', params=q).status_code == 404
+        s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); p = SV.video_path(rd, s); os.makedirs(os.path.dirname(p)); open(p, 'wb').write(b'MP4DATA')
+        r = client.get('/api/streetview/video/file', params=q); assert r.status_code == 200 and r.content == b'MP4DATA' and r.headers['content-type'] == 'video/mp4'
+        assert client.get('/api/streetview/video', params=q).json()['exists'] is True and client.post('/api/streetview/video', json=dict(folder=project.folder, key=key)).json() == dict(started=False, reason='the video is already made')
+        os.remove(p); open(os.path.splitext(p)[0] + '.log', 'w').write('fetching\nstreetview-video: mapillary answered 500\n')
+        assert 'answered 500' in client.get('/api/streetview/video', params=q).json()['error']
+
+    def test_unknown_sections_and_google_are_refused(self, client, project):
+        from strata360 import streetview as SV
+        key = self.key(project); rd = project.race_dir
+        assert client.get('/api/streetview/video', params=dict(folder=project.folder, key='nope')).status_code == 404 and client.post('/api/streetview/video', json=dict(folder=project.folder, key='nope')).status_code == 404
+        g = dict(SV.load(rd, 'mapillary')['sections'][0], id='G1', provider='google', seq='g'); SV._save(rd, 'google', SV.provider_doc('google', [g], SV.load(rd, 'roads')))
+        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key=SV.section_key(g))).status_code == 400
+
+    def test_the_command_makes_the_video_or_says_why_not(self, project, monkeypatch, capsys):
+        import argparse
+        from strata360 import cli, streetview as SV
+        key = self.key(project); made = []; monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print: made.append(s['key']) or '/x.mp4')
+        cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key)); assert made == [key] and 'done: /x.mp4' in capsys.readouterr().out
+        with pytest.raises(SystemExit, match='no section nope'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key='nope'))
+        monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print: (_ for _ in ()).throw(RuntimeError('boom')))
+        with pytest.raises(SystemExit, match='streetview-video: boom'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key))

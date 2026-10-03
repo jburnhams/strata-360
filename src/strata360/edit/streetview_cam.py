@@ -221,10 +221,10 @@ def cached_ups(rd, section, imgs, n, preview=False):
     u = np.array([estimate_up(im) for im in (imgs if imgs is not None else [])]); np.save(f, u); return u
 
 
-def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print):
+def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False):
     """Write the clip of `section` (an entry of streetview.annotate with `items`) lasting `seconds` to `out` (H.264). The whole section is played through, so its pictures per second follow from the length. `road` is the stretch
-    {line: [[lat, lon], ...], km0} (for Panoramax headings). `encode_size`, e.g. (3840, 2160), scales the finished picture."""
-    rig = build(rd, section, road, size); prog, hs, view, n = rig.prog, rig.hs, rig.view, rig.n
+    {line: [[lat, lon], ...], km0} (for Panoramax headings). `encode_size`, e.g. (3840, 2160), scales the finished picture; `preview` uses the smaller copies of the pictures."""
+    rig = build(rd, section, road, size, preview); prog, hs, view, n = rig.prog, rig.hs, rig.view, rig.n
     L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); w, h = encode_size or size
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{size[0]}x{size[1]}', '-r', str(fps), '-i', '-'] + (['-vf', f'scale={w}:{h}:flags=lanczos'] if (w, h) != tuple(size) else []) + ['-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', out + '.part.mp4']
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)

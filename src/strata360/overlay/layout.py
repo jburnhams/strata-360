@@ -28,7 +28,7 @@ LINE = 36                                 # the distance between two lines of me
 ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the element keeps its distance from
     'profile': dict(kind='profile', height=120),
     'clock': dict(kind='clock', x=16, y=24),
-    'stage': dict(kind='stage', x=16, y=186),
+    'stage': dict(kind='stage', x=16, y=222),
     'distance': dict(kind='big', x=520, y=28, metric='dist', label='km'),
     'pace': dict(kind='big', x=190, y=700, v='bottom', metric='pace', label='min/km'),
     'altitude': dict(kind='stat', x=16, y=806, v='bottom', icon='mountain', metric='alt', label='Alt (m)'),
@@ -132,7 +132,7 @@ class Clock:
     def patches(self, t, v):
         c, e = self.c, self.el; x, y = e['x'], e['y']; start = float(c.series._pt[0]); lt = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(c.tz)
         k = c.cutoff_row                                                                                                  # with cut-offs set, a line of its own between the elapsed time and the day
-        out = [c.text(e, x, y, elapsed_text(t - start), LARGE), c.text(e, x, y + 54 + k, f'Day {race_day(start, t, c.tz)}', MEDIUM), c.text(e, x, y + 54 + LINE + k, lt.strftime('%Y/%m/%d  %H:%M:%S'), MEDIUM)]
+        out = [c.text(e, x, y, elapsed_text(t - start), LARGE), c.text(e, x, y + 54 + LINE + k, f'Day {race_day(start, t, c.tz)}', MEDIUM), c.text(e, x, y + 54 + 2 * LINE + k, lt.strftime('%Y/%m/%d  %H:%M:%S'), MEDIUM)]
         cut = c.race_cutoff()
         if cut is not None: out.append(c.text(e, x, y + 54, f'Cut-Off {elapsed_text(cut)}', MEDIUM))                      # the cut-off of the whole race, as a total time since the start
         return out
@@ -165,11 +165,12 @@ class Stage:
                 run = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; L = pr['route_m'] / 1000; p = float(np.interp(t, pr['t'], pr['prog'])) / 1000
                 cut = self.c.cutoffs.get('stage', {}).get(name)                                                  # the stage's cut-off, from leaving the previous checkpoint; with none set, the stage's total time
                 strayed = abs(run - p) > max(0.10 * max(run, p), 0.5)                                            # the run went off the route: what was actually run goes on a line of its own under the stage's distance
-                dist = f'{p:.1f}/{L:.1f} km' if strayed else f'{run:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
-                return out + [line(f'{dist}  ·  {_clock(min(t, b) - a)}/' + (_clock(cut - (a - self.c.cutoffs['start'])) if cut is not None else _clock(b - a)))] + ([line(f'Ran {run:.1f} km', 2)] if strayed else [])
-            if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
+                dist = f'{p:.1f} / {L:.1f} km' if strayed else f'{run:.1f} / {(self._dist(b) - self._dist(a)) / 1000:.1f} km'
+                spent = f'{_clock(min(t, b) - a)} / ' + (_clock(cut - (a - self.c.cutoffs['start'])) if cut is not None else _clock(b - a))
+                return out + [line(spent), line(dist, 2)] + ([line(f'Ran {run:.1f} km', 3)] if strayed else [])                 # the time on the stage, then its distance, then (if the run strayed) what was run
+            if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f} / {(self._dist(b) - self._dist(a)) / 1000:.1f} km'
             else: km = f'{(self._dist(a) - self._dist(self.times[1] if len(self.times) > 1 else a)) / 1000:.1f} km'          # the way from the start of the run to the checkpoint
-            out.append(line(f'{km}  ·  {_hm(max(0.0, min(t, b) - a))} / {_hm(b - a)}'))
+            out += [line(f'{_hm(max(0.0, min(t, b) - a))} / {_hm(b - a)}'), line(km, 2)]                                       # the time first, then the distance
         elif name == 'Before Race' and len(self.times) > 1: out.append(line('-' + _hm(self.times[1] - t) if self.times[1] - t >= 60 else '0m'))           # the time to the start
         elif name == 'After Race': out.append(line('+' + _hm(t - self.times[i]) if t - self.times[i] >= 60 else '0m'))                                # the time since the end of the run
         return out
@@ -185,10 +186,11 @@ class Big:
             d = self.c.series.cols['dist_m']; d = d[np.isfinite(d)]
             if len(d): val = 0.0 if t <= float(self.c.series._pt[0]) else float(d[-1])
         big = fmt(e['metric'], val); out = [self.c.text(e, e['x'], e['y'], big, LARGE, align='right')]; re_ = self.c.route_elapsed(t) if e['metric'] == 'dist' else None
-        if re_ is not None:                                                                                              # with routes: instead of the small km, how far along the routes (all stages added up) of their whole length, under the start of the big figure (it carries the km)
-            left = e['x'] - self.c._text[(big, LARGE, False)][2] / self.c.s
-            out += [self.c.icon(e, 'flag', left, e['y'] + 56, MEDIUM), self.c.text(e, left + MEDIUM + 6, e['y'] + 56, f'{re_[0] / 1000:.1f} / {re_[1] / 1000:.1f} km', MEDIUM, label=True)]       # the finish flag: how far along the routes of their whole length
+        if e['metric'] == 'dist': out.append(self.c.text(e, e['x'] + 8, e['y'] + 18, e['label'], MEDIUM, label=True))                                    # the unit follows the big figure, in medium text
         else: out.append(self.c.text(e, e['x'], e['y'] + 56, e['label'], MEDIUM, label=True, align='right'))
+        if re_ is not None:                                                                                              # with routes: under the start of the big figure, how far along the routes (all stages added up) of their whole length, and a finish flag at the end of it
+            left = e['x'] - self.c._text[(big, LARGE, False)][2] / self.c.s; line = f'{re_[0] / 1000:.1f} / {re_[1] / 1000:.1f}'
+            out += [self.c.text(e, left, e['y'] + 56, line, MEDIUM, label=True), self.c.icon(e, 'flag', left + self.c._text[(line, MEDIUM, True)][2] / self.c.s + 8, e['y'] + 56, MEDIUM)]
         return out
 
 

@@ -1,5 +1,5 @@
 """Which street view sections are worth showing, which overlap, what was chosen (and its label), and the range of clip lengths each can make."""
-import json
+import json, os
 import pytest
 
 from strata360 import streetview as SV
@@ -126,3 +126,38 @@ class TestQualityStage:
         with pytest.raises(RuntimeError, match='roads stage first'): SV.run(str(tmp_path), {}, ['quality'])
         rd = str(tmp_path / 'p'); self.setup_docs(rd); monkeypatch.setattr(SV, '_key', lambda n: None); SV.run(rd, {}, ['quality'], measure=lambda *a, **k: dict(score=50, psnr=1, jerk=1, roll=1), fetch=lambda *a, **k: None)
         assert 'MAPILLARY_TOKEN' in SV.quality_of(rd)['mapillary:a:1.00']['error']
+
+
+class TestTimesAndVideo:
+    def section(self, **kw): return sec('M1', km0=1.0, km1=1.3, items=[dict(id='a', km=1.0, lat=50.13, lon=5.79, t=1_709_812_800), dict(id='b', km=1.3, lat=50.13, lon=5.79, t=1_709_812_830)], **kw)
+
+    def track(self, t0=1_726_401_600):
+        import numpy as np
+        n = 3000; d = 3.0 * np.arange(n); return dict(t=t0 + np.arange(n), lat=50.13 + d / 111195.0, lon=np.full(n, 5.79), dist=d)
+
+    def test_each_section_has_when_it_was_filmed_and_when_the_runner_passed_it(self, tmp_path):
+        out = SV.annotate(str(tmp_path), {'mapillary': doc(self.section())}, self.track())[0]
+        assert out['filmed'] == [1_709_812_800, 1_709_812_830] and out['passed'] == [pytest.approx(1_726_401_600 + 1000 / 3.0), pytest.approx(1_726_401_600 + 1300 / 3.0)]
+        bare = SV.annotate(str(tmp_path), {'mapillary': doc(sec('M1'))})[0]; assert bare['filmed'] is None and bare['passed'] is None
+
+    def test_the_preview_video_of_a_section_is_named_by_what_it_is_made_from(self, tmp_path):
+        rd = str(tmp_path); a = SV.annotate(rd, {'mapillary': doc(self.section())})[0]; p = SV.video_path(rd, a)
+        assert p.endswith('.mp4') and os.path.join('streetview', 'video', 'M1-') in p and SV.video_path(rd, a) == p and a['has_video'] is False
+        assert SV.video_path(rd, dict(a, frames=a['frames'] + 1)) != p and SV.video_path(rd, dict(a, key='other')) != p
+        os.makedirs(os.path.dirname(p)); open(p, 'wb').write(b'x'); assert SV.annotate(rd, {'mapillary': doc(self.section())})[0]['has_video'] is True
+
+    def test_the_preview_is_the_stretch_at_road_speed_held_to_what_the_section_can_play(self):
+        assert SV.default_seconds(sec('M1', km0=1.0, km1=1.4, length_m=400, frames=80)) == 16.0 and SV.default_seconds(sec('M1', length_m=100, frames=80)) == 4.0
+        assert SV.default_seconds(sec('M1', length_m=2000, frames=40)) == 10.0 and SV.default_seconds(sec('M1', length_m=10, frames=80)) == 2.0
+
+    def test_making_the_video_fetches_the_small_pictures_renders_once_and_refuses_google(self, tmp_path, monkeypatch):
+        from strata360.edit import streetview_cam as CAM
+        rd = str(tmp_path); roads = dict(schema=1, id='r', stretches=[dict(id='R1', km0=0.5, km1=3.0, length_m=2500, highways=[], names=[], line=[[1, 1], [1, 2]])], run=[], total_km=4)
+        SV._save(rd, 'roads', roads); a = SV.annotate(rd, {'mapillary': doc(self.section())})[0]; calls = []
+        monkeypatch.setattr(SV, '_key', lambda n: 'tok')
+        monkeypatch.setattr(CAM, 'fetch', lambda rd_, s_, token=None, log=print, preview=False: calls.append(('fetch', s_['id'], token, preview)))
+        def render(rd_, s_, seconds, out, road=None, size=None, preview=False, log=print): calls.append(('render', seconds, road, size, preview)); open(out, 'wb').write(b'mp4')
+        monkeypatch.setattr(CAM, 'render', render)
+        out = SV.make_video(rd, a); assert os.path.exists(out) and calls == [('fetch', 'M1', 'tok', True), ('render', SV.default_seconds(a), dict(line=[[1, 1], [1, 2]], km0=0.5), (960, 540), True)]
+        assert SV.make_video(rd, a) == out and len(calls) == 2                                                                         # kept: not made again
+        with pytest.raises(RuntimeError, match='terms'): SV.make_video(rd, dict(a, provider='google'))
