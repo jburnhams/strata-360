@@ -414,7 +414,7 @@ class TestCutoffsOnTheOverlay:
         def spy(s, *a, **kw): seen.append((s, kw.get('fill'))); return real(s, *a, **kw)
         monkeypatch.setattr(D, 'text', spy); return seen
 
-    def test_the_cut_of_the_control_ahead_is_always_shown_in_red_beside_the_day(self, series, tiles, monkeypatch):
+    def test_the_cut_off_of_the_control_ahead_is_always_shown_in_red_on_its_own_line(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); RED = (235, 40, 40)
         for dt_, want in ((-30, '0:20:00'), (50, '0:20:00'), (200, '0:20:00'), (550, '0:20:00'), (650, '0:40:00'), (900, '1:00:00')):         # before the start and at stage 1: its end; the checkpoint itself; stage 2: its end; after: the finish
             seen.clear(); ov = self.ov(series, tiles, ['clock'], self.cut); ov.patches(T0 + dt_); assert (f'CUT-OFF {want}', RED) in seen, (dt_, seen)
@@ -425,3 +425,9 @@ class TestCutoffsOnTheOverlay:
         self.ov(series, tiles, ['stage'], self.cut).patches(T0 + 400)                       # 300 s into stage 1, which started at T0 + 100; its cut-off is 1200 s after the start of the run: 1100 s for the stage
         assert ('5m', (255, 255, 255)) in seen and ('18m', RED) in seen and '8m' not in [x for x, _ in seen]
         seen.clear(); self.ov(series, tiles, ['stage']).patches(T0 + 400); assert ('5m', (255, 255, 255)) in seen and not [1 for _, f in seen if f == RED]            # no cut-off: just the time so far
+
+    def test_the_cut_off_line_sits_between_the_elapsed_time_and_the_day_and_pushes_the_rest_down(self, series, tiles):
+        ys = lambda ov: [p[1] for p in ov.patches(T0 + 200)]
+        with_cut = ys(self.ov(series, tiles, ['clock'], self.cut)); without = ys(self.ov(series, tiles, ['clock']))
+        assert len(with_cut) == 4 and len(without) == 3
+        elapsed, cut, day, date = sorted(with_cut); assert elapsed < cut < day < date and without[0] == elapsed - 0 and day > without[1] and date > without[2]       # (the day and date are lower than without a cut-off line)

@@ -54,7 +54,7 @@ METRIC = dict(dist='dist_m', pace='pace_s_km', alt='alt_m', slope='slope_pct', h
 class _Ctx:
     """What the widgets share: frame size and scale, fonts, the series, the tiles, the time zone and a cache of drawn text."""
     def __init__(self, series, size, st, tz, tiles, stages=(), progress=None, cutoffs=None):
-        self.stages = list(stages); self.progress = progress or {}; self.cutoffs = cutoffs or {}; self._rs = None; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
+        self.stages = list(stages); self.progress = progress or {}; self.cutoffs = cutoffs or {}; self.cutoff_row = 28 if self.cutoffs else 0; self._rs = None; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
         self._tiles = tiles if callable(tiles) and not isinstance(tiles, Tiles) else (lambda style: tiles) if tiles is not None else None; self._made = {}
         self.vfont, self.lfont = st.get('font') or D.VALUE_FONT, st.get('label_font') or st.get('font') or D.LABEL_FONT; self._text = {}
 
@@ -134,9 +134,10 @@ class Clock:
 
     def patches(self, t, v):
         c, e = self.c, self.el; x, y = e['x'], e['y']; start = float(c.series._pt[0]); lt = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(c.tz)
-        day = f'DAY {race_day(start, t, c.tz)}'; out = [c.text(e, x, y, elapsed_text(t - start), 52), c.text(e, x, y + 62, day, 32), c.text(e, x, y + 104, lt.strftime('%Y/%m/%d  %H:%M:%S'), 22)]
+        k = c.cutoff_row                                                                                                  # with cut-offs set, a line of its own between the elapsed time and the day
+        out = [c.text(e, x, y, elapsed_text(t - start), 52), c.text(e, x, y + 62 + k, f'DAY {race_day(start, t, c.tz)}', 32), c.text(e, x, y + 104 + k, lt.strftime('%Y/%m/%d  %H:%M:%S'), 22)]
         cut = c.cutoff_ahead(t)
-        if cut is not None: out += c.runs(e, x + c._text[(day, 32, False)][2] / c.s + 16, y + 70, [(f'CUT-OFF {elapsed_text(cut)}', (235, 40, 40))], 22)                    # the cut-off ahead, as a total time since the start, in red beside the day
+        if cut is not None: out += c.runs(e, x, y + 58, [(f'CUT-OFF {elapsed_text(cut)}', (235, 40, 40))], 24)                      # the cut-off ahead, as a total time since the start, in red
         return out
 
 
@@ -154,7 +155,7 @@ class Stage:
 
     def patches(self, t, v):
         if not self.times: return []
-        e = self.el; i = max(0, bisect.bisect_right(self.times, t) - 1); name = self.names[i]; out = [self.c.text(e, e['x'], e['y'], name.upper(), 30)]
+        e = {**self.el, 'y': self.el['y'] + self.c.cutoff_row}; i = max(0, bisect.bisect_right(self.times, t) - 1); name = self.names[i]; out = [self.c.text(e, e['x'], e['y'], name.upper(), 30)]
         if name.startswith(('Stage', 'Checkpoint')) and i + 1 < len(self.times):
             a, b = self.times[i], self.times[i + 1]                                                                # a stage runs to the next checkpoint's arrival, a checkpoint to the departure
             pr = self.c.progress.get(name) if name.startswith('Stage') else None
