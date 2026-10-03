@@ -219,6 +219,7 @@ function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string
               <span className={s.steadied === 'by matching only' ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}>steadied: {s.steadied}{s.steadied === 'by matching only' ? ' (may still wobble)' : ''}</span>
               {s.label && <span className="rounded bg-emerald-700 px-1.5 text-xs text-white">called {s.label} in the script</span>}
             </div>
+            {s.light?.warning && <p className="text-xs font-medium text-red-700 dark:text-red-400" role="note" data-light>⚠ {s.light.warning}</p>}
             {s.overlaps.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               <ul className="flex gap-1">{previews(s).filter((_, i, a) => a.length <= 3 || i % Math.ceil(a.length / 3) === 0).slice(0, 3).map(({ it, label }) => <li key={it.id}><img loading="lazy" src={api.streetviewImage(folder, s.provider, it.id, 256)} alt={`${NAME[s.provider]} ${s.id} ${label}`} className="h-16 w-24 rounded object-cover" /></li>)}</ul>

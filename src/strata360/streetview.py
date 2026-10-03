@@ -326,12 +326,25 @@ def set_choice(rd, key, choice):
     os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(st, open(tmp, 'w'), indent=1); os.replace(tmp, p); return choice
 
 
-def annotate(rd, docs):
-    """Every section of the provider docs {provider: doc or None} with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
+BRIGHT, DARK = {'day', 'golden hour'}, {'twilight', 'night'}
+
+
+def light(sec, tr):
+    """The light a section was filmed in against the light the runner had there: {captured, race, warning}. The warning says so when a daytime view would be shown for a stretch run in the dark (or the other way round); None when they fit or are unknown. `tr` is the race track."""
+    from strata360.gps import context as X, clock as CK
+    d, t = track_dist(tr); mid = sec['items'][len(sec['items']) // 2]; caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap_t = caps[len(caps) // 2] if caps else None
+    race_t = float(np.interp((sec['km0'] + sec['km1']) / 2 * 1000, d, t)); day = lambda tt: X.daylight(CK.sun_elevation_deg(mid['lat'], mid['lon'], tt)) if tt else None; cap, race = day(cap_t), day(race_t); warn = None
+    said = {'day': 'in daylight', 'golden hour': 'in golden-hour light', 'twilight': 'at twilight', 'night': 'at night'}
+    if (cap in BRIGHT and race in DARK) or (cap in DARK and race in BRIGHT): warn = f'Filmed {said[cap]}, but the runner passes here {said[race]}: it would look wrong in the film.'
+    return dict(captured=cap, race=race, warning=warn)
+
+
+def annotate(rd, docs, tr=None):
+    """Every section of the provider docs {provider: doc or None} (and, with the race track `tr`, the light they were filmed in against the race's there) with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
     out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['steadied'] = steadying(s); s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
+        s['steadied'] = steadying(s); s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
 
 

@@ -173,8 +173,13 @@ def road_xy(line):
     xy = np.stack([(p[:, 1] - p[0, 1]) * math.cos(math.radians(la0)) * 111320, (p[:, 0] - la0) * 111320], 1); return np.concatenate([[0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]), xy
 
 
-def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print):
-    """Write the clip of `section` (an entry of streetview.annotate with `items`) lasting `seconds` to `out` (H.264). The whole section is played through, so its pictures per second follow from the length. `road` is the stretch {line: [[lat, lon], ...], km0} (for Panoramax headings). `encode_size`, e.g. (3840, 2160), scales the finished picture."""
+class Rig:
+    """What a section's camera needs: the pictures facing the way the runner went (`items`), how far along each is (`prog`, metres), the heading wanted at each (`hs`) and `view(i, yaw)`, the steady view out of picture i looking at compass `yaw`."""
+    def __init__(self, items, prog, hs, view): self.items, self.prog, self.hs, self.view, self.n = items, prog, hs, view, len(items)
+
+
+def build(rd, section, road=None, size=OUT):
+    """The camera rig for a section (see Rig); the maths depends on the kind of picture (module notes). Raises ValueError when there are too few pictures, RuntimeError when one has not been fetched."""
     its = forward_items(section)
     if len(its) < 8: raise ValueError(f"{section['id']}: only {len(its)} pictures face the way the runner went")
     prov = section['provider']; imgs = {}
@@ -194,11 +199,28 @@ def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=N
     elif section['kind'] == '360':
         if not road: raise ValueError('a Panoramax 360 section needs the road (its line and where it starts) to aim along')
         meta = json.load(open(meta_path(rd, section))); rp, rxy = road_xy(road['line']); rp = rp + road['km0'] * 1000.0; prog = km
-        ups = np.array([estimate_up(img(i)) for i in range(n)]); ups = gaussian_filter1d(ups, SIGMA_UP, axis=0, mode='nearest'); ups /= np.linalg.norm(ups, axis=1, keepdims=True)
+        ups = cached_ups(rd, section, [img(i) for i in range(n)], n); ups = gaussian_filter1d(ups, SIGMA_UP, axis=0, mode='nearest'); ups /= np.linalg.norm(ups, axis=1, keepdims=True)
         hs = smooth_heading([heading_along(rp, rxy, p, LOOK_M) for p in prog], SIGMA_HEADING['panoramax']); comp = [meta[it['id']]['compass_angle'] or 0.0 for it in its]; view = lambda i, yaw: reproject(img(i), view_in_picture(ups[i], comp[i], yaw), FOV, size)
     else:
         prog = km; shifts = steady_flat([img(i) for i in range(n)]); view = lambda i, yaw: flat_view(img(i), shifts[i], size)
         hs = np.zeros(n)
+    return Rig(its, prog, hs, view)
+
+
+def ups_path(rd, section): return meta_path(rd, section) + '.ups.npy'
+
+
+def cached_ups(rd, section, imgs, n):
+    """The estimated 'up' of each Panoramax picture, kept beside the pictures (the search takes seconds a picture)."""
+    f = ups_path(rd, section)
+    if os.path.exists(f) and len(np.load(f)) == n: return np.load(f)
+    u = np.array([estimate_up(im) for im in (imgs if imgs is not None else [])]); np.save(f, u); return u
+
+
+def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print):
+    """Write the clip of `section` (an entry of streetview.annotate with `items`) lasting `seconds` to `out` (H.264). The whole section is played through, so its pictures per second follow from the length. `road` is the stretch
+    {line: [[lat, lon], ...], km0} (for Panoramax headings). `encode_size`, e.g. (3840, 2160), scales the finished picture."""
+    rig = build(rd, section, road, size); prog, hs, view, n = rig.prog, rig.hs, rig.view, rig.n
     L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); w, h = encode_size or size
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{size[0]}x{size[1]}', '-r', str(fps), '-i', '-'] + (['-vf', f'scale={w}:{h}:flags=lanczos'] if (w, h) != tuple(size) else []) + ['-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', out + '.part.mp4']
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)

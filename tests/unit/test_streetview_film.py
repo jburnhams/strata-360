@@ -13,7 +13,7 @@ SECTION = dict(id='M1', provider='mapillary', stretch='R1', kind='360', km0=1.0,
 
 
 def sv_clip(label='V1', must=False, start='2026-02-22T10:01:30Z', **facts):
-    f = dict(source='mapillary', camera='a 360 camera', km0=1.0, km1=1.39, length_m=390, pictures=40, spacing_m=10.0, min_s=2.0, max_s=10.0, years=[2024], captured='Thu 07 Mar 2024 18:44', captured_light='day', race_light='day', same_road=[]); f.update(facts)
+    f = dict(source='mapillary', camera='a 360 camera', km0=1.0, km1=1.39, length_m=390, pictures=40, spacing_m=10.0, min_s=2.0, max_s=10.0, years=[2024], captured='Thu 07 Mar 2024 18:44', same_road=[]); f.update(facts)
     return dict(label=label, clip=label, start_utc=start, duration_s=4.0, usable_s=10.0, usable=[(2.0, 10.0)], synthetic=True, streetview=True, race_s=300.0, speedup=75.0, scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
                 settings=dict(kind=None, mode=None, seconds=None, must=must), planned=None, sv_facts=f, km=1.0, local='2026-02-22 10:01', track='km 1.0 of the run')
 
@@ -27,16 +27,16 @@ class TestPack:
         out = SP.streetview_clips(project.folder, tr, 'Europe/Brussels'); assert [c['label'] for c in out] == ['V1']
         c = out[0]; f = c['sv_facts']
         assert c['synthetic'] and c['streetview'] and c['settings']['must'] is True and c['duration_s'] == 2.7 and c['usable_s'] == 10.0 and c['race_s'] == pytest.approx(130.0, abs=2) and c['speedup'] == pytest.approx(48.1, abs=1)
-        assert f['camera'] == 'a 360 camera' and (f['min_s'], f['max_s']) == (2.0, 10.0) and f['pictures'] == 40 and f['captured'] and f['race_light'] and 'km' in c['track'] and f['same_road'] == []
+        assert f['camera'] == 'a 360 camera' and (f['min_s'], f['max_s']) == (2.0, 10.0) and f['pictures'] == 40 and f['captured'] and 'km' in c['track'] and f['same_road'] == []
         assert SP.streetview_clips(project.folder, None, 'UTC') == []
 
     def test_nothing_chosen_means_no_street_view_clips(self, project): assert SP.streetview_clips(project.folder, race_track(), 'UTC') == []
 
     def test_the_prompt_describes_the_view_its_length_range_and_the_light(self):
-        text = SP.render(dict(race={}, clips=[sv_clip(), sv_clip('V2', must=True, captured_light='day', race_light='night', same_road=['V1'], camera='a flat camera facing forward')], music=None), with_usable=False) if False else SP.render(dict(race={}, clips=[sv_clip(), sv_clip('V2', must=True, captured_light='day', race_light='night', same_road=['V1'])], music=None))
-        assert '=== STREET VIEW V1: 4.0 s long' in text and 'NO FOOTAGE: a steady view along the road' in text and 'streetview item of 2 to 10 s' in text and 'filmed in day; the runner passes it in day.' in text
+        text = SP.render(dict(race={}, clips=[sv_clip(), sv_clip('V2', must=True, captured_light='day', race_light='night', same_road=['V1'], camera='a flat camera facing forward')], music=None), with_usable=False) if False else SP.render(dict(race={}, clips=[sv_clip(), sv_clip('V2', must=True, same_road=['V1'])], music=None))
+        assert '=== STREET VIEW V1: 4.0 s long' in text and 'NO FOOTAGE: a steady view along the road' in text and 'streetview item of 2 to 10 s' in text
         v1, v2 = text.split('=== STREET VIEW V2')[0], text.split('=== STREET VIEW V2')[1]
-        assert 'MUST INCLUDE' not in v1 and 'THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE)' in v2 and 'USE IT ONLY IF THAT FITS THE STORY' in v2 and 'covers the same road as V1: use at most one' in v2 and 'the runner says nothing' not in text
+        assert 'MUST INCLUDE' not in v1 and 'THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE)' in v2 and 'covers the same road as V1: use at most one' in v2 and 'the runner says nothing' not in text and 'daylight' not in text.lower().split('=== street view v1')[1] and 'night' not in text.lower().split('=== street view v1')[1]                              # (the light is a warning on the page, not something the writer is told)
 
 
 class TestScript:
@@ -60,7 +60,7 @@ class TestScript:
         assert not any('same road' in p for p in SD.check(dict(items=[dict(type='streetview', clip='V1', seconds=4)]), pack, 20.0, 150.0)[1])
 
     def test_the_instructions_describe_the_streetview_item(self):
-        assert '- "streetview": a steady view along the road' in SD.SYSTEM and '"type": "streetview", "clip": "V1"' in SD.SCHEMA and 'a view filmed in the day looks wrong in the dark' in SD.SYSTEM
+        assert '- "streetview": a steady view along the road' in SD.SYSTEM and '"type": "streetview", "clip": "V1"' in SD.SCHEMA and 'dark' not in SD.SYSTEM.split('"streetview"')[1].split('\n')[0]
         script = dict(items=[dict(type='streetview', clip='V1', seconds=6.04)]); assert SD.resolve(script, self.pack(), 150.0)['items'][0]['seconds'] == 6.0
 
 

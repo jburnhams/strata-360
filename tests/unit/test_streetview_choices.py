@@ -56,3 +56,35 @@ class TestChoices:
 
     def test_a_chosen_section_that_is_not_plausible_is_not_passed_on(self, tmp_path):
         rd = str(tmp_path); b = sec('P1', provider='panoramax', frames=10); SV.set_choice(rd, SV.section_key(b), 'must'); assert SV.chosen(rd, {'panoramax': doc(b)}) == []
+
+
+import datetime as dt
+
+
+def utc(*a): return dt.datetime(*a, tzinfo=dt.timezone.utc).timestamp()
+
+
+class TestLight:
+    DAY = utc(2024, 3, 7, 12)
+
+    def section(self): return sec('M1', items=[dict(id='a', km=1.0, lat=50.13, lon=5.79, t=self.DAY), dict(id='b', km=1.2, lat=50.13, lon=5.79, t=self.DAY + 5), dict(id='c', km=1.3, lat=50.13, lon=5.79, t=self.DAY + 9)])
+
+    def track(self, t0):
+        import numpy as np
+        n = 3000; d = 3.0 * np.arange(n); return dict(t=t0 + np.arange(n), lat=50.13 + d / 111195.0, lon=np.full(n, 5.79), dist=d)
+
+    def test_a_daytime_view_for_a_stretch_run_in_the_dark_is_warned_about(self):
+        out = SV.light(self.section(), self.track(utc(2024, 9, 15, 22)))            # the run is at midnight local time, a kilometre in
+        assert out['captured'] == 'day' and out['race'] == 'night' and out['warning'] == 'Filmed in daylight, but the runner passes here at night: it would look wrong in the film.'
+
+    def test_no_warning_when_the_light_fits_or_is_unknown(self):
+        noon = SV.light(self.section(), self.track(utc(2024, 9, 15, 11))); assert noon['race'] in ('day', 'golden hour') and noon['warning'] is None
+        undated = sec('M1', items=[dict(id='a', km=1.0, lat=50.13, lon=5.79), dict(id='b', km=1.3, lat=50.13, lon=5.79)]); assert SV.light(undated, self.track(utc(2024, 9, 15, 11)))['captured'] is None and SV.light(undated, self.track(utc(2024, 9, 15, 22)))['warning'] is None
+
+    def test_a_night_view_for_a_stretch_run_in_the_day_is_warned_about(self):
+        s = self.section(); s['items'] = [dict(i, t=utc(2024, 3, 7, 0)) for i in s['items']]                    # filmed at midnight
+        out = SV.light(s, self.track(utc(2024, 9, 15, 11))); assert out['captured'] == 'night' and out['warning'] == 'Filmed at night, but the runner passes here in daylight: it would look wrong in the film.'
+
+    def test_annotate_adds_the_light_when_it_has_the_track(self, tmp_path):
+        docs = {'mapillary': doc(self.section())}; assert SV.annotate(str(tmp_path), docs)[0]['light'] is None
+        assert SV.annotate(str(tmp_path), docs, self.track(utc(2024, 9, 15, 22)))[0]['light']['warning']

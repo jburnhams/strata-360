@@ -990,12 +990,17 @@ def create_app(roots, token=None):
         fail = next((l for l in reversed(lines) if l.startswith('streetview:')), '')
         return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
 
+    def sv_track(f):
+        """The race track for working out the light at a section, or None when there is none."""
+        try: return loaded_raw_track(f)
+        except HTTPException: return None
+
     @api.get('/api/streetview', dependencies=[Depends(auth)])
     def get_streetview(folder: str):                                                     # the road stretches, each provider's sections of imagery, what stage is done, the running job, and which keys are set
         from strata360 import streetview as SV
         from strata360.edit import llm_remote as LR
         f = folder_of(folder); rd = config.race_dir(f); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}
-        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
+        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs, sv_track(f)), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
 
     @api.post('/api/streetview/run', dependencies=[Depends(auth)])
     def post_streetview_run(body: dict):                                                 # {folder, stages?: [..], force?}: make the stages in the background at the lowest priority

@@ -123,6 +123,16 @@ describe('the sections that could be used in the film', () => {
     const rows = screen.getAllByRole('row'); expect(rows[1]).toHaveTextContent('P1'); expect(within(rows[1]).getByText('P1')).toHaveClass('text-amber-700')
   })
 
+  it('warns when a daytime view is for a stretch run in the dark, and still lets you choose it', async () => {
+    const sv = makeStreetView(); sv.sections[0].light = { captured: 'day', race: 'night', warning: 'Filmed in daylight, but the runner passes here at night: it would look wrong in the film.' }; serve(sv); setup(<StreetViewPage folder="/data" />)
+    const w = await screen.findByText(/Filmed in daylight, but the runner passes here at night/); expect(w).toHaveAttribute('data-light'); expect(screen.getByLabelText('Must include')).toBeEnabled()
+  })
+
+  it('shows no light warning when the light fits', async () => {
+    const sv = makeStreetView(); sv.sections[0].light = { captured: 'day', race: 'day', warning: null }; serve(sv); setup(<StreetViewPage folder="/data" />)
+    await screen.findByLabelText('Sections that could be used'); expect(document.querySelector('[data-light]')).toBeNull()
+  })
+
   it('reports a failure to save the choice', async () => {
     serve(); server.use(http.post('/api/streetview/choice', () => HttpResponse.json({ detail: 'no such street view section' }, { status: 404 })))
     const { user } = setup(<StreetViewPage folder="/data" />); await user.click(await screen.findByLabelText('Possible')); expect(await screen.findByRole('alert')).toHaveTextContent(/404|no such/)

@@ -154,7 +154,7 @@ def streetview_clips(folder, tr, tz):
     import datetime as dt
     import numpy as np
     from strata360 import streetview as SV
-    from strata360.gps import context as X, clock as CK
+    from strata360.gps import context as X
     from strata360.pipeline import config
     rd = config.race_dir(folder); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; ch = SV.chosen(rd, docs)
     if not ch or tr is None: return []
@@ -162,9 +162,8 @@ def streetview_clips(folder, tr, tz):
     for sec in ch:
         t0 = float(np.interp(sec['km0'] * 1000, dist, ts)); t1 = float(np.interp(sec['km1'] * 1000, dist, ts)); tm = (t0 + t1) / 2; mid = sec['items'][len(sec['items']) // 2]; dur = round(min(max(sec['frames'] / SV.PLAY_FPS, sec['min_s']), sec['max_s']), 1)
         caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap = caps[len(caps) // 2] if caps else None
-        def day(t): return X.daylight(CK.sun_elevation_deg(mid['lat'], mid['lon'], t)) if t else None
         f = dict(source=sec['provider'], camera='a 360 camera' if sec['kind'] == '360' else 'a flat camera facing ' + ', '.join(k for k, v in (sec.get('angles') or {}).items() if v), km0=sec['km0'], km1=sec['km1'], length_m=sec['length_m'], pictures=sec['frames'], spacing_m=sec['spacing_m'],
-                 min_s=sec['min_s'], max_s=sec['max_s'], years=sec['years'], captured=X._local(cap, tz).strftime('%a %d %b %Y %H:%M') if cap else None, captured_light=day(cap), race_light=day(tm), same_road=[c['label'] for c in ch if c['id'] in sec['overlaps'] and c['id'] in by_id])
+                 min_s=sec['min_s'], max_s=sec['max_s'], years=sec['years'], captured=X._local(cap, tz).strftime('%a %d %b %Y %H:%M') if cap else None, same_road=[c['label'] for c in ch if c['id'] in sec['overlaps'] and c['id'] in by_id])
         d = dict(label=sec['label'], clip=sec['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=sec['max_s'], usable=[(sec['min_s'], sec['max_s'])], synthetic=True, streetview=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
                  settings=dict(kind=None, mode=None, seconds=None, must=sec['choice'] == 'must'), planned=None, sv_facts=f)
         ctx = X.context_at(tr, t0, t1, tz); d['track'] = X.describe(ctx)
@@ -255,8 +254,7 @@ def render(pack, with_usable=False, marks=None):
         elif c.get('streetview'):
             f = c.get('sv_facts') or {}; same = f.get('same_road') or []
             L.append(f"NO FOOTAGE: a steady view along the road, made from street-level pictures ({f.get('source')}, {f.get('camera')}, taken {f.get('captured') or 'at an unknown time'}). It covers km {f.get('km0')} to {f.get('km1')} ({f.get('length_m')} m, {f.get('pictures')} pictures, one every {f.get('spacing_m')} m): the runner's {c['race_s'] / 60:.0f} minutes there are shown in a few seconds, with the clock running on screen. "
-                     f"Show it with a streetview item of {f.get('min_s'):g} to {f.get('max_s'):g} s (the whole stretch always plays through; a shorter item is faster), or put a vo item over it. It has no sound and no words. It was filmed in {f.get('captured_light') or 'unknown light'}; the runner passes it in {f.get('race_light') or 'unknown light'}"
-                     + (': USE IT ONLY IF THAT FITS THE STORY, a daytime view would look wrong in the dark.' if f.get('captured_light') in ('day', 'golden hour') and f.get('race_light') in ('twilight', 'night') else '.')
+                     f"Show it with a streetview item of {f.get('min_s'):g} to {f.get('max_s'):g} s (the whole stretch always plays through; a shorter item is faster), or put a vo item over it. It has no sound and no words."
                      + (f" It covers the same road as {', '.join(same)}: use at most one of them." if same else '') + (' THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE): give it a streetview item.' if (c.get('settings') or {}).get('must') else ''))
         elif c.get('synthetic'):
             g = c.get('gap') or {}; pl = c.get('planned')
