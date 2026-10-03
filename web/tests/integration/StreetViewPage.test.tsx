@@ -140,6 +140,14 @@ describe('the sections that could be used in the film', () => {
     expect(screen.getByText('quality could not be measured')).toHaveAttribute('title', 'RuntimeError: x'); sv.sections[0].quality = null
   })
 
+  it('lists every candidate best quality first (the unscored last), or along the route, and shows the score in the table too', async () => {
+    const sv = makeStreetView(); sv.sections = [makeSvSection({ id: 'M1', key: 'a', km0: 1, km1: 1.3, quality: { score: 40, grade: 'fair', psnr: 14, jerk: 1, roll: 1 } }), makeSvSection({ id: 'M2', key: 'b', km0: 2, km1: 2.3, quality: null }),
+      makeSvSection({ id: 'M3', key: 'c', km0: 3, km1: 3.3, quality: { score: 80, grade: 'good', psnr: 17, jerk: 0.1, roll: 0.1 } }), makeSvSection({ id: 'M4', key: 'd', km0: 4, km1: 4.3, plausible: false, why_not: 'only 5 pictures (needs 30)' })]; serve(sv)
+    const { user } = setup(<StreetViewPage folder="/data" />); const card = await screen.findByLabelText('Sections that could be used'); const ids = () => [...card.querySelectorAll('[data-section]')].map(e => e.getAttribute('data-section'))
+    expect(ids()).toEqual(['M3', 'M1', 'M2']); await user.selectOptions(within(card).getByLabelText('Order'), 'route'); expect(ids()).toEqual(['M1', 'M2', 'M3'])
+    const rows = screen.getAllByRole('row'); expect(within(rows[1]).getByText('fair (40)')).toBeInTheDocument(); expect(within(rows[3]).getByText('good (80)')).toBeInTheDocument(); expect(card).toHaveTextContent('1 more sections are too short or too sparse')
+  })
+
   it('says the quality has not been checked yet', async () => {
     serve(); setup(<StreetViewPage folder="/data" />); expect(await screen.findByText('quality not checked yet')).toBeInTheDocument()
   })

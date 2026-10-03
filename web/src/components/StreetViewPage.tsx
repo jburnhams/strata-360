@@ -183,12 +183,12 @@ function List({ title, sections, sel, onSel, none }: { title: string; sections: 
     <div className="overflow-x-auto rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
       <h3 className="mb-1 text-sm font-semibold">{title}</h3>
       <table className="w-full text-left text-sm">
-        <thead className="text-xs text-stone-500"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th>Overlaps</th></tr></thead>
+        <thead className="text-xs text-stone-500"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th className="pr-3">Quality</th><th>Overlaps</th></tr></thead>
         <tbody>
           {sections.map(s => (
             <tr key={s.id} onClick={() => onSel({ kind: 'section', id: s.id })} className={`cursor-pointer border-t border-stone-200 dark:border-stone-700 ${sel?.kind === 'section' && sel.id === s.id ? 'bg-emerald-100 dark:bg-emerald-950' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
               <td className="pr-3"><button className="underline" onClick={e => { e.stopPropagation(); onSel({ kind: 'section', id: s.id }) }}>{NAME[s.provider]} {s.id}</button></td><td className="pr-3">{kindLabel(s)}</td><td className="pr-3">{span(s)} <span className="text-stone-500">({s.stretch})</span></td>
-              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td>{s.overlaps.length ? <span className="text-amber-700 dark:text-amber-400">{s.overlaps.join(', ')}</span> : '–'}</td>
+              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td>{s.overlaps.length ? <span className="text-amber-700 dark:text-amber-400">{s.overlaps.join(', ')}</span> : '–'}</td>
             </tr>
           ))}
         </tbody>
@@ -202,10 +202,13 @@ const CHOICES: { v: SvChoice | 'none'; label: string }[] = [{ v: 'none', label: 
 
 /** The sections that could make a clip, each with its pictures and a choice for the film: not used, possible (the writer may use it) or must include. Sections over the same road say so. */
 function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string; sections: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section'; id: string }) => void; onChoose: (key: string, c: SvChoice | 'none') => void }) {
-  const ok = sections.filter(s => s.plausible), chosen = ok.filter(s => s.choice), by = new Map(sections.map(s => [s.id, s]))
+  const [order, setOrder] = useState<'quality' | 'route'>('quality')
+  const by = new Map(sections.map(s => [s.id, s])), chosen = sections.filter(s => s.plausible && s.choice)
+  const ok = sections.filter(s => s.plausible).sort((a, b) => order === 'route' ? a.km0 - b.km0 : (b.quality?.score ?? -1) - (a.quality?.score ?? -1) || a.km0 - b.km0)                 // best first; the ones not scored yet last
   return (
     <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Sections that could be used">
-      <h3 className="text-sm font-semibold">Sections that could be used in the film</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Sections that could be used in the film</h3>
+        <label className="flex items-center gap-1 text-xs">Order <select value={order} onChange={e => setOrder(e.target.value as 'quality' | 'route')} className="rounded border border-stone-300 bg-white px-1 py-0.5 dark:border-stone-600 dark:bg-stone-900"><option value="quality">best quality first</option><option value="route">along the route</option></select></label></div>
       <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">{ok.length} of {sections.length} sections have enough pictures, close enough together, to make a clip. Mark the ones the film may use: only those are shown to the script writer, and the plan makes a clip of any it picks.
         {chosen.length > 0 && ` Chosen: ${chosen.length} (${chosen.filter(s => s.choice === 'must').length} must include).`} Pictures are credited CC BY-SA to Mapillary and Panoramax contributors.</p>
       {ok.length === 0 && <p className="text-sm text-stone-600 dark:text-stone-400">None of the sections found has enough pictures yet.</p>}
