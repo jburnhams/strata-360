@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import Workspace from '../../src/components/Workspace'
 import { screen, setup, waitFor } from '../utils/render'
-import { makeMeta, makeClipInfo } from '../utils/factories'
+import { makeMeta, makeClipInfo, makeGap, makeGapClip } from '../utils/factories'
 import { mockGet, mockError } from '../utils/api'
 
 // Mock the many child panels that are tested in their own files
@@ -15,6 +15,8 @@ vi.mock('../../src/components/ScriptPanel', () => ({ default: ({ onOpen }: any) 
 vi.mock('../../src/components/VoiceoverPanel', () => ({ default: () => <div data-testid="VoiceoverPanel" /> }))
 vi.mock('../../src/components/TranscriptPanel', () => ({ default: ({ onOpen }: any) => <div data-testid="TranscriptPanel"><button onClick={() => onOpen('CAM_123', 0)}>Open</button></div> }))
 vi.mock('../../src/components/Timeline', () => ({ default: ({ onOpenClip }: any) => <div data-testid="Timeline"><button onClick={() => onOpenClip('CAM_123')}>Open</button></div> }))
+vi.mock('../../src/components/PhotosPanel', () => ({ default: ({ photos }: any) => <div data-testid="PhotosPanel">{(photos ?? []).length}</div> }))
+vi.mock('../../src/components/GapView', () => ({ default: ({ gap }: { gap: string }) => <div data-testid="GapView">{gap}</div> }))
 vi.mock('../../src/components/ClipView', () => ({ default: ({ clip }: { clip: string }) => <div data-testid="ClipView">{clip}</div> }))
 
 // We need fake timers since it polls api.clips and api.meta
@@ -136,5 +138,13 @@ describe('Workspace', () => {
 
     await user.click(await screen.findByRole('button', { name: 'open another / new project' }))
     expect(onChange).toHaveBeenCalled()
+  })
+
+  it('lists the gaps under the clips and opens a gap page when one is clicked', async () => {
+    mockGet('/api/meta', makeMeta()); mockGet('/api/clips', { clips: [makeClipInfo()] })
+    mockGet('/api/gaps', { gaps: [makeGap({ settings: { kind: null, mode: null, seconds: null, must: true }, clips: [makeGapClip({ exists: true, kind: 'flyover', seconds: 12 })] }), makeGap({ id: 'G02', local_start: 'Fri 20 Feb 06:00' })] })
+    const { user } = setup(<Workspace folder="/data" onChange={() => {}} />)
+    expect(await screen.findByText('Gaps in the footage')).toBeInTheDocument(); expect(screen.getByText(/3D · 12 s · must use/)).toBeInTheDocument(); expect(screen.getByText(/no clip/)).toBeInTheDocument()
+    await user.click(screen.getByText('G02')); expect(await screen.findByTestId('GapView')).toHaveTextContent('G02'); expect(screen.queryByTestId('FilmDetails')).not.toBeInTheDocument()
   })
 })

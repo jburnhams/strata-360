@@ -33,6 +33,18 @@ def path_length(lat, lon):
     d = 2 * R_EARTH * np.arcsin(np.sqrt(np.clip(a, 0, 1))); return np.concatenate([[0.0], np.cumsum(np.nan_to_num(d))])
 
 
+def running_climb(alt, hysteresis=4.0):
+    """Total climb and descent so far at each sample of an altitude series (m), ignoring wiggles under `hysteresis` metres (as gps/overview.py `ascent_descent`); where the altitude is missing the totals stay as they were."""
+    up = np.zeros(len(alt)); down = np.zeros(len(alt)); u = d = 0.0; ref = None
+    for i, v in enumerate(alt):
+        if np.isfinite(v):
+            if ref is None: ref = v
+            elif v - ref >= hysteresis: u += v - ref; ref = v
+            elif ref - v >= hysteresis: d += ref - v; ref = v
+        up[i], down[i] = u, d
+    return up, down
+
+
 class Series:
     def __init__(self, tr, pace_s=21, alt_s=9, slope_m=60.0, max_gap_s=10.0, slow_ms=0.5):
         T = np.asarray(tr['t'], float)
@@ -50,7 +62,8 @@ class Series:
         sp = _smooth(sp, pace_s)
         with np.errstate(invalid='ignore', divide='ignore'): pace = np.where(sp > slow_ms, 1000.0 / sp, np.nan)
         alt = _smooth(_resample(T, np.asarray(tr['alt'], float), g, max_gap_s), alt_s)
-        self.cols = dict(dist_m=d, pace_s_km=pace, alt_m=alt, slope_pct=self._slope(d, alt, slope_m), hr=_resample(T, np.asarray(tr.get('hr', np.full(len(T), np.nan)), float), g, max_gap_s))
+        up, down = running_climb(alt)
+        self.cols = dict(dist_m=d, pace_s_km=pace, alt_m=alt, ascent_m=up, descent_m=down, slope_pct=self._slope(d, alt, slope_m), hr=_resample(T, np.asarray(tr.get('hr', np.full(len(T), np.nan)), float), g, max_gap_s))
 
     @staticmethod
     def _slope(d, alt, span):

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type ClipInfo } from '../api'
+import { api, type ClipInfo, type Gap } from '../api'
 import { usePoll } from '../usePoll'
 import ProjectProgress from './ProjectProgress'
 import TrackPanel from './TrackPanel'
@@ -15,6 +15,8 @@ import VoiceoverPanel from './VoiceoverPanel'
 import Timeline from './Timeline'
 import FilmDetails from './FilmDetails'
 import MusicPanel from './MusicPanel'
+import GapView from './GapView'
+import PhotosPanel from './PhotosPanel'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -24,6 +26,10 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   const [focus, setFocus] = useState<number | undefined>(undefined)
   const meta = usePoll(() => api.meta(folder), 60000, [folder])
   const clips = usePoll(() => api.clips(folder).then(r => r.clips), 8000, [folder])
+  const [photoTick, setPhotoTick] = useState(0)
+  const photoData = usePoll(() => api.photos(folder), 15000, [folder, photoTick]); const photos = photoData?.photos; const tz = meta?.timezone ?? photoData?.tz ?? 'Europe/Brussels'
+  const openWhere = (w: { kind: 'clip' | 'gap'; id: string }) => { setFocus(undefined); setSel(w.kind === 'gap' ? `@gap:${w.id}` : w.id) }
+  const gaps = usePoll(() => api.gaps(folder).then(r => r.gaps), 8000, [folder])
   const [overlay, setOverlay] = useThumbOverlay()
   useEffect(() => { setSel(null); setFocus(undefined) }, [folder])
   return (
@@ -37,6 +43,8 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         <ul className="min-h-0 flex-1 space-y-1 overflow-auto md:pr-1">
           {clips === undefined ? Array.from({ length: 8 }, (_, i) => <li key={i} className="flex gap-2 p-1.5"><Skeleton className="h-11 w-20 shrink-0" /><div className="flex-1 space-y-1.5"><Skeleton className="h-3 w-full" /><Skeleton className="h-3 w-1/2" /></div></li>)
             : clips.map(c => <Row key={c.id} folder={folder} c={c} overlay={overlay} active={sel === c.id} onClick={() => { setFocus(undefined); setSel(c.id) }} />)}
+          {gaps !== undefined && gaps.length > 0 && <li className="px-1 pt-2 text-xs font-medium uppercase tracking-wide text-stone-500">Gaps in the footage</li>}
+          {(gaps ?? []).map(g => <GapRow key={g.id} g={g} active={sel === `@gap:${g.id}`} onClick={() => { setFocus(undefined); setSel(`@gap:${g.id}`) }} />)}
         </ul>
       </aside>
       <div className="min-w-0">
@@ -45,7 +53,8 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
           <div className="space-y-4">
             <FilmDetails folder={folder} />
             <ProjectProgress folder={folder} onResults={() => setSel('@timeline')} />
-            <TrackPanel folder={folder} tz={meta?.timezone ?? 'Europe/Brussels'} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
+            <TrackPanel folder={folder} tz={tz} photos={photos} onOpenPhoto={p => p.where && openWhere(p.where)} onOpenClip={c => { setFocus(undefined); setSel(c) }} onOpenGap={g => { setFocus(undefined); setSel(`@gap:${g}`) }} />
+            <PhotosPanel folder={folder} photos={photos} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} onOpen={openWhere} />
             <MusicPanel folder={folder} />
             <ClockPanel folder={folder} />
             <WhoPanel folder={folder} />
@@ -56,9 +65,21 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <TranscriptPanel folder={folder} clips={clips ?? []} tz={meta?.timezone ?? 'Europe/Brussels'} onOpen={(c, t) => { setFocus(t); setSel(c) }} />
           </div>
         ) : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
-          : <ClipView folder={folder} clip={sel} focus={focus} />}
+          : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} photos={photos} tz={tz} />
+          : <ClipView folder={folder} clip={sel} focus={focus} photos={photos} tz={tz} />}
       </div>
     </div>
+  )
+}
+
+function GapRow({ g, active, onClick }: { g: Gap; active: boolean; onClick: () => void }) {
+  const c = g.clips.find(x => x.id === g.id), s = g.settings
+  const state = c?.rendering ? 'rendering…' : c?.exists ? (c.kind === 'flyover' ? '3D' : '2D') + ` · ${c.seconds} s` : c ? 'planned' : 'no clip'
+  return (
+    <li onClick={onClick} className={`flex cursor-pointer gap-2 rounded-lg p-1.5 ${active ? 'bg-emerald-100 dark:bg-emerald-950' : 'hover:bg-stone-200/60 dark:hover:bg-stone-800'}`}>
+      <div className={`flex h-11 w-20 shrink-0 items-center justify-center rounded text-sm font-semibold ${c?.exists ? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{g.id}</div>
+      <div className="min-w-0 flex-1 text-xs"><div className="truncate">{g.local_start}</div><div className="text-stone-500">{(g.duration_s / 3600).toFixed(1)} h · {state}{s?.must ? ' · must use' : ''}</div></div>
+    </li>
   )
 }
 

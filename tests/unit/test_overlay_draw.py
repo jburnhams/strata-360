@@ -80,3 +80,21 @@ class TestComposite:
     def test_patches_are_cut_at_the_edges(self):
         f = np.zeros((4, 4, 3), np.uint8); D.composite(f, [(-1, -1, solid(2, 2, (9, 9, 9, 255))), (3, 3, solid(3, 3, (7, 7, 7, 255))), (10, 10, solid(2, 2, (1, 1, 1, 255)))])
         assert f[0, 0, 0] == 9 and f[1, 1, 0] == 0 and f[3, 3, 0] == 7 and f.sum() == 9 * 3 + 7 * 3
+
+
+class TestLineAndArrow:
+    def test_a_line_can_be_a_fraction_of_a_pixel_wider(self):
+        from strata360.overlay import draw as D
+        u = np.array([5.0, 55.0]); v = np.array([20.5, 20.5])
+        a, b = (D.line_mask((40, 60), u, v, w).sum() for w in (1.3, 1.7)); assert 1.3 * 50 * 0.85 < a < 1.3 * 50 * 1.2 and a < b < 1.7 * 50 * 1.2           # about its width times its length, and wider is more
+        img = np.full((40, 60, 3), 200, np.uint8); D.blend_line(img, u, v, (10, 10, 10), 2.0); assert img[20, 30].max() < 60 and img[2, 30].min() == 200
+
+    def test_an_arrow_points_the_way_it_is_turned(self):
+        from strata360.overlay import draw as D
+        def mass(angle):                                                            # where the weight of the shape lies from the middle (the wide base is on the side opposite the tip)
+            a = D.arrow(20, angle); w = a[..., 3].astype(float); ys, xs = np.mgrid[:a.shape[0], :a.shape[1]]; c = a.shape[0] / 2 - 0.5; return float((w * (xs - c)).sum() / w.sum()), float((w * (ys - c)).sum() / w.sum())
+        x, y = mass(0); assert y > 0.5 and abs(x) < 0.3                             # pointing up: heavier below
+        x, y = mass(90); assert x < -0.5 and abs(y) < 0.3
+        x, y = mass(180); assert y < -0.5 and abs(x) < 0.3
+        x, y = mass(270); assert x > 0.5 and abs(y) < 0.3
+        assert D.arrow(20, 45) is D.arrow(20, 45) and D.arrow(20, 0).shape == (24, 24, 4)

@@ -81,3 +81,37 @@ def upsert(folder, clip):
 
 def remove(folder, clip_id):
     doc = load(folder); n = len(doc['clips']); doc['clips'] = [c for c in doc['clips'] if c['id'] != clip_id]; save(folder, doc); return len(doc['clips']) < n
+
+
+MODES = ('set', 'min')
+MAX_SECONDS = 45.0             # the longest a gap is shown (script_pack.MAX_GAP_S)
+
+
+def settings(folder):
+    """What you chose for each gap, apart from the clip: {gap id: {kind: 'map' | 'flyover' | None (the planner chooses), mode: 'set' (exactly `seconds` in the film) | 'min' (at least `seconds`, the plan may make it longer) | None, seconds, must: use it in the film}}."""
+    return load(folder).get('settings') or {}
+
+
+def gap_settings(folder, gid):
+    s = settings(folder).get(gid) or {}; return dict(kind=s.get('kind'), mode=s.get('mode'), seconds=s.get('seconds'), must=bool(s.get('must')))
+
+
+def set_settings(folder, gid, **fields):
+    """Change some of a gap's settings (kind, mode, seconds, must); None clears kind and mode. Raises ValueError for a value that is not allowed. Returns the gap's settings."""
+    cur = gap_settings(folder, gid)
+    for k, v in fields.items():
+        if k not in cur: raise ValueError(f'unknown setting {k}')
+        cur[k] = v
+    if cur['kind'] not in (None,) + KINDS: raise ValueError(f'kind: one of {", ".join(KINDS)}, or none')
+    if cur['mode'] not in (None,) + MODES: raise ValueError('mode: set or min')
+    if cur['mode']:
+        try: sec = float(cur['seconds'])
+        except (TypeError, ValueError): raise ValueError('give the length in seconds')
+        if not MIN_SECONDS <= sec <= MAX_SECONDS: raise ValueError(f'the length: {MIN_SECONDS:g} to {MAX_SECONDS:g} seconds')
+        cur['seconds'] = round(sec, 2)
+    else: cur['seconds'] = None
+    cur['must'] = bool(cur['must']); doc = load(folder); allset = doc.setdefault('settings', {})
+    if cur['kind'] is None and cur['mode'] is None and not cur['must']: allset.pop(gid, None)
+    else: allset[gid] = cur
+    if not allset: doc.pop('settings', None)
+    save(folder, doc); return cur

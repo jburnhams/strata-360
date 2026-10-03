@@ -103,15 +103,82 @@ describe('TrackPanel', () => {
 
   describe('tracks list', () => {
     const present = () => mockGet('/api/track', makeTrackOverview({ present: true, file: 'race.fit', distance_km: 75.6 }))
-    const two = () => makeTracksListing({ runs: 1, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'route', timed: false, start_utc: null, pois: 2, distance_km: 80 })], pois: [{ name: 'Aid 1', lat: 50.05, lon: 5.07, ele: 120, sym: '', desc: '', track: 't2' }] })
+    const two = () => makeTracksListing({ runs: 1, divergences: [{ lat: 50.05, lon: 5.07, peak_m: 120, length_m: 300, km: 5, t: 0, line: [[50.04, 5.06], [50.06, 5.08]] }], tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'route', timed: false, start_utc: null, pois: 2, distance_km: 80, order: 2, km_start: 70.9, km_end: 119 })], pois: [{ name: 'Aid 1', lat: 50.05, lon: 5.07, ele: 120, sym: '', desc: '', track: 't2' }] })
 
     it('lists each track with its kind, and shows routes on the map with their points of interest', async () => {
       present(); mockGet('/api/tracks', two()); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
       setup(<TrackPanel folder="/data" />)
       expect(await screen.findByLabelText('Kind of course.gpx')).toHaveValue('route'); expect(screen.getByLabelText('Kind of race.gpx')).toHaveValue('run')
-      expect(screen.getByText(/80 km · no times · 2 POI/)).toBeInTheDocument()
+      expect(screen.getByText('80 km · 2 POI')).toBeInTheDocument(); expect(screen.getByTitle('section 2 of the race')).toHaveTextContent('2')
+      expect(await screen.findByText(/run leaves the route by over 50 m \(the 1 farthest\)/)).toBeInTheDocument();
       expect(await screen.findByText('route (planning only)')).toBeInTheDocument(); expect(screen.getByText('point of interest')).toBeInTheDocument()
       await waitFor(() => expect(document.querySelector('[data-poi]')).not.toBeNull())
+    })
+
+    it('highlights a track in the list while it is pointed at, and keeps several picked until they are clicked again', async () => {
+      present(); mockGet('/api/tracks', two()); const seen = recordRequests('/api/tracks/line')
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByRole('button', { name: 'Highlight race.gpx on the map' })).closest('li')!; const other = screen.getByRole('button', { name: 'Highlight course.gpx on the map' })
+      expect(row).not.toHaveAttribute('data-highlighted'); await user.hover(row); expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(seen.some(r => r.url.searchParams.get('id') === 't1')).toBe(true))
+      await user.unhover(row); expect(row).not.toHaveAttribute('data-highlighted')
+      await user.click(screen.getByRole('button', { name: 'Highlight race.gpx on the map' })); await user.click(other); await user.unhover(other)
+      expect(row).toHaveAttribute('data-highlighted'); expect(other).toHaveAttribute('aria-pressed', 'true'); expect(other.closest('li')).toHaveAttribute('data-highlighted')
+      await user.click(other); await user.unhover(other); expect(other).toHaveAttribute('aria-pressed', 'false'); expect(other.closest('li')).not.toHaveAttribute('data-highlighted'); expect(row).toHaveAttribute('data-highlighted')
+    })
+
+    it('shows the time on each route and at each checkpoint, adding up to the run time', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.tracks[1].time_s = 3600 + 12 * 60 + 5; l.tracks[1].ran_km = 12.1; l.tracks[1].pace_s_km = 359; l.tracks[1].ascent_m = 420; l.tracks[1].descent_m = 180; l.tracks[0].time_s = undefined
+      l.timing = { total_s: 3600 + 12 * 60 + 5 + 35 * 60, start: 0, end: 1, checkpoints: { '1': 35 * 60 }, sections: { t2: 3600 + 12 * 60 + 5 }, ran_m: { t2: 12100 }, arrivals: { '1': { t: 1_771_700_000, elapsed_s: 4325, km: 12.1 } }, consistent: true, ascent_m: 2400, descent_m: 2100 }
+      mockGet('/api/tracks', l); setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText('Checkpoint 1')).closest('li')!; expect(row).toHaveTextContent('0:35:00'); expect(row).toHaveTextContent('km 12.1 · 1:12:05 since start · arrived Sat 21 Feb 19:53'); expect(screen.getByTitle(/time on this route/)).toHaveTextContent('12.1 km run · 5:59 /km · ↑420 m ↓180 m')
+      const tot = document.querySelector('[data-timing]')!; expect(tot).toHaveTextContent('Total time 1:47:05'); expect(tot).toHaveTextContent('Checkpoints 0:35:00'); expect(tot).toHaveTextContent('Running time 1:12:05')
+      expect(tot).toHaveTextContent('Running pace 5:57 /km (12.1 km)'); expect(tot).toHaveTextContent('Ascent 2,400 m'); expect(tot).toHaveTextContent('Descent 2,100 m'); expect(tot.closest('li')!.previousElementSibling).toHaveTextContent('race.gpx')                  // (right after the run's row)
+    })
+
+    it('highlights a checkpoint on the map while its row is pointed at, and keeps it when clicked', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.timing = { total_s: 5000, start: 0, end: 1, checkpoints: { '1': 600 }, sections: { t2: 4400 }, consistent: true }
+      l.pois = [...l.pois, { name: 'Checkpoint 1', lat: 50.05, lon: 5.07, ele: null, sym: 'checkpoint', desc: 'a → b', track: 'checkpoint', n: 1 }]
+      mockGet('/api/tracks', l); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText(/^Checkpoint 1$/)).closest('li')!; expect(document.querySelector('[data-checkpoint-hl]')).toBeNull()
+      await user.hover(row); expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).not.toBeNull())
+      await user.unhover(row); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).toBeNull())
+      await user.click(screen.getByRole('button', { name: 'Highlight checkpoint 1 on the map' })); await user.unhover(row)
+      expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).not.toBeNull())
+      await user.click(screen.getByRole('button', { name: 'Highlight checkpoint 1 on the map' })); await user.unhover(row); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).toBeNull())                  // (while the pointer is on the row it is still pointed at)
+    })
+
+    it('lists the finish of the routes after the last one, and highlights it on the map', async () => {
+      present(); const l = two(); l.tracks[1].order = 1
+      l.finish = { reached: false, route_m: 349300, covered_m: 336800, t: null, elapsed_s: null, km: null, time_s: null }
+      l.markers = { start: { lat: 50, lon: 5, t: 1_771_700_000 }, end: { lat: 50.1, lon: 5.2, t: 1_771_800_000, km: 367, elapsed_s: 100000 }, finish: { lat: 50.12, lon: 5.22 } }
+      mockGet('/api/tracks', l); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText(/^Finish \(not reached\)/)).closest('li')!; expect(row).toHaveTextContent('routes 349.3 km, covered 336.8 km')
+      await user.hover(row); expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(document.querySelector('[data-end-hl]')).not.toBeNull()); await user.unhover(row)
+      await waitFor(() => expect(document.querySelector('[data-end-hl]')).toBeNull())
+      await user.click(screen.getByRole('button', { name: 'Highlight the finish on the map' })); await user.unhover(row); await waitFor(() => expect(document.querySelector('[data-end-hl]')).not.toBeNull())
+    })
+
+    it('says when the run got to the finish and how long it stayed', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.finish = { reached: true, route_m: 100000, covered_m: 100000, t: 1_771_700_000, elapsed_s: 7200, km: 99.5, time_s: 600 }
+      mockGet('/api/tracks', l); setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText(/^Finish/)).closest('li')!; expect(row).toHaveTextContent('km 99.5 · 2:00:00 since start · arrived Sat 21 Feb'); expect(row).toHaveTextContent('0:10:00'); expect(row).not.toHaveTextContent('not reached')
+    })
+
+    it('takes a cut-off for a checkpoint and the finish, shows how it was read and the time to spare, and says why when it is not understood', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.timing = { total_s: 5000, start: 0, end: 1, checkpoints: { '1': 600 }, sections: { t2: 4400 }, consistent: true }
+      l.finish = { reached: false, route_m: 349300, covered_m: 336800, t: null, elapsed_s: null, km: null, time_s: null }
+      let cutoffs: Record<string, any> = {}; const seen = recordRequests('/api/tracks/cutoff')
+      mockGet('/api/tracks', () => ({ ...l, cutoffs })); mockPost('/api/tracks/cutoff', async (req: Request) => {
+        const b = await req.json() as { key: string; text: string }; cutoffs = { [b.key]: { text: b.text, kind: 'since_start', elapsed_s: 7200, arrival_s: 5000, margin_s: 2200 } }; return { ...l, cutoffs }
+      })
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const box = await screen.findByLabelText('Cut-off for checkpoint 1'); await user.type(box, '2h{Enter}')
+      await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', key: 'cp:1', text: '2h' }))
+      const read = await screen.findByText(/read as total time: 2:00:00 since the start/); expect(read).toHaveTextContent('0:36:40 to spare'); expect(screen.getByLabelText('Cut-off for the finish')).toHaveValue('')
+      server.use(http.post('/api/tracks/cutoff', () => HttpResponse.json({ detail: 'could not read "abc" as a time' }, { status: 400 })))
+      await user.type(screen.getByLabelText('Cut-off for the finish'), 'abc{Enter}'); expect(await screen.findByRole('alert')).toHaveTextContent('could not read "abc" as a time')
     })
 
     it('marks a track a run, refreshing the race track and the list', async () => {

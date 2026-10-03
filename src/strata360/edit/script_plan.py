@@ -103,7 +103,8 @@ def pieces(draft, pack, voice_s, wpm):
             text = (it.get('text') or '').strip() if it['type'] == 'vo' else ''; d = voice_s.get(n); est = d is None; d = estimated_s(text, wpm) if est else d
             if it['type'] == 'gap': sec = min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), MAX_GAP_S)             # a gap item names its own length (the clip is made to it)
             else: sec = c['duration_s'] if it['type'] == 'vo' else min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), c['duration_s'])
-            out.append(dict(base, kind='synthetic', role='broll' if it['type'] == 'gap' else it['type'], gap_kind=it.get('kind') if it['type'] == 'gap' else None, text=text, speak_s=d if text else 0.0, estimated=est and bool(text), seconds=max(sec, LEAD_S + d + TAIL_S if text else 0.0), seg=seg_id(c['clip'], text) if text else None)); continue
+            piece = (dict(base, kind='synthetic', role='broll' if it['type'] == 'gap' else it['type'], gap_kind=it.get('kind') if it['type'] == 'gap' else None, text=text, speak_s=d if text else 0.0, estimated=est and bool(text), seconds=max(sec, LEAD_S + d + TAIL_S if text else 0.0), seg=seg_id(c['clip'], text) if text else None))
+            out.append(gap_choice(piece, c.get('settings') or {}, LEAD_S + d + TAIL_S if text else 0.0)); continue                 # (the length you gave the gap: exactly or at least)
         if it['type'] == 'clip':
             ls = [lines[i] for i in it.get('lines') or [] if i in lines]
             if not ls: warn.append(f'item {n + 1}: no transcript lines; skipped'); continue
@@ -274,10 +275,19 @@ def est_beats(p, beat_s):
 GAP_MIN_S = 3.0              # a generated clip is shortened to this at the least to fit the music
 
 
+def gap_choice(p, lim, need=0.0):
+    """Apply what you chose for a gap's length to its piece: `set` makes it exactly that long (or as long as the narration over it needs, if longer) and fixed, `min` at least that long, never shortened below it to fit the music."""
+    if lim.get('mode') == 'set': p['seconds'] = max(float(lim['seconds']), need); p['fixed'] = True
+    elif lim.get('mode') == 'min': p['seconds'] = max(p['seconds'], float(lim['seconds'])); p['min_s'] = float(lim['seconds'])
+    return p
+
+
 def flex(p):
     """(shortest, longest) seconds a piece may be stretched to in order to fit the music, or None when its length is fixed: camera b-roll 2 s up to double (or 6 s more), but not longer than its clip; a generated clip (picture only, not under narration) 3 s up to one and a half times (45 s at most)."""
     if p['kind'] == 'broll': return 2.0, max(min(max(p['seconds'] * 2.0, p['seconds'] + 6.0), float(p.get('duration_s') or 1e9) - 0.2), p['seconds'])           # never past the clip's own length: more would show the same footage twice
-    if p['kind'] == 'synthetic' and p.get('role') == 'broll': return GAP_MIN_S, min(MAX_GAP_S, max(p['seconds'] * 1.5, p['seconds'] + 3.0))
+    if p['kind'] == 'synthetic' and p.get('role') == 'broll':
+        if p.get('fixed'): return None                                                                  # a length you set stays
+        lo = max(GAP_MIN_S, p.get('min_s') or 0.0); return min(lo, p['seconds']), min(MAX_GAP_S, max(p['seconds'] * 1.5, p['seconds'] + 3.0, lo))
     return None
 
 
@@ -325,9 +335,21 @@ def auto_gaps(ps, pack, music, target_s, warn, min_race_s=3600.0, seconds=(3.0, 
         left = target - total
         if left <= band // 2: break
         sec = min(max(c['race_s'] / 3600.0 * 0.5 + 3.0, seconds[0]), seconds[1], max(left * beat_s, seconds[0]))
-        piece = dict(n=None, clip=c['clip'], label=c['label'], duration_s=c['duration_s'], kind='synthetic', role='broll', gap_kind=None, text='', speak_s=0.0, estimated=False, seconds=round(sec, 2), seg=None, auto=True)
+        piece = gap_choice(dict(n=None, clip=c['clip'], label=c['label'], duration_s=c['duration_s'], kind='synthetic', role='broll', gap_kind=None, text='', speak_s=0.0, estimated=False, seconds=round(sec, 2), seg=None, auto=True), c.get('settings') or {})
         at = next((j for j, p in enumerate(ps) if start.get(p['label'], '') > c['start_utc']), len(ps)); ps.insert(at, piece); total += est_beats(piece, beat_s); added.append(c['label'])
     if added: warn.append(f"the script is {short_s:.0f} s short of the music: added the unfilled gap clip(s) {', '.join(added)} (2D maps, in their place in the race)")
+    return added
+
+
+def force_gaps(ps, pack, warn):
+    """The gaps you marked `must` (Gaps page) that the script left out, added as picture-only generated clips in their place in the race, at the length you gave (else the default for the gap). Returns the labels added; `ps` is changed."""
+    used = {p['label'] for p in ps}; must = [c for c in pack['clips'] if c.get('synthetic') and (c.get('settings') or {}).get('must') and c['label'] not in used]
+    if not must: return []
+    start = {c['label']: c['start_utc'] for c in pack['clips']}; added = []
+    for c in sorted(must, key=lambda c: c['start_utc']):
+        piece = gap_choice(dict(n=None, clip=c['clip'], label=c['label'], duration_s=c['duration_s'], kind='synthetic', role='broll', gap_kind=None, text='', speak_s=0.0, estimated=False, seconds=round(min(max(c['duration_s'], 3.0), MAX_GAP_S), 2), seg=None, auto=True), c.get('settings') or {})
+        at = next((j for j, p in enumerate(ps) if start.get(p['label'], '') > c['start_utc']), len(ps)); ps.insert(at, piece); added.append(c['label'])
+    if added: warn.append(f"added the gap clip(s) {', '.join(added)} because you marked them to use")
     return added
 
 
@@ -370,6 +392,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     ps, w0 = pieces(draft, pack, voice_s, wpm); warn += w0; ps = [p for p in ps if p['clip'] in foot or p['kind'] == 'synthetic']
     for p in ps:                                                                                    # the dialogue the script plays is not footage for narration or b-roll
         if p['kind'] == 'clip' and p['clip'] in foot: foot[p['clip']].reserved.append((p['start'], p['start'] + p['seconds']))
+    force_gaps(ps, pack, warn)                                                                      # the gaps you marked must-use that the script left out
     cap_broll(ps, foot, warn)                                                                       # b-roll is asked for no more than the clip has unused (flex() then never stretches it past that either)
     fit, anchors = fit_and_anchor(ps, draft, music, target_s, warn)
     auto = auto_gaps(ps, pack, music, target_s, warn) if target_s else []

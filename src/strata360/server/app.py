@@ -787,11 +787,14 @@ def create_app(roots, token=None):
             os.replace(dest, dest + '.bad'); raise HTTPException(400, f'could not read that file: {type(e).__name__}: {e}')
         TKS.update_merged(rd); return o
 
+    def tz_of(f):                                                                        # the race's time zone (for cut-offs given as a time of day)
+        rd = config.race_dir(f); return (config.load(f) if os.path.exists(os.path.join(rd, 'race.json')) else {}).get('timezone') or 'Europe/Brussels'
+
     # The project's tracks: any number of FIT / GPX files, each a run (merged into the one race track) or a route (shown on the overview map for planning only)
     @api.get('/api/tracks', dependencies=[Depends(auth)])
     def get_tracks(folder: str):                                                         # every track with kind and summary, the merged run track, and the points of interest
         from strata360.gps import tracks as TKS
-        return TKS.listing(config.race_dir(folder_of(folder)))
+        f = folder_of(folder); return TKS.listing(config.race_dir(f), tz_of(f))
 
     @api.post('/api/tracks', dependencies=[Depends(auth)])
     async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
@@ -807,7 +810,16 @@ def create_app(roots, token=None):
         try: TKS.set_kind(rd, str(body.get('id')), str(body.get('kind')))
         except KeyError: raise HTTPException(404, 'no such track')
         except ValueError as e: raise HTTPException(400, str(e))
-        return TKS.listing(rd)
+        return TKS.listing(rd, tz_of(folder_of(body.get('folder'))))
+
+    @api.post('/api/tracks/cutoff', dependencies=[Depends(auth)])
+    def post_tracks_cutoff(body: dict):                                                  # {folder, key: 'cp:N' | 'finish', text}: the cut-off typed for a checkpoint or the finish (empty clears); read in any common form (gps/cutoffs.py)
+        from strata360.gps import tracks as TKS
+        f = folder_of(body.get('folder')); rd = config.race_dir(f)
+        try: TKS.set_cutoff(rd, str(body.get('key')), str(body.get('text') or ''), tz_of(f))
+        except KeyError: raise HTTPException(404, 'no such checkpoint')
+        except ValueError as e: raise HTTPException(400, str(e))
+        return TKS.listing(rd, tz_of(f))
 
     @api.delete('/api/tracks', dependencies=[Depends(auth)])
     def delete_tracks(folder: str, id: str):                                             # take a track out (its file is kept under tracks/removed)
@@ -815,7 +827,7 @@ def create_app(roots, token=None):
         rd = config.race_dir(folder_of(folder))
         try: TKS.remove(rd, id)
         except KeyError: raise HTTPException(404, 'no such track')
-        return TKS.listing(rd)
+        return TKS.listing(rd, tz_of(folder_of(folder)))
 
     @api.get('/api/tracks/line', dependencies=[Depends(auth)])
     def get_tracks_line(folder: str, id: str, limit: int = 3000):                        # the line of one track (id, or `merged`) for the overview map: lat, lon (no times needed)
@@ -927,7 +939,12 @@ def create_app(roots, token=None):
         for c in docs:
             c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
             c['error'] = '' if c['rendering'] or c['exists'] else failure(c['id'])
-        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]
+        from strata360.edit import script_draft as SD
+        draft = SD.load_draft(f) or {}; said = {}
+        for n, it in enumerate(draft.get('items') or []):                                   # what the newest script draft does with each gap: the narration over it and its length
+            gid = norm_label(it.get('clip', ''))
+            if gid.startswith('G'): said.setdefault(gid, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
+        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]; g['settings'] = SY.gap_settings(f, g['id']); g['script'] = said.get(g['id'], [])
         return gaps
 
     def loaded_raw_track(f):
@@ -936,6 +953,56 @@ def create_app(roots, token=None):
         if not p: raise HTTPException(404, 'there is no race track yet')
         return track.load(p)
 
+    def photo_rows(f):
+        """The photos with when and where each was taken (photos.py `located`) and the clip or gap its time falls in."""
+        from strata360 import photos as PH
+        from strata360.gps import track
+        cfg = config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}; p = config.track_path(f, cfg); run = track.load(p) if p else None; rd = config.race_dir(f); clips = []
+        for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
+            c = _j(d, 'clip.json')
+            if c: clips.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=c['video']['source_frames'] / c['video']['nominal_fps']))
+        try: gaps = gap_rows(f) if run is not None else []
+        except HTTPException: gaps = []
+        out = []
+        for e in PH.load(rd)['photos']:
+            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); out.append(r)
+        return sorted(out, key=lambda x: x['taken_utc'])
+
+    @api.get('/api/photos', dependencies=[Depends(auth)])
+    def get_photos(folder: str):                                                         # the photos with their time, place (own GPS first, else the run's position at that time), whether those disagree, and the clip or gap they fall in
+        f = folder_of(folder); return dict(photos=photo_rows(f), tz=(config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}).get('timezone') or 'Europe/Brussels')
+
+    @api.post('/api/photos', dependencies=[Depends(auth)])
+    async def post_photo(request: Request, folder: str, filename: str):                  # one photo as the raw request body (the page sends several one after the other)
+        from strata360 import photos as PH
+        f = folder_of(folder); data = await request.body(); cfg = config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}
+        try: e = PH.add(config.race_dir(f), filename, data, cfg.get('timezone') or 'Europe/Brussels')
+        except ValueError as ex: raise HTTPException(400, f'{filename}: {ex}')
+        return next(x for x in photo_rows(f) if x['id'] == e['id'])
+
+    @api.delete('/api/photos', dependencies=[Depends(auth)])
+    def delete_photo(folder: str, id: str):                                              # take a photo out (its files are kept under photos/removed)
+        from strata360 import photos as PH
+        f = folder_of(folder)
+        try: PH.remove(config.race_dir(f), id)
+        except KeyError: raise HTTPException(404, 'no such photo')
+        return dict(photos=photo_rows(f))
+
+    @api.get('/api/photos/thumb')
+    def get_photo_thumb(request: Request, folder: str, id: str, w: int = 480):           # a small copy, the right way up (an <img> cannot send headers: the cookie / query token authenticates)
+        from strata360 import photos as PH
+        auth(request); p = PH.thumb(config.race_dir(folder_of(folder)), id, w)
+        if not p: raise HTTPException(404, 'no such photo')
+        return FileResponse(p, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
+
+    @api.get('/api/photos/file')
+    def get_photo_file(request: Request, folder: str, id: str, original: bool = False):  # the photo to look at: a JPEG up to 3000 px wide whatever the format it came in (a browser cannot show a TIFF or a HEIC); original=1 sends the uploaded file as it was
+        from strata360 import photos as PH
+        auth(request); rd = config.race_dir(folder_of(folder)); e = next((x for x in PH.load(rd)['photos'] if x['id'] == id), None)
+        if e is None or not os.path.exists(os.path.join(rd, e['file'])): raise HTTPException(404, 'no such photo')
+        if original: return FileResponse(os.path.join(rd, e.get('original') or e['file']), headers={'Cache-Control': 'max-age=86400'})
+        return FileResponse(PH.thumb(rd, id, 3000), media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
+
     @api.get('/api/gaps', dependencies=[Depends(auth)])
     def get_gaps(folder: str):                                                           # the stretches of the race with no clip, each with its generated map clips
         from strata360.overlay import flyover as FO
@@ -943,6 +1010,14 @@ def create_app(roots, token=None):
         try: FO.find_mbgl(); flyover = dict(available=True, note='')
         except FO.FlyoverError as e: flyover = dict(available=False, note=str(e))
         return dict(gaps=gap_rows(f), flyover=flyover)
+
+    @api.post('/api/gaps/settings', dependencies=[Depends(auth)])
+    def post_gap_settings(body: dict):                                                   # {folder, gap, kind?: 'map' | 'flyover' | null, mode?: 'set' | 'min' | null, seconds?, must?}: what you chose for a gap (kind, a set or a minimum length, must-use); only the fields sent change
+        from strata360.edit import synthetic as SY
+        f = folder_of(body.get('folder')); gid = str(body.get('gap') or '')
+        if not any(g['id'] == gid for g in gap_rows(f)): raise HTTPException(404, 'no such gap')
+        try: return SY.set_settings(f, gid, **{k: body[k] for k in ('kind', 'mode', 'seconds', 'must') if k in body})
+        except ValueError as e: raise HTTPException(400, str(e))
 
     @api.post('/api/gaps/clip', dependencies=[Depends(auth)])
     def post_gap_clip(body: dict):                                                       # {folder, gap, kind? ('map' | 'flyover'), size?, seconds? | speedup?, from?, to?, id?}: plan a generated clip (the 2D map or the 3D flyover, 4K) for a gap (or a stretch of it); rendering is a separate step

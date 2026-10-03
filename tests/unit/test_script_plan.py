@@ -269,3 +269,21 @@ def test_a_shot_between_two_cuts_is_never_longer_than_a_window_may_be():
         def candidate_at(self, a, b): return NS(start_s=a, end_s=b)
     w = SPL.dialogue_windows(FP(), 0.0, 45.0, [], 'x', cap=19.8, cuts=[6.0, 27.0])          # 0-6, 6-27 (21 s: too long), 27-45
     assert all(l <= 19.8 + 1e-9 for _, _, l in w) and abs(sum(l for _, _, l in w) - 45.0) < 1e-9 and [round(a, 2) for _, a, _ in w] == [0.0, 6.0, 16.5, 27.0]
+
+
+def test_a_length_you_set_for_a_gap_is_kept_and_a_minimum_is_never_shortened_below():
+    fixed = SPL.gap_choice(gap_piece('G01', 20.0), dict(mode='set', seconds=9.0)); least = SPL.gap_choice(gap_piece('G02', 4.0), dict(mode='min', seconds=8.0)); none = SPL.gap_choice(gap_piece('G03', 12.0), {})
+    assert fixed['seconds'] == 9.0 and fixed['fixed'] and SPL.flex(fixed) is None                                                              # exactly that long, never stretched or shortened
+    assert least['seconds'] == 8.0 and SPL.flex(least)[0] == 8.0 and SPL.flex(least)[1] >= 11.0                                                # at least 8 s: longer is allowed
+    assert none['seconds'] == 12.0 and 'fixed' not in none and SPL.flex(none)[0] == SPL.GAP_MIN_S
+    assert SPL.gap_choice(gap_piece('G04', 6.0, role='vo'), dict(mode='set', seconds=3.0), need=7.5)['seconds'] == 7.5                         # narration over it still has the time it needs
+    ps = [gap_piece('G01', 10.0), gap_piece('G02', 10.0), dict(kind='clip', seconds=10.0, n=2)]; SPL.gap_choice(ps[0], dict(mode='set', seconds=10.0)); SPL.gap_choice(ps[1], dict(mode='min', seconds=8.0))
+    SPL.fit_pass(ps, MUSIC, 16.0); assert ps[0]['seconds'] == 10.0 and ps[1]['seconds'] == 8.0                                                  # the music asks for less: the set one stays, the minimum goes down only to 8 s
+
+
+def test_a_gap_marked_must_use_is_added_in_its_place_when_the_script_leaves_it_out():
+    ps = [dict(kind='broll', seconds=10.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='broll', seconds=10.0, n=1, label='0002', clip='c2', text='', seg=None)]
+    kept = dict(gp('G01', '2026-02-22T10:30:00Z', 600.0), settings=dict(kind=None, mode='set', seconds=7.0, must=True)); other = dict(gp('G02', '2026-02-22T10:40:00Z', 600.0), settings=dict(must=False))
+    pack = dict(clips=[dict(label='0001', start_utc='2026-02-22T10:01:00Z'), kept, other, dict(label='0002', start_utc='2026-02-22T12:00:00Z')])
+    warn = []; added = SPL.force_gaps(ps, pack, warn); assert added == ['G01'] and [p['label'] for p in ps] == ['0001', 'G01', '0002'] and ps[1]['seconds'] == 7.0 and ps[1]['fixed'] and any('because you marked them to use' in w for w in warn)
+    assert SPL.force_gaps(ps, pack, []) == [] and SPL.force_gaps([], dict(clips=[dict(label='0001')]), []) == []                               # already in; nothing marked

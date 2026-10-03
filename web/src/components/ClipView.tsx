@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, type ClipDetail } from '../api'
+import { api, type ClipDetail, type Photo } from '../api'
+import PhotoStrip from './PhotoStrip'
 import NoteBox from './NoteBox'
 import RedoDialog from './RedoDialog'
 import Phrase, { type Mode } from './Phrase'
@@ -17,7 +18,7 @@ const Card = ({ title, children }: { title: string; children: React.ReactNode })
 )
 const Kv = ({ k, v }: { k: string; v: React.ReactNode }) => v == null || v === '' ? null : <div className="flex justify-between gap-3 py-0.5 text-sm"><span className="text-stone-500">{k}</span><span className="text-right">{v}</span></div>
 
-export default function ClipView({ folder, clip, focus }: { folder: string; clip: string; focus?: number }) {
+export default function ClipView({ folder, clip, focus, photos, tz = 'Europe/Brussels' }: { folder: string; clip: string; focus?: number; photos?: Photo[]; tz?: string }) {
   const [c, setC] = useState<ClipDetail>()
   const [err, setErr] = useState<string>()
   const [redo, setRedo] = useState(false)
@@ -94,6 +95,7 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
         </WordMarker>
       </Card>
       {redo && <RedoDialog folder={folder} clip={clip} onClose={() => setRedo(false)} />}
+      <PhotoStrip folder={folder} photos={photos} tz={tz} kind="clip" id={clip} />
       <NoteBox folder={folder} clip={clip} title="Notes for this clip" placeholder="What happened here? Names, places, how it felt, anything to mention or avoid…" />
     </div>
   )

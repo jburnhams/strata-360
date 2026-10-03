@@ -193,18 +193,426 @@ def pois(path):
     return out
 
 
-def listing(rd):
-    """Everything the app shows: the tracks with their summaries and kinds, the merged run track when there is one, and the points of interest of all of them."""
+def end_markers(rd):
+    """Where the race starts and stops on the map: {start: {lat, lon, t}, end: {lat, lon, t, km, elapsed_s} (the last point of the run), finish: {lat, lon} (the end of the last route in race order; None without routes)}; None without a run."""
+    cur = current_path(rd)
+    if not cur: return None
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t'])
+    if ok.sum() < 2: return None
+    lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]; order, _ = route_order(rd); last = max(order, key=lambda o: o['order']) if order else None
+    return dict(start=dict(lat=float(lat[0]), lon=float(lon[0]), t=float(t[0])), end=dict(lat=float(lat[-1]), lon=float(lon[-1]), t=float(t[-1]), km=round(float(_dist(lat, lon)[-1]) / 1000.0, 1), elapsed_s=round(float(t[-1] - t[0]))),
+                finish=dict(lat=last['end'][0], lon=last['end'][1]) if last else None)
+
+
+def finish_info(rd):
+    """The finish of the routes for the Tracks list (the finish line, not where the run ended): {reached, route_m, covered_m, t, elapsed_s, km, time_s}. route_m is the length of all the routes and covered_m how much of that the run covered (the stages added up, as on the overlay).
+    When the run came to the end of the last route (the At Finish stage) `reached` is True and t, elapsed_s, km (from the start of the run) and time_s (how long it stayed to the end of the run) say when; otherwise those are None. None without routes."""
+    order, _ = route_order(rd); cur = current_path(rd)
+    if not order or not cur: return None
+    sched = stage_schedule(rd); tm = timing(rd); prog = stage_progress(rd)
+    if not sched or not tm or not prog: return None
+    names = [l for _, l in sched]; covered = 0.0
+    for name, pr in prog.items():
+        k = names.index(name) if name in names else None
+        if k is None or not len(pr['t']): continue
+        covered += pr['route_m'] if (k + 1 < len(names) and names[k + 1] != 'After Race') else float(pr['prog'][-1])                                   # a stage with something after it other than the end of the run was completed
+    out = dict(reached=False, route_m=round(sum(p['route_m'] for p in prog.values())), covered_m=round(covered), t=None, elapsed_s=None, km=None, time_s=None)
+    fin = next((a for a, l in sched if l == 'At Finish'), None)
+    if fin is not None:
+        run = read(cur); ok = np.isfinite(run['t']) & np.isfinite(run['lat']) & np.isfinite(run['lon']); tt = run['t'][ok]; cum = _dist(run['lat'][ok], run['lon'][ok])
+        out.update(reached=True, t=float(fin), elapsed_s=round(float(fin - tm['start'])), km=round(float(np.interp(fin, tt, cum)) / 1000.0, 1), time_s=round(float(tm['end'] - fin)))
+    return out
+
+
+def _cutoff_text(rd): return _manifest(rd).get('cutoffs') or {}
+
+
+def cutoff_contexts(rd, tz='Europe/Brussels'):
+    """What a typed cut-off needs to be understood, for the checkpoints ('cp:N') and the finish ('finish'): {key: ctx} (see gps/cutoffs.py), with the time the run reached each, as time since the start."""
+    from strata360.gps import cutoffs as CU
+    tm = timing(rd)
+    if not tm: return {}
+    arr = {int(k): v['elapsed_s'] for k, v in tm['arrivals'].items()}; left = {int(k): arr[int(k)] + tm['checkpoints'][k] for k in tm['arrivals']}; n = len(tm['arrivals']); saved = _cutoff_text(rd); out = {}; prev_cut = None
+    fin = finish_info(rd)
+    for k in range(1, n + 1):
+        prev_ref = prev_cut if prev_cut is not None else (arr.get(k - 1, 0))
+        out[f'cp:{k}'] = dict(start=tm['start'], tz=tz, prev_ref_s=prev_ref, last_departure_s=left.get(k - 1, 0), arrival_s=arr[k])
+        prev_cut = _cutoff_resolved(saved.get(f'cp:{k}'), out[f'cp:{k}'])
+    prev_ref = prev_cut if prev_cut is not None else arr.get(n, 0)
+    if fin: out['finish'] = dict(start=tm['start'], tz=tz, prev_ref_s=prev_ref, last_departure_s=left.get(n, 0), arrival_s=fin['elapsed_s'] if fin['reached'] else None)
+    return out
+
+
+def _cutoff_resolved(text, ctx):
+    from strata360.gps import cutoffs as CU
+    if not text: return None
+    try: return CU.parse(text, ctx)['elapsed_s']
+    except ValueError: return None
+
+
+def overlay_places(rd):
+    """Where the start, the finish (the end of the last route) and the checkpoints are, for the overlay maps: {start: (lat, lon), finish: (lat, lon) or None, checkpoints: [(n, lat, lon)]}; None without a run."""
+    em = end_markers(rd)
+    if not em: return None
+    _, marks = route_order(rd)
+    return dict(start=(em['start']['lat'], em['start']['lon']), finish=(em['finish']['lat'], em['finish']['lon']) if em['finish'] else None, checkpoints=[(m['n'], m['lat'], m['lon']) for m in marks])
+
+
+def overlay_cutoffs(rd, tz='Europe/Brussels'):
+    """The cut-offs for the overlay, as time since the start of the run: {'start': UTC seconds of the start, 'stage': {'Stage N': the cut-off at the end of that stage (its checkpoint, or the finish for the last)}, 'cp': {N: cut-off of checkpoint N}, 'finish': cut-off of the finish}; only those set and understood."""
+    order, _ = route_order(rd); tm = timing(rd) if order else None
+    if not tm: return {}
+    c = {k: v['elapsed_s'] for k, v in cutoffs(rd, tz).items() if 'elapsed_s' in v}; n = len(order)
+    stage = {f'Stage {k}': c[f'cp:{k}' if k < n else 'finish'] for k in range(1, n + 1) if (f'cp:{k}' if k < n else 'finish') in c}
+    return dict(start=tm['start'], stage=stage, cp={int(k[3:]): v for k, v in c.items() if k.startswith('cp:')}, finish=c.get('finish'))
+
+
+def set_cutoff(rd, key, text, tz='Europe/Brussels'):
+    """Save the cut-off typed for a checkpoint ('cp:N') or the finish ('finish'); empty text clears it. Raises ValueError (with a message to show) when the text is not understood, KeyError for an unknown key."""
+    from strata360.gps import cutoffs as CU
+    ctx = cutoff_contexts(rd, tz).get(key)
+    if ctx is None: raise KeyError(key)
+    doc = _manifest(rd); cuts = doc.setdefault('cutoffs', {}); text = (text or '').strip()
+    if not text: cuts.pop(key, None)
+    else: CU.parse(text, ctx); cuts[key] = text
+    _save(rd, doc)
+
+
+def cutoffs(rd, tz='Europe/Brussels'):
+    """The saved cut-offs as the app shows them: {key: {text, kind, elapsed_s, arrival_s, margin_s}} (margin: seconds to spare, negative when late; None when the run did not get there), or {text, error}."""
+    from strata360.gps import cutoffs as CU
+    saved = _cutoff_text(rd); ctxs = cutoff_contexts(rd, tz); out = {}
+    for key, text in saved.items():
+        ctx = ctxs.get(key)
+        if ctx is None: continue
+        try: r = CU.parse(text, ctx)
+        except ValueError as e: out[key] = dict(text=text, error=str(e)); continue
+        out[key] = dict(text=text, kind=r['kind'], elapsed_s=r['elapsed_s'], arrival_s=ctx['arrival_s'], margin_s=None if ctx['arrival_s'] is None else r['elapsed_s'] - ctx['arrival_s'])
+    return out
+
+
+def listing(rd, tz='Europe/Brussels'):
+    """Everything the app shows: the tracks with their summaries and kinds, the merged run track when there is one, the points of interest of all of them, and where the race track leaves the routes (`divergences`)."""
     items = []; points = []
+    try: order, marks = route_order(rd)
+    except Exception: order, marks = [], []                                         # (the map is not worth failing the list over)
+    info_of = {o['id']: o for o in order}
     for e in entries(rd):
         try: info = summary(e['file'])
         except Exception as ex: items.append(dict(id=e['id'], name=e['name'], kind=e['kind'], error=f'{type(ex).__name__}: {ex}')); continue
         try: p = [dict(q, track=e['id']) for q in pois(e['file'])]
         except Exception: p = []
-        points += p; items.append(dict(id=e['id'], name=e['name'], kind=e['kind'], pois=len(p), **info))
+        points += p; o = info_of.get(e['id']); items.append(dict(id=e['id'], name=e['name'], kind=e['kind'], pois=len(p), **info, **({k: o[k] for k in ('order', 'reversed', 'km_start', 'km_end')} if o else {})))
+    items.sort(key=lambda x: (x['kind'] != 'run', x.get('order') is None, x.get('order') or 0))                        # runs first, then the routes in race order
+    name = {x['id']: x['name'] for x in items}
+    try: stops = checkpoint_stops(rd)
+    except Exception: stops = {}                                                    # (the map is not worth failing the list over)
+    for c in marks: points.append(dict(name=f"Checkpoint {c['n']}", lat=c['lat'], lon=c['lon'], ele=None, sym='checkpoint', desc=f"{name.get(c['before'], '')} → {name.get(c['after'], '')}" + (f" (their ends are {c['gap_m']} m apart)" if c['gap_m'] >= 20 else ''), track='checkpoint', n=c['n'], **({'stop': stops[c['n']]} if c['n'] in stops else {})))
     merged = None
     if len(runs(rd)) >= 2:
         current_path(rd)
         try: merged = json.load(open(os.path.join(rd, MERGED_INFO)))
         except (OSError, ValueError): merged = None
-    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)))
+    try: div = divergences(rd)
+    except Exception: div = []                                                     # (the map is not worth failing the list over)
+    try: tm = timing(rd)
+    except Exception: tm = {}
+    try: mk = end_markers(rd)
+    except Exception: mk = None
+    try: fi = finish_info(rd)
+    except Exception: fi = None
+    try: cuts = cutoffs(rd, tz)
+    except Exception: cuts = {}
+    for x in items:
+        if x['id'] in tm.get('sections', {}):
+            i = x['id']; x['time_s'] = tm['sections'][i]; x['ran_km'] = round(tm['ran_m'][i] / 1000.0, 1); x['ascent_m'], x['descent_m'] = tm['climb'][i]
+            if tm['ran_m'][i] >= 100: x['pace_s_km'] = round(tm['sections'][i] / (tm['ran_m'][i] / 1000.0))                         # (the time between the checkpoints over the distance run in it)
+    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div, timing=tm or None, markers=mk, finish=fi, cutoffs=cuts)
+
+
+_DIV = {}
+
+
+def _fill(p, step):
+    """A polyline in metres with a point every `step` metres or less along it."""
+    d = np.hypot(*np.diff(p, axis=0).T); s = np.concatenate([[0], np.cumsum(d)]); n = max(2, int(s[-1] / step) + 1); u = np.linspace(0, s[-1], n)
+    return np.column_stack([np.interp(u, s, p[:, 0]), np.interp(u, s, p[:, 1])]) if s[-1] > 0 else p[:1]
+WRONG_DEG = 35.0               # heading differing from the route's by more than this (as lines) is heading the wrong way
+MIN_WRONG = 0.3                # a stretch off the route needs this share of it heading the wrong way, else it is only an offset alongside the route
+
+
+def _heading(p, k):
+    """Heading (degrees, 0-180 as a line) at each point of a polyline in metres, from the points k steps either side."""
+    n = len(p); a = np.clip(np.arange(n) - k, 0, n - 1); b = np.clip(np.arange(n) + k, 0, n - 1)
+    return np.degrees(np.arctan2(p[b, 0] - p[a, 0], p[b, 1] - p[a, 1])) % 180.0
+
+
+def _apart(h1, h2):
+    """Angle between two headings taken as lines, 0-90 degrees."""
+    return np.abs(((h1 - h2 + 90.0) % 180.0) - 90.0)
+
+
+def divergences(rd, threshold_m=50.0, top=10, step_m=10.0, join_m=150.0):
+    """Where the race track leaves the routes by more than `threshold_m` (the distance to the nearest route of any: routes can be sections of the course). The race track is taken every `step_m` metres and each route is filled in to the same spacing, so the distance is within step_m / 2; stretches off the routes
+    less than `join_m` apart along the run are one divergence. A stretch that only keeps level with a route, offset from it (less than MIN_WRONG of it heading more than WRONG_DEG away from the route's direction), is left out. Returns the `top` by score (peak distance times the share heading the wrong way), biggest first: [{lat, lon, peak_m, wrong, score, length_m, km, t, line}] (lat, lon: the farthest point; km: along the race track; line: the stretch, thinned)."""
+    rts = [e for e in entries(rd) if e['kind'] == 'route']; cur = current_path(rd)
+    if not rts or not cur: return []
+    key = (cur, os.path.getmtime(cur), tuple((e['file'], os.path.getmtime(e['file'])) for e in rts), threshold_m, top)
+    if key in _DIV: return _DIV[key]
+    from scipy.spatial import cKDTree
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    if len(lat) < 2: return []
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    xy = lambda la, lo: np.column_stack([(lo - 5.0) * kx, (la - lat0) * ky])
+    pts = []; hdg = []
+    for e in rts:
+        r = read(e['file']); g = np.isfinite(r['lat']) & np.isfinite(r['lon'])
+        if g.sum() >= 2:
+            f = _fill(xy(r['lat'][g], r['lon'][g]), step_m); pts.append(f); hdg.append(_heading(f, 2))
+    if not pts: return []
+    tree = cKDTree(np.vstack(pts)); rh = np.concatenate(hdg)
+    P = xy(lat, lon); s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))]); u = np.arange(0, s[-1], step_m)           # the race track every step_m along its own length
+    if len(u) < 2: return []
+    Q = np.column_stack([np.interp(u, s, P[:, 0]), np.interp(u, s, P[:, 1])]); tt = np.interp(u, s, t); d, nn = tree.query(Q); off = d > threshold_m; turn = _apart(_heading(Q, 3), rh[nn]) > WRONG_DEG       # (heading of the run against the heading of the route where it is nearest, as lines: the way along it does not matter)
+    out = []; i = 0; n = len(u)
+    while i < n:
+        if not off[i]: i += 1; continue
+        j = i
+        while True:                                                                   # extend over short returns to the route
+            k = j + 1
+            while k < n and not off[k]: k += 1
+            if k < n and (k - j) * step_m < join_m: j = k
+            else: break
+        a, b = i, j; share = float(turn[a:b + 1][off[a:b + 1]].mean())
+        if share < MIN_WRONG: i = j + 1; continue                                  # keeps level with the route, only offset: not a wrong turn
+        m = a + int(np.argmax(d[a:b + 1])); idx = np.unique(np.linspace(a, b, min(60, b - a + 1)).astype(int))
+        unxy = lambda q: (float(q[1] / ky + lat0), float(q[0] / kx + 5.0))
+        pk = unxy(Q[m]); out.append(dict(lat=round(pk[0], 6), lon=round(pk[1], 6), peak_m=round(float(d[m])), wrong=round(share, 2), score=round(float(d[m]) * share), length_m=round((b - a + 1) * step_m), km=round(float(u[m]) / 1000.0, 1), t=float(tt[m]), line=[[round(unxy(Q[q])[0], 6), round(unxy(Q[q])[1], 6)] for q in idx]))
+        i = j + 1
+    out = sorted(out, key=lambda x: -x['score'])[:top]; _DIV.clear(); _DIV[key] = out; return out
+
+
+_ORDER = {}
+
+
+def route_order(rd, step_m=10.0, reach_m=150.0):
+    """The routes in the order the race runs them, from the race track. A route is run in one stretch of the race track about as long as itself, which starts near one of the places the race track passes the route's first point (a loop or a start and finish together make several) and goes on
+    or back from there; every such start and direction is tried and the stretch whose points lie nearest the route's is taken. The routes are then put in the order of their stretches, each turned the way the race ran it. Returns
+    [{id, order (1 = first), reversed, km_start, km_end (along the race track), start: [lat, lon], end: [lat, lon]}] and, between each route and the next, the checkpoints [{n, lat, lon, gap_m, before, after}]: halfway between the end of one route and the start of the next, which need not meet exactly.
+    The start of the first route and the end of the last are not checkpoints. Empty without a race track."""
+    rts = [e for e in entries(rd) if e['kind'] == 'route']; cur = current_path(rd)
+    if not rts or not cur: return [], []
+    key = (cur, os.path.getmtime(cur), tuple((e['file'], os.path.getmtime(e['file'])) for e in rts), step_m)
+    if key in _ORDER: return _ORDER[key]
+    from scipy.spatial import cKDTree
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']); lat, lon = run['lat'][ok], run['lon'][ok]
+    if len(lat) < 2: return [], []
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    xy = lambda la, lo: np.column_stack([(lo - 5.0) * kx, (la - lat0) * ky]); ll = lambda q: [float(q[1] / ky + lat0), float(q[0] / kx + 5.0)]
+    P = xy(lat, lon); s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))]); u = np.arange(0, s[-1], step_m)
+    if len(u) < 2: return [], []
+    Q = np.column_stack([np.interp(u, s, P[:, 0]), np.interp(u, s, P[:, 1])]); tree = cKDTree(Q); found = []
+    for e in rts:
+        r = read(e['file']); g = np.isfinite(r['lat']) & np.isfinite(r['lon'])
+        if g.sum() < 2: continue
+        R = xy(r['lat'][g], r['lon'][g]); L = float(np.hypot(*np.diff(R, axis=0).T).sum()); S = _fill(R, 50.0); span = int(1.25 * L / step_m) + 1
+        near = np.sort(np.array(tree.query_ball_point(R[0], reach_m), int)); starts = []
+        if len(near):
+            for grp in np.split(near, np.flatnonzero(np.diff(near) > 50) + 1): starts.append(int(grp[np.argmin(np.hypot(*(Q[grp] - R[0]).T))]))      # the nearest point of each pass
+        best = None
+        for c in starts:
+            for sign in (1, -1):
+                lo, hi = (c, min(len(Q), c + span)) if sign > 0 else (max(0, c - span), c + 1)
+                if hi - lo < 2: continue
+                dd, ix = cKDTree(Q[lo:hi]).query(S); cost = float(np.mean(np.minimum(dd, 300.0)))
+                if best is None or cost < best[0]: best = (cost, lo, ix, sign)
+        if best is None: continue
+        _, lo, ix, sign = best; first, last = float(u[lo + ix[0]]), float(u[lo + ix[-1]])
+        found.append(dict(id=e['id'], key=(first + last) / 2, reversed=sign < 0, km_start=round(min(first, last) / 1000.0, 1), km_end=round(max(first, last) / 1000.0, 1), a=R[-1] if sign < 0 else R[0], b=R[0] if sign < 0 else R[-1]))
+    found.sort(key=lambda x: x['key']); order = []; marks = []
+    for n, f in enumerate(found, 1):
+        order.append(dict(id=f['id'], order=n, reversed=f['reversed'], km_start=f['km_start'], km_end=f['km_end'], start=ll(f['a']), end=ll(f['b'])))
+        if n > 1:
+            p = found[n - 2]['b']; la, lo_ = ll((p + f['a']) / 2)
+            marks.append(dict(n=n - 1, lat=round(la, 6), lon=round(lo_, 6), gap_m=round(float(np.hypot(*(f['a'] - p)))), before=found[n - 2]['id'], after=f['id']))
+    _ORDER.clear(); _ORDER[key] = (order, marks); return order, marks
+
+
+STOP_MS = 0.7                  # slower than this (m/s, over half a minute either side) is standing still
+ZONE_M = 300.0                 # a checkpoint's zone: the race track inside it is the visit
+VISIT_GAP_S = 120.0            # out of the zone (with samples there) for longer than this and coming back is another visit (shorter is the track wobbling at the edge)
+
+
+def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
+    """How long the run spent at each checkpoint: {checkpoint n: {arrived, left, stopped_s, radius_m}} (times are UTC epoch seconds; checkpoints the run did not reach are left out).
+    The visit is ONE pass of the race track through the zone (radius_m round the checkpoint): the one nearest to where the routes join along the race (the race can pass the same place again later; a return after more than VISIT_GAP_S outside is another visit and is not counted). The zone is large because the stop is often not exactly at the point,
+    and time spent still moving on the way in or out is not counted: `arrived` is the first sample in the visit that is slower than STOP_MS and `left` the last one of the visit (speed over 2 x window_s round it, so a gap in the recording while the watch was paused counts as standing still), `stopped_s` the time between them, 0 when the run never slowed (`passed` is then when it went by: the sample nearest the checkpoint)."""
+    order, marks = route_order(rd); cur = current_path(rd)
+    if not marks or not cur: return {}
+    from scipy.spatial import cKDTree
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    if len(t) < 2: return {}
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    P = np.column_stack([(lon - 5.0) * kx, (lat - lat0) * ky]); cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))]); tree = cKDTree(P); km = {o['id']: o for o in order}; out = {}
+    for c in marks:
+        cp = np.array([(c['lon'] - 5.0) * kx, (c['lat'] - lat0) * ky]); idx = np.sort(np.array(tree.query_ball_point(cp, radius_m), int))
+        if not len(idx): continue
+        visits = np.split(idx, np.flatnonzero((np.diff(idx) > 1) & (np.diff(t[idx]) > VISIT_GAP_S)) + 1); want = (km[c['before']]['km_end'] + km[c['after']]['km_start']) * 500.0       # (half the sum of two km, as metres); a gap of more than VISIT_GAP_S needs samples outside the zone between to be another visit: a gap with no samples at all is the watch paused, still the same visit
+        v = min(visits, key=lambda g: abs(float(cum[g[len(g) // 2]]) - want)); tv = t[v]
+        a = np.interp(tv - window_s, t, P[:, 0]), np.interp(tv - window_s, t, P[:, 1]); b = np.interp(tv + window_s, t, P[:, 0]), np.interp(tv + window_s, t, P[:, 1])
+        speed = np.hypot(b[0] - a[0], b[1] - a[1]) / (2 * window_s); slow = np.flatnonzero(speed < STOP_MS)
+        arrived, left = (float(tv[slow[0]]), float(tv[slow[-1]])) if len(slow) else (None, None)
+        out[c['n']] = dict(passed=float(tv[int(np.argmin(np.hypot(*(P[v] - cp).T)))]), arrived=arrived, left=left, stopped_s=round(left - arrived) if arrived is not None else 0, radius_m=round(radius_m))
+    return out
+
+
+def timing(rd):
+    """The time of the run split between the checkpoints and the routes: {total_s, start, end, checkpoints: {n: seconds}, sections: {route id: seconds}, ran_m: {route id: metres actually run in it}, climb: {route id: [ascent, descent] in metres}, arrivals: {n: {t (UTC), elapsed_s, km}} (arrival at each checkpoint, from the start of the run), ascent_m, descent_m (the whole run), consistent}. The run, from its first sample to its last, is cut at each checkpoint's arrival and departure (a checkpoint the run never slowed at is a moment, 0 s):
+    section k is from the departure from checkpoint k - 1 (the start of the run for the first) to the arrival at checkpoint k (the end of the run for the last one reached), so the checkpoint times and the section times add up to `total_s` exactly. Routes beyond the last checkpoint the run reached have no time. `consistent` is False if the
+    checkpoints came out of order along the run (a section would be negative)."""
+    order, marks = route_order(rd); cur = current_path(rd)
+    if not order or not cur: return {}
+    stops = checkpoint_stops(rd); run = read(cur); ok = np.isfinite(run['t']) & np.isfinite(run['lat']) & np.isfinite(run['lon']); t = run['t'][ok]
+    if len(t) < 2: return {}
+    from strata360.gps.overview import ascent_descent
+    alt = run['alt'][ok]; cum = _dist(run['lat'][ok], run['lon'][ok]); metres = lambda a, b: float(np.interp(b, t, cum) - np.interp(a, t, cum)); up_down = lambda a, b: ascent_descent(alt[(t >= a) & (t <= b)])                  # distance actually covered between two times
+    t0, t1 = float(t.min()), float(t.max()); ids = [o['id'] for o in sorted(order, key=lambda o: o['order'])]; secs = {}; cps = {}; dist = {}; climb = {}; arrivals = {}; prev = t0; consistent = True
+    for k, rid in enumerate(ids, 1):
+        c = stops.get(k) if k < len(ids) else None
+        if c is None:
+            secs[rid] = t1 - prev; dist[rid] = metres(prev, t1); climb[rid] = up_down(prev, t1); consistent = consistent and t1 >= prev; break                                                   # the run ended in this section (or this is the last one)
+        a = c['arrived'] if c['arrived'] is not None else c['passed']; l = c['left'] if c['left'] is not None else c['passed']
+        arrivals[k] = dict(t=a, elapsed_s=round(a - t0), km=round(metres(t0, a) / 1000.0, 1)); secs[rid] = a - prev; dist[rid] = metres(prev, a); climb[rid] = up_down(prev, a); cps[k] = l - a; consistent = consistent and a >= prev and l >= a; prev = l
+    return dict(total_s=round(t1 - t0), start=t0, end=t1, checkpoints={k: round(v) for k, v in cps.items()}, sections={k: round(v) for k, v in secs.items()}, ran_m={k: round(v) for k, v in dist.items()}, arrivals=arrivals, climb={k: [round(v[0]), round(v[1])] for k, v in climb.items()}, ascent_m=round(ascent_descent(alt)[0]), descent_m=round(ascent_descent(alt)[1]), consistent=bool(consistent))
+
+
+def stage_schedule(rd, zone_m=ZONE_M):
+    """What stage of the race it is, by time: [(UTC seconds from which it holds, label)] in order, the first from minus infinity: Before Race, At Start (until the run is more than zone_m from where it began), Stage 1, Checkpoint 1 (arrival to departure), Stage 2, ... Checkpoint N, Stage N + 1,
+    At Finish (from coming within zone_m of the end of the last route; only if the run got there), After Race (from the last point of the run). Without routes the stage between start and end is just `On Course`. Empty without a run."""
+    tm = timing(rd) if route_order(rd)[0] else {}
+    cur = current_path(rd)
+    if not cur: return []
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    if len(t) < 2: return []
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    gone = np.flatnonzero(np.hypot((lon - lon[0]) * kx, (lat - lat[0]) * ky) > zone_m); leave = float(t[gone[0]]) if len(gone) else float(t[-1]); t0, t1 = float(t[0]), float(t[-1])
+    marks = end_markers(rd) or {}; seq = [(-np.inf, 'Before Race'), (t0, 'At Start')]
+    if not tm:
+        seq += [(leave, 'On Course')]
+    else:
+        n = len(tm['sections']); seq += [(leave, 'Stage 1')]
+        for k in range(1, n):
+            a = tm['arrivals'].get(k)
+            if a is None: break
+            seq += [(a['t'], f'Checkpoint {k}'), (a['t'] + tm['checkpoints'][k], f'Stage {k + 1}')]
+        fin = marks.get('finish')
+        if fin and len(seq) >= 3 and len(tm['arrivals']) == n - 1:                                                          # the run reached the last stage: did it get to the finish line?
+            near = np.flatnonzero((np.hypot((lon - fin['lon']) * kx, (lat - fin['lat']) * ky) <= zone_m) & (t > seq[-1][0]))
+            if len(near): seq += [(float(t[near[0]]), 'At Finish')]
+    seq.append((t1, 'After Race')); times = np.maximum.accumulate(np.array([s[0] for s in seq])); return [(float(a), s[1]) for a, s in zip(times, seq)]
+
+
+def stage_progress(rd, on_route_m=50.0, every_s=5.0):
+    """How far along its route the run was at each moment of each stage: {'Stage N': {route_m, t (UTC seconds), prog (metres along the route)}} (t and prog are empty for a stage the run did not get to). The progress is the place on the route nearest to the run while the run is within `on_route_m` of it, and stays at the last such place while the run is off the route, so it is
+    what the route says has been covered, to set beside the distance actually run (they differ when the run went off course or missed a loop). Sampled every `every_s` seconds over the stage."""
+    order, _ = route_order(rd); cur = current_path(rd); sched = stage_schedule(rd)
+    if not order or not cur or not sched: return {}
+    from scipy.spatial import cKDTree
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0; P = np.column_stack([(lon - 5.0) * kx, (lat - lat0) * ky]); files = {e['id']: e['file'] for e in entries(rd)}
+    times = [a for a, _ in sched]; out = {}
+    for o in order:
+        name = f"Stage {o['order']}"; k = next((j for j, (_, l) in enumerate(sched) if l == name), None)
+        if o['id'] not in files: continue
+        r = read(files[o['id']]); g = np.isfinite(r['lat']) & np.isfinite(r['lon']); rl, ro = r['lat'][g], r['lon'][g]
+        if o['reversed']: rl, ro = rl[::-1], ro[::-1]
+        R = np.column_stack([(ro - 5.0) * kx, (rl - lat0) * ky]); s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(R, axis=0).T))]); u = np.arange(0, s[-1], 10.0); F = np.column_stack([np.interp(u, s, R[:, 0]), np.interp(u, s, R[:, 1])])
+        sel = np.flatnonzero((t >= times[k]) & (t <= times[k + 1])) if k is not None and k + 1 < len(sched) else []
+        if len(sel) < 2: out[name] = dict(route_m=float(s[-1]), t=np.array([]), prog=np.array([])); continue                  # a stage the run never got to still has its length (for the total of the routes)
+        sel = sel[::max(1, int(every_s / max(1e-9, float(np.median(np.diff(t[sel]))) or 1.0)))]; d, nn = cKDTree(F).query(P[sel]); prog = np.where(d <= on_route_m, u[nn], np.nan)
+        last = 0.0; prog = prog.copy()
+        for j in range(len(prog)):                                                                  # holds at the last place on the route while off it
+            if np.isfinite(prog[j]): last = prog[j]
+            else: prog[j] = last
+        out[name] = dict(route_m=float(s[-1]), t=t[sel], prog=prog)
+    return out
+
+
+def _hm(s):
+    s = int(abs(s)); h, m = s // 3600, s % 3600 // 60; return f'{h}h{m:02d}m' if h else f'{m}m'
+
+
+def race_story(rd, tz='Europe/Brussels'):
+    """The race as facts for the script writer: the stages (route length, distance run, time), the checkpoints (when reached, how long stopped, the cut-off and the time to spare or late), the finish, and what the run covered of the routes. None without routes.
+    {stages: [{n, route_km, ran_km, covered_km, time_s, off_course}], checkpoints: [{n, elapsed_s, local, km, stopped_s, cutoff_s, margin_s}], finish: {...}, route_km, covered_km, complete}; `off_course` is set only when the distance run differs from the route covered by more than 10%."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    order, _ = route_order(rd); tm = timing(rd) if order else None
+    if not tm: return None
+    order = sorted(order, key=lambda o: o['order']); sched = stage_schedule(rd); prog = stage_progress(rd); cuts = cutoffs(rd, tz); fin = finish_info(rd); n = len(order); names = [l for _, l in sched]
+    local = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(ZoneInfo(tz)).strftime('%a %H:%M')
+    stages = []
+    for o in order:
+        name = f"Stage {o['order']}"; p = prog.get(name) or {}; route = float(p.get('route_m', 0.0)); k = names.index(name) if name in names else None
+        complete = k is not None and k + 1 < len(names) and names[k + 1] != 'After Race'; covered = route if complete else (float(p['prog'][-1]) if len(p.get('prog') if p.get('prog') is not None else []) else 0.0)
+        ran = tm['ran_m'].get(o['id'], 0.0) if tm['sections'].get(o['id']) is not None else 0.0
+        off = None
+        if covered > 0 and ran > 0 and abs(ran - covered) > 0.10 * max(ran, covered): off = dict(ran_km=round(ran / 1000.0, 1), route_km=round(covered / 1000.0, 1))
+        stages.append(dict(n=o['order'], route_km=round(route / 1000.0, 1), ran_km=round(ran / 1000.0, 1), covered_km=round(covered / 1000.0, 1), time_s=tm['sections'].get(o['id']), complete=complete, off_course=off))
+    cps = []
+    for k, a in sorted(tm['arrivals'].items()):
+        c = cuts.get(f'cp:{k}') or {}
+        cps.append(dict(n=int(k), elapsed_s=a['elapsed_s'], local=local(a['t']), km=a['km'], stopped_s=tm['checkpoints'].get(k), cutoff_s=c.get('elapsed_s'), margin_s=c.get('margin_s')))
+    fc = cuts.get('finish') or {}
+    finish = dict(reached=bool(fin and fin['reached']), cutoff_s=fc.get('elapsed_s'), margin_s=fc.get('margin_s'), elapsed_s=fin['elapsed_s'] if fin and fin['reached'] else None)
+    cur = current_path(rd); run = read(cur); ok = np.isfinite(run['t']) & np.isfinite(run['lat']) & np.isfinite(run['lon']); tt = run['t'][ok]; cum = _dist(run['lat'][ok], run['lon'][ok]); step = max(1, len(tt) // 20000)
+    route_km = round(sum(s['route_km'] for s in stages), 1); covered_km = round(sum(s['covered_km'] for s in stages), 1)
+    return dict(stages=stages, checkpoints=cps, finish=finish, route_km=route_km, covered_km=covered_km, run_s=round(tm['end'] - tm['start']), start=tm['start'], _sched=sched, _prog=prog, _cuts={k: v.get('elapsed_s') for k, v in cuts.items() if 'elapsed_s' in v}, _arr={int(k): v['elapsed_s'] for k, v in tm['arrivals'].items()}, _run=(tt[::step], cum[::step]))
+
+
+def names_of(story): return [l for _, l in story['_sched']]
+
+
+def story_at(story, t, dist_m=None):
+    """Where the race stood at time `t` (UTC seconds): {stage, checkpoints_done, of, route_km_done, route_km, stage_km_done, stage_km, km_to_next, next, elapsed_s, cutoff_s, left_s, last_margin_s, off_course}. `dist_m` is the distance the run had covered (from the start) if known: with it the distance run in the stage can be compared with the route's."""
+    import bisect
+    sched = story['_sched']; times = [a for a, _ in sched]; name = sched[max(0, bisect.bisect_right(times, t) - 1)][1]; elapsed = t - story['start']; stages = story['stages']; n = len(stages); cps = story['checkpoints']
+    done = sum(1 for c in cps if c['elapsed_s'] <= elapsed + 1e-6)
+    cur = int(name.split()[1]) if name.startswith('Stage') else (int(name.split()[1]) + 1 if name.startswith('Checkpoint') else (1 if name in ('Before Race', 'At Start') else n))
+    cur = min(max(cur, 1), n); st = stages[cur - 1]; pr = story['_prog'].get(f'Stage {cur}') or {}
+    import numpy as np
+    inside = float(np.interp(t, pr['t'], pr['prog'])) / 1000.0 if len(pr.get('t', [])) and name.startswith('Stage') else (st['route_km'] if name.startswith('Checkpoint') and cur > 1 or name in ('At Finish', 'After Race') else 0.0)
+    if name.startswith('Checkpoint'): inside = 0.0
+    nxt = f'checkpoint {cur}' if cur < n else 'the finish'; cut = story['_cuts'].get(f'cp:{cur}' if cur < n else 'finish')
+    last_margin = next((c['margin_s'] for c in reversed(cps) if c['elapsed_s'] <= elapsed + 1e-6 and c['margin_s'] is not None), None)
+    off = None
+    if name.startswith('Stage') and name in names_of(story):                                                   # the distance run in the stage so far against the route covered so far
+        t0s = story['start'] if cur == 1 else sched[names_of(story).index(name)][0]; tt, cum = story['_run']; ran = (float(np.interp(t, tt, cum)) - float(np.interp(t0s, tt, cum))) / 1000.0
+        if abs(ran - inside) > max(0.10 * max(ran, inside), 0.5): off = dict(ran_km=round(ran, 1), route_km=round(inside, 1))
+    return dict(stage=cur, of=n, name=name, checkpoints_done=done, route_km_done=round(sum(s['route_km'] for s in stages[:cur - 1]) + inside, 1), route_km=story['route_km'], stage_km_done=round(inside, 1), stage_km=st['route_km'],
+                km_to_next=round(max(0.0, st['route_km'] - inside), 1), next=nxt, elapsed_s=round(elapsed), cutoff_s=cut, left_s=None if cut is None else round(cut - elapsed), last_margin_s=last_margin, off_course=off)
+
+
+def story_line(p):
+    """One line for a clip: how far along the course the race was (from `story_at`)."""
+    t = f"stage {p['stage']} of {p['of']}, {p['checkpoints_done']} of {p['of'] - 1} checkpoints done, {p['stage_km_done']:g} of {p['stage_km']:g} route km into the stage, {p['km_to_next']:g} km to {p['next']}"
+    if p['left_s'] is not None: t += f"; {_hm(p['left_s'])} left to the cut-off for {p['next']}" if p['left_s'] >= 0 else f"; {_hm(p['left_s'])} PAST the cut-off for {p['next']}"
+    if p['last_margin_s'] is not None: t += f"; the last checkpoint was reached {_hm(p['last_margin_s'])} {'ahead of' if p['last_margin_s'] >= 0 else 'behind'} its cut-off"
+    if p['off_course']: t += f"; off course in this stage (ran {p['off_course']['ran_km']:g} km for {p['off_course']['route_km']:g} km of route)"
+    return t
+
+
+def story_text(story, tz='Europe/Brussels'):
+    """The course facts for the race section of the prompt: one short paragraph per fact, only what is known (no cut-offs unless they were typed in; an off-course distance only when it differs from the route by more than 10%)."""
+    n = len(story['stages']); L = [f"Course: {n} stages with {n - 1} checkpoints between them, {story['route_km']:g} km of route in all; the GPS run covered {story['covered_km']:g} km of that route in {_hm(story['run_s'])}"]
+    for s in story['stages']:
+        t = f"  stage {s['n']}: route {s['route_km']:g} km, ran {s['ran_km']:g} km" + (f" in {_hm(s['time_s'])}" if s['time_s'] else '') + ('' if s['complete'] else ' (the run ended in this stage, short of the end of it)')
+        if s['off_course']: t += f"; ran {s['off_course']['ran_km']:g} km against {s['off_course']['route_km']:g} km of route covered (more than 10% apart: detours or off course)"
+        L.append(t)
+    for c in story['checkpoints']:
+        t = f"  checkpoint {c['n']}: reached after {_hm(c['elapsed_s'])} ({c['local']}), km {c['km']:g} of the run" + (f", stopped {_hm(c['stopped_s'])}" if c['stopped_s'] else '')
+        if c['cutoff_s'] is not None: t += f"; cut-off {_hm(c['cutoff_s'])} after the start: " + (f"{_hm(c['margin_s'])} {'to spare' if c['margin_s'] >= 0 else 'LATE'}" if c['margin_s'] is not None else 'not reached')
+        L.append(t)
+    f = story['finish']
+    L.append('  finish: ' + ('reached after ' + _hm(f['elapsed_s']) if f['reached'] else 'NOT reached (the run ended before the end of the last route: a DNF)') + (f"; cut-off {_hm(f['cutoff_s'])} after the start" if f['cutoff_s'] is not None else ''))
+    return L

@@ -6,7 +6,7 @@ import { usePoll } from '../usePoll'
 // (the camera follows the runner at a speed-up with the race overlay on top), watch it, and use it in the script as a clip labelled with the gap's name (G01 ...).
 const KIND_LABEL: Record<GapKind, string> = { map: '2D map', flyover: '3D flyover (4K)' }
 const BUTTON: Record<GapKind, string> = { map: 'Generate map clip', flyover: 'Generate 3D flyover' }
-export default function GapsPanel({ folder }: { folder: string }) {
+export default function GapsPanel({ folder, onOpen }: { folder: string; onOpen?: (gap: string) => void }) {
   const [tick, setTick] = useState(0)
   const data = usePoll(() => api.gaps(folder), 4000, [folder, tick])
   const [seconds, setSeconds] = useState<Record<string, string>>({})
@@ -36,7 +36,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
           return (
             <li key={g.id} className="p-2">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <b className="w-10">{g.id}</b>
+                {onOpen ? <button className="w-10 text-left font-bold text-emerald-700 underline dark:text-emerald-400" title="Open the page for this gap" onClick={() => onOpen(g.id)}>{g.id}</button> : <b className="w-10">{g.id}</b>}
                 <span>{g.local_start} → {g.local_end}</span>
                 <span className="text-stone-500">{hours(g)} · km {g.km_start}–{g.km_end} · +{g.ascent_m} m{g.daylight ? ` · ${g.daylight}` : ''}</span>
                 <span className="ml-auto flex items-center gap-2">

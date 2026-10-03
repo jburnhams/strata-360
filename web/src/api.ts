@@ -20,9 +20,19 @@ export interface TrackOverview {
 export interface TrackSeries { points: number; start_utc: string; end_utc: string; duration_s: number; distance_km: number | null; t: number[]; km: (number | null)[]; alt: (number | null)[]; alt_lo: (number | null)[]; alt_hi: (number | null)[]; pace: (number | null)[]; moving: number[]; hr: (number | null)[] }
 export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
 export type TrackKind = 'run' | 'route'
-export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number }
-export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string }
-export interface TracksListing { tracks: TrackEntry[]; merged: { runs: string[]; samples: number; start_utc: string; end_utc: string; distance_km: number } | null; pois: Poi[]; runs: number }
+export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number; time_s?: number; ran_km?: number; pace_s_km?: number; ascent_m?: number; descent_m?: number; order?: number | null; reversed?: boolean; km_start?: number; km_end?: number }
+export interface Stop { arrived: number | null; left: number | null; stopped_s: number; radius_m: number }
+export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string; n?: number; stop?: Stop }
+export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
+export interface Timing { total_s: number; start: number; end: number; checkpoints: Record<string, number>; sections: Record<string, number>; ran_m?: Record<string, number>; arrivals?: Record<string, { t: number; elapsed_s: number; km: number }>; ascent_m?: number; descent_m?: number; consistent: boolean }
+export interface EndMarkers { start: { lat: number; lon: number; t: number }; end: { lat: number; lon: number; t: number; km: number; elapsed_s: number }; finish: { lat: number; lon: number } | null }
+export interface Photo {
+  id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
+  loc: { lat: number; lon: number; source: 'photo gps' | 'run track' } | null; apart_m: number | null; flag: string | null; where: { kind: 'clip' | 'gap'; id: string } | null
+}
+export interface Cutoff { text: string; kind?: 'since_start' | 'since_last' | 'clock'; elapsed_s?: number; arrival_s?: number | null; margin_s?: number | null; error?: string }
+export interface FinishInfo { reached: boolean; route_m: number; covered_m: number; t: number | null; elapsed_s: number | null; km: number | null; time_s: number | null }
+export interface TracksListing { cutoffs?: Record<string, Cutoff>; finish?: FinishInfo | null; markers?: EndMarkers | null; timing?: Timing | null; divergences?: Divergence[]; tracks: TrackEntry[]; merged: { runs: string[]; samples: number; start_utc: string; end_utc: string; distance_km: number } | null; pois: Poi[]; runs: number }
 export interface ExtraLine { id: string; kind: TrackKind | 'merged'; name: string; lat: number[]; lon: number[] }
 export interface TrackClipFacts { local: string; daylight: string | null; elapsed_h: number | null; distance_km: number | null; percent: number | null; pace_min_km: number | null; gradient_pct: number | null; altitude_m: number | null; heart_rate: number | null; text: string }
 export interface TrackClip {
@@ -31,7 +41,10 @@ export interface TrackClip {
 }
 export type GapKind = 'map' | 'flyover'
 export interface GapClip { id: string; gap: string; kind: GapKind | string; size?: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; error?: string; approved?: boolean; file?: string }
+export interface GapSettings { kind: GapKind | null; mode: 'set' | 'min' | null; seconds: number | null; must: boolean }
+export interface GapScriptItem { n: number; type: string; text: string; seconds: number | null; kind: string | null }
 export interface Gap {
+  settings?: GapSettings; script?: GapScriptItem[]
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
@@ -123,6 +136,7 @@ export const api = {
   tileUrl: (style = 'tf-landscape') => `/api/tiles/${style}/{z}/{x}/{y}`,
   trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
   gaps: (folder: string) => call<{ gaps: Gap[]; flyover?: { available: boolean; note: string } }>('/api/gaps?' + q({ folder })),
+  setGapSettings: (folder: string, gap: string, fields: Partial<GapSettings>) => call<GapSettings>('/api/gaps/settings', { folder, gap, ...fields }),
   planGapClip: (folder: string, gap: string, seconds: number, kind: GapKind = 'map') => call<GapClip>('/api/gaps/clip', { folder, gap, seconds, kind }),
   renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
   deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),
@@ -142,6 +156,17 @@ export const api = {
     if (!r.ok) throw new Error(`${file.name}: ${j.detail || `HTTP ${r.status}`}`)
     return j as TrackEntry
   },
+  photos: (folder: string) => call<{ photos: Photo[]; tz: string }>('/api/photos?' + q({ folder })),
+  uploadPhoto: async (folder: string, file: File) => {
+    const r = await fetch('/api/photos?' + q({ folder, filename: file.name }), { method: 'POST', body: file })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.detail || `${file.name}: HTTP ${r.status}`)
+    return j as Photo
+  },
+  deletePhoto: async (folder: string, id: string) => { const r = await fetch('/api/photos?' + q({ folder, id }), { method: 'DELETE' }); if (!r.ok) throw new Error(`HTTP ${r.status}`) },
+  photoThumb: (folder: string, id: string, w = 480) => '/api/photos/thumb?' + q({ folder, id, w: String(w) }),
+  photoFile: (folder: string, id: string) => '/api/photos/file?' + q({ folder, id }),
+  setCutoff: (folder: string, key: string, text: string) => call<TracksListing>('/api/tracks/cutoff', { folder, key, text }),
   setTrackKind: (folder: string, id: string, kind: TrackKind) => call<TracksListing>('/api/tracks/kind', { folder, id, kind }),
   removeTrack: async (folder: string, id: string) => {
     const r = await fetch('/api/tracks?' + q({ folder, id }), { method: 'DELETE' }); const j = await r.json().catch(() => ({}))

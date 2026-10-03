@@ -624,3 +624,42 @@ class TestTracksCollection:
     def test_the_older_single_upload_still_works_and_counts_as_a_run(self, client, project):
         q = dict(folder=project.folder); assert client.post('/api/track', params=dict(q, filename='t.gpx'), content=self.gpx()).status_code == 200
         t = client.get('/api/tracks', params=q).json(); assert [(x['id'], x['kind']) for x in t['tracks']] == [('main', 'run')]
+
+
+class TestGapSettings(TestGapClipsApi):
+    def test_the_gap_page_settings_are_saved_and_checked(self, client, project):
+        from strata360.edit import synthetic as SY
+        self.with_gap(project); q = lambda **b: client.post('/api/gaps/settings', json=dict(folder=project.folder, gap='G01', **b))
+        assert client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps'][0]['settings'] == dict(kind=None, mode=None, seconds=None, must=False)
+        r = q(kind='flyover', mode='min', seconds=8, must=True); assert r.status_code == 200 and r.json() == dict(kind='flyover', mode='min', seconds=8.0, must=True)
+        assert SY.gap_settings(project.folder, 'G01')['kind'] == 'flyover' and client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps'][0]['settings']['must'] is True
+        assert q(seconds=1).status_code == 400 and q(mode='exactly').status_code == 400 and q(kind='3d').status_code == 400
+        assert client.post('/api/gaps/settings', json=dict(folder=project.folder, gap='G99', must=True)).status_code == 404
+        assert q(kind=None, mode=None, must=False).json() == dict(kind=None, mode=None, seconds=None, must=False) and SY.settings(project.folder) == {}
+
+
+class TestPhotosApi(TestGapClipsApi):
+    def jpeg(self, off, gps=None):
+        import datetime as dt, io
+        from PIL import Image
+        t = dt.datetime.fromtimestamp(self.T0 + off, dt.timezone.utc); ex = Image.Exif(); ex.get_ifd(0x8769)[0x9003] = t.strftime('%Y:%m:%d %H:%M:%S'); ex.get_ifd(0x8769)[0x9011] = '+00:00'
+        if gps: g = ex.get_ifd(0x8825); g[1] = 'N'; g[2] = (int(gps[0]), 0.0, (gps[0] % 1) * 3600); g[3] = 'E'; g[4] = (int(gps[1]), 0.0, (gps[1] % 1) * 3600)
+        b = io.BytesIO(); Image.new('RGB', (80, 60), (5, 90, 200)).save(b, 'JPEG', exif=ex); return b.getvalue() + b'\0' * 200
+
+    def test_photos_are_uploaded_placed_in_the_clip_or_gap_and_served_as_jpeg(self, client, project):
+        self.with_gap(project); q = dict(folder=project.folder)
+        a = client.post('/api/photos', params=dict(q, filename='in_clip.jpg'), content=self.jpeg(60)).json()                            # inside the first clip (0 to 300 s)
+        b = client.post('/api/photos', params=dict(q, filename='in_gap.jpg'), content=self.jpeg(2000)).json()                            # between the clips: the gap
+        c = client.post('/api/photos', params=dict(q, filename='far.jpg'), content=self.jpeg(2000, gps=(50.5, 5.5))).json()               # its own position is nowhere near the run
+        assert a['where'] == dict(kind='clip', id='CAM_20260222190000_0001_D') and a['loc']['source'] == 'run track' and a['flag'] is None and a['track']['elapsed_s'] == 60
+        assert b['where'] == dict(kind='gap', id='G01') and c['loc']['source'] == 'photo gps' and 'km apart' in c['flag'] and c['apart_m'] > 20000
+        rows = client.get('/api/photos', params=q).json(); assert [p['id'] for p in rows['photos']] == ['p1', 'p2', 'p3'] and rows['tz']
+        t = client.get('/api/photos/thumb', params=dict(q, id='p1', w=40)); assert t.status_code == 200 and t.headers['content-type'] == 'image/jpeg' and t.content[:2] == b'\xff\xd8'
+        assert client.get('/api/photos/file', params=dict(q, id='p1')).headers['content-type'] == 'image/jpeg' and client.get('/api/photos/file', params=dict(q, id='p1', original=1)).status_code == 200
+        assert client.get('/api/photos/thumb', params=dict(q, id='p9')).status_code == 404
+        r = client.delete('/api/photos', params=dict(q, id='p2')); assert [p['id'] for p in r.json()['photos']] == ['p1', 'p3'] and client.delete('/api/photos', params=dict(q, id='p2')).status_code == 404
+
+    def test_a_file_that_is_not_a_usable_photo_is_refused_with_its_name(self, client, project):
+        q = dict(folder=project.folder, filename='notes.txt'); assert client.post('/api/photos', params=q, content=b'x' * 300).status_code == 400
+        r = client.post('/api/photos', params=dict(folder=project.folder, filename='bad.jpg'), content=b'x' * 300); assert r.status_code == 400 and r.json()['detail'].startswith('bad.jpg: ')
+        assert client.get('/api/photos', params=dict(folder=project.folder)).json()['photos'] == []

@@ -3,7 +3,7 @@ import { act, fireEvent } from '@testing-library/react'
 import L from 'leaflet'
 import TrackMap from '../../src/components/TrackMap'
 import { screen, setup } from '../utils/render'
-import { makeTrackClip, makeTrackLine } from '../utils/factories'
+import { makePhoto, makeTrackClip, makeTrackLine } from '../utils/factories'
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
 afterEach(() => { vi.useRealTimers() })
@@ -32,6 +32,66 @@ describe('TrackMap', () => {
     const opts = lines.mock.calls.map(c => c[1] as L.PolylineOptions)
     expect(opts.some(o => o.color === '#2563eb' && o.dashArray)).toBe(true); expect(opts.some(o => o.color === '#a3a3a3' && !o.dashArray)).toBe(true)
     expect(screen.getByTitle('Aid 1')).toBeInTheDocument(); lines.mockRestore()
+  })
+
+  it('marks each place the run leaves the route with a red stretch and an exclamation mark', () => {
+    const lines = vi.spyOn(L, 'polyline')
+    const { container } = setup(<TrackMap {...props()} divergences={[{ lat: 50.05, lon: 5.05, peak_m: 348, length_m: 660, km: 72, t: 0, line: [[50.04, 5.04], [50.06, 5.06]] }]} />)
+    expect(screen.getByTitle('348 m off the route')).toHaveTextContent('!'); expect(container.querySelector('[data-divergence]')).not.toBeNull()
+    expect(lines.mock.calls.some(c => (c[1] as L.PolylineOptions).color === '#dc2626')).toBe(true); lines.mockRestore()
+  })
+
+  it('draws the highlighted tracks bold yellow with a black outline, and tells the list when a route is pointed at or clicked', () => {
+    const lines = vi.spyOn(L, 'polyline'); const hover = vi.fn(), toggle = vi.fn()
+    setup(<TrackMap {...props()} onHoverTrack={hover} onToggleTrack={toggle} extras={[{ id: 't2', kind: 'route', name: 'course.gpx', lat: [50, 50.1], lon: [5, 5.1] }]} highlight={[{ id: 't2', kind: 'route', name: 'course.gpx', lat: [50, 50.1], lon: [5, 5.1] }]} />)
+    const opts = lines.mock.calls.map(c => c[1] as L.PolylineOptions); expect(opts.some(o => o.color === '#facc15' && o.weight === 5)).toBe(true); expect(opts.some(o => o.color === '#000' && o.weight === 9)).toBe(true)
+    const route = lines.mock.results.map(r => r.value as L.Polyline).find((_, i) => (opts[i] as L.PolylineOptions).color === '#2563eb')!
+    route.fire('mouseover'); route.fire('mouseout'); route.fire('click'); expect(hover.mock.calls).toEqual([['t2'], [null]]); expect(toggle).toHaveBeenCalledWith('t2'); lines.mockRestore()
+  })
+
+  it('marks the start in green, the finish line from the route and where the run ended in red', () => {
+    const { container } = setup(<TrackMap {...props()} tz="UTC" ends={{ start: { lat: 50, lon: 5, t: 1_771_700_000 }, end: { lat: 50.1, lon: 5.2, t: 1_771_800_000, km: 379.4, elapsed_s: 100000 }, finish: { lat: 50.12, lon: 5.22 } }} />)
+    for (const k of ['start', 'finish', 'end']) expect(container.querySelector(`[data-end="${k}"]`)).not.toBeNull()
+    expect(screen.getByTitle('Start')).toBeInTheDocument(); expect(screen.getByTitle('Finish line')).toBeInTheDocument(); expect(screen.getByTitle('End of the run')).toBeInTheDocument()
+  })
+
+  it('rings the finish line, and only that, when the finish is highlighted', () => {
+    const ends = { start: { lat: 50, lon: 5, t: 0 }, end: { lat: 50.1, lon: 5.2, t: 10, km: 1, elapsed_s: 10 }, finish: { lat: 50.12, lon: 5.22 } }
+    const { container, rerender } = setup(<TrackMap {...props()} ends={ends} />); expect(container.querySelector('[data-end-hl]')).toBeNull()
+    rerender(<TrackMap {...props()} ends={ends} ringEnds />); const hl = container.querySelectorAll('[data-end-hl]'); expect(hl).toHaveLength(1); expect(hl[0].getAttribute('data-end')).toBe('finish')
+  })
+
+  it('has no finish line without a route', () => {
+    const { container } = setup(<TrackMap {...props()} ends={{ start: { lat: 50, lon: 5, t: 0 }, end: { lat: 50.1, lon: 5.2, t: 10, km: 1, elapsed_s: 10 }, finish: null }} />)
+    expect(container.querySelector('[data-end="finish"]')).toBeNull(); expect(container.querySelector('[data-end="end"]')).not.toBeNull()
+  })
+
+  it('puts a camera icon at each photo with a position, with its picture on hover, and opens it when clicked', async () => {
+    const open = vi.fn(); const photos = [makePhoto(), makePhoto({ id: 'p2', name: 'IMG_2.jpg', loc: null }), makePhoto({ id: 'p3', name: 'IMG_3.jpg', flag: 'far apart', loc: { lat: 50.2, lon: 5.2, source: 'photo gps' } })]
+    const { container, user } = setup(<TrackMap {...props()} photos={photos} photoThumb={id => `/thumb/${id}`} onOpenPhoto={open} />)
+    expect(container.querySelectorAll('[data-photo-marker]')).toHaveLength(2)                                       // (the one with no position has no icon)
+    await user.hover(screen.getByTitle('IMG_3.jpg')); const tip = await screen.findByText('IMG_3.jpg ⚠'); expect(tip.parentElement!.querySelector('img')!.getAttribute('src')).toBe('/thumb/p3')
+    fireEvent.click(screen.getByTitle('IMG_3.jpg')); expect(open).toHaveBeenCalledWith(photos[2])
+  })
+
+  it('numbers the checkpoints between routes', () => {
+    const { container } = setup(<TrackMap {...props()} pois={[{ name: 'Checkpoint 2', lat: 50.05, lon: 5.05, ele: null, sym: 'checkpoint', desc: 'a → b', track: 'checkpoint', n: 2 }]} />)
+    expect(screen.getByTitle('Checkpoint 2')).toHaveTextContent('2'); expect(container.querySelector('[data-checkpoint]')).not.toBeNull()
+  })
+
+  it('shows how long the run stood still at a checkpoint when it is hovered', async () => {
+    const t = 1_771_700_000
+    const { user } = setup(<TrackMap {...props()} tz="UTC" pois={[{ name: 'Checkpoint 1', lat: 50.05, lon: 5.05, ele: null, sym: 'checkpoint', desc: 'a.gpx → b.gpx', track: 'checkpoint', n: 1, stop: { arrived: t + 300, left: t + 2400, stopped_s: 2100, radius_m: 300 } }, { name: 'Checkpoint 2', lat: 50.1, lon: 5.1, ele: null, sym: 'checkpoint', desc: '', track: 'checkpoint', n: 2, stop: { arrived: null, left: null, stopped_s: 0, radius_m: 300 } }]} />)
+    await user.hover(screen.getByTitle('Checkpoint 1')); const tip = await screen.findByText(/Time here 35 min 00 s/); expect(tip).toHaveTextContent('(18:58 to 19:33)'); await user.unhover(screen.getByTitle('Checkpoint 1'))
+    await user.hover(screen.getByTitle('Checkpoint 2')); expect(await screen.findByText('Did not slow down within 300 m')).toBeInTheDocument()
+  })
+
+  it('rings a highlighted checkpoint in bold yellow', () => {
+    const cp = (n: number) => ({ name: `Checkpoint ${n}`, lat: 50.05 + n / 100, lon: 5.05, ele: null, sym: 'checkpoint', desc: '', track: 'checkpoint', n })
+    const { container, rerender } = setup(<TrackMap {...props()} pois={[cp(1), cp(2)]} />)
+    expect(container.querySelector('[data-checkpoint-hl]')).toBeNull()
+    rerender(<TrackMap {...props()} pois={[cp(1), cp(2)]} highlightCheckpoints={[2]} />)
+    const hl = container.querySelectorAll('[data-checkpoint-hl]'); expect(hl).toHaveLength(1); expect(hl[0]).toHaveTextContent('2'); expect(hl[0].getAttribute('style')).toContain('#facc15')
   })
 
   it('colours a marker green when the draft plays the clip and grey when it does not', () => {
