@@ -246,7 +246,7 @@ class FlyoverClip:
         return out
 
     def _badges(self, k):
-        """The badges of the places that are on the screen in frame k, [(x, y, patch)] in the frame's pixels, found with the same camera maths the fit of the camera used (`project`); the start is left out when it is next to the finish, and one under the runner's arrow is left out (the position stays on top)."""
+        """The badges of the places that are on the screen in frame k, [(x, y, patch)] in the frame's pixels, found with the same camera maths the fit of the camera used (`project`); the start is left out when it is next to the finish, and one at the runner's own place is shown just above the arrow, so you can tell you are at that place."""
         if not self.marks: return []
         g, lat, lon, alt = self.route; c = self.cam; d = BADGE * self.W / 1920.0; centre = (float(c['lat'][k]), float(c['lon'][k]), float(c['alt'][k])); size = (BASE_W, RENDER_H); sc = self.W / BASE_W
         r = float(c['runner'][k]); xs, ys, ok = project(g, lat, lon, alt, np.array([m[2] for m in self.marks] + [r]), centre, float(c['bearing'][k]), float(c['zoom'][k]), float(c['pitch'][k]), size, self.exag)
@@ -254,7 +254,8 @@ class FlyoverClip:
         for (kind, label, _), (x, y), good in zip(self.marks, pts[:-1], ok[:-1]):
             if not good or not (d / 2 <= x <= self.W - d / 2 and d / 2 <= y <= self.H - d / 2): continue
             if kind == 'start' and fin is not None and np.hypot(x - fin[0], y - fin[1]) < d * 1.1: continue
-            if np.hypot(x - me[0], y - me[1]) < d * 0.9: continue
+            if np.hypot(x - me[0], y - me[1]) < d * 0.9: y = me[1] - d * 1.1 - 8 * self.W / 1920.0; x = me[0]                      # at the runner's own place: the badge sits just above the arrow, so both show (the arrow is part of the terrain picture, it cannot go on top)
+            if not (d / 2 <= y <= self.H - d / 2): continue
             out.append((x, y, D.badge(label, d, kind)))
         return out
 

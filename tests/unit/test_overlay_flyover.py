@@ -211,6 +211,8 @@ def test_the_start_next_to_the_finish_is_left_out_and_every_badge_is_inside_the_
     for k in (0, 10, 39): assert all(12 <= x <= 1280 - 12 and 12 <= y <= 720 - 12 for x, y, _ in c._badges(k))
 
 
-def test_the_runners_arrow_stays_on_top_of_a_place_under_it(series, fake_mbgl, tmp_path):
-    here = east(float(0.9 * 1000)); c = clip(series, tmp=tmp_path, places=dict(start=here, finish=None, checkpoints=[])); r = float(c.cam['runner'][0]); c2 = clip(series, tmp=tmp_path, places=dict(start=east(r), finish=None, checkpoints=[]))
-    assert c2._badges(0) == []                                                                                                                              # a badge at the runner's own position is left out
+def test_a_place_at_the_runners_own_position_is_shown_just_above_the_arrow(series, fake_mbgl, tmp_path):
+    base = clip(series, tmp=tmp_path); r = float(base.cam['runner'][0]); c = clip(series, tmp=tmp_path, places=dict(start=east(r), finish=None, checkpoints=[]))
+    x, y, _ = c._badges(0)[0]; me = FO.project(*c.route, np.array([r]), (float(c.cam['lat'][0]), float(c.cam['lon'][0]), float(c.cam['alt'][0])), float(c.cam['bearing'][0]), float(c.cam['zoom'][0]), float(c.cam['pitch'][0]), (FO.BASE_W, FO.RENDER_H), c.exag)
+    sx, sy = float(me[0][0]) * c.W / FO.BASE_W, float(me[1][0]) * c.W / FO.BASE_W
+    assert abs(x - sx) < 1.0 and y < sy - 20                                                                                                                  # straight above the arrow, clear of it
