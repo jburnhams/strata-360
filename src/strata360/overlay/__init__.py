@@ -18,13 +18,30 @@ def _series(path, mtime):
     return Series(TR.load(path))
 
 
+@functools.lru_cache(maxsize=4)
+def _schedule(rd, stamp):
+    from strata360.gps import tracks
+    try: return tuple(tracks.stage_schedule(rd))
+    except Exception as e:                                                  # the stage text is dropped (loudly), the rest of the overlay stays
+        print(f'overlay: no stage text: {type(e).__name__}: {e}'); return ()
+
+
+def _stages(track):
+    """The stage schedule of the project the track file belongs to (its folder, or the folder above `tracks/`); empty for a track kept elsewhere."""
+    import os
+    rd = os.path.dirname(os.path.abspath(track)); rd = os.path.dirname(rd) if os.path.basename(rd) == 'tracks' else rd
+    if not os.path.exists(os.path.join(rd, 'race.json')) and not os.path.exists(os.path.join(rd, 'tracks.json')): return ()
+    stamp = tuple(os.path.getmtime(os.path.join(rd, n)) if os.path.exists(os.path.join(rd, n)) else 0 for n in ('tracks.json', 'track.fit', 'track.gpx', 'track.merged.npz'))
+    return _schedule(rd, stamp)
+
+
 def build(cfg, track, size, tiles=None, maps=True):
     """The overlay with race settings `cfg` (race.json merged) over the track file `track`; maps=False leaves the maps (and their credit) out."""
     import os
     from strata360.overlay.layout import Overlay, settings
     st = settings(cfg.get('overlay'))
     if not maps: st = {**st, 'elements': [e for e in st['elements'] if e not in ('route_map', 'local_map', 'credit')]}
-    return Overlay(_series(track, os.path.getmtime(track)), size, st, tz=cfg.get('timezone') or 'Europe/Brussels', tiles=tiles)
+    return Overlay(_series(track, os.path.getmtime(track)), size, st, tz=cfg.get('timezone') or 'Europe/Brussels', tiles=tiles, stages=_stages(track) if 'stage' in st['elements'] else ())
 
 
 def for_project(folder, size, tiles=None):

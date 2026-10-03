@@ -195,3 +195,31 @@ def test_start_finish_and_end_of_the_run_markers(tmp_path):
     m = TK.end_markers(rd); assert m['finish'] is None and m['start']['lat'] == 50.0 and abs(m['end']['lat'] - 50.0499) < 1e-6 and 5.4 < m['end']['km'] < 5.6 and m['end']['elapsed_s'] == 499
     TK.add(rd, 'one.gpx', gpx(north(0, 300), route=True, timed=False)); TK.add(rd, 'two.gpx', gpx(north(300, 800), route=True, timed=False))                     # the second route is longer than the run: the finish line is its end
     m = TK.end_markers(rd); assert abs(m['finish']['lat'] - 50.0799) < 1e-4 and m['end']['lat'] < m['finish']['lat'] and TK.listing(rd)['markers']['finish'] == m['finish']
+
+
+def _stop_run(rd, routes):
+    from datetime import datetime, timezone
+    t0 = 1_770_000_000; pts = []; y = 0.0
+    for i in range(1200): y += 3.0; pts.append(y)                                   # 3 m/s to 3600 m, 400 s standing there, on to 6300 m
+    pts += [y] * 400
+    for i in range(900): y += 3.0; pts.append(y)
+    body = ''.join(f'<trkpt lat="{50.0 + m / 110540.0}" lon="5.0"><time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time></trkpt>' for i, m in enumerate(pts))
+    TK.add(rd, 'run.gpx', f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode())
+    for name, (a, b) in routes: TK.add(rd, name, gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(a, b)], route=True, timed=False))
+    return t0
+
+
+def test_stage_schedule_runs_from_before_the_race_to_after_it(tmp_path):
+    rd = str(tmp_path); t0 = _stop_run(rd, [('one.gpx', (0, 121)), ('two.gpx', (121, 361))])                               # the run ends before the end of the second route
+    s = TK.stage_schedule(rd); assert [l for _, l in s] == ['Before Race', 'At Start', 'Stage 1', 'Checkpoint 1', 'Stage 2', 'After Race']
+    assert s[0][0] == float('-inf') and s[1][0] == t0 and 90 <= s[2][0] - t0 <= 110 and 1190 <= s[3][0] - t0 <= 1210 and 380 <= s[4][0] - s[3][0] <= 400 and s[-1][0] == t0 + 2499 and [a for a, _ in s] == sorted(a for a, _ in s)
+
+
+def test_the_finish_stage_only_when_the_run_got_to_the_end_of_the_last_route(tmp_path):
+    rd = str(tmp_path); _stop_run(rd, [('one.gpx', (0, 121)), ('two.gpx', (121, 211))])                                    # the second route ends where the run does
+    assert [l for _, l in TK.stage_schedule(rd)] == ['Before Race', 'At Start', 'Stage 1', 'Checkpoint 1', 'Stage 2', 'At Finish', 'After Race']
+
+
+def test_without_routes_the_stage_between_start_and_end_is_on_course(tmp_path):
+    rd = str(tmp_path); _stop_run(rd, []); assert [l for _, l in TK.stage_schedule(rd)] == ['Before Race', 'At Start', 'On Course', 'After Race']
+    assert TK.stage_schedule(str(tmp_path / 'none')) == []

@@ -9,14 +9,14 @@ frame of another shape still has everything in its corner. race.json `overlay` c
   {"enabled": true, "elements": ["clock", "distance", ...], "scale": 1.0, "map_opacity": 0.6, "local_zoom": 14, "auto_zoom": true, "zoom_range": 1.5,
    "style": null, "font": null, "label_font": null, "layout": {"pace": {"y": 860}, "route_map": {"style": "osm"}}}
 
-`elements` picks and orders what is shown (any of ELEMENTS); `layout` overrides any field of an element; `font`/`label_font` are paths to other TTF/OTF files.
+`elements` picks and orders what is shown (any of ELEMENTS; `stage` is the Before Race / At Start / Stage N / Checkpoint N / At Finish / After Race text); `layout` overrides any field of an element; `font`/`label_font` are paths to other TTF/OTF files.
 Map styles: the whole-route map is plain (tf-landscape: towns, main roads, relief); the close-up shows the ground (tf-outdoors: contours, paths, hill shading). `style` sets
 one style for both. The close-up zooms by itself (overlay/zoom.py: closer where the map is busy, wider on straight stretches) within local_zoom +/- zoom_range, unless
 auto_zoom is false.
 
 Nothing is stored per frame: the overlay is drawn onto each frame as it is rendered; what does not change is drawn once and reused (each distinct text, the whole-route map,
 the close-up map while the runner stands still); the clock and the marker follow every frame."""
-import datetime as dt, json, math, os
+import bisect, datetime as dt, json, math, os
 from zoneinfo import ZoneInfo
 import numpy as np, cv2
 from strata360.overlay import draw as D
@@ -26,7 +26,8 @@ REF_W, REF_H = 1920, 1080
 ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the element keeps its distance from
     'profile': dict(kind='profile', height=120),
     'clock': dict(kind='clock', x=16, y=24),
-    'distance': dict(kind='big', x=150, y=170, metric='dist', label='km'),
+    'stage': dict(kind='stage', x=16, y=164),
+    'distance': dict(kind='big', x=150, y=262, metric='dist', label='km'),
     'pace': dict(kind='big', x=150, y=745, v='bottom', metric='pace', label='min/km'),
     'altitude': dict(kind='stat', x=16, y=850, v='bottom', icon='mountain', metric='alt', label='ALT (m)'),
     'slope': dict(kind='stat', x=220, y=850, v='bottom', icon='slope', metric='slope', label='SLOPE (%)'),
@@ -51,8 +52,8 @@ METRIC = dict(dist='dist_m', pace='pace_s_km', alt='alt_m', slope='slope_pct', h
 
 class _Ctx:
     """What the widgets share: frame size and scale, fonts, the series, the tiles, the time zone and a cache of drawn text."""
-    def __init__(self, series, size, st, tz, tiles):
-        self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
+    def __init__(self, series, size, st, tz, tiles, stages=()):
+        self.stages = list(stages); self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
         self._tiles = tiles if callable(tiles) and not isinstance(tiles, Tiles) else (lambda style: tiles) if tiles is not None else None; self._made = {}
         self.vfont, self.lfont = st.get('font') or D.VALUE_FONT, st.get('label_font') or st.get('font') or D.LABEL_FONT; self._text = {}
 
@@ -100,6 +101,31 @@ class Clock:
     def patches(self, t, v):
         c, e = self.c, self.el; x, y = e['x'], e['y']; start = float(c.series._pt[0]); lt = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(c.tz)
         return [c.text(e, x, y, elapsed_text(t - start), 52), c.text(e, x, y + 62, f'DAY {race_day(start, t, c.tz)}', 32), c.text(e, x, y + 104, lt.strftime('%Y/%m/%d  %H:%M:%S'), 22)]
+
+
+def _hm(seconds):
+    """3h4m, or 23m under an hour."""
+    m = int(seconds // 60); return f'{m // 60}h{m % 60}m' if m >= 60 else f'{m}m'
+
+
+class Stage:
+    """Where the race is: Before Race (-4h3m: the time to the start), At Start, Stage N (km and time so far / in the whole stage), Checkpoint N (km from the start of the run, time there so far / in all), At Finish, After Race (+34h4m: the time since the end of the run); gps/tracks.py `stage_schedule`, worked out from the routes and the run. Nothing is drawn when there is no schedule."""
+    def __init__(self, c, el): self.c, self.el = c, el; self.times = [a for a, _ in c.stages]; self.names = [b for _, b in c.stages]
+
+    def _dist(self, t):
+        d = self.c.series.at(t)['dist_m']; return float(d) if math.isfinite(d) else 0.0
+
+    def patches(self, t, v):
+        if not self.times: return []
+        e = self.el; i = max(0, bisect.bisect_right(self.times, t) - 1); name = self.names[i]; out = [self.c.text(e, e['x'], e['y'], name.upper(), 30)]
+        if name.startswith(('Stage', 'Checkpoint')) and i + 1 < len(self.times):
+            a, b = self.times[i], self.times[i + 1]                                                                # a stage runs to the next checkpoint's arrival, a checkpoint to the departure
+            if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
+            else: km = f'{(self._dist(a) - self._dist(self.times[1] if len(self.times) > 1 else a)) / 1000:.1f} km'          # the way from the start of the run to the checkpoint
+            out.append(self.c.text(e, e['x'], e['y'] + 38, f'{km}  ·  {_hm(max(0.0, min(t, b) - a))} / {_hm(b - a)}', 22))
+        elif name == 'Before Race' and len(self.times) > 1: out.append(self.c.text(e, e['x'], e['y'] + 38, '-' + _hm(self.times[1] - t) if self.times[1] - t >= 60 else '0m', 22))           # the time to the start
+        elif name == 'After Race': out.append(self.c.text(e, e['x'], e['y'] + 38, '+' + _hm(t - self.times[i]) if t - self.times[i] >= 60 else '0m', 22))                                # the time since the end of the run
+        return out
 
 
 class Big:
@@ -215,7 +241,7 @@ class Credit:
         return [self.c.text(self.el, self.el['x'], self.el['y'] + 14 * i, line, self.el['size'], label=True, align='right') for i, line in enumerate(self.lines)]
 
 
-KINDS = dict(profile=Profile, clock=Clock, big=Big, stat=Stat, route_map=RouteMap, local_map=LocalMap, credit=Credit)
+KINDS = dict(profile=Profile, clock=Clock, stage=Stage, big=Big, stat=Stat, route_map=RouteMap, local_map=LocalMap, credit=Credit)
 
 
 def settings(st=None):
@@ -228,8 +254,8 @@ def settings(st=None):
 class Overlay:
     """overlay.apply(frame, t) draws the overlay for UTC seconds t onto an RGB frame (uint8 or uint16) in place. `tiles` defaults to the configured style (fetched and cached on first use)."""
 
-    def __init__(self, series, size, st=None, tz='Europe/Brussels', tiles=None):
-        self.st = settings(st); self.c = _Ctx(series, size, self.st, tz, tiles)
+    def __init__(self, series, size, st=None, tz='Europe/Brussels', tiles=None, stages=()):
+        self.st = settings(st); self.c = _Ctx(series, size, self.st, tz, tiles, stages)
         els = {n: {**ELEMENTS[n], **self.st['layout'].get(n, {})} for n in self.st['elements']}
         styles = [self.c.style(e) for e in els.values() if e['kind'] in ('route_map', 'local_map')]
         for st_ in styles: self.c.tiles(st_)                                                                        # a missing map key is reported now, not hours into a render

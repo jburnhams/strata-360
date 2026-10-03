@@ -393,3 +393,29 @@ def timing(rd):
         a = c['arrived'] if c['arrived'] is not None else c['passed']; l = c['left'] if c['left'] is not None else c['passed']
         arrivals[k] = dict(t=a, elapsed_s=round(a - t0), km=round(metres(t0, a) / 1000.0, 1)); secs[rid] = a - prev; dist[rid] = metres(prev, a); climb[rid] = up_down(prev, a); cps[k] = l - a; consistent = consistent and a >= prev and l >= a; prev = l
     return dict(total_s=round(t1 - t0), start=t0, end=t1, checkpoints={k: round(v) for k, v in cps.items()}, sections={k: round(v) for k, v in secs.items()}, ran_m={k: round(v) for k, v in dist.items()}, arrivals=arrivals, climb={k: [round(v[0]), round(v[1])] for k, v in climb.items()}, ascent_m=round(ascent_descent(alt)[0]), descent_m=round(ascent_descent(alt)[1]), consistent=bool(consistent))
+
+
+def stage_schedule(rd, zone_m=ZONE_M):
+    """What stage of the race it is, by time: [(UTC seconds from which it holds, label)] in order, the first from minus infinity: Before Race, At Start (until the run is more than zone_m from where it began), Stage 1, Checkpoint 1 (arrival to departure), Stage 2, ... Checkpoint N, Stage N + 1,
+    At Finish (from coming within zone_m of the end of the last route; only if the run got there), After Race (from the last point of the run). Without routes the stage between start and end is just `On Course`. Empty without a run."""
+    tm = timing(rd) if route_order(rd)[0] else {}
+    cur = current_path(rd)
+    if not cur: return []
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    if len(t) < 2: return []
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    gone = np.flatnonzero(np.hypot((lon - lon[0]) * kx, (lat - lat[0]) * ky) > zone_m); leave = float(t[gone[0]]) if len(gone) else float(t[-1]); t0, t1 = float(t[0]), float(t[-1])
+    marks = end_markers(rd) or {}; seq = [(-np.inf, 'Before Race'), (t0, 'At Start')]
+    if not tm:
+        seq += [(leave, 'On Course')]
+    else:
+        n = len(tm['sections']); seq += [(leave, 'Stage 1')]
+        for k in range(1, n):
+            a = tm['arrivals'].get(k)
+            if a is None: break
+            seq += [(a['t'], f'Checkpoint {k}'), (a['t'] + tm['checkpoints'][k], f'Stage {k + 1}')]
+        fin = marks.get('finish')
+        if fin and len(seq) >= 3 and len(tm['arrivals']) == n - 1:                                                          # the run reached the last stage: did it get to the finish line?
+            near = np.flatnonzero((np.hypot((lon - fin['lon']) * kx, (lat - fin['lat']) * ky) <= zone_m) & (t > seq[-1][0]))
+            if len(near): seq += [(float(t[near[0]]), 'At Finish')]
+    seq.append((t1, 'After Race')); times = np.maximum.accumulate(np.array([s[0] for s in seq])); return [(float(a), s[1]) for a, s in zip(times, seq)]

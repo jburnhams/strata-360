@@ -262,3 +262,27 @@ class TestRaceDay:
 
     def test_elapsed_time_runs_past_24_hours(self):
         assert [LY.elapsed_text(x) for x in (-5, 0, 59, 3661, 26 * 3600 + 14 * 60 + 5, 130 * 3600)] == ['0:00:00', '0:00:00', '0:00:59', '1:01:01', '26:14:05', '130:00:00']
+
+
+class TestStageText:
+    def test_the_stage_follows_the_schedule_and_is_upper_case(self, series, tiles, texts):
+        stages = [(float('-inf'), 'Before Race'), (T0 + 10, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 400, 'Checkpoint 1'), (T0 + 600, 'After Race')]
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages)
+        for dt_, want, n in ((-5, 'BEFORE RACE', 2), (10, 'AT START', 1), (99, 'AT START', 1), (100, 'STAGE 1', 2), (450, 'CHECKPOINT 1', 2), (900, 'AFTER RACE', 2)):
+            texts.clear(); ov.c._text.clear(); assert len(ov.patches(T0 + dt_)) == n and want in texts                 # (drawn text is kept for reuse: cleared so the spy sees it)
+
+    def test_nothing_is_drawn_without_a_schedule(self, series, tiles):
+        assert LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles).patches(T0 + 5) == []
+
+    def test_a_stage_shows_the_distance_and_time_so_far_over_its_whole_and_a_checkpoint_the_distance_from_the_start_and_the_time_there(self, series, tiles, texts):
+        stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 400, 'Checkpoint 1'), (T0 + 460, 'Stage 2'), (T0 + 800, 'After Race')]
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages)       # the track runs 3 m/s
+        ov.patches(T0 + 250); assert '0.5/0.9 km  ·  2m / 5m' in texts                                                          # 150 s of 300 s: 450 m of 900 m
+        ov.patches(T0 + 430); assert '1.2 km  ·  0m / 1h' not in texts and any(x.startswith('1.2 km  ·  0m / 1m') for x in texts)   # at the checkpoint: 1200 m from the start; 30 s in of 60 s
+        assert [LY._hm(x) for x in (0, 59, 60, 23 * 60, 3 * 3600 + 4 * 60, 7 * 3600 + 3 * 60)] == ['0m', '0m', '1m', '23m', '3h4m', '7h3m']
+
+    def test_before_the_race_counts_down_to_the_start_and_after_it_counts_up_from_the_end(self, series, tiles, texts):
+        stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'After Race')]
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages)
+        for t, want in ((T0 - (4 * 3600 + 3 * 60), '-4h3m'), (T0 - 30, '0m'), (T0 + 800 + 34 * 3600 + 4 * 60, '+34h4m'), (T0 + 805, '0m')):
+            texts.clear(); ov.c._text.clear(); ov.patches(t); assert want in texts, (t, texts)
