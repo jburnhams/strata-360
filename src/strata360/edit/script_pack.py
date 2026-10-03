@@ -134,12 +134,13 @@ def photo_clips(folder, tr, tz):
     from strata360.analysis import photo_analysis as PA
     from strata360.gps import context as X
     from strata360.pipeline import config
-    rd = config.race_dir(folder); rows = PH.load(rd)['photos']
+    from strata360.pipeline import notes as N
+    rd = config.race_dir(folder); rows = [e for e in PH.load(rd)['photos'] if PH.is_used(e)]; notes = N.load(folder).get('clips') or {}                 # only the photos ticked to use are options
     if not rows: return []
     out = []
     for e in rows:
         lab = PH.label_of(e); mo = PH.motion_of(e); doc = PA.load_doc(rd, e['id']); a = PA.summary(doc); explicit = mo['seconds'] is not None; sec = float(mo['seconds']) if explicit else PA.auto_seconds(doc); t = e['taken_utc']          # a length you set on the photo is kept; else 2 to 3 s by how busy it is
-        d = dict(label=lab, clip=lab, start_utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=max(sec, MAX_PHOTO_S), usable=[(0.0, max(sec, MAX_PHOTO_S))], synthetic=True, photo=True, race_s=0.0, speedup=1.0, scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
+        d = dict(label=lab, clip=lab, start_utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=max(sec, MAX_PHOTO_S), usable=[(0.0, max(sec, MAX_PHOTO_S))], synthetic=True, photo=True, race_s=0.0, speedup=1.0, scene={}, note=(notes.get(lab) or '').strip(), lines=[], speech_s=0.0, speech_words=0,
                  settings=dict(kind=None, mode='set' if explicit else None, seconds=sec if explicit else None, must=bool(e.get('must'))), planned=None, photo_facts=dict(name=e['name'], camera=e.get('camera') or '', **{k: v for k, v in a.items() if k != 'stages'}))
         if tr is not None:
             ctx = X.context_at(tr, t, t, tz); d['track'] = X.describe(ctx)

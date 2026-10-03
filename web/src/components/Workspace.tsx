@@ -18,7 +18,7 @@ import MusicPanel from './MusicPanel'
 import GapView from './GapView'
 import PhotosPanel from './PhotosPanel'
 import StreetViewPage from './StreetViewPage'
-import PhotoCard from './PhotoCard'
+import PhotoPage from './PhotoPage'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -30,7 +30,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   const clips = usePoll(() => api.clips(folder).then(r => r.clips), 8000, [folder])
   const [photoTick, setPhotoTick] = useState(0)
   const photoData = usePoll(() => api.photos(folder), 8000, [folder, photoTick]); const photos = photoData?.photos; const tz = meta?.timezone ?? photoData?.tz ?? 'Europe/Brussels'
-  const openPhoto = (p: Photo) => { if (p.must) { setFocus(undefined); setSel(`@photo:${p.id}`) } }
+  const openPhoto = (p: Photo) => { if (p.use) { setFocus(undefined); setSel(`@photo:${p.id}`) } }
   const gaps = usePoll(() => api.gaps(folder).then(r => r.gaps), 8000, [folder, photoTick])         // a photo ticked to use sits among the footage, so the gaps change with it
   const svChosen = usePoll(() => api.svChosen(folder).then(r => r.sections), 8000, [folder, photoTick])
   const [overlay, setOverlay] = useThumbOverlay()
@@ -46,7 +46,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         </label>
         <ul className="min-h-0 flex-1 space-y-1 overflow-auto md:pr-1">
           {clips === undefined ? Array.from({ length: 8 }, (_, i) => <li key={i} className="flex gap-2 p-1.5"><Skeleton className="h-11 w-20 shrink-0" /><div className="flex-1 space-y-1.5"><Skeleton className="h-3 w-full" /><Skeleton className="h-3 w-1/2" /></div></li>)
-            : timeline(clips, gaps ?? [], (photos ?? []).filter(p => p.must), svChosen ?? []).map(e => e.kind === 'clip' ? <Row key={e.id} folder={folder} c={e.c} overlay={overlay} active={sel === e.id} onClick={() => { setFocus(undefined); setSel(e.id) }} />
+            : timeline(clips, gaps ?? [], (photos ?? []).filter(p => p.use), svChosen ?? []).map(e => e.kind === 'clip' ? <Row key={e.id} folder={folder} c={e.c} overlay={overlay} active={sel === e.id} onClick={() => { setFocus(undefined); setSel(e.id) }} />
               : e.kind === 'gap' ? <GapRow key={e.id} g={e.g} active={sel === `@gap:${e.g.id}`} onClick={() => { setFocus(undefined); setSel(`@gap:${e.g.id}`) }} />
               : e.kind === 'photo' ? <PhotoRow key={e.id} folder={folder} p={e.p} active={sel === `@photo:${e.p.id}`} onClick={() => { setFocus(undefined); setSel(`@photo:${e.p.id}`) }} />
               : <SvRow key={e.id} s={e.s} active={sel === '@streetview'} onClick={() => setSel('@streetview')} />)}
@@ -72,7 +72,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         ) : sel === '@streetview' ? <StreetViewPage folder={folder} tz={tz} />
           : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
           : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} />
-          : sel.startsWith('@photo:') ? <PhotoView folder={folder} photo={photos?.find(p => p.id === sel.slice(7))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
+          : sel.startsWith('@photo:') ? <PhotoPage folder={folder} photo={photos?.find(p => p.id === sel.slice(7))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
           : <ClipView folder={folder} clip={sel} focus={focus} />}
       </div>
     </div>
@@ -86,11 +86,6 @@ export function timeline(clips: ClipInfo[], gaps: Gap[], photos: Photo[], sv: Sv
   const out: Entry[] = [...clips.map(c => ({ kind: 'clip' as const, id: c.id, t: Date.parse(c.start_utc) / 1000, c })), ...gaps.map(g => ({ kind: 'gap' as const, id: `@gap:${g.id}`, t: g.t0, g })),
     ...photos.map(p => ({ kind: 'photo' as const, id: `@photo:${p.id}`, t: p.taken_utc, p })), ...sv.map(s => ({ kind: 'sv' as const, id: `@sv:${s.key}`, t: s.t0, s }))]
   return out.sort((a, b) => a.t - b.t)
-}
-
-function PhotoView({ folder, photo, tz, onChanged }: { folder: string; photo?: Photo; tz: string; onChanged: () => void }) {
-  if (!photo) return <p className="text-sm text-stone-500">That photo is not there any more.</p>
-  return <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900"><PhotoCard folder={folder} p={photo} tz={tz} onMotion={onChanged} /></section>
 }
 
 function PhotoRow({ folder, p, active, onClick }: { folder: string; p: Photo; active: boolean; onClick: () => void }) {

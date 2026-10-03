@@ -171,7 +171,7 @@ describe('one list of everything the film can use, in time order', () => {
     const t = (iso: string) => Date.parse(iso) / 1000
     mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_1_0001_D', start_utc: '2026-02-20T10:00:00Z' }), makeClipInfo({ id: 'CAM_2_0002_D', start_utc: '2026-02-20T16:00:00Z' })] })
     mockGet('/api/gaps', { gaps: [makeGap({ id: 'G01', t0: t('2026-02-20T11:00:00Z'), t1: t('2026-02-20T15:00:00Z') })] })
-    mockGet('/api/photos', { photos: [makePhoto({ id: 'p1', must: true, taken_utc: t('2026-02-20T12:00:00Z') }), makePhoto({ id: 'p2', taken_utc: t('2026-02-20T12:30:00Z') })], tz: 'UTC' })
+    mockGet('/api/photos', { photos: [makePhoto({ id: 'p1', use: true, taken_utc: t('2026-02-20T12:00:00Z') }), makePhoto({ id: 'p2', taken_utc: t('2026-02-20T12:30:00Z') })], tz: 'UTC' })
     mockGet('/api/streetview/chosen', { sections: [{ key: 'mapillary:s:3.00', label: 'V1', id: 'M3', provider: 'mapillary', kind: '360', choice: 'must', t0: t('2026-02-20T13:00:00Z'), t1: t('2026-02-20T13:05:00Z'), length_m: 800, quality: 'good' }] })
     setup(<Workspace folder="/data" onChange={() => {}} />)
     await screen.findByText('V1')

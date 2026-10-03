@@ -979,9 +979,14 @@ def create_app(roots, token=None):
         try: gaps = gap_rows(f) if run is not None else []
         except HTTPException: gaps = []
         from strata360.analysis import photo_analysis as PA
+        from strata360.edit import script_draft as SD
+        said = {}
+        for n, it in enumerate((SD.load_draft(f) or {}).get('items') or []):                  # what the newest script draft does with each photo: the narration over it and its length
+            lab = norm_label(it.get('clip', ''))
+            if lab.startswith('P'): said.setdefault(lab, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
         out = []
         for e in PH.load(rd)['photos']:
-            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); r['motion'] = PH.motion_of(e); out.append(r)
+            r = PH.located(e, run); r['use'] = PH.is_used(e); r['script'] = said.get(PH.label_of(e), []); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); r['motion'] = PH.motion_of(e); out.append(r)
         return sorted(out, key=lambda x: x['taken_utc'])
 
     def photo_job(f):
@@ -1220,11 +1225,15 @@ def create_app(roots, token=None):
         return FileResponse(out, media_type='video/mp4', headers={'Cache-Control': 'max-age=86400'})
 
     @api.post('/api/photos/settings', dependencies=[Depends(auth)])
-    def post_photo_settings(body: dict):                                                 # {folder, id, must}: use this photo in the film (the plan adds it where its time falls if the script leaves it out)
+    def post_photo_settings(body: dict):                                                 # {folder, id, use?, must?}: use: the photo is an option for the film (the writer may show it, it is in the film list); must: the plan adds it where its time falls if the script leaves it out
         from strata360 import photos as PH
-        f = folder_of(body.get('folder')); pid = str(body.get('id') or '')
-        try: return dict(id=pid, must=PH.set_must(config.race_dir(f), pid, bool(body.get('must'))))
-        except KeyError: raise HTTPException(404, 'no such photo')
+        f = folder_of(body.get('folder')); pid = str(body.get('id') or ''); rd = config.race_dir(f)
+        try:
+            if 'use' in body: PH.set_use(rd, pid, bool(body['use']))
+            if 'must' in body: PH.set_must(rd, pid, bool(body['must']))
+            e = next(p for p in PH.load(rd)['photos'] if p['id'] == pid)
+        except (KeyError, StopIteration): raise HTTPException(404, 'no such photo')
+        return dict(id=pid, use=PH.is_used(e), must=bool(e.get('must')))
 
     @api.post('/api/photos/analyse', dependencies=[Depends(auth)])
     def post_photos_analyse(body: dict):                                                 # {folder, stages?: [..], photo?: [ids], force?}: run the clip stages that make sense for a photo over the photos, in the background at the lowest priority (`strata360 photos-analyse`)

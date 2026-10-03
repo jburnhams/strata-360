@@ -544,7 +544,7 @@ class TestPhotoUse(TestPhotosApi):
     def test_a_photo_can_be_marked_for_the_film_and_its_clip_goes_when_it_is_removed(self, client, project):
         from strata360.edit import synthetic as SY
         self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
-        assert client.post('/api/photos/settings', json=dict(q, id='p1', must=True)).json() == dict(id='p1', must=True) and client.get('/api/photos', params=q).json()['photos'][0]['must'] is True
+        assert client.post('/api/photos/settings', json=dict(q, id='p1', must=True)).json() == dict(id='p1', use=True, must=True) and client.get('/api/photos', params=q).json()['photos'][0]['must'] is True
         assert client.post('/api/photos/settings', json=dict(q, id='p9', must=True)).status_code == 404
         SY.upsert(project.folder, SY.make_photo(dict(id='p1', taken_utc=self.T0 + 60, file='x'), 5.0, dict(style='auto', seed=0))); assert [c['id'] for c in SY.load(project.folder)['clips']] == ['P1']
         client.delete('/api/photos', params=dict(q, id='p1')); assert SY.load(project.folder)['clips'] == []

@@ -56,7 +56,7 @@ export interface StreetView {
   job: PhotoJob; keys: { mapillary: boolean; google: boolean }
 }
 export interface Photo {
-  must?: boolean; motion?: MotionSettings; analysis?: PhotoAnalysis
+  use?: boolean; must?: boolean; motion?: MotionSettings; analysis?: PhotoAnalysis; script?: GapScriptItem[]
   id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
   loc: { lat: number; lon: number; source: 'photo gps' | 'run track' } | null; apart_m: number | null; flag: string | null; where: { kind: 'clip' | 'gap'; id: string } | null
 }
@@ -210,7 +210,8 @@ export const api = {
     return j as Photo
   },
   deletePhoto: async (folder: string, id: string) => { const r = await fetch('/api/photos?' + q({ folder, id }), { method: 'DELETE' }); if (!r.ok) throw new Error(`HTTP ${r.status}`) },
-  setPhotoMust: (folder: string, id: string, must: boolean) => call<{ id: string; must: boolean }>('/api/photos/settings', { folder, id, must }),
+  setPhotoMust: (folder: string, id: string, must: boolean) => call<{ id: string; use: boolean; must: boolean }>('/api/photos/settings', { folder, id, must }),
+  setPhotoUse: (folder: string, id: string, use: boolean) => call<{ id: string; use: boolean; must: boolean }>('/api/photos/settings', { folder, id, use }),
   photoThumb: (folder: string, id: string, w = 480) => '/api/photos/thumb?' + q({ folder, id, w: String(w) }),
   photoOverlay: (folder: string, id: string) => '/api/photos/thumb?' + q({ folder, id, overlay: '1' }),
   photoFile: (folder: string, id: string) => '/api/photos/file?' + q({ folder, id }),

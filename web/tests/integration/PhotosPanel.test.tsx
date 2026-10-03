@@ -25,7 +25,7 @@ describe('PhotosPanel', () => {
   })
 
   it('offers to open only the photos ticked for the film (they are in the film list)', async () => {
-    const open = vi.fn(); const { user } = setup(<PhotosPanel folder="/data" photos={[makePhoto(), makePhoto({ id: 'p2', must: true })]} tz="Europe/Brussels" onChanged={() => {}} onOpen={open} />)
+    const open = vi.fn(); const { user } = setup(<PhotosPanel folder="/data" photos={[makePhoto(), makePhoto({ id: 'p2', use: true })]} tz="Europe/Brussels" onChanged={() => {}} onOpen={open} />)
     expect(screen.getAllByRole('button', { name: 'Open in the film list' })).toHaveLength(1); await user.click(screen.getByRole('button', { name: 'Open in the film list' })); expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'p2' }))
   })
 
@@ -72,11 +72,11 @@ describe('PhotosPanel analysis', () => {
 })
 
 describe('Use in the film', () => {
-  it('marks a photo to be used in the film, and shows it ticked once it is', async () => {
-    const seen = recordRequests('/api/photos/settings'); server.use(http.post('/api/photos/settings', () => HttpResponse.json({ id: 'p1', must: true }))); const changed = vi.fn()
+  it('makes a photo an option for the film, and shows it ticked once it is', async () => {
+    const seen = recordRequests('/api/photos/settings'); server.use(http.post('/api/photos/settings', () => HttpResponse.json({ id: 'p1', use: true, must: false }))); const changed = vi.fn()
     const { user, rerender } = setup(<PhotosPanel folder="/data" photos={[makePhoto()]} tz="UTC" onChanged={changed} onOpen={() => {}} />)
     const box = screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' }); expect(box).not.toBeChecked(); await user.click(box)
-    await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', id: 'p1', must: true })); await waitFor(() => expect(changed).toHaveBeenCalled())
-    rerender(<PhotosPanel folder="/data" photos={[makePhoto({ must: true })]} tz="UTC" onChanged={changed} onOpen={() => {}} />); expect(screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' })).toBeChecked()
+    await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', id: 'p1', use: true })); await waitFor(() => expect(changed).toHaveBeenCalled())
+    rerender(<PhotosPanel folder="/data" photos={[makePhoto({ use: true })]} tz="UTC" onChanged={changed} onOpen={() => {}} />); expect(screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' })).toBeChecked()
   })
 })

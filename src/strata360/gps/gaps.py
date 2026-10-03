@@ -18,7 +18,7 @@ def used_spans(folder):
     from strata360 import photos as PH
     from strata360.pipeline import config
     out = []
-    try: out += [dict(id=PH.label_of(e), t0=float(e['taken_utc']), t1=float(e['taken_utc'])) for e in PH.load(config.race_dir(folder))['photos'] if e.get('must')]
+    try: out += [dict(id=PH.label_of(e), t0=float(e['taken_utc']), t1=float(e['taken_utc'])) for e in PH.load(config.race_dir(folder))['photos'] if PH.is_used(e)]
     except (OSError, ValueError, KeyError, TypeError): pass
     try:
         from strata360 import streetview as SV
