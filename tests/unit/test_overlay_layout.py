@@ -51,17 +51,17 @@ class TestSettings:
 class TestShows:
     def test_the_values_at_the_frame_time(self, series, tiles, texts):
         overlay(series, tiles).patches(T0 + 300)                             # 900 m, 5:33 /km, 5 %, 345 m, 147 bpm; 08:05:00 in Brussels
-        for s in ('2025/09/16', '08:05:00', '0.9', 'km', '5:33', 'min/km', '345', '5', '147', 'ALT (m)', 'SLOPE (%)', 'BPM'): assert s in texts
+        for s in ('2025/09/16  08:05:00', '0:05:00', 'DAY 1', '0.9', 'km', '5:33', 'min/km', '345', '5', '147', 'ALT (m)', 'SLOPE (%)', 'BPM'): assert s in texts
         assert '© OpenStreetMap contributors' not in texts                                    # no credit on the picture: it goes with the film's distribution
 
     def test_time_zone(self, series, tiles, texts):
-        LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['clock']}, tz='UTC', tiles=tiles).patches(T0 + 1.6); assert '06:00:01' in texts
+        LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['clock']}, tz='UTC', tiles=tiles).patches(T0 + 1.6); assert '2025/09/16  06:00:01' in texts and '0:00:01' in texts
 
     def test_outside_the_track_shows_dashes(self, series, tiles, texts):
         overlay(series, tiles, elements=['pace', 'heart_rate']).patches(T0 + 5000); assert '-:--' in texts and LY.DASH in texts
 
     def test_only_the_chosen_elements(self, series, tiles):
-        ov = overlay(series, tiles, elements=['clock', 'heart_rate']); assert [type(w).__name__ for w in ov.widgets] == ['Clock', 'Stat'] and len(ov.patches(T0 + 10)) == 5
+        ov = overlay(series, tiles, elements=['clock', 'heart_rate']); assert [type(w).__name__ for w in ov.widgets] == ['Clock', 'Stat'] and len(ov.patches(T0 + 10)) == 6
 
     def test_downhill_icon(self, tiles, texts, monkeypatch):
         names = []; real = D.icon; monkeypatch.setattr(D, 'icon', lambda n, px: names.append(n) or real(n, px))
@@ -188,7 +188,7 @@ class TestProject:
         from strata360.gps import track as TR
         p = make_project(config={'timezone': 'UTC', 'overlay': {'style': 'osm', 'elements': ['clock']}}); open(p.path('track.fit'), 'wb').close()
         monkeypatch.setattr(TR, 'load', lambda path: race_track())
-        ov = for_project(p.folder, (1920, 1080), tiles=tiles); ov.patches(T0); assert '06:00:00' in texts and ov.st['style'] == 'osm'
+        ov = for_project(p.folder, (1920, 1080), tiles=tiles); ov.patches(T0); assert '2025/09/16  06:00:00' in texts and ov.st['style'] == 'osm'
 
 
 class TestFinalKey:
@@ -239,3 +239,26 @@ class TestProfile:
 def test_no_credit_is_drawn_unless_it_is_asked_for(series, tiles, texts):
     ov = overlay(series, tiles); ov.patches(T0 + 300); assert not any('©' in t for t in texts) and not any(type(w).__name__ == 'Credit' for w in ov.widgets)                                           # credits go with the film's distribution
     ov = overlay(series, tiles, elements=['route_map', 'credit']); ov.patches(T0 + 300); assert any('OpenStreetMap' in t for t in texts)
+
+
+class TestRaceDay:
+    """Calendar days from the start, except that a first day shorter than an hour goes on into the next calendar day."""
+    def at(self, y, mo, d, h, mi, tz='UTC'):
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+        return dt.datetime(y, mo, d, h, mi, tzinfo=ZoneInfo(tz)).timestamp()
+
+    def test_a_start_in_the_afternoon_has_day_2_from_midnight(self):
+        from zoneinfo import ZoneInfo
+        z = ZoneInfo('Europe/Brussels'); st = self.at(2026, 2, 19, 16, 0, 'Europe/Brussels')
+        assert [LY.race_day(st, self.at(2026, 2, d, h, m, 'Europe/Brussels'), z) for d, h, m in ((19, 16, 0), (19, 23, 59), (20, 0, 0), (20, 23, 59), (21, 0, 0))] == [1, 1, 2, 2, 3]
+        assert LY.race_day(st, st - 3600, z) == 1                                                  # before the start
+
+    def test_a_start_within_an_hour_of_midnight_keeps_day_1_through_the_next_day(self):
+        from zoneinfo import ZoneInfo
+        z = ZoneInfo('UTC'); st = self.at(2026, 2, 19, 23, 30)
+        assert [LY.race_day(st, self.at(2026, 2, d, h, m), z) for d, h, m in ((19, 23, 45), (20, 0, 0), (20, 23, 59), (21, 0, 0), (21, 12, 0))] == [1, 1, 1, 2, 2]
+        st = self.at(2026, 2, 19, 22, 59); assert LY.race_day(st, self.at(2026, 2, 20, 0, 0), z) == 2             # an hour or more before midnight: the day counts
+
+    def test_elapsed_time_runs_past_24_hours(self):
+        assert [LY.elapsed_text(x) for x in (-5, 0, 59, 3661, 26 * 3600 + 14 * 60 + 5, 130 * 3600)] == ['0:00:00', '0:00:00', '0:00:59', '1:01:01', '26:14:05', '130:00:00']

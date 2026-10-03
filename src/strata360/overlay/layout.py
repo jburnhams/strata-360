@@ -1,6 +1,6 @@
 """The overlay: what it shows and where, drawn for any frame size at the exact time of each frame.
 
-The elements follow the overlay made before with gopro-dashboard-overlay (scripts/overlay/layout.xml, used as a guide; no code taken from it): date and time top left, distance so far, pace,
+The elements follow the overlay made before with gopro-dashboard-overlay (scripts/overlay/layout.xml, used as a guide; no code taken from it): elapsed time and the day of the race with the date and time top left, distance so far, pace,
 and a bottom row of altitude, slope and heart rate with icons; the whole route with the position marker top right and a close-up map that moves with the runner below it.
 
 Positions and sizes are written for a 1920 x 1080 frame and scaled to the film (so 4K is drawn at 4K, not enlarged); each element keeps its distance from the edges it is anchored to, so a
@@ -25,8 +25,8 @@ from strata360.overlay.tiles import Tiles, STYLES, world
 REF_W, REF_H = 1920, 1080
 ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the element keeps its distance from
     'profile': dict(kind='profile', height=120),
-    'clock': dict(kind='clock', x=200, y=24),
-    'distance': dict(kind='big', x=150, y=124, metric='dist', label='km'),
+    'clock': dict(kind='clock', x=16, y=24),
+    'distance': dict(kind='big', x=150, y=170, metric='dist', label='km'),
     'pace': dict(kind='big', x=150, y=745, v='bottom', metric='pace', label='min/km'),
     'altitude': dict(kind='stat', x=16, y=850, v='bottom', icon='mountain', metric='alt', label='ALT (m)'),
     'slope': dict(kind='stat', x=220, y=850, v='bottom', icon='slope', metric='slope', label='SLOPE (%)'),
@@ -81,12 +81,25 @@ class _Ctx:
         rgba, pad = self._text[key]; X, Y = self.at(el, x, y); return (X - pad, Y - pad, rgba)
 
 
+def race_day(start, t, tz):
+    """The calendar day of the race at time t (UTC seconds), 1 on the day it starts. Days change at local midnight, except that a start in the last hour before midnight (a first day shorter than an hour) does not count
+    as a day of its own: that day goes on into the next calendar day, and the second day starts at the next midnight."""
+    s0 = dt.datetime.fromtimestamp(start, dt.timezone.utc).astimezone(tz); mid = dt.datetime.combine(s0.date() + dt.timedelta(days=1), dt.time(), tzinfo=tz)
+    n = (dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(tz).date() - s0.date()).days
+    return max(1, n + 1 - (1 if (mid - s0).total_seconds() < 3600 and n >= 1 else 0))
+
+
+def elapsed_text(seconds):
+    s = max(0, int(seconds)); return f'{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}'
+
+
 class Clock:
+    """Time since the start of the race track (large), the day of the race (calendar days: `race_day`), and the date and time of day (smaller)."""
     def __init__(self, c, el): self.c, self.el = c, el
 
     def patches(self, t, v):
-        lt = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(self.c.tz); x, y = self.el['x'], self.el['y']
-        return [self.c.text(self.el, x, y, lt.strftime('%Y/%m/%d'), 32, align='right'), self.c.text(self.el, x, y + 40, lt.strftime('%H:%M:%S'), 40, align='right')]
+        c, e = self.c, self.el; x, y = e['x'], e['y']; start = float(c.series._pt[0]); lt = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(c.tz)
+        return [c.text(e, x, y, elapsed_text(t - start), 52), c.text(e, x, y + 62, f'DAY {race_day(start, t, c.tz)}', 32), c.text(e, x, y + 104, lt.strftime('%Y/%m/%d  %H:%M:%S'), 22)]
 
 
 class Big:
