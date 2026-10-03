@@ -385,3 +385,180 @@ class TestLyricsApi:
         r = client.post('/api/lyrics/phrase', json=dict(folder=f, key='14.5-20.0', deleted=True)).json(); assert r['deleted'] is True and client.get('/api/lyrics', params=dict(folder=f)).json()['vocal_spans'] == [[9.7, 14.3]]
         assert client.post('/api/lyrics/phrase', json=dict(folder=f, key='9.0-9.5', deleted=True)).status_code == 404
         assert client.delete('/api/lyrics', params=dict(folder=f)).json() == dict(reset=True) and client.get('/api/lyrics', params=dict(folder=f)).json()['exists'] is False
+
+class TestWhoApi:
+    def record(self, project):
+        d = os.path.join(project.race_dir, 'people')
+        os.makedirs(d, exist_ok=True)
+        json.dump(dict(clusters=[dict(id=1, faces=10)], suggested_wearer=[1]), open(os.path.join(d, 'clusters.json'), 'w'))
+
+    def test_get_who_generates_when_missing(self, client, project, monkeypatch):
+        called = []
+        def mock_run(rd, **kw):
+            called.append((rd, kw))
+            self.record(project)
+        monkeypatch.setattr('strata360.analysis.identity.run', mock_run)
+
+        f = project.folder
+        res = client.get('/api/who', params=dict(folder=f)).json()
+        assert len(called) == 1
+        assert called[0][0] == project.race_dir
+        assert res['ready'] is True
+        assert res['clusters'] == [{'id': 1, 'faces': 10}]
+        assert res['suggested'] == [1]
+
+    def test_get_who_returns_cached_when_present_unless_refresh(self, client, project, monkeypatch):
+        called = []
+        def mock_run(rd, **kw): called.append(rd)
+        monkeypatch.setattr('strata360.analysis.identity.run', mock_run)
+
+        self.record(project)
+        f = project.folder
+        res = client.get('/api/who', params=dict(folder=f)).json()
+        assert len(called) == 0
+        assert res['ready'] is True
+
+        res2 = client.get('/api/who', params=dict(folder=f, refresh=True)).json()
+        assert len(called) == 1
+
+    def test_get_who_handles_generation_error(self, client, project, monkeypatch):
+        def mock_run(*args, **kw): raise SystemExit('some error')
+        monkeypatch.setattr('strata360.analysis.identity.run', mock_run)
+
+        f = project.folder
+        res = client.get('/api/who', params=dict(folder=f)).json()
+        assert res['ready'] is False
+        assert res['reason'] == 'some error'
+
+    def test_get_who_sheet_returns_image_if_present(self, client, project):
+        f = project.folder
+        assert client.get('/api/who/sheet', params=dict(folder=f)).status_code == 404
+
+        d = os.path.join(project.race_dir, 'people')
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, 'clusters.png'), 'wb').write(b'\x89PNG\r\n\x1a\n')
+
+        res = client.get('/api/who/sheet', params=dict(folder=f))
+        assert res.status_code == 200
+        assert res.headers['content-type'] == 'image/png'
+        assert res.content == b'\x89PNG\r\n\x1a\n'
+
+    def test_get_who_me_returns_thumbnails(self, client, project, monkeypatch):
+        f = project.folder
+        monkeypatch.setattr('strata360.server.app.ROOT_DIR', str(project.path('')))
+        assert client.get('/api/who/me', params=dict(folder=f)).status_code == 404
+
+        import numpy as np
+        d = str(project.path('profiles'))
+        os.makedirs(d, exist_ok=True)
+
+        # 5 images of 10x10 RGB
+        thumbs = np.zeros((5, 10, 10, 3), dtype=np.uint8)
+        thumbs[0, :, :] = [255, 0, 0] # red
+        np.savez(os.path.join(d, 'me.npz'), thumbs=thumbs)
+
+        res = client.get('/api/who/me', params=dict(folder=f, n=2))
+        assert res.status_code == 200
+        assert res.headers['content-type'] == 'image/jpeg'
+        assert res.content[:3] == b'\xff\xd8\xff' # JPEG header
+
+    def test_post_who_saves_profile_and_starts_job(self, client, project, monkeypatch, fake_popen):
+        f = project.folder
+        called = []
+        def mock_run(rd, **kw): called.append((rd, kw))
+        monkeypatch.setattr('strata360.analysis.identity.run', mock_run)
+
+        assert client.post('/api/who', json=dict(folder=f)).status_code == 400
+        assert client.post('/api/who', json=dict(folder=f, me=[])).status_code == 400
+        assert client.post('/api/who', json=dict(folder=f, me=['a'])).status_code == 400
+
+        res = client.post('/api/who', json=dict(folder=f, me=[1, 3]))
+        assert res.status_code == 200
+        assert res.json() == dict(ok=True)
+
+        assert len(called) == 1
+        assert called[0][0] == project.race_dir
+        assert called[0][1]['me'] == '1,3'
+
+        assert len(fake_popen.instances) == 1
+        assert 'run' in fake_popen.instances[0].cmd
+
+    def test_post_who_handles_error(self, client, project, monkeypatch):
+        f = project.folder
+        def mock_run(*args, **kw): raise SystemExit('bad profile')
+        monkeypatch.setattr('strata360.analysis.identity.run', mock_run)
+
+        res = client.post('/api/who', json=dict(folder=f, me=[1, 3]))
+        assert res.status_code == 400
+        assert res.json()['detail'] == 'bad profile'
+
+
+class TestClockApi:
+    def test_get_clock_returns_offset_and_states(self, client, project):
+        f = project.folder
+        res = client.get('/api/clock', params=dict(folder=f)).json()
+        assert res['offset_s'] == 0.0
+        assert res['verified'] is False
+        assert res['has_track'] is False
+
+        # update config
+        cfg = dict(camera_clock=dict(offset_seconds=10.0, utc_offset_hours=1.0, verified=True, note='test'))
+        from strata360.pipeline import config as C; C.save(project.folder, cfg)
+
+        res = client.get('/api/clock', params=dict(folder=f)).json()
+        assert res['offset_s'] == 3610.0 # 10 + 3600*1
+        assert res['verified'] is True
+        assert res['note'] == 'test'
+
+    def test_get_clock_suggest_requires_track(self, client, project):
+        f = project.folder
+        res = client.get('/api/clock/suggest', params=dict(folder=f))
+        assert res.status_code == 400
+        assert res.json()['detail'] == 'add the race track first'
+
+    def test_get_clock_suggest_returns_suggestions(self, client, project, monkeypatch):
+        f = project.folder
+        # mock track_path to exist
+        from strata360.pipeline import config
+        monkeypatch.setattr(config, 'track_path', lambda *args: '/dummy/track.fit')
+
+        def mock_load(*args): return 'dummy_track'
+        monkeypatch.setattr('strata360.gps.track.load', mock_load)
+
+        def mock_suggest(rd, trk, prior_s):
+            assert trk == 'dummy_track'
+            assert prior_s == 0.0
+            return [{'offset_s': 5.0, 'votes': 2}]
+        monkeypatch.setattr('strata360.gps.anchors.suggest', mock_suggest)
+
+        res = client.get('/api/clock/suggest', params=dict(folder=f)).json()
+        assert res['current'] == 0.0
+        assert res['suggestions'] == [{'offset_s': 5.0, 'votes': 2}]
+
+    def test_post_clock_rejects_invalid_offsets(self, client, project):
+        f = project.folder
+        assert client.post('/api/clock', json=dict(folder=f)).status_code == 400
+        assert client.post('/api/clock', json=dict(folder=f, offset_seconds='abc')).status_code == 400
+        assert client.post('/api/clock', json=dict(folder=f, offset_seconds=86401)).status_code == 400
+        assert client.post('/api/clock', json=dict(folder=f, offset_seconds=-86401)).status_code == 400
+
+    def test_post_clock_saves_offset_and_runs_ingest(self, client, project, monkeypatch):
+        f = project.folder
+        called = []
+        def mock_run(f_arg, stages, *args):
+            called.append((f_arg, stages))
+            return ['dummy_clip'] # length 1
+        monkeypatch.setattr('strata360.pipeline.runner.run', mock_run)
+
+        res = client.post('/api/clock', json=dict(folder=f, offset_seconds=42.5)).json()
+        assert res['retimed'] == 1
+        assert res['clock']['offset_s'] == 42.5
+        assert res['clock']['verified'] is True
+
+        assert len(called) == 1
+        assert called[0][1] == ['ingest']
+
+        # verify config saved
+        from strata360.pipeline import config as C; cfg = C.load(project.folder)
+        assert cfg['camera_clock']['offset_seconds'] == 42.5
+        assert cfg['camera_clock']['utc_offset_hours'] == 0.0

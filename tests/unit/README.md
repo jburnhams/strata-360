@@ -15,7 +15,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 
 | Module | Cover | Status / notes |
 | --- | --- | --- |
-| `server/app.py` | 34% | partial: auth, browse, last, open, notes, log, clips done; the rest of the endpoints todo (transcript, script, voiceover, film, final, music, track, edit, clock, who, state/clear/stop) |
+| `server/app.py` | 60% | partial: auth, browse, last, open, notes, log, clips, clock, who done; the rest of the endpoints todo (transcript, script, voiceover, film, final, music, track, edit, state/clear/stop) |
 | `gps/track.py` | 52% | partial: `at`, `to_gpx`, cache done; `load_fit`/`load_gpx` need fitdecode/gpxpy (add to requirements-test.txt to test them) |
 | `edit/llm_remote.py` | 81% | partial: Vertex/Gemini/Claude request shape, retries and tiers done |
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
