@@ -287,3 +287,26 @@ def test_a_gap_marked_must_use_is_added_in_its_place_when_the_script_leaves_it_o
     pack = dict(clips=[dict(label='0001', start_utc='2026-02-22T10:01:00Z'), kept, other, dict(label='0002', start_utc='2026-02-22T12:00:00Z')])
     warn = []; added = SPL.force_gaps(ps, pack, warn); assert added == ['G01'] and [p['label'] for p in ps] == ['0001', 'G01', '0002'] and ps[1]['seconds'] == 7.0 and ps[1]['fixed'] and any('because you marked them to use' in w for w in warn)
     assert SPL.force_gaps(ps, pack, []) == [] and SPL.force_gaps([], dict(clips=[dict(label='0001')]), []) == []                               # already in; nothing marked
+
+
+class TestChainWindows:
+    B = 60.0 / 97.0                 # a beat at 97 bpm
+
+    def test_a_talking_stretch_cut_in_shots_is_played_straight_through_without_repeating_anything(self):
+        wins = [('c', 21.99, 3.0), ('c', 24.99, 3.0), ('c', 27.99, 4.0)]                                       # cut at 24.99 and 27.99
+        out = SPL.chain_windows(wins, self.B, 60.0, speech=True); ends = [s + b * self.B for _, s, _, b in out]; starts = [s for _, s, _, _ in out]
+        assert all(starts[i + 1] >= ends[i] - 1e-9 for i in range(len(out) - 1)) and starts[1] == pytest.approx(ends[0]) and starts[2] == pytest.approx(ends[1])             # each picks up where the last ended
+        assert starts[1] > 24.99 and out[1][2] < 3.0                                                                                                                 # the second is later and shorter than planned
+        assert out[0][3] == 5 and starts[0] == 21.99                                                                                                                   # (3.0 s is 4.85 beats: 5 whole beats)
+
+    def test_a_shot_with_nothing_left_after_the_one_before_is_dropped(self):
+        out = SPL.chain_windows([('c', 10.0, 2.4), ('c', 12.4, 0.2), ('c', 12.6, 3.0)], self.B, 60.0, speech=True)         # 2.4 s is 3.88 beats: 4 beats = 2.474 s, which covers all but 0.13 s of the 0.2 s shot
+        assert out[0][1] == 10.0 and len(out) == 2 and out[1][1] == 12.6                                                       # the sliver is left out; the next shot starts where it was meant to (the pause)
+
+    def test_b_roll_and_narration_keep_their_own_starts_and_only_dialogue_is_chained(self):
+        wins = [('c', 5.0, 2.0), ('c', 6.0, 2.0)]
+        assert [s for _, s, _, _ in SPL.chain_windows(wins, self.B, 60.0, speech=False)] == [5.0, 6.0]
+        assert [b for *_, b in SPL.chain_windows(wins, self.B, 60.0, speech=False, broll=True)] == [3, 3]                    # (b-roll is rounded to the nearest beat)
+
+    def test_a_shot_near_the_end_of_the_clip_is_moved_back_to_fit(self):
+        out = SPL.chain_windows([('c', 9.5, 2.0)], self.B, 10.0, speech=True); assert out[0][1] == pytest.approx(10.0 - 4 * self.B)

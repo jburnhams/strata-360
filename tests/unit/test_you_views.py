@@ -148,3 +148,31 @@ def test_you_are_tracked_at_the_frame_rate_through_the_cameras_own_motion_and_th
     err = np.degrees(np.abs(((yaw - truth + np.pi) % (2 * np.pi)) - np.pi)); assert err.max() < 1.0 and np.abs(pitch).max() < 1e-6                     # frame-rate truth although the detections are a second apart
     assert FR.you_track(samples[:1], stab, abs_t) is None and FR.you_track(samples, None, abs_t) is None
     far = FR.you_track(samples, stab, np.array([40.0])); assert np.isnan(far[0][0])                              # no detection within 2.5 s: nothing
+
+
+def asked(view, beats=8, face=None, steady=0.8, speech=True, **ft):
+    """The warning when a view is asked for in a window of `beats` beats (120 bpm: half a second each)."""
+    tcl = tc(1); tcl['features'].update(ft, steady=steady); clips = [dict(id='c', start_utc='2026-02-22T10:00:00Z', duration_s=40.0, candidates=[tcl])]; cand = CH.clip_candidates(dict(id='c', candidates=[tcl]))[0]
+    w = CH.Window(0, cand, 0.0, beats, 0.6, False, speech=speech); w.view = view; w.face = face; warns = []; music = O.Music(bpm=120.0, beats=beats, bar_beats=4, sections=[(0, 10 ** 9, 0.5)])
+    try: CH.assign_techniques([w], clips, LIB, music, CH.Settings(seed=1), np.random.default_rng(1), warns, B=beats)
+    except O.Infeasible: pass
+    return [x for x in warns if 'was asked for but is not possible' in x]
+
+
+def test_the_warning_for_a_view_that_was_asked_for_but_is_not_possible_gives_the_actual_cause():
+    got = asked('close', you_close=0.3, you_far=0.9); assert len(got) == 1 and 'close view of you was asked for but is not possible in this window: you are close enough to the camera for a face view in only 30% of this footage (the close view needs at least 50%); the planner chose its own shot' in got[0]
+    assert not asked('mid', you_close=0.9, protagonist=0.1)                                                                                             # (a talking window is let through whatever the footage's features say)
+    tcl = asked('mid', speech=False, you_close=0.9, protagonist=0.1); assert len(tcl) == 1 and 'you are found in only 10% of this footage (the mid view needs at least 30%)' in tcl[0]
+    assert 'you are far enough from the camera for the ultra wide view in only 0% of this footage (the far view needs at least 50%)' in asked('far', you_close=0.9)[0]
+    face = asked('close', face=0.2, you_close=0.9); assert len(face) == 1 and 'your face is clear in only 20% of this window (a close view needs 60%)' in face[0]
+    busy = asked('close', beats=16, steady=0.0, you_close=0.9); assert len(busy) == 1 and 'the window is 8.0 s but a close view of you may last at most 3.0 s in footage this busy (steadiness 0%)' in busy[0]
+    short = asked('mid', beats=2, you_close=0.9); assert len(short) == 1 and 'the window is 1.0 s but this view lasts 2 to 15 s' in short[0]
+    assert not asked('mid', you_close=0.9) and 'whole bars' not in ''.join(asked('mid', beats=3, protagonist=0.1))
+
+
+def test_a_talking_shot_of_you_is_aimed_at_the_face_not_the_top_of_the_head():
+    without = FR.resolve_segment(seg('dialogue_hold'), LIB, data(you())); assert without['subject'] == 'you'
+    faced = [dict(x, face=-20.0) for x in you()]; with_face = FR.resolve_segment(seg('dialogue_hold'), LIB, data(faced))
+    vf = aim.vfov_deg(with_face['keyframes'][0]['fov']); assert with_face['keyframes'][0]['pitch'] == pytest.approx(-20.0 - aim.TALK_FACE_HIGH * vf, abs=1.0)              # the face centre, a little above the middle of the frame
+    assert with_face['keyframes'][0]['pitch'] != pytest.approx(without['keyframes'][0]['pitch'], abs=1.0)                                                            # not where the head-top aim puts the camera
+    other = FR.resolve_segment(seg('selfie_far'), LIB, data(faced)); assert other['keyframes'][0]['pitch'] == pytest.approx(-5.0, abs=1.0)                           # the other shots are not moved by it

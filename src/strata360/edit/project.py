@@ -197,7 +197,9 @@ def plan_from_script(folder, draft_name=None, log=print):
     res = SPL.build(draft, pack, clips, lib, music, voice_s, wpm=float(draft.get('wpm') or 150.0), st=st, target_s=((pack.get('music') or {}).get('length_s')))
     music = O.Music(bpm=bpm, beats=res['beats'], bar_beats=bar, sections=music.sections); ser = serialise(res['segs'], clips, music, lib)
     for g, role, k in zip(ser, res['roles'], res['piece_of']): g['role'] = role; g['item'] = res['pieces'][k]['n']; g['energy_hi'] = g['energy'] >= 0.6
-    sync_gap_clips(folder, res.get('synthetic') or [], log); ser = insert_synthetic(folder, ser, res.get('synthetic') or [], music.beat_s)
+    from strata360.edit import photo_clip as PCL, streetview_clip as SVC
+    specs = res.get('synthetic') or []; sync_gap_clips(folder, [sp for sp in specs if not PCL.is_photo_label(sp['clip']) and not SVC.is_streetview_label(sp['clip'])], log); PCL.sync(folder, specs, log); SVC.sync(folder, specs, log)                     # the plan's gap clips planned, the photos' moves rendered to their lengths
+    ser = insert_synthetic(folder, ser, specs, music.beat_s)
     for g in ser:
         if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
     PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)

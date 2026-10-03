@@ -26,7 +26,27 @@ export interface Poi { name: string; lat: number; lon: number; ele: number | nul
 export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
 export interface Timing { total_s: number; start: number; end: number; checkpoints: Record<string, number>; sections: Record<string, number>; ran_m?: Record<string, number>; arrivals?: Record<string, { t: number; elapsed_s: number; km: number }>; ascent_m?: number; descent_m?: number; consistent: boolean }
 export interface EndMarkers { start: { lat: number; lon: number; t: number }; end: { lat: number; lon: number; t: number; km: number; elapsed_s: number }; finish: { lat: number; lon: number } | null }
+export interface PhotoAnalysis { objects?: { label: string; n: number }[]; setting?: string; description?: string; tags?: string[]; lighting?: string; weather?: string; scenery?: number; clarity?: number; people?: number; me?: boolean; face_clear?: boolean; place?: string; exposure?: string; quality?: string; overlay?: boolean; stages: string[] }
+export type MotionStyle = 'push_in' | 'pull_out' | 'pan' | 'drift' | 'reveal' | 'hold'
+export interface MotionSettings { style: 'auto' | MotionStyle; seconds: number | null; seed: number }       // seconds null: the length follows how busy the photo is (2 to 3 s)
+export interface MotionPlan { style: MotionStyle; duration_s: number; zmax: number; seed: number; subjects: { cx: number; cy: number; w: number; h: number; weight: number; label: string }[]; windows: number[][]; size: number[]; settings: MotionSettings }
+export interface PhotoJob { running: boolean; log: string[]; error: string }
+export type SvProvider = 'mapillary' | 'panoramax' | 'google'
+export interface SvItem { id: string; km: number; lat: number; lon: number; a?: number; b: number; t?: number; u?: string }
+/** One capture run (a sequence, or a run of Google panoramas) along one road stretch. `angles` (flat cameras): how many frames face forward / right / back / left of the way the runner went. */
+export interface SvSection { id: string; provider: SvProvider; stretch: string; kind: '360' | '2d'; km0: number; km1: number; length_m: number; frames: number; spacing_m: number | null; years: number[]; camera: string | null; size: number[] | null; seq: string; angles: Record<string, number> | null; items: SvItem[] }
+export interface SvStretch { id: string; km0: number; km1: number; length_m: number; highways: string[]; names: string[]; line: [number, number][] }
+export interface SvRoads { id: string; total_km: number; stretches: SvStretch[]; run: [number, number][] }
+export interface SvStageStatus { done: boolean; stale?: boolean; stretches?: number; sections?: number; scored?: number; frames?: number; km: number }
+export type SvChoice = 'possible' | 'must'
+/** A section with what the page needs: a key that survives the stage being run again, whether it could make a clip (and why not), how long it plays at 15 pictures a second and how fast that looks, the sections over the same road, and your choice. */
+export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
+export interface StreetView {
+  status: Record<'roads' | SvProvider | 'quality', SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { frames: number; km: number } | null>; sections: SvSectionInfo[]
+  job: PhotoJob; keys: { mapillary: boolean; google: boolean }
+}
 export interface Photo {
+  must?: boolean; motion?: MotionSettings; analysis?: PhotoAnalysis
   id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
   loc: { lat: number; lon: number; source: 'photo gps' | 'run track' } | null; apart_m: number | null; flag: string | null; where: { kind: 'clip' | 'gap'; id: string } | null
 }
@@ -156,7 +176,15 @@ export const api = {
     if (!r.ok) throw new Error(`${file.name}: ${j.detail || `HTTP ${r.status}`}`)
     return j as TrackEntry
   },
-  photos: (folder: string) => call<{ photos: Photo[]; tz: string }>('/api/photos?' + q({ folder })),
+  streetview: (folder: string) => call<StreetView>('/api/streetview?' + q({ folder })),
+  runStreetview: (folder: string, body: { stages?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/streetview/run', { folder, ...body }),
+  setStreetviewChoice: (folder: string, key: string, choice: SvChoice | 'none') => call<{ key: string; choice: SvChoice | null }>('/api/streetview/choice', { folder, key, choice }),
+  streetviewImage: (folder: string, provider: SvProvider, id: string, w = 256) => '/api/streetview/image?' + q({ folder, provider, id, w: String(w) }),
+  photos: (folder: string) => call<{ photos: Photo[]; tz: string; job?: PhotoJob }>('/api/photos?' + q({ folder })),
+  photoMotion: (folder: string, id: string, p: Partial<MotionSettings> = {}) => call<MotionPlan>('/api/photos/motion?' + q({ folder, id, ...(p.style ? { style: p.style } : {}), ...(p.seconds != null ? { seconds: String(p.seconds) } : {}), ...(p.seed != null ? { seed: String(p.seed) } : {}) })),
+  saveMotion: (folder: string, id: string, p: Partial<MotionSettings>) => call<MotionPlan>('/api/photos/motion', { folder, id, ...p }),
+  photoMotionVideo: (folder: string, id: string, p: { style: string; seconds: number; seed: number }, w = 960) => '/api/photos/motion/video?' + q({ folder, id, style: p.style, seconds: String(p.seconds), seed: String(p.seed), w: String(w) }),
+  analysePhotos: (folder: string, body: { stages?: string[]; photo?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/photos/analyse', { folder, ...body }),
   uploadPhoto: async (folder: string, file: File) => {
     const r = await fetch('/api/photos?' + q({ folder, filename: file.name }), { method: 'POST', body: file })
     const j = await r.json().catch(() => ({}))
@@ -164,7 +192,9 @@ export const api = {
     return j as Photo
   },
   deletePhoto: async (folder: string, id: string) => { const r = await fetch('/api/photos?' + q({ folder, id }), { method: 'DELETE' }); if (!r.ok) throw new Error(`HTTP ${r.status}`) },
+  setPhotoMust: (folder: string, id: string, must: boolean) => call<{ id: string; must: boolean }>('/api/photos/settings', { folder, id, must }),
   photoThumb: (folder: string, id: string, w = 480) => '/api/photos/thumb?' + q({ folder, id, w: String(w) }),
+  photoOverlay: (folder: string, id: string) => '/api/photos/thumb?' + q({ folder, id, overlay: '1' }),
   photoFile: (folder: string, id: string) => '/api/photos/file?' + q({ folder, id }),
   setCutoff: (folder: string, key: string, text: string) => call<TracksListing>('/api/tracks/cutoff', { folder, key, text }),
   setTrackKind: (folder: string, id: string, kind: TrackKind) => call<TracksListing>('/api/tracks/kind', { folder, id, kind }),

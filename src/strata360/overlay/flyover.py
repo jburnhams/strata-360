@@ -14,10 +14,12 @@ import numpy as np, cv2
 from scipy.interpolate import PchipInterpolator
 
 from strata360 import hw
+from strata360.overlay import draw as D
 from strata360.overlay.mapclip import frame_count
 
 BASE_W, BASE_H = 1280, 720    # the picture the camera is planned for
 SHARP_MAX = 1.5               # the finest tiles that still reach the horizon (the map at 1920 wide): a larger picture is also rendered at this detail, at a pixel ratio on top (a 4K frame is 1920 wide at ratio 2), as the background where the finer tiles of the 4K render run out
+BADGE = 30                    # the width of the start, checkpoint and finish badges at 1920 wide
 RENDER_H = 820                # rendered this tall at BASE_W, and the bottom cropped: the draft branch leaves a wedge of missing tiles along the bottom edge
 EXAGGERATION = 1.5
 BACKGROUND = '#26381f'        # what shows where a tile is missing: matches the forest
@@ -218,7 +220,7 @@ def check_size(size):
 
 
 class FlyoverClip:
-    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=True, mbgl=None, cache=CACHE, camera=None):
+    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(3840, 2160), imagery=DEFAULT_IMAGERY, tz='Europe/Brussels', st=None, exag=EXAGGERATION, sharp=True, mbgl=None, cache=CACHE, camera=None, places=None):
         if not t1 > t0: raise ValueError('the stretch has no length')
         check_size(size)
         if imagery not in IMAGERY: raise ValueError(f'imagery: one of {", ".join(IMAGERY)}')
@@ -231,7 +233,31 @@ class FlyoverClip:
         self.style = make_style(imagery, exag, lon[keep], lat[keep], self.scale if sharp else 1.0, self.dz)
         self.style_c = make_style(imagery, exag, lon[keep], lat[keep], self.scale / self.ratio, self.dz_c) if self.coarse else None
         self.credit = IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT                                                                                  # (the imagery's credit is not drawn: credits go with the film's distribution, strata360 credits lists them)
-        self._tmp = None
+        self._tmp = None; self.places = places; self.marks = self._place_marks(places)
+
+    def _place_marks(self, places):
+        """The start, finish and checkpoints as [(kind, label, route metres, lat, lon)]: each put at the nearest point of the route, which is where it is drawn."""
+        if not places: return []
+        g, lat, lon, alt = self.route; out = []
+        def at(la, lo): return float(g[int(np.argmin((lat - la) ** 2 + ((lon - lo) * np.cos(np.radians(la))) ** 2))])
+        out.append(('start', '', at(*places['start'])))
+        for n, la, lo in places.get('checkpoints') or []: out.append(('number', str(n), at(la, lo)))
+        if places.get('finish'): out.append(('finish', '', at(*places['finish'])))
+        return out
+
+    def _badges(self, k):
+        """The badges of the places that are on the screen in frame k, [(x, y, patch)] in the frame's pixels, found with the same camera maths the fit of the camera used (`project`); the start is left out when it is next to the finish, and one at the runner's own place is shown just above the arrow, so you can tell you are at that place."""
+        if not self.marks: return []
+        g, lat, lon, alt = self.route; c = self.cam; d = BADGE * self.W / 1920.0; centre = (float(c['lat'][k]), float(c['lon'][k]), float(c['alt'][k])); size = (BASE_W, RENDER_H); sc = self.W / BASE_W
+        r = float(c['runner'][k]); xs, ys, ok = project(g, lat, lon, alt, np.array([m[2] for m in self.marks] + [r]), centre, float(c['bearing'][k]), float(c['zoom'][k]), float(c['pitch'][k]), size, self.exag)
+        pts = [(x * sc, y * sc) for x, y in zip(xs, ys)]; me = pts[-1]; out = []; fin = next((pts[i] for i, m in enumerate(self.marks) if m[0] == 'finish'), None)
+        for (kind, label, _), (x, y), good in zip(self.marks, pts[:-1], ok[:-1]):
+            if not good or not (d / 2 <= x <= self.W - d / 2 and d / 2 <= y <= self.H - d / 2): continue
+            if kind == 'start' and fin is not None and np.hypot(x - fin[0], y - fin[1]) < d * 1.1: continue
+            if np.hypot(x - me[0], y - me[1]) < d * 0.9: y = me[1] - d * 1.1 - 8 * self.W / 1920.0; x = me[0]                      # at the runner's own place: the badge sits just above the arrow, so both show (the arrow is part of the terrain picture, it cannot go on top)
+            if not (d / 2 <= y <= self.H - d / 2): continue
+            out.append((x, y, D.badge(label, d, kind)))
+        return out
 
     def time(self, k): return self.t0 + k * self.speedup / self.fps
 
@@ -267,7 +293,10 @@ class FlyoverClip:
                 self.style_c['sources']['me']['data'] = feats; back = self._draw(k, self.style_c, coarse=True)
                 alpha = cv2.GaussianBlur(cv2.dilate(missing.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(np.float32), (0, 0), 3.0)[..., None]
                 img = (img * (1.0 - alpha) + back * alpha).astype(np.uint8)
-        return np.ascontiguousarray(img[:self.H, :, ::-1])             # the bottom strip (missing tiles) cropped, BGR -> RGB
+        out = np.ascontiguousarray(img[:self.H, :, ::-1])             # the bottom strip (missing tiles) cropped, BGR -> RGB
+        marks = self._badges(k)
+        if marks: D.composite(out, [(x - b.shape[1] / 2, y - b.shape[0] / 2, b) for x, y, b in marks])                 # the start, checkpoints and finish, as on the overlay's maps
+        return out
 
     def frame(self, k):
         """The picture of frame k as RGB uint8: the terrain with no overlay and no credit (the film's own overlay is added when the film is rendered, render/final.py)."""

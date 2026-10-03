@@ -71,3 +71,13 @@ def test_the_whole_route_on_screen_is_drawn_in_one_colour_and_the_stretch_is_not
     c = clip(series, tiles); c.frame(3)
     coloured = [(col, n) for col, n in calls if col != (0, 0, 0)]
     assert coloured == [(MC.ROUTE, len(series.route_lat))]                                          # every point of the route, in one colour: no red-behind, white-ahead split, no stretch drawn differently
+
+
+def test_the_start_checkpoints_and_finish_are_drawn_under_the_runner_as_on_the_overlay_maps(series, tiles):
+    blue = lambda img: int((np.abs(img.astype(int) - (29, 78, 216)).sum(2) < 60).sum())
+    lat = np.interp(T0 + 300, series._pt, series.route_lat); lon = np.interp(T0 + 300, series._pt, series.route_lon)
+    places = dict(start=(lat - 0.002, lon), finish=(lat + 0.02, lon), checkpoints=[(3, lat + 0.0009, lon)])
+    plain = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles); marked = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles, places=places)
+    a, b = plain.frame(0), marked.frame(0); assert blue(b) - blue(a) > 8 and not np.array_equal(a, b)                                               # the numbered checkpoint ahead of the runner
+    d = np.abs(a.astype(int) - b.astype(int)).sum(2) > 0; assert d.mean() < 0.05                                                                           # only the badges changed
+    assert np.array_equal(plain.frame(5), MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles, places=None).frame(5))

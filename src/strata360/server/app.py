@@ -51,6 +51,8 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+STREETVIEW_JOBS = {}          # folder -> Popen of a running `strata360 streetview`
+PHOTO_JOBS = {}               # folder -> Popen of a running `strata360 photos-analyse`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
 PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
@@ -800,8 +802,9 @@ def create_app(roots, token=None):
     async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
         from strata360.gps import tracks as TKS
         f = folder_of(folder); data = await request.body(); rd = config.race_dir(f)
-        try: return TKS.add(rd, filename, data, kind or None)
+        try: out = TKS.add(rd, filename, data, kind or None)
         except ValueError as e: raise HTTPException(400, str(e))
+        overlays_changed(f); return out                                                  # (the maps on the overlay show the tracks)
 
     @api.post('/api/tracks/kind', dependencies=[Depends(auth)])
     def post_tracks_kind(body: dict):                                        # mark a track run or route (the merged race track follows)
@@ -810,6 +813,7 @@ def create_app(roots, token=None):
         try: TKS.set_kind(rd, str(body.get('id')), str(body.get('kind')))
         except KeyError: raise HTTPException(404, 'no such track')
         except ValueError as e: raise HTTPException(400, str(e))
+        overlays_changed(folder_of(body.get('folder')))
         return TKS.listing(rd, tz_of(folder_of(body.get('folder'))))
 
     @api.post('/api/tracks/cutoff', dependencies=[Depends(auth)])
@@ -819,6 +823,7 @@ def create_app(roots, token=None):
         try: TKS.set_cutoff(rd, str(body.get('key')), str(body.get('text') or ''), tz_of(f))
         except KeyError: raise HTTPException(404, 'no such checkpoint')
         except ValueError as e: raise HTTPException(400, str(e))
+        overlays_changed(f)                                                              # the overlay shows cut-offs: the thumbnails are made again
         return TKS.listing(rd, tz_of(f))
 
     @api.delete('/api/tracks', dependencies=[Depends(auth)])
@@ -827,6 +832,7 @@ def create_app(roots, token=None):
         rd = config.race_dir(folder_of(folder))
         try: TKS.remove(rd, id)
         except KeyError: raise HTTPException(404, 'no such track')
+        overlays_changed(folder_of(folder))
         return TKS.listing(rd, tz_of(folder_of(folder)))
 
     @api.get('/api/tracks/line', dependencies=[Depends(auth)])
@@ -963,14 +969,100 @@ def create_app(roots, token=None):
             if c: clips.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=c['video']['source_frames'] / c['video']['nominal_fps']))
         try: gaps = gap_rows(f) if run is not None else []
         except HTTPException: gaps = []
+        from strata360.analysis import photo_analysis as PA
         out = []
         for e in PH.load(rd)['photos']:
-            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); out.append(r)
+            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); r['motion'] = PH.motion_of(e); out.append(r)
         return sorted(out, key=lambda x: x['taken_utc'])
+
+    def photo_job(f):
+        """The state of the photo analysis: whether it is running, the end of its log, and the last failure (a stage that could not run says why)."""
+        from strata360.analysis import photo_analysis as PA
+        job = PHOTO_JOBS.get(f); running = bool(job and job.poll() is None); lines = []
+        try: lines = open(os.path.join(PA.adir(config.race_dir(f)), 'run.log'), errors='replace').read().strip().splitlines()
+        except OSError: pass
+        lines = [l for l in lines if 'unsupported hash type' not in l and not l.startswith(('Traceback', '  File', '    ', 'ValueError: unsupported', 'ERROR:root'))]
+        fail = next((l for l in reversed(lines) if 'FAILED' in l or l.startswith('photos-analyse:')), '')
+        return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
+
+    def streetview_job(f):
+        """Whether the street view stages are running, the end of their log and the last failure."""
+        from strata360 import streetview as SV
+        job = STREETVIEW_JOBS.get(f); running = bool(job and job.poll() is None); lines = []
+        try: lines = open(os.path.join(SV.adir(config.race_dir(f)), 'run.log'), errors='replace').read().strip().splitlines()
+        except OSError: pass
+        fail = next((l for l in reversed(lines) if l.startswith('streetview:')), '')
+        return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
+
+    def sv_track(f):
+        """The race track for working out the light at a section, or None when there is none."""
+        try: return loaded_raw_track(f)
+        except HTTPException: return None
+
+    @api.get('/api/streetview', dependencies=[Depends(auth)])
+    def get_streetview(folder: str):                                                     # the road stretches, each provider's sections of imagery, what stage is done, the running job, and which keys are set
+        from strata360 import streetview as SV
+        from strata360.edit import llm_remote as LR
+        f = folder_of(folder); rd = config.race_dir(f); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}
+        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs, sv_track(f)), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
+
+    @api.post('/api/streetview/run', dependencies=[Depends(auth)])
+    def post_streetview_run(body: dict):                                                 # {folder, stages?: [..], force?}: make the stages in the background at the lowest priority
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); stages = [str(s) for s in body.get('stages') or []]; bad = [s for s in stages if s not in SV.STAGES]
+        if bad: raise HTTPException(400, f'unknown street view stage(s) {", ".join(bad)}: one of {", ".join(SV.STAGES)}')
+        job = STREETVIEW_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='street view is already being worked out')
+        cmd = [*oslib.cli_command(), 'streetview', f] + (['--stages', ','.join(stages)] if stages else []) + (['--force'] if body.get('force') else [])
+        d = SV.adir(config.race_dir(f)); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'run.log'), 'wb')
+        STREETVIEW_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.post('/api/streetview/choice', dependencies=[Depends(auth)])
+    def post_streetview_choice(body: dict):                                              # {folder, key, choice: 'none' | 'possible' | 'must'}: whether the film may use this section (the writer is only told about the ones you chose)
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); rd = config.race_dir(f); key = str(body.get('key') or '')
+        if not any(x['key'] == key for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})): raise HTTPException(404, 'no such street view section')
+        choice = str(body.get('choice') or '')
+        try: SV.set_choice(rd, key, choice)
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        return dict(key=key, choice=None if choice == 'none' else choice)
+
+    @api.get('/api/streetview/image')
+    def get_streetview_image(request: Request, folder: str, provider: str, id: str, w: int = 640):   # one frame as a JPEG (an <img> cannot send headers: the cookie / query token authenticates); only frames the stage found can be asked for
+        from strata360 import streetview as SV
+        auth(request); rd = config.race_dir(folder_of(folder))
+        if provider not in SV.PROVIDERS: raise HTTPException(400, f'provider is one of {", ".join(SV.PROVIDERS)}')
+        try: data = SV.image(rd, provider, SV.load(rd, provider), id, w)
+        except KeyError: raise HTTPException(404, 'no such frame')
+        except RuntimeError as ex: raise HTTPException(502, str(ex))
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store' if provider == 'google' else 'max-age=86400'})
+
+    def start_photo_job(f, stages=(), photo=(), force=False):
+        """Start `photos-analyse` in the background (one at a time per project); {started, reason?}."""
+        from strata360.analysis import photo_analysis as PA
+        job = PHOTO_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='the photos are already being analysed')
+        cmd = [*oslib.cli_command(), 'photos-analyse', f] + (['--stages', ','.join(stages)] if stages else []) + [x for p in photo for x in ('--photo', p)] + (['--force'] if force else [])
+        d = PA.adir(config.race_dir(f)); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'run.log'), 'wb')
+        PHOTO_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    def overlays_changed(f):
+        """What the overlay shows has changed (a cut-off, a track, a checkpoint): forget the thumbnails with the overlay (clips and photos, so no old one is shown) and start making them again. The film preview is out of date by its own key; it is not remade
+        until asked (it is big)."""
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        from strata360.pipeline import runner
+        rd = config.race_dir(f); library = config.load(f).get('library') if os.path.exists(os.path.join(rd, 'race.json')) else None
+        if library: runner.clear(f, 'thumb_overlay')
+        for pth in glob.glob(os.path.join(rd, 'clips', '*', 'thumb_overlay.*')) + glob.glob(os.path.join(PA.adir(rd), '*-overlay.jpg')):
+            try: os.remove(pth)
+            except OSError: pass
+        if library: start_job(f, ('run', '--stages', 'thumb_overlay'))
+        if PH.load(rd)['photos']: start_photo_job(f, ['thumb_overlay'])
 
     @api.get('/api/photos', dependencies=[Depends(auth)])
     def get_photos(folder: str):                                                         # the photos with their time, place (own GPS first, else the run's position at that time), whether those disagree, and the clip or gap they fall in
-        f = folder_of(folder); return dict(photos=photo_rows(f), tz=(config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}).get('timezone') or 'Europe/Brussels')
+        f = folder_of(folder); return dict(photos=photo_rows(f), job=photo_job(f), tz=(config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}).get('timezone') or 'Europe/Brussels')
 
     @api.post('/api/photos', dependencies=[Depends(auth)])
     async def post_photo(request: Request, folder: str, filename: str):                  # one photo as the raw request body (the page sends several one after the other)
@@ -980,18 +1072,81 @@ def create_app(roots, token=None):
         except ValueError as ex: raise HTTPException(400, f'{filename}: {ex}')
         return next(x for x in photo_rows(f) if x['id'] == e['id'])
 
+    def photo_plan(f, pid, style=None, seconds=None, seed=None):
+        """The pan and zoom for a photo: its saved settings (or those asked for) applied to what the analysis found in it: the plan (edit/photo_motion.py) with the first and last windows as fractions of the picture, for drawing on it."""
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        from strata360.edit import photo_motion as PM
+        rd = config.race_dir(f); e = next((x for x in PH.load(rd)['photos'] if x['id'] == pid), None)
+        if e is None: raise HTTPException(404, 'no such photo')
+        m = PH.motion_of(e); st = style or m['style']; doc = PA.load_doc(rd, pid); sec = float(seconds if seconds is not None else (m['seconds'] if m['seconds'] is not None else PA.auto_seconds(doc))); sd = int(seed if seed is not None else m['seed'])
+        path = os.path.join(rd, e['file']); size = PH.oriented_size(path)
+        try: pl = PM.plan(size, sec, st, PM.focals(doc, PA.read_bgr(path, 480)), sd)
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        w, h = pl['size']; pl['windows'] = [[round(v / d, 4) for v, d in zip(PM.crop_at(pl, t), (w, h, w, h))] for t in (0.0, pl['duration_s'])]; pl['settings'] = m; return pl
+
+    @api.get('/api/photos/motion', dependencies=[Depends(auth)])
+    def get_photo_motion(folder: str, id: str, style: str = '', seconds: float | None = None, seed: int | None = None):   # the pan and zoom plan for a photo (the saved settings unless style / seconds / seed are given), to show its path
+        return photo_plan(folder_of(folder), id, style or None, seconds, seed)
+
+    @api.post('/api/photos/motion', dependencies=[Depends(auth)])
+    def post_photo_motion(body: dict):                                                   # {folder, id, style?, seconds?, seed?}: save the pan and zoom chosen for a photo; returns the plan
+        from strata360 import photos as PH
+        f = folder_of(body.get('folder')); pid = str(body.get('id') or '')
+        try: PH.set_motion(config.race_dir(f), pid, **{k: body[k] for k in ('style', 'seconds', 'seed') if k in body})
+        except KeyError: raise HTTPException(404, 'no such photo')
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        return photo_plan(f, pid)
+
+    @api.get('/api/photos/motion/video')
+    def get_photo_motion_video(request: Request, folder: str, id: str, style: str = '', seconds: float | None = None, seed: int | None = None, w: int = 960):   # the move as a small MP4 to watch (made when first asked for, kept); a <video> cannot send headers: the cookie / query token authenticates
+        import hashlib
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        from strata360.edit import photo_motion as PM
+        auth(request); f = folder_of(folder); rd = config.race_dir(f); pl = photo_plan(f, id, style or None, seconds, seed); w = max(320, min(int(w), 1920)); w -= w % 2; h = int(round(w / pl['aspect'])) // 2 * 2
+        e = next(x for x in PH.load(rd)['photos'] if x['id'] == id); src = os.path.join(rd, e['file'])
+        key = hashlib.sha1(json.dumps([pl['keys'], w, h, os.path.getmtime(src), pl['size']]).encode()).hexdigest()[:12]; out = os.path.join(rd, 'photos', 'motion', f'{id}-{key}.mp4')
+        if not os.path.exists(out):
+            os.makedirs(os.path.dirname(out), exist_ok=True); tmp = out + '.part.mp4'
+            try: PM.write_video(tmp, PA.read_bgr(src, 2400), pl, (w, h)); os.replace(tmp, out)
+            except RuntimeError as ex: raise HTTPException(500, str(ex))
+        return FileResponse(out, media_type='video/mp4', headers={'Cache-Control': 'max-age=86400'})
+
+    @api.post('/api/photos/settings', dependencies=[Depends(auth)])
+    def post_photo_settings(body: dict):                                                 # {folder, id, must}: use this photo in the film (the plan adds it where its time falls if the script leaves it out)
+        from strata360 import photos as PH
+        f = folder_of(body.get('folder')); pid = str(body.get('id') or '')
+        try: return dict(id=pid, must=PH.set_must(config.race_dir(f), pid, bool(body.get('must'))))
+        except KeyError: raise HTTPException(404, 'no such photo')
+
+    @api.post('/api/photos/analyse', dependencies=[Depends(auth)])
+    def post_photos_analyse(body: dict):                                                 # {folder, stages?: [..], photo?: [ids], force?}: run the clip stages that make sense for a photo over the photos, in the background at the lowest priority (`strata360 photos-analyse`)
+        from strata360.analysis import photo_analysis as PA
+        f = folder_of(body.get('folder')); stages = [str(s) for s in body.get('stages') or []]; bad = [s for s in stages if s not in PA.VERSIONS]
+        if bad: raise HTTPException(400, f'unknown photo stage(s) {", ".join(bad)}: one of {", ".join(PA.ORDER)}')
+        return start_photo_job(f, stages, [str(p) for p in body.get('photo') or []], bool(body.get('force')))
+
     @api.delete('/api/photos', dependencies=[Depends(auth)])
     def delete_photo(folder: str, id: str):                                              # take a photo out (its files are kept under photos/removed)
         from strata360 import photos as PH
         f = folder_of(folder)
         try: PH.remove(config.race_dir(f), id)
         except KeyError: raise HTTPException(404, 'no such photo')
+        from strata360.edit import synthetic as SY
+        SY.remove(f, PH.label_of(id))                                                    # its clip in the plan goes too
         return dict(photos=photo_rows(f))
 
     @api.get('/api/photos/thumb')
-    def get_photo_thumb(request: Request, folder: str, id: str, w: int = 480):           # a small copy, the right way up (an <img> cannot send headers: the cookie / query token authenticates)
+    def get_photo_thumb(request: Request, folder: str, id: str, w: int = 480, overlay: bool = False):  # a small copy, the right way up (an <img> cannot send headers: the cookie / query token authenticates); overlay=1: the picture with the race overlay as it was then, once the thumb_overlay stage has made it
         from strata360 import photos as PH
-        auth(request); p = PH.thumb(config.race_dir(folder_of(folder)), id, w)
+        from strata360.analysis import photo_analysis as PA
+        auth(request); rd = config.race_dir(folder_of(folder))
+        if overlay:
+            o = os.path.join(PA.adir(rd), f'{id}-overlay.jpg')
+            if os.path.exists(o): return FileResponse(o, media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
+            raise HTTPException(404, 'no overlay version of this photo yet')
+        p = PH.thumb(rd, id, w)
         if not p: raise HTTPException(404, 'no such photo')
         return FileResponse(p, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
 

@@ -663,3 +663,145 @@ class TestPhotosApi(TestGapClipsApi):
         q = dict(folder=project.folder, filename='notes.txt'); assert client.post('/api/photos', params=q, content=b'x' * 300).status_code == 400
         r = client.post('/api/photos', params=dict(folder=project.folder, filename='bad.jpg'), content=b'x' * 300); assert r.status_code == 400 and r.json()['detail'].startswith('bad.jpg: ')
         assert client.get('/api/photos', params=dict(folder=project.folder)).json()['photos'] == []
+
+
+class TestPhotoAnalysisApi(TestPhotosApi):
+    def test_the_analysis_is_started_in_the_background_and_its_results_are_in_the_list(self, client, project, fake_popen):
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
+        r = client.post('/api/photos/analyse', json=dict(folder=project.folder, stages=['scenes', 'exposure'], photo=['p1'], force=True)); assert r.json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'photos-analyse' in cmd and cmd[cmd.index('--stages') + 1] == 'scenes,exposure' and cmd[cmd.index('--photo') + 1] == 'p1' and '--force' in cmd
+        assert client.post('/api/photos/analyse', json=dict(folder=project.folder, stages=['audio'])).status_code == 400
+        j = client.get('/api/photos', params=q).json(); assert j['job']['running'] is True and j['photos'][0]['analysis']['stages'] == [] and client.post('/api/photos/analyse', json=dict(folder=project.folder)).json()['started'] is False
+
+    def test_results_and_an_overlay_picture_are_served(self, client, project):
+        from strata360.analysis import photo_analysis as PA
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60)); rd = project.race_dir
+        assert client.get('/api/photos/thumb', params=dict(q, id='p1', overlay=1)).status_code == 404
+        doc = PA.load_doc(rd, 'p1'); doc['scenes'] = dict(ok=True, setting='trail', description='x', tags=['a'], scenery=7.0, clarity=4.0); doc['stages']['scenes'] = dict(version=1, key='k'); PA.save_doc(rd, doc)
+        os.makedirs(PA.adir(rd), exist_ok=True); open(os.path.join(PA.adir(rd), 'p1-overlay.jpg'), 'wb').write(b'\xff\xd8jpeg')
+        a = client.get('/api/photos', params=q).json()['photos'][0]['analysis']; assert a['scenery'] == 7.0 and a['tags'] == ['a'] and a['stages'] == ['scenes']
+        assert client.get('/api/photos/thumb', params=dict(q, id='p1', overlay=1)).content == b'\xff\xd8jpeg'
+
+
+class TestPhotoMotionApi(TestPhotosApi):
+    def test_the_move_is_planned_from_what_was_found_in_the_photo_and_the_choice_is_saved(self, client, project):
+        from strata360.analysis import photo_analysis as PA
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
+        doc = PA.load_doc(project.race_dir, 'p1'); doc['people'] = dict(w=80, h=60, people=[], faces=[dict(box=[10, 10, 24, 24], score=0.9, pose=[0, 0, 0], emb=0)]); doc['identity'] = dict(me=dict(face=0, sim=0.9, box=[10, 10, 24, 24]), n_people=1, others=0, threshold=0.45); PA.save_doc(project.race_dir, doc)
+        pl = client.get('/api/photos/motion', params=dict(q, id='p1', style='push_in', seconds=5)).json()
+        assert pl['style'] == 'push_in' and pl['duration_s'] == 5.0 and pl['subjects'][0]['label'] == 'you' and len(pl['windows']) == 2 and all(0 <= v <= 1 for w in pl['windows'] for v in w) and pl['settings'] == dict(style='auto', seconds=None, seed=0)
+        saved = client.post('/api/photos/motion', json=dict(q, id='p1', style='reveal', seconds=8, seed=3)); assert saved.status_code == 200 and saved.json()['style'] == 'reveal' and saved.json()['settings'] == dict(style='reveal', seconds=8.0, seed=3)
+        assert client.get('/api/photos/motion', params=dict(q, id='p1')).json()['duration_s'] == 8.0
+        assert client.post('/api/photos/motion', json=dict(q, id='p1', style='spin')).status_code == 400 and client.post('/api/photos/motion', json=dict(q, id='p1', seconds=100)).status_code == 400 and client.post('/api/photos/motion', json=dict(q, id='p9')).status_code == 404
+        assert client.post('/api/photos/motion', json=dict(q, id='p1', style='auto', seconds=None, seed=0)).json()['settings'] == dict(style='auto', seconds=None, seed=0) and client.get('/api/photos/motion', params=dict(q, id='p9')).status_code == 404
+
+
+class TestPhotoMotionVideo(TestPhotosApi):
+    def test_the_video_is_made_once_per_move_and_served(self, client, project, monkeypatch):
+        from strata360.edit import photo_motion as PM
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60)); made = []
+        def fake(path, img, pl, size, fps=25.0): made.append((size, pl['style'])); open(path, 'wb').write(b'mp4'); return 1
+        monkeypatch.setattr(PM, 'write_video', fake)
+        a = client.get('/api/photos/motion/video', params=dict(q, id='p1', style='pull_out', seconds=4, w=640)); assert a.status_code == 200 and a.headers['content-type'] == 'video/mp4' and a.content == b'mp4' and made == [((640, 360), 'pull_out')]
+        client.get('/api/photos/motion/video', params=dict(q, id='p1', style='pull_out', seconds=4, w=640)); assert len(made) == 1                                           # kept
+        client.get('/api/photos/motion/video', params=dict(q, id='p1', style='push_in', seconds=4, w=640)); assert len(made) == 2 and client.get('/api/photos/motion/video', params=dict(q, id='p9')).status_code == 404
+        monkeypatch.setattr(PM, 'write_video', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('ffmpeg failed (1): x'))); r = client.get('/api/photos/motion/video', params=dict(q, id='p1', style='hold', seconds=3)); assert r.status_code == 500 and 'ffmpeg failed' in r.json()['detail']
+
+
+class TestPhotoUse(TestPhotosApi):
+    def test_a_photo_can_be_marked_for_the_film_and_its_clip_goes_when_it_is_removed(self, client, project):
+        from strata360.edit import synthetic as SY
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
+        assert client.post('/api/photos/settings', json=dict(q, id='p1', must=True)).json() == dict(id='p1', must=True) and client.get('/api/photos', params=q).json()['photos'][0]['must'] is True
+        assert client.post('/api/photos/settings', json=dict(q, id='p9', must=True)).status_code == 404
+        SY.upsert(project.folder, SY.make_photo(dict(id='p1', taken_utc=self.T0 + 60, file='x'), 5.0, dict(style='auto', seed=0))); assert [c['id'] for c in SY.load(project.folder)['clips']] == ['P1']
+        client.delete('/api/photos', params=dict(q, id='p1')); assert SY.load(project.folder)['clips'] == []
+        client.post('/api/photos', params=dict(q, filename='b.jpg'), content=self.jpeg(70)); assert client.post('/api/photos/settings', json=dict(q, id='p2', must=False)).json()['must'] is False
+
+
+class TestStreetViewApi(TestGapClipsApi):
+    def make_docs(self, project):
+        from strata360 import streetview as SV
+        rd = project.race_dir; roads = dict(schema=1, id='r1', stretches=[dict(id='R1', km0=1.0, km1=1.5, length_m=500, highways=['residential'], names=['Rue A'], line=[[50.0, 5.0], [50.001, 5.0]])], run=[[50.0, 5.0]], total_km=2)
+        SV._save(rd, 'roads', roads)
+        sec = dict(id='M1', provider='mapillary', stretch='R1', kind='2d', km0=1.0, km1=1.2, length_m=200, frames=2, spacing_m=100, years=[2024], camera=None, size=None, seq='s', angles={'forward': 2}, items=[dict(id='m1', km=1.0, lat=50.0, lon=5.0, a=0, b=0)])
+        SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [sec], roads))
+
+    def test_the_page_gets_stretches_sections_status_and_which_keys_are_set(self, client, project, monkeypatch):
+        from strata360.edit import llm_remote as LR
+        monkeypatch.setattr(LR, 'secret', lambda n: 'x' if n == 'MAPILLARY_TOKEN' else None)
+        q = dict(folder=project.folder); j = client.get('/api/streetview', params=q).json()
+        assert j['roads'] is None and j['status']['roads']['done'] is False and j['keys'] == dict(mapillary=True, google=False) and j['job'] == dict(running=False, log=[], error='')
+        self.make_docs(project); j = client.get('/api/streetview', params=q).json()
+        assert j['roads']['stretches'][0]['id'] == 'R1' and [x['id'] for x in j['sections']] == ['M1'] and j['providers'] == dict(mapillary=dict(frames=2, km=0.2), panoramax=None, google=None)
+        assert j['status']['mapillary'] == dict(done=True, stale=False, sections=1, frames=2, km=0.2) and j['status']['roads'] == dict(done=True, stretches=1, km=0.5)
+
+    def test_sections_come_with_whether_they_are_plausible_what_they_overlap_and_the_choice_made(self, client, project):
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir; roads = SV.load(rd, 'roads'); base = SV.load(rd, 'mapillary')['sections'][0]
+        good = dict(base, id='M2', seq='s2', km0=1.1, km1=1.3, length_m=200, frames=40, spacing_m=5.0); other = dict(base, id='P1', provider='panoramax', seq='c', km0=1.15, km1=1.25, length_m=100, frames=12, spacing_m=8.0)
+        SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [base, good], roads)); SV._save(rd, 'panoramax', SV.provider_doc('panoramax', [other], roads)); q = dict(folder=project.folder)
+        by = {x['id']: x for x in client.get('/api/streetview', params=q).json()['sections']}
+        assert by['M1']['plausible'] is False and 'only 2 pictures' in by['M1']['why_not'] and by['M2']['plausible'] is True and by['M2']['play_s'] == 2.7 and by['M2']['speed_ms'] == 75.0 and (by['M2']['min_s'], by['M2']['max_s']) == (2.0, 10.0) and (by['M1']['min_s'], by['M1']['max_s']) == (2.0, 0.5)
+        assert by['M2']['overlaps'] == ['M1', 'P1'] and by['P1']['overlaps'] == ['M1', 'M2'] and by['M1']['overlaps'] == ['M2', 'P1'] and by['M2']['choice'] is None and by['M2']['key'] == 'mapillary:s2:1.10'
+        assert client.post('/api/streetview/choice', json=dict(folder=project.folder, key='mapillary:s2:1.10', choice='must')).json() == dict(key='mapillary:s2:1.10', choice='must')
+        assert {x['id']: x['choice'] for x in client.get('/api/streetview', params=q).json()['sections']}['M2'] == 'must'
+        assert client.post('/api/streetview/choice', json=dict(folder=project.folder, key='mapillary:s2:1.10', choice='none')).json()['choice'] is None and {x['id']: x['choice'] for x in client.get('/api/streetview', params=q).json()['sections']}['M2'] is None
+        assert client.post('/api/streetview/choice', json=dict(folder=project.folder, key='nope', choice='must')).status_code == 404 and client.post('/api/streetview/choice', json=dict(folder=project.folder, key='mapillary:s2:1.10', choice='maybe')).status_code == 400
+
+    def test_the_stages_are_started_in_the_background_one_job_at_a_time(self, client, project, fake_popen):
+        r = client.post('/api/streetview/run', json=dict(folder=project.folder, stages=['roads', 'mapillary'], force=True)); assert r.json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'streetview' in cmd and cmd[cmd.index('--stages') + 1] == 'roads,mapillary' and '--force' in cmd
+        assert client.post('/api/streetview/run', json=dict(folder=project.folder, stages=['bing'])).status_code == 400
+        assert client.get('/api/streetview', params=dict(folder=project.folder)).json()['job']['running'] is True
+        assert client.post('/api/streetview/run', json=dict(folder=project.folder)).json()['started'] is False
+
+    def test_the_failure_of_a_stage_is_shown(self, client, project):
+        from strata360 import streetview as SV
+        os.makedirs(SV.adir(project.race_dir), exist_ok=True); open(os.path.join(SV.adir(project.race_dir), 'run.log'), 'w').write('roads: 3 stretches\nstreetview: mapillary: no MAPILLARY_TOKEN in secrets.env\n')
+        assert 'no MAPILLARY_TOKEN' in client.get('/api/streetview', params=dict(folder=project.folder)).json()['job']['error']
+
+    def test_pictures_only_for_frames_the_stage_found_and_google_ones_are_not_kept(self, client, project, monkeypatch):
+        from strata360 import streetview as SV
+        self.make_docs(project); q = dict(folder=project.folder, provider='mapillary', id='m1')
+        monkeypatch.setattr(SV, 'image', lambda rd, provider, doc, item_id, w, **k: (_ for _ in ()).throw(KeyError(item_id)) if item_id != 'm1' else b'\xff\xd8jpg')
+        r = client.get('/api/streetview/image', params=q); assert r.status_code == 200 and r.content == b'\xff\xd8jpg' and r.headers['content-type'] == 'image/jpeg'
+        assert client.get('/api/streetview/image', params=dict(q, id='other')).status_code == 404 and client.get('/api/streetview/image', params=dict(q, provider='bing')).status_code == 400
+        assert client.get('/api/streetview/image', params=dict(q, provider='google')).status_code == 200
+        monkeypatch.setattr(SV, 'image', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('mapillary answered 500')))
+        assert client.get('/api/streetview/image', params=q).status_code == 502
+
+
+class TestOverlaysAreMadeAgain(TestTracksCollection):
+    """Whatever the overlay shows changes (a cut-off, a track): the thumbnails with the overlay are forgotten and made again."""
+
+    def with_overlay_files(self, project):
+        p = os.path.join(project.race_dir, 'race.json'); cfg = json.load(open(p)); cfg['library'] = project.folder; json.dump(cfg, open(p, 'w'))               # (a project with a library of footage: the thumbnails are made by a worker)
+        d = os.path.join(project.race_dir, 'clips', 'CAM_X'); os.makedirs(d, exist_ok=True); files = [os.path.join(d, 'thumb_overlay.jpg'), os.path.join(d, 'thumb_overlay.json')]
+        for f in files: open(f, 'wb').write(b'x')
+        return files
+
+    def test_a_cutoff_forgets_the_overlay_thumbnails_and_starts_making_them_again(self, client, project, fake_popen):
+        q = dict(folder=project.folder); up = lambda name, data, **kw: client.post('/api/tracks', params=dict(q, filename=name, **kw), content=data)
+        up('a.gpx', self.gpx()); up('route.gpx', self.gpx(route=True), kind='route'); files = self.with_overlay_files(project); n = len(fake_popen.instances); files = self.with_overlay_files(project)      # (adding the tracks did it once already)
+        r = client.post('/api/tracks/cutoff', json=dict(q, key='finish', text='1h')); assert r.status_code == 200
+        assert not any(os.path.exists(f) for f in files)
+        cmds = [i.cmd for i in fake_popen.instances[n:]]; assert any('run' in c and 'thumb_overlay' in c for c in cmds), cmds
+
+    def test_adding_changing_and_removing_a_track_do_the_same(self, client, project, fake_popen):
+        q = dict(folder=project.folder); up = lambda name, data, **kw: client.post('/api/tracks', params=dict(q, filename=name, **kw), content=data)
+        files = self.with_overlay_files(project); a = up('a.gpx', self.gpx()).json(); assert not any(os.path.exists(f) for f in files)
+        files = self.with_overlay_files(project); b = up('b.gpx', self.gpx(lat0=50.01, t0=1_770_001_000)).json(); assert not any(os.path.exists(f) for f in files)
+        files = self.with_overlay_files(project); client.post('/api/tracks/kind', json=dict(q, id=b['id'], kind='run')); assert not any(os.path.exists(f) for f in files)
+        files = self.with_overlay_files(project); client.delete('/api/tracks', params=dict(q, id=b['id'])); assert not any(os.path.exists(f) for f in files)
+        assert any('thumb_overlay' in i.cmd for i in fake_popen.instances)
+
+    def test_photo_overlays_are_forgotten_too_and_made_again(self, client, project, fake_popen):
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        import io
+        from PIL import Image
+        ex = Image.Exif(); ex.get_ifd(0x8769)[0x9003] = '2026:02:22 10:01:30'; ex.get_ifd(0x8769)[0x9011] = '+00:00'; b = io.BytesIO(); Image.new('RGB', (80, 60), (5, 90, 200)).save(b, 'JPEG', exif=ex); PH.add(project.race_dir, 'a.jpg', b.getvalue() + b'\0' * 200, 'UTC')
+        os.makedirs(PA.adir(project.race_dir), exist_ok=True); o = os.path.join(PA.adir(project.race_dir), 'p1-overlay.jpg'); open(o, 'wb').write(b'x'); q = dict(folder=project.folder)
+        client.post('/api/tracks', params=dict(q, filename='a.gpx'), content=self.gpx()); assert not os.path.exists(o)
+        assert any('photos-analyse' in i.cmd and 'thumb_overlay' in i.cmd for i in fake_popen.instances)

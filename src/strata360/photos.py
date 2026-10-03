@@ -110,9 +110,58 @@ def add(rd, filename, data, tz='Europe/Brussels'):
         if t is None: raise ValueError('the photo has no time stamp (EXIF date): without it I cannot place it in the race')
     except ValueError:
         os.replace(dest, dest + '.bad'); raise
-    entry = dict(id=pid, name=os.path.basename(filename), file=os.path.relpath(work, rd), original=os.path.relpath(dest, rd), taken_utc=round(t, 3), time_source=how, width=info['width'], height=info['height'], camera=(info['make'] + ' ' + info['model']).strip(),
+    ow, oh = oriented_size(work)
+    entry = dict(id=pid, name=os.path.basename(filename), file=os.path.relpath(work, rd).replace(os.sep, '/'), original=os.path.relpath(dest, rd).replace(os.sep, '/'), taken_utc=round(t, 3), time_source=how, width=ow, height=oh, camera=(info['make'] + ' ' + info['model']).strip(),
                  gps=dict(lat=round(info['lat'], 6), lon=round(info['lon'], 6)) if info['lat'] is not None else None, added=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
     doc['photos'].append(entry); doc['next'] += 1; _save(rd, doc); return entry
+
+
+def oriented_size(path):
+    """(width, height) of the photo as it is shown (turned the right way up by its EXIF orientation)."""
+    from PIL import Image
+    im = Image.open(path); w, h = im.size; o = im.getexif().get(0x0112); return (h, w) if o in (5, 6, 7, 8) else (w, h)
+
+
+def label_of(entry_or_id):
+    """The name the script and the plan call a photo: p3 -> P3."""
+    return str(entry_or_id['id'] if isinstance(entry_or_id, dict) else entry_or_id).upper()
+
+
+def set_must(rd, pid, must):
+    """Mark a photo to be used in the film (the plan adds it where its time falls if the script leaves it out), or not. Raises KeyError for an unknown photo."""
+    doc = load(rd); e = next((p for p in doc['photos'] if p['id'] == pid), None)
+    if e is None: raise KeyError(pid)
+    if must: e['must'] = True
+    else: e.pop('must', None)
+    _save(rd, doc); return bool(must)
+
+
+MOTION_DEFAULT = dict(style='auto', seconds=None, seed=0)             # seconds None: the length follows how busy the photo is (analysis/photo_analysis.py `auto_seconds`, 2 to 3 s)
+
+
+def motion_of(entry):
+    """The pan and zoom chosen for a photo (edit/photo_motion.py): {style: 'auto' or one of its styles, seconds, seed}."""
+    return {**MOTION_DEFAULT, **(entry.get('motion') or {})}
+
+
+def set_motion(rd, pid, **fields):
+    """Change some of a photo's pan and zoom settings (style, seconds, seed); returns all three. Raises ValueError for a value that is not allowed, KeyError for an unknown photo."""
+    from strata360.edit import photo_motion as PM
+    doc = load(rd); e = next((p for p in doc['photos'] if p['id'] == pid), None)
+    if e is None: raise KeyError(pid)
+    cur = motion_of(e)
+    for k, v in fields.items():
+        if k not in cur: raise ValueError(f'unknown setting {k}')
+        cur[k] = v
+    if cur['style'] != 'auto' and cur['style'] not in PM.STYLES: raise ValueError(f'style: auto or one of {", ".join(PM.STYLES)}')
+    try:
+        if cur['seconds'] is not None: cur['seconds'] = round(float(cur['seconds']), 2)
+        cur['seed'] = int(cur['seed'])
+    except (TypeError, ValueError): raise ValueError('seconds and seed must be numbers')
+    if cur['seconds'] is not None and not 2.0 <= cur['seconds'] <= 8.0: raise ValueError('the length: 2 to 8 seconds, or leave it to the photo (2 to 3 s by how busy it is)')
+    if cur == MOTION_DEFAULT: e.pop('motion', None)
+    else: e['motion'] = cur
+    _save(rd, doc); return cur
 
 
 def remove(rd, pid):

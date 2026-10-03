@@ -26,7 +26,12 @@ def film_dir(folder, key): return os.path.join(config.race_dir(folder), 'preview
 def plan_key(folder, plan):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
     h = hashlib.sha1(json.dumps(plan['segments'], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
-    h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
+    h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode())
+    try:
+        from strata360 import overlay
+        h.update(overlay.inputs_signature(folder).encode())                                      # the overlay is on every frame: new cut-offs or checkpoints make the preview out of date
+    except Exception: pass
+    return h.hexdigest()[:10]
 
 
 class EquirectView(Globe):

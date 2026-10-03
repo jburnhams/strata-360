@@ -22,6 +22,8 @@ TAIL_S = 0.3                 # and its window runs this long after it ends
 MAX_DIALOGUE_S = 20.0        # the longest dialogue technique (dialogue_hold)
 MAX_PICTURE_S = CH.MAX_SEG_S
 MAX_GAP_S = 45.0             # the longest a gap item plays (script_pack.MAX_GAP_S)
+MAX_PHOTO_S = 3.0            # and a photo item (script_pack.MAX_PHOTO_S); a length set on the photo is kept
+MIN_PHOTO_S = 2.0
 
 
 def seg_id(clip, text):
@@ -91,19 +93,37 @@ def split_points(start, seconds, pauses, target=SPLIT_TARGET_S, floor=SPLIT_MIN_
     return cuts
 
 
+def chain_windows(wins, beat_s, duration, speech, broll=False):
+    """The shots of one piece as [(candidate, start, length, beats)] in whole beats. A talking stretch cut into several shots is played straight through: a shot is rounded UP to whole beats, so it runs past the point where the next one was meant to start;
+    the next one then picks up exactly where the last ended (it is shorter by the difference, and left out if nothing is left of it), so no words and no picture are heard or seen twice. `duration` is the clip's length."""
+    out = []; prev_end = None
+    for c, start, length in wins:
+        if speech and prev_end is not None and start < prev_end - 1e-6:
+            length -= prev_end - start; start = prev_end
+            if length < 0.4 * beat_s: continue                                                              # (a sliver the last shot already covers is not worth a shot of its own)
+        beats = max(1, int(round(length / beat_s))) if broll else max(1, int(math.ceil(length / beat_s - 1e-9))); dur = beats * beat_s; start = max(min(start, duration - dur), 0.0)
+        out.append((c, start, length, beats)); prev_end = start + dur
+    return out
+
+
 def pieces(draft, pack, voice_s, wpm):
     """The script as pieces in order: [{n, kind, clip, label, seconds, ...}]. `voice_s` maps the item number to how long the narration takes to speak (missing: estimated from the words)."""
     by_label = {c['label']: c for c in pack['clips']}; lines = {l['id']: l for c in pack['clips'] for l in c['lines']}; out = []; warn = []
     for n, it in enumerate(draft['items']):
         c = by_label.get(norm_label(it.get('clip', '')))
         if c is None: warn.append(f"item {n + 1}: no clip {it.get('clip')}; skipped"); continue
+        if it.get('type') == 'photo' and not c.get('photo'): warn.append(f"item {n + 1}: {c['label']} is not a photo; skipped"); continue
+        if it.get('type') == 'streetview' and not c.get('streetview'): warn.append(f"item {n + 1}: {c['label']} is not a street view section; skipped"); continue
         base = dict(n=n, clip=c['clip'], label=c['label'], duration_s=c['duration_s'])
         if c.get('synthetic'):                                                                          # a generated clip: its whole length, picture only; narration may run over it
             if it['type'] == 'clip': warn.append(f"item {n + 1}: {c['label']} has no words; skipped"); continue
             text = (it.get('text') or '').strip() if it['type'] == 'vo' else ''; d = voice_s.get(n); est = d is None; d = estimated_s(text, wpm) if est else d
-            if it['type'] == 'gap': sec = min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), MAX_GAP_S)             # a gap item names its own length (the clip is made to it)
+            if it['type'] == 'gap' and (c.get('photo') or c.get('streetview')): warn.append(f"item {n + 1}: {c['label']} is a {'photo' if c.get('photo') else 'street view section'}, not a gap; skipped"); continue
+            if it['type'] == 'photo': sec = min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), MAX_PHOTO_S)           # a photo item names its own length (the move is made to it)
+            elif it['type'] == 'streetview': sec = min(max(float(it.get('seconds') or c['duration_s']), c['sv_facts']['min_s']), c['sv_facts']['max_s'])                  # a street view item names its length within what the section can play (the whole stretch always plays through)
+            elif it['type'] == 'gap': sec = min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), MAX_GAP_S)             # a gap item names its own length (the clip is made to it)
             else: sec = c['duration_s'] if it['type'] == 'vo' else min(max(float(it.get('seconds') or c['duration_s']), CH.MIN_SEG_S), c['duration_s'])
-            piece = (dict(base, kind='synthetic', role='broll' if it['type'] == 'gap' else it['type'], gap_kind=it.get('kind') if it['type'] == 'gap' else None, text=text, speak_s=d if text else 0.0, estimated=est and bool(text), seconds=max(sec, LEAD_S + d + TAIL_S if text else 0.0), seg=seg_id(c['clip'], text) if text else None))
+            piece = (dict(base, kind='synthetic', role='broll' if it['type'] in ('gap', 'photo', 'streetview') else it['type'], gap_kind=it.get('kind') if it['type'] == 'gap' else None, photo=bool(c.get('photo')), streetview=bool(c.get('streetview')), sv_range=(c['sv_facts']['min_s'], c['sv_facts']['max_s']) if c.get('streetview') else None, text=text, speak_s=d if text else 0.0, estimated=est and bool(text), seconds=max(sec, LEAD_S + d + TAIL_S if text else 0.0), seg=seg_id(c['clip'], text) if text else None))
             out.append(gap_choice(piece, c.get('settings') or {}, LEAD_S + d + TAIL_S if text else 0.0)); continue                 # (the length you gave the gap: exactly or at least)
         if it['type'] == 'clip':
             ls = [lines[i] for i in it.get('lines') or [] if i in lines]
@@ -287,6 +307,8 @@ def flex(p):
     if p['kind'] == 'broll': return 2.0, max(min(max(p['seconds'] * 2.0, p['seconds'] + 6.0), float(p.get('duration_s') or 1e9) - 0.2), p['seconds'])           # never past the clip's own length: more would show the same footage twice
     if p['kind'] == 'synthetic' and p.get('role') == 'broll':
         if p.get('fixed'): return None                                                                  # a length you set stays
+        if p.get('streetview'): lo, hi = p['sv_range']; return min(lo, p['seconds']), max(hi, p['seconds'])                    # a street view clip goes anywhere in what its section can play (any length down to 2 s, up to its slowest smooth speed)
+        if p.get('photo'): return min(MIN_PHOTO_S, p['seconds']), max(MAX_PHOTO_S, p['seconds'])                                  # a photo goes between 2 and 3 s to fit the music (never longer than it was, if you set it longer)
         lo = max(GAP_MIN_S, p.get('min_s') or 0.0); return min(lo, p['seconds']), min(MAX_GAP_S, max(p['seconds'] * 1.5, p['seconds'] + 3.0, lo))
     return None
 
@@ -331,7 +353,7 @@ def auto_gaps(ps, pack, music, target_s, warn, min_race_s=3600.0, seconds=(3.0, 
     beat_s = music.beat_s; band = music.bar_beats; total = sum(est_beats(p, beat_s) for p in ps); target = int(round(target_s / beat_s)); used = {p['label'] for p in ps}
     if target - total <= band: return []
     start = {c['label']: c['start_utc'] for c in pack['clips']}; added = []; short_s = (target - total) * beat_s
-    for c in sorted((c for c in pack['clips'] if c.get('synthetic') and c.get('race_s', 0) >= min_race_s and c['label'] not in used), key=lambda c: -c['race_s']):
+    for c in sorted((c for c in pack['clips'] if c.get('synthetic') and not c.get('streetview') and c.get('race_s', 0) >= min_race_s and c['label'] not in used), key=lambda c: -c['race_s']):
         left = target - total
         if left <= band // 2: break
         sec = min(max(c['race_s'] / 3600.0 * 0.5 + 3.0, seconds[0]), seconds[1], max(left * beat_s, seconds[0]))
@@ -342,14 +364,15 @@ def auto_gaps(ps, pack, music, target_s, warn, min_race_s=3600.0, seconds=(3.0, 
 
 
 def force_gaps(ps, pack, warn):
-    """The gaps you marked `must` (Gaps page) that the script left out, added as picture-only generated clips in their place in the race, at the length you gave (else the default for the gap). Returns the labels added; `ps` is changed."""
+    """The gaps and photos you marked `must` (the Gaps page, the photo cards) that the script left out, added as picture-only generated clips in their place in the race, at the length you gave (else the default for the gap). Returns the labels added; `ps` is changed."""
     used = {p['label'] for p in ps}; must = [c for c in pack['clips'] if c.get('synthetic') and (c.get('settings') or {}).get('must') and c['label'] not in used]
     if not must: return []
     start = {c['label']: c['start_utc'] for c in pack['clips']}; added = []
     for c in sorted(must, key=lambda c: c['start_utc']):
-        piece = gap_choice(dict(n=None, clip=c['clip'], label=c['label'], duration_s=c['duration_s'], kind='synthetic', role='broll', gap_kind=None, text='', speak_s=0.0, estimated=False, seconds=round(min(max(c['duration_s'], 3.0), MAX_GAP_S), 2), seg=None, auto=True), c.get('settings') or {})
+        sv = (c['sv_facts']['min_s'], c['sv_facts']['max_s']) if c.get('streetview') else None
+        piece = gap_choice(dict(n=None, clip=c['clip'], label=c['label'], duration_s=c['duration_s'], kind='synthetic', role='broll', gap_kind=None, photo=bool(c.get('photo')), streetview=bool(sv), sv_range=sv, text='', speak_s=0.0, estimated=False, seconds=round(min(max(c['duration_s'], sv[0]), sv[1]) if sv else max(c['duration_s'], MIN_PHOTO_S) if c.get('photo') else min(max(c['duration_s'], 3.0), MAX_GAP_S), 2), seg=None, auto=True), c.get('settings') or {})
         at = next((j for j, p in enumerate(ps) if start.get(p['label'], '') > c['start_utc']), len(ps)); ps.insert(at, piece); added.append(c['label'])
-    if added: warn.append(f"added the gap clip(s) {', '.join(added)} because you marked them to use")
+    if added: warn.append(f"added the gap, photo or street view clip(s) {', '.join(added)} because you marked them to use")
     return added
 
 
@@ -409,9 +432,8 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
             if short > 1e-6:
                 c0, s0, l0 = wins[-1]; grow = min(short, max(cap_p - l0, 0.0)); wins[-1] = (c0, s0, l0 + grow)
                 warn.append(f"item {p['n'] + 1}: the narration needs {p['seconds']:.1f} s but clip {p['label']} has {p['seconds'] - short:.1f} s of footage for it; the last frame is held" + (f" for {short - grow:.1f} s more than a window allows" if short - grow > 1e-6 else '') + ' (choices: shorten the line, move it to a longer clip, or let the hold stand)')
-        for c, start, length in wins:
-            speech = p['kind'] == 'clip'; beats = max(1, int(math.ceil(length / beat_s - 1e-9))) if p['kind'] != 'broll' else max(1, int(round(length / beat_s)))
-            dur = beats * beat_s; start = max(min(start, fp.duration - dur), 0.0)
+        for c, start, length, beats in chain_windows(wins, beat_s, fp.duration, p['kind'] == 'clip', p['kind'] == 'broll'):
+            speech = p['kind'] == 'clip'; dur = beats * beat_s
             w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.view = p.get('view'); w.face = fp.face_share(start, start + dur); w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
             windows.append(w); roles.append(p['kind']); first_window.setdefault(k, len(windows) - 1)
     if not windows and not any(p['kind'] == 'synthetic' for p in ps): raise O.Infeasible('the script has no windows: no item could be matched to footage')

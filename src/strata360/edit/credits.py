@@ -25,7 +25,10 @@ def needed(folder):
     for g in plan:
         if g.get('synthetic') and g['clip'] in docs: kinds[g['clip']] = docs[g['clip']]
     for cid, c in sorted(kinds.items()):
-        if c['kind'] == 'flyover':
+        if c['kind'] == 'photo': continue                                                                # (your own picture)
+        if c['kind'] == 'streetview':
+            add(f"the street view {cid} ({(c.get('style') or {}).get('provider')})", 'Street-level imagery: Mapillary contributors (CC BY-SA 4.0)' if (c.get('style') or {}).get('provider') == 'mapillary' else 'Street-level imagery: Panoramax contributors (CC BY-SA 4.0)')
+        elif c['kind'] == 'flyover':
             from strata360.overlay import flyover as FO
             imagery = (c.get('style') or {}).get('imagery') or FO.DEFAULT_IMAGERY; add(f'the 3D flyover {cid}', FO.IMAGERY[imagery][3] + ' · ' + FO.TERRAIN_CREDIT)
         else:

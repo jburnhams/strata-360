@@ -223,6 +223,8 @@ def resolve_segment(g, lib, data):
         ev = CameraPath(path['keyframes'], path.get('ref', 'world')).evaluate(times)
         ty = np.degrees(y); aimer = (lambda pi, hi, vf, hd: AIM.aim_face(pi, hi, hd)) if tech.id == 'selfie_close' else AIM.aim_pitch
         tp = np.array([aimer(float(np.degrees(p[i])), float(h[i]), AIM.vfov_deg(float(ev['fov'][i])), None if np.isnan(hdd[i]) else float(hdd[i])) for i in range(len(times))])
+        if tech.id == 'dialogue_hold' and subject == 'you':                                                 # a talking shot is about the face, not the top of the head (the head-top aim above leaves the face at the bottom of the frame when you look down): the centre of the face, a little above the middle
+            fp = _face(data[subject], 'face', abs_t); tp = np.where(np.isfinite(fp), fp - AIM.TALK_FACE_HIGH * np.array([AIM.vfov_deg(float(f)) for f in ev['fov']]), tp)
         if tech.id == 'selfie_close':                                                                    # the close view puts the CENTRE OF THE FACE (between the eyes and the nose) in the middle of the frame, where the detector found it; the head-top estimate is only the fallback
             fp = _face(data[subject], 'face', abs_t); tp = np.where(np.isfinite(fp), fp, tp)
         trk = you_track(data[subject], data.get('stab'), abs_t, proxy=data.get('proxy')) if tracking else None; tracked = False

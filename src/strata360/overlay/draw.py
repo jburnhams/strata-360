@@ -16,7 +16,7 @@ SS = 4                                       # supersampling of shapes
 def font(path, px): return ImageFont.truetype(path, max(1, int(round(px))))
 
 
-def shadowed(mask, fill, px, strength=0.65, shadow=(0, 0, 0)):
+def shadowed(mask, fill, px, strength=0.8, shadow=(0, 0, 0)):
     """RGBA patch of `fill` through the L-mode `mask` with a soft shadow around it; returns (rgba, pad), the patch being `pad` pixels larger than the mask on every side."""
     pad = max(2, int(math.ceil(px / 9))); m = Image.new('L', (mask.width + 2 * pad, mask.height + 2 * pad)); m.paste(mask, (pad, pad))
     sh = m.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(max(1.0, px / 18)))
@@ -35,7 +35,7 @@ def text(s, px, path=VALUE_FONT, fill=(255, 255, 255), tabular=True, shadow=(0, 
     if not tabular: xs, x = [0.0], f.getlength(s)
     w = max(1, int(math.ceil(x))); m = Image.new('L', (w + 2, asc + desc)); d = ImageDraw.Draw(m)
     for ch, cx in zip(s if tabular else [s], xs): d.text((cx, asc), ch, font=f, fill=255, anchor='ls')
-    rgba, pad = shadowed(m, fill, px, strength=0.9 if shadow != (0, 0, 0) else 0.65, shadow=shadow); return rgba, pad, x
+    rgba, pad = shadowed(m, fill, px, strength=0.9 if shadow != (0, 0, 0) else 0.8, shadow=shadow); return rgba, pad, x
 
 
 def _ss(size, draw_fn):

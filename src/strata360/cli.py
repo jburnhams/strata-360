@@ -314,6 +314,28 @@ def cmd_script_plan(a):
         except Exception as e: print(f'voice-over not made: {e}')
 
 
+def cmd_photos_analyse(a):
+    """Run the clip stages that make sense for a photo (exposure, quality, places, people, identity, face_view, scenes, thumb_overlay: analysis/photo_analysis.py) over the project's photos, redoing only what is out of date."""
+    from strata360.analysis import photo_analysis as PA
+    from strata360.pipeline import config
+    oslib.lower_priority(); folder = a.name
+    try: done = PA.run(folder, stages=[s.strip() for s in a.stages.split(',')] if a.stages else None, only=set(a.photo) if a.photo else None, force=a.force)
+    except (ValueError, RuntimeError) as e: sys.exit(f'photos-analyse: {e}')
+    print('done: ' + '; '.join(f'{s} {len(v)}' for s, v in done.items()))
+
+
+def cmd_streetview(a):
+    """Street view: the stretches of the run on a road (stage roads) and the street-level imagery on them from Mapillary, Panoramax and Google (one stage each); only what is missing or out of date unless --force. Details: streetview.py."""
+    from strata360 import streetview as SV
+    from strata360.gps import track
+    oslib.lower_priority(); cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
+    if not tp: sys.exit('streetview: no race track: add the .fit or .gpx first')
+    tr = track.load(tp); d, _ = SV.track_dist(tr); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); tr = dict(lat=tr['lat'][ok], lon=tr['lon'][ok], dist=d, t=tr['t'][ok])
+    try: done = SV.run(config.race_dir(a.name), tr, [s.strip() for s in a.stages.split(',')] if a.stages else None, a.force)
+    except (ValueError, RuntimeError) as e: sys.exit(f'streetview: {e}')
+    print('done: ' + (', '.join(done) or 'nothing to do'))
+
+
 def cmd_gaps(a):
     """The stretches of the race with no clip (the gaps), from the clips' times and the race track; --plan registers a synthetic clip (an animated map) for each, to be rendered later."""
     from strata360.gps import gaps as GP, track
@@ -387,11 +409,16 @@ def cmd_gap_clip(a):
         except ValueError as e: sys.exit(str(e))
         t0, t1 = when(clip['t0']), when(clip['t1'])
     w, h = (int(x) for x in (clip.get('size') or '1920x1080').split('x')); st = clip.get('style') or {}; series = Series(tr)
+    try:
+        from strata360.gps import tracks as TKS
+        places = TKS.overlay_places(config.race_dir(a.name))                                                                         # the start, finish and checkpoints, as on the overlay's maps
+    except Exception as e:                                                                                                         # (the map then has none, said loudly)
+        print(f'gap-clip: no start, finish or checkpoints on the map: {type(e).__name__}: {e}'); places = None
     if clip['kind'] == 'flyover':
         from strata360.overlay import flyover as FO
-        try: mbgl = FO.find_mbgl(); mc = FO.FlyoverClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), imagery=st.get('imagery') or FO.DEFAULT_IMAGERY, tz=tz, sharp=st.get('sharp', True), mbgl=mbgl)
+        try: mbgl = FO.find_mbgl(); mc = FO.FlyoverClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), imagery=st.get('imagery') or FO.DEFAULT_IMAGERY, tz=tz, sharp=st.get('sharp', True), mbgl=mbgl, places=places)
         except (ValueError, FO.FlyoverError) as e: sys.exit(str(e))
-    else: mc = MC.MapClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(st.get('map') or MC.DEFAULT_STYLE), tz=tz)
+    else: mc = MC.MapClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(st.get('map') or MC.DEFAULT_STYLE), tz=tz, places=places)
     out = os.path.join(config.race_dir(a.name), 'synthetic', clip['id'] + '.mp4'); oslib.lower_priority(); last = [0]
     def show(done, total):
         if done - last[0] >= max(1, total // 20) or done == total: last[0] = done; print(f'  {clip["id"]}: {done}/{total} frames', flush=True)
@@ -592,6 +619,8 @@ def main():
     p = sub.add_parser('script-draft', help='write or revise the whole-race script (clips, the runner\'s own lines and narration) with the LLM; --revise keeps the current draft and applies your marks and pins'); p.add_argument('name', metavar='FOLDER_OR_RACE')
     p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
     p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
+    p = sub.add_parser('streetview', help='find the road stretches of the run and the street-level imagery (Mapillary, Panoramax, Google) on them'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--stages', help='comma list of roads,mapillary,panoramax,google'); p.add_argument('--force', action='store_true', help='redo even what is up to date'); p.set_defaults(fn=cmd_streetview)
+    p = sub.add_parser('photos-analyse', help='run the clip stages that make sense for a photo (exposure, quality, places, people, identity, face_view, scenes, thumb_overlay) over the uploaded photos; only what is out of date'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--stages', help='comma list of exposure,quality,places,people,identity,face_view,scenes,thumb_overlay'); p.add_argument('--photo', action='append', help='a photo id (p1 ...); repeat for several'); p.add_argument('--force', action='store_true', help='redo even what is up to date'); p.set_defaults(fn=cmd_photos_analyse)
     p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
     p = sub.add_parser('gap-clip', help='render the animated map clip or 3D flyover for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--kind', choices=['map', 'flyover'], default='map', help='the animated 2D map, or the 3D terrain flyover (4K)'); p.add_argument('--size', help='WIDTHxHEIGHT (default 1920x1080 for the map, 3840x2160 for the flyover)'); p.add_argument('--style', help='map style (default tf-landscape, which needs a Thunderforest key; osm needs none)'); p.add_argument('--imagery', choices=['esri', 'eox', 'osm', 'topo'], help='flyover imagery (default esri)'); p.add_argument('--no-sharp', action='store_true', help='flyover: enlarge the 720p map tiles at larger sizes (faster, softer) instead of fetching finer ones'); p.set_defaults(fn=cmd_gap_clip)
     p = sub.add_parser('lyrics', help='find the words in the music track (where it is sung)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--reset', action='store_true'); p.add_argument('--reset-all', action='store_true', help='also forget your corrections'); p.set_defaults(fn=cmd_lyrics)

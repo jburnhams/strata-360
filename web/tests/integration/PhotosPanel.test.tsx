@@ -47,6 +47,42 @@ describe('PhotosPanel', () => {
   })
 })
 
+describe('PhotosPanel analysis', () => {
+  const analysed = makePhoto({ analysis: { stages: ['scenes', 'places'], setting: 'trail', weather: 'cloud', description: 'A muddy path through trees.', scenery: 7, clarity: 4, tags: ['trees', 'mud'], objects: [{ label: 'bottle', n: 2 }, { label: 'bicycle', n: 1 }], place: 'Nadrin (Luxembourg)', people: 2, me: true, face_clear: true, exposure: 'dark', quality: 'ok', overlay: true } })
+
+  it('shows what the analysis found on each photo', () => {
+    setup(<PhotosPanel folder="/data" photos={[analysed, makePhoto({ id: 'p2', name: 'IMG_2.jpg', analysis: { stages: [] } })]} tz="UTC" onChanged={() => {}} onOpen={() => {}} />)
+    const a = document.querySelector('[data-photo="p1"] [data-analysis]')!; expect(a).toHaveTextContent('A muddy path through trees.'); expect(a).toHaveTextContent('Nadrin (Luxembourg) · trail, cloud · scenery 7/10, clarity 4/5 · 2 people, you among them (face clear) · objects: 2 bottle, bicycle · looks dark')
+    expect(a).toHaveTextContent('treesmud'); expect(a.querySelector('a')!.getAttribute('href')).toContain('overlay=1'); expect(document.querySelector('[data-photo="p2"] [data-analysis]')).toBeNull()
+  })
+
+  it('starts the analysis, shows its progress, and says why it stopped', async () => {
+    const seen = recordRequests('/api/photos/analyse'); server.use(http.post('/api/photos/analyse', () => HttpResponse.json({ started: true }))); const changed = vi.fn()
+    const { user, rerender } = setup(<PhotosPanel folder="/data" photos={[makePhoto()]} tz="UTC" onChanged={changed} onOpen={() => {}} />)
+    await user.click(screen.getByRole('button', { name: 'Analyse photos' })); await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', force: false })); expect(changed).toHaveBeenCalled()
+    rerender(<PhotosPanel folder="/data" photos={[makePhoto()]} tz="UTC" job={{ running: true, log: ['places: 1 photo(s)', 'people: 1 photo(s)'], error: '' }} onChanged={changed} onOpen={() => {}} />)
+    expect(screen.getByText('people: 1 photo(s)')).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'Analysing…' })).toBeDisabled()
+    rerender(<PhotosPanel folder="/data" photos={[makePhoto()]} tz="UTC" job={{ running: false, log: [], error: 'identity: RuntimeError: no wearer profile profiles/me.npz' }} onChanged={changed} onOpen={() => {}} />)
+    expect(screen.getByRole('alert')).toHaveTextContent('The analysis stopped: identity: RuntimeError: no wearer profile')
+  })
+
+  it('offers to redo everything once the photos have been analysed', async () => {
+    const seen = recordRequests('/api/photos/analyse'); server.use(http.post('/api/photos/analyse', () => HttpResponse.json({ started: true })))
+    const { user } = setup(<PhotosPanel folder="/data" photos={[analysed]} tz="UTC" onChanged={() => {}} onOpen={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Analyse again' })).toBeInTheDocument(); await user.click(screen.getByRole('button', { name: 'Redo all' })); await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ force: true }))
+  })
+})
+
+describe('Use in the film', () => {
+  it('marks a photo to be used in the film, and shows it ticked once it is', async () => {
+    const seen = recordRequests('/api/photos/settings'); server.use(http.post('/api/photos/settings', () => HttpResponse.json({ id: 'p1', must: true }))); const changed = vi.fn()
+    const { user, rerender } = setup(<PhotosPanel folder="/data" photos={[makePhoto()]} tz="UTC" onChanged={changed} onOpen={() => {}} />)
+    const box = screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' }); expect(box).not.toBeChecked(); await user.click(box)
+    await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', id: 'p1', must: true })); await waitFor(() => expect(changed).toHaveBeenCalled())
+    rerender(<PhotosPanel folder="/data" photos={[makePhoto({ must: true })]} tz="UTC" onChanged={changed} onOpen={() => {}} />); expect(screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' })).toBeChecked()
+  })
+})
+
 describe('PhotoStrip', () => {
   const photos = [makePhoto(), makePhoto({ id: 'p2', where: { kind: 'gap', id: 'G03' } }), makePhoto({ id: 'p3', where: null })]
   it('shows only the photos whose time falls in the clip or gap', () => {
