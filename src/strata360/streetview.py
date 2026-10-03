@@ -60,13 +60,13 @@ def roads_id(doc): return hashlib.sha1(json.dumps([[s['km0'], s['km1']] for s in
 def find_roads(track, cache_dir, svc=None, log=print):
     """roads.json body: the road stretches of `track` (a dict of lat, lon, dist arrays) and the run thinned to about every 100 m for drawing."""
     lat, lon, dist = (np.asarray(track[k], float) for k in ('lat', 'lon', 'dist'))
-    out = roads.stretches(lat, lon, dist, cache_dir, svc=svc); la, lo, d = roads.sample(lat, lon, dist, STEP_M); stretches = []
+    out = roads.stretches(lat, lon, dist, cache_dir, on_m=ON_ROAD_M, svc=svc); la, lo, d = roads.sample(lat, lon, dist, STEP_M); stretches = []
     for n, s in enumerate(out, 1):
         line = [[round(float(a), 5), round(float(b), 5)] for a, b in zip(la[s['i0']:s['i1']], lo[s['i0']:s['i1']])]
         stretches.append(dict(id=f'R{n}', km0=s['km0'], km1=s['km1'], length_m=s['length_m'], highways=s['highways'], names=s['names'], line=line))
     log(f'roads: {len(stretches)} stretches, {sum(s["length_m"] for s in stretches) / 1000:.1f} km of {d[-1] / 1000:.0f} km')
     run = [[round(float(a), 4), round(float(b), 4)] for a, b in zip(la[::5], lo[::5])]
-    doc = dict(schema=SCHEMA, source='OpenStreetMap (Overpass)', on_road_m=8.0, min_m=300.0, total_km=round(float(d[-1]) / 1000, 2), stretches=stretches, run=run); doc['id'] = roads_id(doc); return doc
+    doc = dict(schema=SCHEMA, source='OpenStreetMap (Overpass)', on_road_m=ON_ROAD_M, min_m=300.0, total_km=round(float(d[-1]) / 1000, 2), stretches=stretches, run=run); doc['id'] = roads_id(doc); return doc
 
 
 # --- the sections of imagery on a stretch ---------------------------------------------------------------------------------------------------------------------------------------
