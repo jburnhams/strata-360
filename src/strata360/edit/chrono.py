@@ -264,6 +264,32 @@ FACE_MIN_SHARE = 0.6           # the close view needs a clear face in at least t
 VIEW_TECH = {'mid': 'selfie_hold', 'close': 'selfie_close', 'far': 'selfie_far'}      # the views of you a window can ask for (K6)
 
 
+VIEW_NEED_TEXT = {'protagonist': 'you are found in only {p}% of this footage (the mid view needs at least {t}%)', 'you_close': 'you are close enough to the camera for a face view in only {p}% of this footage (the close view needs at least {t}%)',
+                  'you_far': 'you are far enough from the camera for the ultra wide view in only {p}% of this footage (the far view needs at least {t}%)'}
+
+
+def view_blocked(tid, lib, w, c, d, st, music):
+    """Why the technique `tid` (one of the views of you) is not allowed in window `w` of footage `c` lasting `d` seconds: the first of the planner's rules that stops it, in words with the numbers; None when none does.
+    The rules are those of `assign_techniques`, in the same order."""
+    t = lib.get(tid)
+    if t is None: return f'the technique {tid} is not in the library'
+    if tid in st.bans_techs: return f'{tid} is banned in the settings'
+    if w.speech and not t.dialogue_ok: return f'the runner is speaking in this window and {tid} is not used over speech'
+    if tid == 'selfie_close':
+        limit = CLOSE_MAX_BUSY + (CLOSE_MAX_CALM - CLOSE_MAX_BUSY) * calm((getattr(c, 'features', None) or {}).get('steady'))
+        if d > limit + 1e-9: return f'the window is {d:.1f} s but a close view of you may last at most {limit:.1f} s in footage this busy (steadiness {100 * calm((getattr(c, "features", None) or {}).get("steady")):.0f}%)'
+        face = getattr(w, 'face', None)
+        if face is not None and face < FACE_MIN_SHARE: return f'your face is clear in only {100 * face:.0f}% of this window (a close view needs {100 * FACE_MIN_SHARE:.0f}%)'
+    if not (t.dmin - 1e-9 <= d <= t.dmax + 1e-9): return f'the window is {d:.1f} s but this view lasts {t.dmin:g} to {t.dmax:g} s'
+    if t.beats == 'bar' and w.beats % music.bar_beats: return f'this view needs whole bars and the window is {w.beats} beats'
+    if (w.forced and tid in ('hold_wide', 'follow_runner', 'selfie_hold')) or (w.speech and tid in ('dialogue_hold', 'selfie_hold')): return None          # (these are let through whatever the footage's own features say)
+    feats = getattr(c, 'features', None) or {}
+    for f, (wt, thr) in t.needs.items():
+        v = feats.get(f)
+        if thr is not None and (v is None or v < thr): return VIEW_NEED_TEXT.get(f, f'{f} is {0 if v is None else 100 * v:.0f}% (needs {100 * thr:.0f}%)').format(p=0 if v is None else round(100 * v), t=round(100 * thr))
+    return None
+
+
 def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
     """The beam search over an ordered list of windows for each window's technique; shared by the beat planner (`plan`) and the script planner (edit/script_plan.py). `windows` are in film order (their
     beats add up to `B`, default the music's); returns the ordered list of Seg."""
@@ -296,7 +322,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
         view = getattr(w, 'view', None)
         if not want and view in VIEW_TECH:                                                                  # the script asked for a view of you (mid, close, far): used when the footage allows it
             if any(o[0] == VIEW_TECH[view] for o in opts): want = VIEW_TECH[view]
-            else: warnings.append(f"{wids[k]}: the {view} view of you was asked for but this window does not allow it here ({'you are not found, or too near or too far' if view != 'close' else 'you are not found or too near; or your face is not clear; or the footage is too busy for a close view this long; or there is no mid view of you next to it to glide with'}); the planner chose its own shot")
+            else: warnings.append(f"{wids[k]}: the {view} view of you was asked for but is not possible in this window: {view_blocked(VIEW_TECH[view], lib, w, c, d, st, music) or 'the planner left it out for another rule'}; the planner chose its own shot")
         if want:
             if any(o[0] == want for o in opts): opts = [o for o in opts if o[0] == want]
             elif w.fixed: opts = [(want, 0.0)]                                                               # a locked window keeps its technique even if the rules would no longer allow it
