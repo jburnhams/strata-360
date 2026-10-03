@@ -87,7 +87,53 @@ def _kokoro_speak(voice, rate, text, out):
     wavfile.write(out, sr, (np.clip(samples, -1, 1) * 32767).astype(np.int16))
 
 
-ENGINES = {'kokoro': ('Kokoro (open model, British male)', _kokoro_available, voices, _kokoro_speak)}
+# ---- ElevenLabs: a hosted voice (paid API, key ELEVENLABS_API_KEY in secrets.env); British male voices first --------------------------------------------------------------------------------------
+EL_URL = 'https://api.elevenlabs.io/v1'
+EL_MODEL = os.environ.get('STRATA360_ELEVENLABS_MODEL') or 'eleven_multilingual_v2'
+EL_DEFAULT_VOICES = [('onwK4e9ZLuTAKqWW03F9', 'Daniel'), ('JBFqnCBsd6RMkjVDRZzb', 'George')]        # the premade British male voices (Daniel: steady broadcaster, George: warm storyteller)
+EL_SR = 24000
+
+
+def _el_key():
+    from strata360.edit import llm_remote
+    return llm_remote.secret('ELEVENLABS_API_KEY')
+
+
+def _el_request(path, body=None):
+    import urllib.error, urllib.request
+    req = urllib.request.Request(EL_URL + path, data=None if body is None else json.dumps(body).encode(), headers={'xi-api-key': _el_key() or '', 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r: return r.read()
+    except urllib.error.HTTPError as e: raise RuntimeError(f'ElevenLabs {e.code}: {e.read()[:300].decode(errors="replace")}')
+    except urllib.error.URLError as e: raise RuntimeError(f'ElevenLabs unreachable: {e.reason}')
+
+
+def _el_available():
+    """Off for now (Kokoro is the voice-over): set STRATA360_ELEVENLABS=1 as well as the key to offer it."""
+    return os.environ.get('STRATA360_ELEVENLABS') == '1' and bool(_el_key())
+
+
+def _el_voices():
+    """The account's voices as [{name (the voice id), label, group, lang}], British male first; the premade British male ones when the list cannot be fetched."""
+    try: vs = json.loads(_el_request('/voices'))['voices']
+    except (RuntimeError, ValueError, KeyError): vs = []
+    out = [dict(name=v['voice_id'], label=v['name'].split(' - ')[0], group=('British male' if (v.get('labels') or {}).get('accent') == 'british' and (v.get('labels') or {}).get('gender') == 'male' else 'Other'),
+                lang='en_GB' if (v.get('labels') or {}).get('accent') == 'british' else 'en') for v in vs]
+    known = {v['name'] for v in out}
+    out += [dict(name=i, label=n, group='British male', lang='en_GB') for i, n in EL_DEFAULT_VOICES if i not in known]
+    pref = [i for i, _ in EL_DEFAULT_VOICES]
+    return sorted(out, key=lambda v: (v['group'] != 'British male', pref.index(v['name']) if v['name'] in pref else 99, v['label']))
+
+
+def _el_speak(voice, rate, text, out):
+    import wave
+    speed = float(min(max(rate / BASE_WPM, 0.7), 1.2))                       # the API's range
+    pcm = _el_request(f'/text-to-speech/{voice or EL_DEFAULT_VOICES[0][0]}?output_format=pcm_{EL_SR}', dict(text=text, model_id=EL_MODEL, voice_settings=dict(stability=0.55, similarity_boost=0.75, speed=speed, use_speaker_boost=True)))
+    with wave.open(out, 'wb') as w: w.setnchannels(1); w.setsampwidth(2); w.setframerate(EL_SR); w.writeframes(pcm)
+
+
+ENGINES = {'elevenlabs': ('ElevenLabs (hosted, British male)', _el_available, _el_voices, _el_speak),
+           'kokoro': ('Kokoro (open model, British male)', _kokoro_available, voices, _kokoro_speak)}
 
 
 def available_engines():
