@@ -50,9 +50,9 @@ TRACK_NAMES = ('track.fit', 'track.gpx')      # the race track lives at <project
 
 def track_path(name, cfg=None):
     """The race track file of a project: the known filename in the project folder, else the (older) `gps` setting, else None."""
-    for n in TRACK_NAMES:
-        p = os.path.join(race_dir(name), n)
-        if os.path.exists(p): return p
+    from strata360.gps import tracks                                       # the one track the program uses: the run, or the runs merged (route tracks are for the overview map only)
+    p = tracks.current_path(race_dir(name))
+    if p: return p
     g = (cfg or {}).get('gps')
     return g if g and os.path.exists(g) else None
 

@@ -781,9 +781,53 @@ def create_app(roots, token=None):
                 if os.path.exists(q): os.replace(q, q + '.replaced')                       # keep the previous file next to it, never silently lose it
         dest = os.path.join(rd, 'track' + ext); open(dest, 'wb').write(data)
         from strata360.gps.overview import overview
-        try: return overview(dest)
+        from strata360.gps import tracks as TKS
+        try: o = overview(dest)
         except Exception as e:
             os.replace(dest, dest + '.bad'); raise HTTPException(400, f'could not read that file: {type(e).__name__}: {e}')
+        TKS.update_merged(rd); return o
+
+    # The project's tracks: any number of FIT / GPX files, each a run (merged into the one race track) or a route (shown on the overview map for planning only)
+    @api.get('/api/tracks', dependencies=[Depends(auth)])
+    def get_tracks(folder: str):                                                         # every track with kind and summary, the merged run track, and the points of interest
+        from strata360.gps import tracks as TKS
+        return TKS.listing(config.race_dir(folder_of(folder)))
+
+    @api.post('/api/tracks', dependencies=[Depends(auth)])
+    async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
+        from strata360.gps import tracks as TKS
+        f = folder_of(folder); data = await request.body(); rd = config.race_dir(f)
+        try: return TKS.add(rd, filename, data, kind or None)
+        except ValueError as e: raise HTTPException(400, str(e))
+
+    @api.post('/api/tracks/kind', dependencies=[Depends(auth)])
+    def post_tracks_kind(body: dict):                                        # mark a track run or route (the merged race track follows)
+        from strata360.gps import tracks as TKS
+        rd = config.race_dir(folder_of(body.get('folder')))
+        try: TKS.set_kind(rd, str(body.get('id')), str(body.get('kind')))
+        except KeyError: raise HTTPException(404, 'no such track')
+        except ValueError as e: raise HTTPException(400, str(e))
+        return TKS.listing(rd)
+
+    @api.delete('/api/tracks', dependencies=[Depends(auth)])
+    def delete_tracks(folder: str, id: str):                                             # take a track out (its file is kept under tracks/removed)
+        from strata360.gps import tracks as TKS
+        rd = config.race_dir(folder_of(folder))
+        try: TKS.remove(rd, id)
+        except KeyError: raise HTTPException(404, 'no such track')
+        return TKS.listing(rd)
+
+    @api.get('/api/tracks/line', dependencies=[Depends(auth)])
+    def get_tracks_line(folder: str, id: str, limit: int = 3000):                        # the line of one track (id, or `merged`) for the overview map: lat, lon (no times needed)
+        from strata360.gps import tracks as TKS
+        import numpy as np
+        rd = config.race_dir(folder_of(folder))
+        if id == 'merged': p = os.path.join(rd, TKS.MERGED); p = p if os.path.exists(p) else None
+        else: p = next((e['file'] for e in TKS.entries(rd) if e['id'] == id), None)
+        if not p: raise HTTPException(404, 'no such track')
+        tr = TKS.read(p); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']); lat, lon = tr['lat'][ok], tr['lon'][ok]
+        idx = np.unique(np.linspace(0, len(lat) - 1, max(2, min(limit, len(lat)))).astype(int))
+        return dict(id=id, lat=[round(float(lat[i]), 6) for i in idx], lon=[round(float(lon[i]), 6) for i in idx])
 
     @api.get('/api/edit', dependencies=[Depends(auth)])
     def get_edit(folder: str):                                                           # settings, overrides, the saved plan, the technique list and the newest script's lines by segment id

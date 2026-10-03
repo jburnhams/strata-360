@@ -415,3 +415,36 @@ class TestProposeKeepsAScriptPlan:
         monkeypatch.setattr(PJ, 'load', lambda f: dict(plan=dict(source='script'))); called = []; monkeypatch.setattr(PJ, 'propose', lambda f, s=None, o=None, keep=True: called.append(1) or dict(plan=None))
         r = client.post('/api/edit/propose', json=dict(folder=project.folder)); assert r.status_code == 409 and 'planned from the script' in r.json()['detail'] and not called
         assert client.post('/api/edit/propose', json=dict(folder=project.folder, replace=True)).status_code == 200 and called
+
+
+class TestTracksCollection:
+    """Several tracks per project: runs merge into the race track, routes only show on the overview map."""
+
+    def gpx(self, n=60, lat0=50.0, t0=1_770_000_000, route=False, wpt=False):
+        from datetime import datetime, timezone
+        tm = lambda i: '' if route else f'<time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time>'
+        pts = ''.join(f'<trkpt lat="{lat0 + i * 1e-4}" lon="5.0"><ele>10</ele>{tm(i)}</trkpt>' for i in range(n))
+        w = '<wpt lat="50.001" lon="5.0"><name>Aid 1</name></wpt>' if wpt else ''
+        return f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">{w}<trk><trkseg>{pts}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode()
+
+    def test_upload_mark_merge_and_remove(self, client, project):
+        q = dict(folder=project.folder); up = lambda name, data, **kw: client.post('/api/tracks', params=dict(q, filename=name, **kw), content=data)
+        a = up('a.gpx', self.gpx(wpt=True)).json(); assert a['kind'] == 'run'
+        b = up('b.gpx', self.gpx(lat0=50.01, t0=1_770_001_000)).json(); assert b['kind'] == 'route'
+        r = client.post('/api/tracks/kind', json=dict(q, id=b['id'], kind='run')); assert r.status_code == 200 and r.json()['runs'] == 2 and r.json()['merged']['samples'] == 120
+        ov = client.get('/api/track', params=q).json(); assert ov['samples'] == 120                                           # the one race track is the merged runs
+        assert client.get('/api/tracks/line', params=dict(q, id='merged', limit=50)).json()['lat'] and client.get('/api/tracks/line', params=dict(q, id=a['id'])).status_code == 200
+        assert [p['name'] for p in client.get('/api/tracks', params=q).json()['pois']] == ['Aid 1']
+        assert client.post('/api/tracks/kind', json=dict(q, id='zzz', kind='run')).status_code == 404 and client.post('/api/tracks/kind', json=dict(q, id=a['id'], kind='x')).status_code == 400
+        r = client.delete('/api/tracks', params=dict(q, id=b['id'])); assert r.json()['runs'] == 1 and r.json()['merged'] is None and client.get('/api/track', params=q).json()['samples'] == 60
+        assert client.delete('/api/tracks', params=dict(q, id='zzz')).status_code == 404 and client.get('/api/tracks/line', params=dict(q, id='merged')).status_code == 404
+
+    def test_bad_files_are_refused(self, client, project):
+        q = dict(folder=project.folder)
+        assert client.post('/api/tracks', params=dict(q, filename='a.txt'), content=b'x' * 300).status_code == 400
+        assert client.post('/api/tracks', params=dict(q, filename='a.gpx'), content=b'<gpx>' + b'x' * 300).status_code == 400
+        assert client.get('/api/tracks', params=q).json()['tracks'] == []
+
+    def test_the_older_single_upload_still_works_and_counts_as_a_run(self, client, project):
+        q = dict(folder=project.folder); assert client.post('/api/track', params=dict(q, filename='t.gpx'), content=self.gpx()).status_code == 200
+        t = client.get('/api/tracks', params=q).json(); assert [(x['id'], x['kind']) for x in t['tracks']] == [('main', 'run')]

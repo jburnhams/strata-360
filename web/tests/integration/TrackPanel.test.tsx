@@ -1,9 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import TrackPanel from '../../src/components/TrackPanel'
 import { screen, setup, waitFor } from '../utils/render'
-import { makeTrackClip, makeTrackOverview } from '../utils/factories'
-import { mockGet, mockPost, mockError, recordRequests, mockPending } from '../utils/api'
+import { makeTrackClip, makeTrackEntry, makeTrackOverview, makeTracksListing } from '../utils/factories'
+import { mockGet, mockPost, mockDelete, mockError, recordRequests, mockPending } from '../utils/api'
 import { axe } from 'vitest-axe'
+import { http, HttpResponse } from 'msw'
+import { server } from '../utils/server'
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
@@ -97,6 +99,45 @@ describe('TrackPanel', () => {
     const { container } = setup(<TrackPanel folder="/data" />)
     await screen.findByRole('group', { name: 'Pace chart' })
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  describe('tracks list', () => {
+    const present = () => mockGet('/api/track', makeTrackOverview({ present: true, file: 'race.fit', distance_km: 75.6 }))
+    const two = () => makeTracksListing({ runs: 1, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'route', timed: false, start_utc: null, pois: 2, distance_km: 80 })], pois: [{ name: 'Aid 1', lat: 50.05, lon: 5.07, ele: 120, sym: '', desc: '', track: 't2' }] })
+
+    it('lists each track with its kind, and shows routes on the map with their points of interest', async () => {
+      present(); mockGet('/api/tracks', two()); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
+      setup(<TrackPanel folder="/data" />)
+      expect(await screen.findByLabelText('Kind of course.gpx')).toHaveValue('route'); expect(screen.getByLabelText('Kind of race.gpx')).toHaveValue('run')
+      expect(screen.getByText(/80 km · no times · 2 POI/)).toBeInTheDocument()
+      expect(await screen.findByText('route (planning only)')).toBeInTheDocument(); expect(screen.getByText('point of interest')).toBeInTheDocument()
+      expect(document.querySelector('[data-poi]')).not.toBeNull()
+    })
+
+    it('marks a track a run, refreshing the race track and the list', async () => {
+      present(); const seen = recordRequests('/api/tracks/kind'); let marked = false
+      const after = makeTracksListing({ runs: 2, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'run' })], merged: { runs: ['main', 't2'], samples: 200, start_utc: '', end_utc: '', distance_km: 90 } })
+      mockGet('/api/tracks', () => (marked ? after : two())); mockPost('/api/tracks/kind', () => { marked = true; return after })
+      const { user } = setup(<TrackPanel folder="/data" />)
+      await user.selectOptions(await screen.findByLabelText('Kind of course.gpx'), 'run')
+      expect(await screen.findByText(/Race track = 2 runs merged · 90 km/)).toBeInTheDocument(); expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', id: 't2', kind: 'run' })
+    })
+
+    it('adds several files one after the other and says which one was refused', async () => {
+      present(); mockGet('/api/tracks', makeTracksListing()); const seen = recordRequests('/api/tracks')
+      server.use(http.post('/api/tracks', ({ request }) => new URL(request.url).searchParams.get('filename') === 'bad.gpx' ? HttpResponse.json({ detail: 'could not read that file' }, { status: 400 }) : HttpResponse.json(makeTrackEntry())))
+      const { user } = setup(<TrackPanel folder="/data" />)
+      await user.upload(await screen.findByLabelText('Add track files'), [new File(['a'], 'a.gpx'), new File(['b'], 'bad.gpx'), new File(['c'], 'c.gpx')])
+      expect(await screen.findByRole('alert')).toHaveTextContent('bad.gpx: could not read that file')
+      expect(seen.filter(r => r.method === 'POST').map(r => r.url.searchParams.get('filename'))).toEqual(['a.gpx', 'bad.gpx'])
+    })
+
+    it('removes a track', async () => {
+      present(); mockGet('/api/tracks', two()); mockDelete('/api/tracks', makeTracksListing({ runs: 1, tracks: [makeTrackEntry()] })); const seen = recordRequests('/api/tracks')
+      const { user } = setup(<TrackPanel folder="/data" />)
+      await user.click(await screen.findByRole('button', { name: 'Remove course.gpx' }))
+      await waitFor(() => expect(seen.some(r => r.method === 'DELETE' && r.url.searchParams.get('id') === 't2')).toBe(true))
+    })
   })
 
   describe('race view', () => {

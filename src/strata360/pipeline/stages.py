@@ -171,7 +171,8 @@ def thumb(ctx):
        note='where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)')
 def _track_file(ctx):
     """The race track of the clip's project (track.fit / track.gpx in the project folder, or the older `gps` setting)."""
-    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = next((os.path.join(root, n) for n in ('track.fit', 'track.gpx') if os.path.exists(os.path.join(root, n))), None) or ctx.cfg.get('gps')
+    from strata360.gps import tracks
+    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = tracks.current_path(root) or ctx.cfg.get('gps')
     if not tp or not os.path.exists(tp): raise RuntimeError('no race track (track.fit / track.gpx in the project folder): add it in the app, then redo this stage')
     return root, tp
 

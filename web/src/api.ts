@@ -19,6 +19,11 @@ export interface TrackOverview {
 }
 export interface TrackSeries { points: number; start_utc: string; end_utc: string; duration_s: number; distance_km: number | null; t: number[]; km: (number | null)[]; alt: (number | null)[]; alt_lo: (number | null)[]; alt_hi: (number | null)[]; pace: (number | null)[]; moving: number[]; hr: (number | null)[] }
 export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
+export type TrackKind = 'run' | 'route'
+export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number }
+export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string }
+export interface TracksListing { tracks: TrackEntry[]; merged: { runs: string[]; samples: number; start_utc: string; end_utc: string; distance_km: number } | null; pois: Poi[]; runs: number }
+export interface ExtraLine { id: string; kind: TrackKind | 'merged'; name: string; lat: number[]; lon: number[] }
 export interface TrackClipFacts { local: string; daylight: string | null; elapsed_h: number | null; distance_km: number | null; percent: number | null; pace_min_km: number | null; gradient_pct: number | null; altitude_m: number | null; heart_rate: number | null; text: string }
 export interface TrackClip {
   id: string; label: string; start_utc: string; end_utc: string; duration_s: number; covered: boolean; used: boolean; used_s: number; moments?: number | null; usable_s?: number | null; scene?: { settings: string[]; weather: string[] }
@@ -130,6 +135,20 @@ export const api = {
     if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
     return j as TrackOverview
   },
+  tracks: (folder: string) => call<TracksListing>('/api/tracks?' + q({ folder })),
+  addTrack: async (folder: string, file: File, kind?: TrackKind) => {
+    const r = await fetch('/api/tracks?' + q(kind ? { folder, filename: file.name, kind } : { folder, filename: file.name }), { method: 'POST', body: file })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(`${file.name}: ${j.detail || `HTTP ${r.status}`}`)
+    return j as TrackEntry
+  },
+  setTrackKind: (folder: string, id: string, kind: TrackKind) => call<TracksListing>('/api/tracks/kind', { folder, id, kind }),
+  removeTrack: async (folder: string, id: string) => {
+    const r = await fetch('/api/tracks?' + q({ folder, id }), { method: 'DELETE' }); const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
+    return j as TracksListing
+  },
+  tracksLine: (folder: string, id: string, limit = 3000) => call<{ id: string; lat: number[]; lon: number[] }>('/api/tracks/line?' + q({ folder, id, limit: String(limit) })),
   clip: (folder: string, clip: string) => call<ClipDetail>('/api/clip?' + q({ folder, clip })),
   previewUrl: (folder: string, clip: string) => '/api/preview?' + q({ folder, clip }),
   thumbUrl: (folder: string, clip: string, v: string, overlay = false) => '/api/thumb?' + q({ folder, clip, v, ...(overlay ? { overlay: '1' } : {}) }),     // v: busts the browser cache when the picture changes

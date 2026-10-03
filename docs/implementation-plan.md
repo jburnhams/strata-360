@@ -413,3 +413,9 @@ Answered on 1 Oct as well: a reference overlay (layout and command line) to work
 
 Still open:
 None; the overlay configuration arrived on 1 Oct (A2).
+
+## Several tracks per project: runs and routes
+
+A project holds any number of FIT / GPX tracks (`gps/tracks.py`: `tracks.json` manifest, files in `tracks/`; the older single `track.fit|gpx` counts as the first run, id `main`). Each is marked a **run** (the recording, needs times) or a **route** (a planned or official course, may have no times). The pipeline still sees exactly one track through `config.track_path`: the single run's own file, or `track.merged.npz` when there are two or more runs (`merge`: runs in priority order, a lower run only fills the stretches the higher ones did not record without a >30 s break; distance recomputed along the merged line). Routes are informational: only the overview map reads them. Points of interest come from GPX waypoints / named route points and FIT course points (`pois`). GPX is now read with the standard library (`gps/track.py::gpx_parts`; gpxpy was never a listed dependency), including `<rte>` files and heart rate / cadence / temperature extensions.
+
+Server: `GET/POST/DELETE /api/tracks`, `POST /api/tracks/kind`, `GET /api/tracks/line` (any track or `merged`); `/api/track*` is unchanged and serves the race track. Web: a Tracks list in the track panel (multi-file add, run/route select, remove: files are moved to `tracks/removed/`, never deleted) and the overview map draws routes dashed, each run plain when there are several, the merged race track on top, and a marker with a tooltip for each point of interest.

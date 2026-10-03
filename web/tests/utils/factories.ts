@@ -46,6 +46,8 @@ export const makeScriptDraft = (o: Partial<import('../../src/api').ScriptDraft> 
 export const makeTrackLine = (o: Partial<import('../../src/api').TrackLine> = {}): import('../../src/api').TrackLine => {
   const n = 20; return { lat: Array.from({ length: n }, (_, i) => 50 + i * 0.01), lon: Array.from({ length: n }, (_, i) => 5 + i * 0.015), t: Array.from({ length: n }, (_, i) => i * 400), ...o }
 }
+export const makeTracksListing = (o: Partial<import('../../src/api').TracksListing> = {}): import('../../src/api').TracksListing => ({ tracks: [], merged: null, pois: [], runs: 0, ...o })
+export const makeTrackEntry = (o: Partial<import('../../src/api').TrackEntry> = {}): import('../../src/api').TrackEntry => ({ id: 't1', name: 'race.gpx', kind: 'run', samples: 100, timed: true, start_utc: '2026-02-22T18:00:00Z', end_utc: '2026-02-23T04:00:00Z', distance_km: 75.6, pois: 0, ...o })
 export const makeTrackSeries = (o: Partial<import('../../src/api').TrackSeries> = {}): import('../../src/api').TrackSeries => {
   const n = 40; return {
     points: n, start_utc: '2026-02-22T18:00:00Z', end_utc: '2026-02-23T04:00:00Z', duration_s: 36000, distance_km: 75.6,
