@@ -536,3 +536,83 @@ def stage_progress(rd, on_route_m=50.0, every_s=5.0):
             else: prog[j] = last
         out[name] = dict(route_m=float(s[-1]), t=t[sel], prog=prog)
     return out
+
+
+def _hm(s):
+    s = int(abs(s)); h, m = s // 3600, s % 3600 // 60; return f'{h}h{m:02d}m' if h else f'{m}m'
+
+
+def race_story(rd, tz='Europe/Brussels'):
+    """The race as facts for the script writer: the stages (route length, distance run, time), the checkpoints (when reached, how long stopped, the cut-off and the time to spare or late), the finish, and what the run covered of the routes. None without routes.
+    {stages: [{n, route_km, ran_km, covered_km, time_s, off_course}], checkpoints: [{n, elapsed_s, local, km, stopped_s, cutoff_s, margin_s}], finish: {...}, route_km, covered_km, complete}; `off_course` is set only when the distance run differs from the route covered by more than 10%."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    order, _ = route_order(rd); tm = timing(rd) if order else None
+    if not tm: return None
+    order = sorted(order, key=lambda o: o['order']); sched = stage_schedule(rd); prog = stage_progress(rd); cuts = cutoffs(rd, tz); fin = finish_info(rd); n = len(order); names = [l for _, l in sched]
+    local = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(ZoneInfo(tz)).strftime('%a %H:%M')
+    stages = []
+    for o in order:
+        name = f"Stage {o['order']}"; p = prog.get(name) or {}; route = float(p.get('route_m', 0.0)); k = names.index(name) if name in names else None
+        complete = k is not None and k + 1 < len(names) and names[k + 1] != 'After Race'; covered = route if complete else (float(p['prog'][-1]) if len(p.get('prog') if p.get('prog') is not None else []) else 0.0)
+        ran = tm['ran_m'].get(o['id'], 0.0) if tm['sections'].get(o['id']) is not None else 0.0
+        off = None
+        if covered > 0 and ran > 0 and abs(ran - covered) > 0.10 * max(ran, covered): off = dict(ran_km=round(ran / 1000.0, 1), route_km=round(covered / 1000.0, 1))
+        stages.append(dict(n=o['order'], route_km=round(route / 1000.0, 1), ran_km=round(ran / 1000.0, 1), covered_km=round(covered / 1000.0, 1), time_s=tm['sections'].get(o['id']), complete=complete, off_course=off))
+    cps = []
+    for k, a in sorted(tm['arrivals'].items()):
+        c = cuts.get(f'cp:{k}') or {}
+        cps.append(dict(n=int(k), elapsed_s=a['elapsed_s'], local=local(a['t']), km=a['km'], stopped_s=tm['checkpoints'].get(k), cutoff_s=c.get('elapsed_s'), margin_s=c.get('margin_s')))
+    fc = cuts.get('finish') or {}
+    finish = dict(reached=bool(fin and fin['reached']), cutoff_s=fc.get('elapsed_s'), margin_s=fc.get('margin_s'), elapsed_s=fin['elapsed_s'] if fin and fin['reached'] else None)
+    cur = current_path(rd); run = read(cur); ok = np.isfinite(run['t']) & np.isfinite(run['lat']) & np.isfinite(run['lon']); tt = run['t'][ok]; cum = _dist(run['lat'][ok], run['lon'][ok]); step = max(1, len(tt) // 20000)
+    route_km = round(sum(s['route_km'] for s in stages), 1); covered_km = round(sum(s['covered_km'] for s in stages), 1)
+    return dict(stages=stages, checkpoints=cps, finish=finish, route_km=route_km, covered_km=covered_km, run_s=round(tm['end'] - tm['start']), start=tm['start'], _sched=sched, _prog=prog, _cuts={k: v.get('elapsed_s') for k, v in cuts.items() if 'elapsed_s' in v}, _arr={int(k): v['elapsed_s'] for k, v in tm['arrivals'].items()}, _run=(tt[::step], cum[::step]))
+
+
+def names_of(story): return [l for _, l in story['_sched']]
+
+
+def story_at(story, t, dist_m=None):
+    """Where the race stood at time `t` (UTC seconds): {stage, checkpoints_done, of, route_km_done, route_km, stage_km_done, stage_km, km_to_next, next, elapsed_s, cutoff_s, left_s, last_margin_s, off_course}. `dist_m` is the distance the run had covered (from the start) if known: with it the distance run in the stage can be compared with the route's."""
+    import bisect
+    sched = story['_sched']; times = [a for a, _ in sched]; name = sched[max(0, bisect.bisect_right(times, t) - 1)][1]; elapsed = t - story['start']; stages = story['stages']; n = len(stages); cps = story['checkpoints']
+    done = sum(1 for c in cps if c['elapsed_s'] <= elapsed + 1e-6)
+    cur = int(name.split()[1]) if name.startswith('Stage') else (int(name.split()[1]) + 1 if name.startswith('Checkpoint') else (1 if name in ('Before Race', 'At Start') else n))
+    cur = min(max(cur, 1), n); st = stages[cur - 1]; pr = story['_prog'].get(f'Stage {cur}') or {}
+    import numpy as np
+    inside = float(np.interp(t, pr['t'], pr['prog'])) / 1000.0 if len(pr.get('t', [])) and name.startswith('Stage') else (st['route_km'] if name.startswith('Checkpoint') and cur > 1 or name in ('At Finish', 'After Race') else 0.0)
+    if name.startswith('Checkpoint'): inside = 0.0
+    nxt = f'checkpoint {cur}' if cur < n else 'the finish'; cut = story['_cuts'].get(f'cp:{cur}' if cur < n else 'finish')
+    last_margin = next((c['margin_s'] for c in reversed(cps) if c['elapsed_s'] <= elapsed + 1e-6 and c['margin_s'] is not None), None)
+    off = None
+    if name.startswith('Stage') and name in names_of(story):                                                   # the distance run in the stage so far against the route covered so far
+        t0s = story['start'] if cur == 1 else sched[names_of(story).index(name)][0]; tt, cum = story['_run']; ran = (float(np.interp(t, tt, cum)) - float(np.interp(t0s, tt, cum))) / 1000.0
+        if abs(ran - inside) > max(0.10 * max(ran, inside), 0.5): off = dict(ran_km=round(ran, 1), route_km=round(inside, 1))
+    return dict(stage=cur, of=n, name=name, checkpoints_done=done, route_km_done=round(sum(s['route_km'] for s in stages[:cur - 1]) + inside, 1), route_km=story['route_km'], stage_km_done=round(inside, 1), stage_km=st['route_km'],
+                km_to_next=round(max(0.0, st['route_km'] - inside), 1), next=nxt, elapsed_s=round(elapsed), cutoff_s=cut, left_s=None if cut is None else round(cut - elapsed), last_margin_s=last_margin, off_course=off)
+
+
+def story_line(p):
+    """One line for a clip: how far along the course the race was (from `story_at`)."""
+    t = f"stage {p['stage']} of {p['of']}, {p['checkpoints_done']} of {p['of'] - 1} checkpoints done, {p['stage_km_done']:g} of {p['stage_km']:g} route km into the stage, {p['km_to_next']:g} km to {p['next']}"
+    if p['left_s'] is not None: t += f"; {_hm(p['left_s'])} left to the cut-off for {p['next']}" if p['left_s'] >= 0 else f"; {_hm(p['left_s'])} PAST the cut-off for {p['next']}"
+    if p['last_margin_s'] is not None: t += f"; the last checkpoint was reached {_hm(p['last_margin_s'])} {'ahead of' if p['last_margin_s'] >= 0 else 'behind'} its cut-off"
+    if p['off_course']: t += f"; off course in this stage (ran {p['off_course']['ran_km']:g} km for {p['off_course']['route_km']:g} km of route)"
+    return t
+
+
+def story_text(story, tz='Europe/Brussels'):
+    """The course facts for the race section of the prompt: one short paragraph per fact, only what is known (no cut-offs unless they were typed in; an off-course distance only when it differs from the route by more than 10%)."""
+    n = len(story['stages']); L = [f"Course: {n} stages with {n - 1} checkpoints between them, {story['route_km']:g} km of route in all; the GPS run covered {story['covered_km']:g} km of that route in {_hm(story['run_s'])}"]
+    for s in story['stages']:
+        t = f"  stage {s['n']}: route {s['route_km']:g} km, ran {s['ran_km']:g} km" + (f" in {_hm(s['time_s'])}" if s['time_s'] else '') + ('' if s['complete'] else ' (the run ended in this stage, short of the end of it)')
+        if s['off_course']: t += f"; ran {s['off_course']['ran_km']:g} km against {s['off_course']['route_km']:g} km of route covered (more than 10% apart: detours or off course)"
+        L.append(t)
+    for c in story['checkpoints']:
+        t = f"  checkpoint {c['n']}: reached after {_hm(c['elapsed_s'])} ({c['local']}), km {c['km']:g} of the run" + (f", stopped {_hm(c['stopped_s'])}" if c['stopped_s'] else '')
+        if c['cutoff_s'] is not None: t += f"; cut-off {_hm(c['cutoff_s'])} after the start: " + (f"{_hm(c['margin_s'])} {'to spare' if c['margin_s'] >= 0 else 'LATE'}" if c['margin_s'] is not None else 'not reached')
+        L.append(t)
+    f = story['finish']
+    L.append('  finish: ' + ('reached after ' + _hm(f['elapsed_s']) if f['reached'] else 'NOT reached (the run ended before the end of the last route: a DNF)') + (f"; cut-off {_hm(f['cutoff_s'])} after the start" if f['cutoff_s'] is not None else ''))
+    return L

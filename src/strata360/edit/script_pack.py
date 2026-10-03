@@ -106,11 +106,15 @@ def gap_clips(folder, tr, tz):
     from strata360.edit import synthetic as SY
     from strata360.gps import context as X, gaps as GP
     if tr is None: return []
-    planned = {c['id']: c for c in SY.load(folder)['clips']}; out = []
+    from strata360.pipeline import notes as N
+    planned = {c['id']: c for c in SY.load(folder)['clips']}; out = []; notes = N.load(folder).get('clips') or {}; choices = SY.settings(folder)
     for g in GP.find_gaps(GP.load_spans(folder), tr, 1200.0, tz):
-        c = planned.get(g['id']); sec = round(c['seconds'], 1) if c else SY.default_seconds(g['duration_s']); ctx = X.context_at(tr, g['t0'], g['t1'], tz)
+        c = planned.get(g['id']); sec = round(c['seconds'], 1) if c else SY.default_seconds(g['duration_s']); mine = SY.gap_settings(folder, g['id'])
+        if mine['mode'] == 'set': sec = float(mine['seconds'])                                           # a length you set
+        elif mine['mode'] == 'min': sec = max(sec, float(mine['seconds']))                               # at least the length you gave
+        ctx = X.context_at(tr, g['t0'], g['t1'], tz)
         d = dict(label=norm_label(g['id']), clip=g['id'], start_utc=dt.datetime.fromtimestamp(g['t0'], dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=MAX_GAP_S, usable=[(0.0, MAX_GAP_S)], synthetic=True, race_s=g['duration_s'],
-                 speedup=round(g['duration_s'] / sec, 1), scene={}, note='', lines=[], speech_s=0.0, speech_words=0, track=X.describe(ctx),
+                 speedup=round(g['duration_s'] / sec, 1), scene={}, note=(notes.get(g['id']) or '').strip(), settings=mine, lines=[], speech_s=0.0, speech_words=0, track=X.describe(ctx),
                  gap={k: g.get(k) for k in ('local_start', 'local_end', 'km_start', 'km_end', 'distance_km', 'ascent_m', 'daylight', 'moving_share')},
                  options=[dict(kind='map', default_seconds=sec), dict(kind='flyover', default_seconds=sec, note=FLYOVER_NOTE)], planned=dict(kind=c['kind'], seconds=c['seconds'], status=c.get('status'), approved=c.get('approved', True)) if c else None)
         if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
@@ -155,8 +159,19 @@ def build(folder, tz=None):
         d['look'] = look_of(cdir, scale); d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
         d['speech_s'] = round(sum(l['t1'] - l['t0'] for l in d['lines']), 1); d['speech_words'] = sum(l['words'] for l in d['lines']); out.append(d)
     out = sorted(out + gap_clips(folder, tr, tz), key=lambda c: c['start_utc'])
+    story = None
+    try:
+        from strata360.gps import tracks as TKS
+        story = TKS.race_story(rd, tz)
+    except Exception as e:                                                                       # the course facts are left out (loudly); the script is still written from the rest
+        print(f'script pack: no course facts: {type(e).__name__}: {e}')
+    if story:
+        for c in out:
+            t = dt.datetime.fromisoformat(c['start_utc'].replace('Z', '+00:00')).timestamp() + float(c.get('race_s') or c['duration_s']) / 2
+            c['progress'] = TKS.story_line(TKS.story_at(story, t))
     speech_s = sum(c['speech_s'] for c in out); speech_w = sum(c['speech_words'] for c in out)
     race = dict(note=(notes.get('folder') or '').strip(), details=MT.describe(folder), km_total=MT.load(folder).get('distance_km'), speech_wpm=round(speech_w / speech_s * 60) if speech_s else None, clips_missing=missing)
+    if story: race['course'] = TKS.story_text(story, tz)
     if tr is not None: race['track'] = f"the GPS recorded {tr['dist'][-1] / 1000:.0f} km over {(tr['t'][-1] - tr['t'][0]) / 3600:.0f} hours (the runner's own elapsed time: not a time limit, and the distance can exceed the official one because of detours). The km in each clip's track line is GPS distance from the start"
     return dict(race=race, clips=out, music=music_facts(folder))
 
@@ -166,6 +181,7 @@ def render(pack, with_usable=False, marks=None):
     marks = marks or {}; r = pack['race']; L = ['THE RACE']
     if r.get('details'): L.append(r['details'])
     if r.get('track'): L.append('Track: ' + r['track'])
+    if r.get('course'): L += ['The course, the checkpoints and the cut-offs (cut-offs are times since the start of the run):'] + r['course']
     if r.get('note'): L += ["The runner's own notes about the race:", r['note']]
     m = pack.get('music')
     if m:
@@ -185,6 +201,7 @@ def render(pack, with_usable=False, marks=None):
                      f"Fill it with a generated clip: a generated clip (the planner draws it as a 2D map or a 3D terrain flyover: you only give its length), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
                      + (f" Already planned: {pl['kind']}, {pl['seconds']} s ({pl['status']})." if pl else ''))
         if c.get('track'): L.append('track: ' + c['track'])
+        if c.get('progress'): L.append('race progress: ' + c['progress'])
         if c.get('place'): L.append('place: ' + c['place'])
         s = c.get('scene') or {}
         lk = c.get('look')

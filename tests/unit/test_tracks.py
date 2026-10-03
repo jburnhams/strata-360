@@ -246,3 +246,30 @@ def test_the_finish_entry_is_the_routes_finish_and_says_whether_the_run_got_ther
     rd2 = str(tmp_path / 'fin'); os.makedirs(rd2); _stop_run(rd2, [('one.gpx', (0, 121)), ('two.gpx', (121, 211))])        # it got to the end
     g = TK.finish_info(rd2); assert g['reached'] is True and 0 <= g['time_s'] < 200 and 2300 < g['elapsed_s'] < 2499 and 5.5 < g['km'] < 6.4 and abs(g['covered_m'] - g['route_m']) < 100
     assert TK.finish_info(str(tmp_path / 'none')) is None
+
+
+def test_the_race_story_gives_the_script_writer_the_course_the_checkpoints_and_the_cut_offs(tmp_path):
+    rd = str(tmp_path); t0 = _stop_run(rd, [('one.gpx', (0, 121)), ('two.gpx', (121, 361))])                                    # the run stood 400 s at the first checkpoint, ended 2670 m into a 7170 m second route
+    TK.set_cutoff(rd, 'cp:1', '1h')                                                                                            # 3600 s after the start: reached at about 1200 s
+    st = TK.race_story(rd)
+    assert [s['n'] for s in st['stages']] == [1, 2] and st['stages'][0]['complete'] and not st['stages'][1]['complete'] and st['stages'][1]['off_course'] is None
+    c = st['checkpoints'][0]; assert c['n'] == 1 and 1190 <= c['elapsed_s'] <= 1215 and c['cutoff_s'] == 3600 and 2300 < c['margin_s'] < 2450 and 3.5 < c['km'] < 3.7 and 370 <= c['stopped_s'] <= 400
+    assert st['finish']['reached'] is False
+    text = '\n'.join(TK.story_text(st)); assert 'Course: 2 stages with 1 checkpoints' in text and 'checkpoint 1: reached after 20m' in text and 'to spare' in text and 'finish: NOT reached' in text and 'against' not in text      # (nothing off course: not mentioned)
+    p = TK.story_at(st, t0 + 1500); assert p['stage'] == 2 and p['checkpoints_done'] == 1 and p['next'] == 'the finish' and p['left_s'] is None and p['last_margin_s'] == c['margin_s'] and p['off_course'] is None
+    q = TK.story_at(st, t0 + 600); assert q['stage'] == 1 and q['checkpoints_done'] == 0 and q['next'] == 'checkpoint 1' and q['left_s'] == 3000 and 1.7 < q['stage_km_done'] < 1.9 and q['km_to_next'] > 1.7
+    line = TK.story_line(q); assert 'stage 1 of 2' in line and '0 of 1 checkpoints done' in line and '50m left to the cut-off for checkpoint 1' in line
+    assert TK.race_story(str(tmp_path / 'none')) is None
+
+
+def test_the_race_story_mentions_an_off_course_stage_only_when_the_distance_run_is_more_than_10_percent_off(tmp_path):
+    from datetime import datetime, timezone
+    rd = str(tmp_path); t0 = 1_770_000_000; rows = []; y = 0.0
+    for i in range(600): y += 3.0; rows.append((i, y, 0.0))
+    for i in range(300): rows.append((600 + i, y, 0.02 * (i + 1) / 300))
+    body = ''.join(f'<trkpt lat="{50.0 + m / 110540.0}" lon="{5.0 + x}"><time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time></trkpt>' for i, m, x in rows)
+    TK.add(rd, 'run.gpx', f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode())
+    TK.add(rd, 'only.gpx', gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(0, 201)], route=True, timed=False))
+    st = TK.race_story(rd); s = st['stages'][0]; assert s['off_course'] and s['off_course']['ran_km'] > s['off_course']['route_km'] * 1.1
+    assert 'against' in '\n'.join(TK.story_text(st)); late = TK.story_at(st, t0 + 800); assert late['off_course'] and late['off_course']['ran_km'] > late['off_course']['route_km'] * 1.1
+    assert TK.story_at(st, t0 + 300)['off_course'] is None                                                                   # on the route at that time: nothing to say

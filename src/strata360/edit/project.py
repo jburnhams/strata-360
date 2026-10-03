@@ -128,20 +128,21 @@ def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
     def kind_of(old, gap, sec):
         """A rendered clip and one you made keep their kind; otherwise the planner chooses (and remembers the last choice for the variety)."""
         nonlocal last
-        k = old['kind'] if old and (old.get('by') == 'user' or old.get('exists') or old.get('file')) else SY.choose_kind(gap, sec, last); last = k; return k
+        mine = SY.gap_settings(folder, gap['id'])['kind']
+        k = mine or (old['kind'] if old and (old.get('by') == 'user' or old.get('exists') or old.get('file')) else SY.choose_kind(gap, sec, last)); last = k; return k                 # the kind you chose for the gap always wins
     for n, it in items:
         gid = norm_label(it.get('clip', ''))
         if gid not in gaps: log(f'item {n + 1}: no such gap {gid}; skipped'); continue
         old = docs.get(gid)
         if it['type'] == 'vo':
             text = (it.get('text') or '').strip(); speak = voice_s.get(n); speak = len(text.split()) * 60.0 / wpm if speak is None else speak
-            need = round(SPL.LEAD_S + speak + SPL.TAIL_S, 2); kind = kind_of(old, gaps[gid], max(need, SY.MIN_SECONDS))
+            need = round(SPL.LEAD_S + speak + SPL.TAIL_S, 2); need = SPL.gap_choice(dict(seconds=need), SY.gap_settings(folder, gid), need)['seconds']; kind = kind_of(old, gaps[gid], max(need, SY.MIN_SECONDS))                 # (the length you set or the least you gave)
             if old and old['kind'] == kind and old['seconds'] >= need - 0.05: continue
             sec = max(need, old['seconds'] if old and old['kind'] == kind else SY.default_seconds(gaps[gid]['duration_s']))
         else:
-            sec = round(float(it.get('seconds') or 0), 2); kind = kind_of(old, gaps[gid], sec)
+            sec = SPL.gap_choice(dict(seconds=round(float(it.get('seconds') or 0), 2)), SY.gap_settings(folder, gid))['seconds']; kind = kind_of(old, gaps[gid], sec)                        # (the length you set or the least you gave)
             if old and old['kind'] == kind and abs(old['seconds'] - sec) < 0.05: continue
-        try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind)
+        try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind, by='user' if SY.gap_settings(folder, gid)['kind'] else 'planner')
         except ValueError as e: log(f'item {n + 1}: {gid}: {e}; skipped'); continue
         made.append(SY.upsert(folder, clip)); log(f"planned {kind} clip {gid} for {clip['seconds']:g} s"); docs[gid] = made[-1]
     return made
@@ -158,9 +159,9 @@ def sync_gap_clips(folder, specs, log=print):
     cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []; last = None
     for sp in todo:
         old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
-        kind = old['kind'] if old and (old.get('by') == 'user' or old.get('file')) else SY.choose_kind(gaps[sp['clip']], sec, last)           # the planner chooses again for the new length (a clip shortened to 4 s is a map), unless it is rendered or yours
+        kind = SY.gap_settings(folder, sp['clip'])['kind'] or (old['kind'] if old and (old.get('by') == 'user' or old.get('file')) else SY.choose_kind(gaps[sp['clip']], sec, last))           # the planner chooses again for the new length (a clip shortened to 4 s is a map), unless it is rendered or yours
         last = kind
-        clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
+        clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind, by='user' if SY.gap_settings(folder, sp['clip'])['kind'] else 'planner'); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
     return made
 
 
