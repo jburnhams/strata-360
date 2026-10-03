@@ -54,8 +54,8 @@ class TestChoices:
         assert out['M1']['play_s'] == 4.0 and out['M1']['speed_ms'] == 75.0 and out['P1']['plausible'] is False and out['P1']['choice'] is None and out['P1']['label'] is None
         assert [s['id'] for s in SV.annotate(rd, docs)] == ['M1', 'P1'] and [s['label'] for s in SV.chosen(rd, docs)] == ['V1']
 
-    def test_a_chosen_section_that_is_not_plausible_is_not_passed_on(self, tmp_path):
-        rd = str(tmp_path); b = sec('P1', provider='panoramax', frames=10); SV.set_choice(rd, SV.section_key(b), 'must'); assert SV.chosen(rd, {'panoramax': doc(b)}) == []
+    def test_a_chosen_section_that_is_not_plausible_is_still_passed_on_because_it_is_the_users_call(self, tmp_path):
+        rd = str(tmp_path); b = sec('P1', provider='panoramax', frames=10); SV.set_choice(rd, SV.section_key(b), 'must'); assert [x['id'] for x in SV.chosen(rd, {'panoramax': doc(b)})] == ['P1']
 
 
 import datetime as dt

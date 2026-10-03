@@ -353,6 +353,13 @@ describe('the preview video of a section', () => {
     await user.click(screen.getByRole('button', { name: 'Make a preview video' })); await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('another preview video is being made'))
   })
 
+  it('lets any section be used from its details, even one that is not a candidate', async () => {
+    const sv = makeStreetView(); sv.sections[0] = makeSvSection({ plausible: false, why_not: 'only 12 pictures (needs 30)' }); await pick(sv)
+    const seen = recordRequests('/api/streetview/choice'); server.use(http.post('/api/streetview/choice', () => HttpResponse.json({ key: sv.sections[0].key, choice: 'possible' })))
+    const group = await screen.findByRole('group', { name: /in the film \(details\)/ }); expect(within(group).getByText(/Not a candidate \(only 12 pictures/)).toBeInTheDocument()
+    await within(group).getByLabelText('Possible').click(); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen[0].body).toMatchObject({ choice: 'possible' })
+  })
+
   it('offers a video for Google like the others', async () => {
     const sv = makeStreetView(); sv.sections[0] = makeSvSection({ id: 'G1', key: 'google:g:1.20', provider: 'google', kind: '360', angles: null }); await pick(sv)
     expect(await screen.findByRole('button', { name: 'Make a preview video' })).toBeEnabled()

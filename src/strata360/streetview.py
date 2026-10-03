@@ -433,8 +433,8 @@ def make_video(rd, s, log=print):
 
 
 def chosen(rd, docs):
-    """The sections chosen for the film (and plausible), in km order, each with its label V1..."""
-    return [s for s in annotate(rd, docs) if s['choice'] and s['plausible'] and s['label']]
+    """The sections chosen for the film, in km order, each with its label V1... Any section can be chosen, even one too short or too sparse to be a candidate: that is the user's call."""
+    return [s for s in annotate(rd, docs) if s['choice'] and s['label']]
 
 
 def track_dist(tr):

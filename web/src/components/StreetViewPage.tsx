@@ -64,6 +64,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
   const [tiles, setTiles] = useState<TileStatus>()
   const [sel, setSel] = useState<{ kind: 'section' | 'stretch'; id: string }>()
   const [shown, setShown] = useState<Record<string, boolean>>({ mapillary: true, panoramax: true, google: true, '360': true, '2d': true, clips: true })
+  const choose = async (key: string, c: SvChoice | 'none') => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }
   const [probe, setProbe] = useState<{ lat: number; lon: number }>(), [near, setNear] = useState<SvNearResult>(), [nearBusy, setNearBusy] = useState(false), [nearErr, setNearErr] = useState<string>(), [nearLog, setNearLog] = useState<string[]>([])
   const [nearGen, setNearGen] = useState(0)                                                       // changes with each click, so an old answer is not shown for a new point
   const look = async (lat: number, lon: number, gen: number) => {
@@ -115,7 +116,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
         <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">Where the run was on a road, and the street-level pictures there are of those roads: a gap in the film could be shown as the view along the road.</p>
         {!data ? <p className="text-sm text-stone-500">Loading…</p> : <Stages data={data} onRun={run} err={err} />}
       </div>
-      {data && roads && sections.length > 0 && <Candidates folder={folder} tz={tz} sections={visible} all={sections} sel={sel} onSel={setSel} onChoose={async (key, c) => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }} />}
+      {data && roads && sections.length > 0 && <Candidates folder={folder} tz={tz} sections={visible} all={sections} sel={sel} onSel={setSel} onChoose={choose} />}
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
           <Filters shown={shown} setShown={setShown} data={data} filters={filters} setFilters={setFilters} total={sections.length} showing={visible.length} />
@@ -132,7 +133,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
         </div>
       )}
       {probe && <NearPanel key={nearGen} folder={folder} tz={tz} probe={probe} result={near} busy={nearBusy} log={nearLog} error={nearErr} onSearch={search} onPromoted={() => setTick(t => t + 1)} onClose={() => { nearGenRef.current++; setProbe(undefined); setNear(undefined); setNearErr(undefined); setNearBusy(false) }} />}
-      {(section || chosenStretch) && <Detail folder={folder} tz={tz} section={section} stretch={chosenStretch} sections={sections.filter(s => s.stretch === chosenStretch?.id)} onSel={setSel} />}
+      {(section || chosenStretch) && <Detail folder={folder} tz={tz} section={section} stretch={chosenStretch} sections={sections.filter(s => s.stretch === chosenStretch?.id)} onSel={setSel} onChoose={choose} />}
       {roads && <List title="Every section found" tz={tz} sections={visible} sel={sel} onSel={setSel} none={sections.length === 0} />}
     </section>
   )
@@ -245,7 +246,7 @@ function SvMap({ routes, probe, onPick, roads, run, sections, clips, scale, sel,
   return <div ref={el} role="application" aria-label="Map of the road parts and street view coverage" className="h-[480px] w-full overflow-hidden rounded-lg bg-stone-200 dark:bg-stone-800" />
 }
 
-function Detail({ folder, tz, section, stretch, sections, onSel }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
+function Detail({ folder, tz, section, stretch, sections, onSel, onChoose }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onChoose: (key: string, c: SvChoice | 'none') => void; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
   const [big, setBig] = useState<{ provider: SvProvider; id: string }>()
   useEffect(() => { setBig(undefined) }, [section?.id])
   return (
@@ -259,6 +260,10 @@ function Detail({ folder, tz, section, stretch, sections, onSel }: { folder: str
             {section.years.length > 0 && ` · ${section.years.join(', ')}`}{section.camera && ` · ${section.camera}`}{section.size && ` · ${section.size[0]}×${section.size[1]}`}</div>
           <div className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(section.filmed?.[0], tz)}{section.filmed && section.filmed[1] - section.filmed[0] > 60 ? ` to ${when(section.filmed[1], tz)}` : ''} · you pass it {when(section.passed?.[0], tz)}{section.passed ? ` to ${when(section.passed[1], tz).split(' ').slice(-1)[0]}` : ''}</div>
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
+          <fieldset className="mt-1 flex flex-wrap items-center gap-3 text-sm" aria-label={`Use ${NAME[section.provider]} ${section.id} in the film (details)`}>
+            {CHOICES.map(c => <label key={c.v} className="flex items-center gap-1"><input type="radio" name={`use-detail-${section.key}`} checked={(section.choice ?? 'none') === c.v} onChange={() => onChoose(section.key, c.v)} />{c.label}</label>)}
+            {!section.plausible && <span className="text-xs text-amber-700 dark:text-amber-400">Not a candidate ({section.why_not}), but you can still use it.</span>}
+          </fieldset>
           <SectionVideo folder={folder} section={section} />
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
@@ -299,7 +304,7 @@ const CHOICES: { v: SvChoice | 'none'; label: string }[] = [{ v: 'none', label: 
 /** The sections that could make a clip, each with its pictures and a choice for the film: not used, possible (the writer may use it) or must include. Sections over the same road say so. */
 function Candidates({ folder, tz, sections, all, sel, onSel, onChoose }: { folder: string; tz: string; sections: SvSectionInfo[]; all: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section'; id: string }) => void; onChoose: (key: string, c: SvChoice | 'none') => void }) {
   const [order, setOrder] = useState<'quality' | 'route'>('quality')
-  const by = new Map(all.map(s => [s.id, s])), chosen = all.filter(s => s.plausible && s.choice)
+  const by = new Map(all.map(s => [s.id, s])), chosen = all.filter(s => s.choice)
   const ok = sections.filter(s => s.plausible).sort((a, b) => order === 'route' ? a.km0 - b.km0 : (b.quality?.score ?? -1) - (a.quality?.score ?? -1) || a.km0 - b.km0)                 // best first; the ones not scored yet last
   return (
     <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Sections that could be used">
