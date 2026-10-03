@@ -15,6 +15,8 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe
   const [err, setErr] = useState<string>()
   const input = useRef<HTMLInputElement>(null)
   const [listing, setListing] = useState<TracksListing>(), [ver, setVer] = useState(0)
+  const [hot, setHot] = useState<string | null>(null), [pinned, setPinned] = useState<string[]>([])                  // the track pointed at, and the tracks picked (click again to let go): shown in bold yellow on the map and in the list
+  const toggle = (id: string) => setPinned(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
   useEffect(() => { api.track(folder).then(setT).catch(e => setErr(e.message)); api.tracks(folder).then(setListing).catch(() => {}) }, [folder])
   const changed = async () => { try { const [o, l] = await Promise.all([api.track(folder), api.tracks(folder)]); setT(o); setListing(l); setVer(v => v + 1) } catch (e) { setErr((e as Error).message) } }   // the race track follows the runs
 
@@ -55,14 +57,15 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe
         {stat('Altitude', t.min_altitude_m != null ? `${t.min_altitude_m}–${t.max_altitude_m}` : null, 'm')}{stat('Heart rate', t.avg_hr != null ? `${t.avg_hr} (max ${t.max_hr})` : null)}{stat('Points', t.samples?.toLocaleString())}
       </div>
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
-      <TracksList folder={folder} listing={listing} onChange={changed} />
-      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} />
+      <TracksList folder={folder} listing={listing} onChange={changed} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
+      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
       <GapsPanel folder={folder} />
     </div>
   )
 }
 
-function RaceView({ folder, listing, onOpenClip, tz }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string }) {
+type Pick = { hot: string | null; setHot: (id: string | null) => void; pinned: string[]; toggle: (id: string) => void }
+function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string } & Pick) {
   const [overlay] = useThumbOverlay()
   const [base, setBase] = useState<TrackLine>(), [series, setSeries] = useState<TrackSeries>(), [clips, setClips] = useState<TrackClip[]>([]), [hasDraft, setHasDraft] = useState(false), [tiles, setTiles] = useState<TileStatus>(), [err, setErr] = useState<string>()
   const [xMode, setXMode] = useState<XMode>('time'), [cursor, setCursor] = useState<number | null>(null), [hover, setHover] = useState<{ clip: TrackClip; x: number; y: number }>()
@@ -81,6 +84,16 @@ function RaceView({ folder, listing, onOpenClip, tz }: { folder: string; listing
       .then(r => { if (live) setExtras(r.filter((x): x is ExtraLine => !!x)) })
     return () => { live = false }
   }, [folder, listing])
+  const [lines, setLines] = useState<Record<string, ExtraLine>>({})                                  // the line of every track that has been highlighted (fetched when first needed)
+  const ids = useMemo(() => Array.from(new Set([...pinned, ...(hot ? [hot] : [])])), [pinned, hot])
+  useEffect(() => {
+    for (const id of ids) {
+      if (lines[id] || extras.some(e => e.id === id)) continue
+      const t = listing?.tracks.find(x => x.id === id); if (!t) continue
+      api.tracksLine(folder, id).then(l => setLines(c => ({ ...c, [id]: { id, kind: t.kind, name: t.name, lat: l.lat, lon: l.lon } }))).catch(() => {})
+    }
+  }, [ids, lines, extras, listing, folder])
+  const highlight = useMemo(() => ids.map(id => extras.find(e => e.id === id) ?? lines[id]).filter((x): x is ExtraLine => !!x), [ids, extras, lines])
   const hoverClip = (c: TrackClip | null, x = 0, y = 0) => setHover(c ? { clip: c, x, y } : undefined)
   const off = useMemo(() => clips.filter(c => !c.covered), [clips])
   if (err) return <p className="mt-3 text-sm text-amber-700">The map and charts need the track and its clips: {err}</p>
@@ -88,7 +101,7 @@ function RaceView({ folder, listing, onOpenClip, tz }: { folder: string; listing
   return (
     <div className="mt-3 space-y-2">
       {tiles && !tiles.ok && <p role="alert" className="text-sm text-amber-700">The map background is off: {tiles.error}</p>}
-      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} />
+      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} highlight={highlight} onHoverTrack={setHot} onToggleTrack={toggle} />
       <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
         <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
         {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#78716c' }} />not in the film</span>}
@@ -110,7 +123,7 @@ function RaceView({ folder, listing, onOpenClip, tz }: { folder: string; listing
 }
 
 // The project's tracks: every uploaded FIT / GPX file marked a run (merged into the one race track) or a route (the course, shown on the map for planning only).
-function TracksList({ folder, listing, onChange }: { folder: string; listing?: TracksListing; onChange: () => Promise<void> }) {
+function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onChange: () => Promise<void> } & Pick) {
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string>(), input = useRef<HTMLInputElement>(null)
   const act = async (f: () => Promise<unknown>) => { setBusy(true); setErr(undefined); try { await f() } catch (e) { setErr((e as Error).message) } finally { try { await onChange() } finally { setBusy(false) } } }
   const add = (files: FileList | File[] | null) => act(async () => { for (const f of Array.from(files ?? [])) await api.addTrack(folder, f) })
@@ -126,9 +139,10 @@ function TracksList({ folder, listing, onChange }: { folder: string; listing?: T
       {rows.length === 0 && <p className="text-stone-500">No tracks listed.</p>}
       <ul className="space-y-1">
         {rows.map(x => (
-          <li key={x.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <li key={x.id} data-highlighted={hot === x.id || pinned.includes(x.id) ? '' : undefined} onMouseEnter={() => setHot(x.id)} onMouseLeave={() => setHot(null)}
+            className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded px-1 ${hot === x.id || pinned.includes(x.id) ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : ''}`}>
             {x.kind === 'route' && <span className="w-6 text-center text-xs font-semibold text-blue-700 dark:text-blue-400" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
-            <span className="min-w-0 flex-1 truncate" title={x.name}>{x.name}</span>
+            <button type="button" aria-pressed={pinned.includes(x.id)} aria-label={`Highlight ${x.name} on the map`} className="min-w-0 flex-1 cursor-pointer truncate text-left" title={`${x.name} (click to keep it highlighted on the map)`} onClick={() => toggle(x.id)}>{x.name}</button>
             {x.error ? <span className="text-red-600">{x.error}</span> : <span className="text-xs text-stone-500">{x.distance_km} km · {x.start_utc ? x.start_utc.slice(0, 10) : 'no times'}{x.pois ? ` · ${x.pois} POI` : ''}{x.kind === 'route' && x.order ? ` · km ${x.km_start}–${x.km_end} of the run${x.reversed ? ' (run the other way)' : ''}` : ''}</span>}
             <select aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
               <option value="run">run</option><option value="route">route</option>

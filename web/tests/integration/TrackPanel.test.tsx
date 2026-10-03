@@ -115,6 +115,17 @@ describe('TrackPanel', () => {
       await waitFor(() => expect(document.querySelector('[data-poi]')).not.toBeNull())
     })
 
+    it('highlights a track in the list while it is pointed at, and keeps several picked until they are clicked again', async () => {
+      present(); mockGet('/api/tracks', two()); const seen = recordRequests('/api/tracks/line')
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByRole('button', { name: 'Highlight race.gpx on the map' })).closest('li')!; const other = screen.getByRole('button', { name: 'Highlight course.gpx on the map' })
+      expect(row).not.toHaveAttribute('data-highlighted'); await user.hover(row); expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(seen.some(r => r.url.searchParams.get('id') === 't1')).toBe(true))
+      await user.unhover(row); expect(row).not.toHaveAttribute('data-highlighted')
+      await user.click(screen.getByRole('button', { name: 'Highlight race.gpx on the map' })); await user.click(other); await user.unhover(other)
+      expect(row).toHaveAttribute('data-highlighted'); expect(other).toHaveAttribute('aria-pressed', 'true'); expect(other.closest('li')).toHaveAttribute('data-highlighted')
+      await user.click(other); await user.unhover(other); expect(other).toHaveAttribute('aria-pressed', 'false'); expect(other.closest('li')).not.toHaveAttribute('data-highlighted'); expect(row).toHaveAttribute('data-highlighted')
+    })
+
     it('marks a track a run, refreshing the race track and the list', async () => {
       present(); const seen = recordRequests('/api/tracks/kind'); let marked = false
       const after = makeTracksListing({ runs: 2, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'run' })], merged: { runs: ['main', 't2'], samples: 200, start_utc: '', end_utc: '', distance_km: 90 } })

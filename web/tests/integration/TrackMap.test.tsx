@@ -41,6 +41,14 @@ describe('TrackMap', () => {
     expect(lines.mock.calls.some(c => (c[1] as L.PolylineOptions).color === '#dc2626')).toBe(true); lines.mockRestore()
   })
 
+  it('draws the highlighted tracks bold yellow with a black outline, and tells the list when a route is pointed at or clicked', () => {
+    const lines = vi.spyOn(L, 'polyline'); const hover = vi.fn(), toggle = vi.fn()
+    setup(<TrackMap {...props()} onHoverTrack={hover} onToggleTrack={toggle} extras={[{ id: 't2', kind: 'route', name: 'course.gpx', lat: [50, 50.1], lon: [5, 5.1] }]} highlight={[{ id: 't2', kind: 'route', name: 'course.gpx', lat: [50, 50.1], lon: [5, 5.1] }]} />)
+    const opts = lines.mock.calls.map(c => c[1] as L.PolylineOptions); expect(opts.some(o => o.color === '#facc15' && o.weight === 5)).toBe(true); expect(opts.some(o => o.color === '#000' && o.weight === 9)).toBe(true)
+    const route = lines.mock.results.map(r => r.value as L.Polyline).find((_, i) => (opts[i] as L.PolylineOptions).color === '#2563eb')!
+    route.fire('mouseover'); route.fire('mouseout'); route.fire('click'); expect(hover.mock.calls).toEqual([['t2'], [null]]); expect(toggle).toHaveBeenCalledWith('t2'); lines.mockRestore()
+  })
+
   it('numbers the checkpoints between routes', () => {
     const { container } = setup(<TrackMap {...props()} pois={[{ name: 'Checkpoint 2', lat: 50.05, lon: 5.05, ele: null, sym: 'checkpoint', desc: 'a → b', track: 'checkpoint', n: 2 }]} />)
     expect(screen.getByTitle('Checkpoint 2')).toHaveTextContent('2'); expect(container.querySelector('[data-checkpoint]')).not.toBeNull()
