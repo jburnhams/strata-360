@@ -16,17 +16,17 @@ SS = 4                                       # supersampling of shapes
 def font(path, px): return ImageFont.truetype(path, max(1, int(round(px))))
 
 
-def shadowed(mask, fill, px, strength=0.65):
+def shadowed(mask, fill, px, strength=0.65, shadow=(0, 0, 0)):
     """RGBA patch of `fill` through the L-mode `mask` with a soft shadow around it; returns (rgba, pad), the patch being `pad` pixels larger than the mask on every side."""
     pad = max(2, int(math.ceil(px / 9))); m = Image.new('L', (mask.width + 2 * pad, mask.height + 2 * pad)); m.paste(mask, (pad, pad))
     sh = m.filter(ImageFilter.MaxFilter(3)).filter(ImageFilter.GaussianBlur(max(1.0, px / 18)))
     a_t = np.asarray(m, np.float32) / 255.0; a_s = np.asarray(sh, np.float32) / 255.0 * strength; a = a_t + a_s * (1 - a_t)
     with np.errstate(invalid='ignore', divide='ignore'): k = np.where(a > 0, a_t / a, 0.0)
-    rgb = np.asarray(fill, np.float32)[None, None, :3] * k[..., None]
+    rgb = np.asarray(fill, np.float32)[None, None, :3] * k[..., None] + np.asarray(shadow, np.float32)[None, None, :3] * (1 - k[..., None])
     return np.dstack([rgb, a * 255.0 * (fill[3] / 255.0 if len(fill) > 3 else 1.0)]).round().astype(np.uint8), pad
 
 
-def text(s, px, path=VALUE_FONT, fill=(255, 255, 255), tabular=True):
+def text(s, px, path=VALUE_FONT, fill=(255, 255, 255), tabular=True, shadow=(0, 0, 0)):
     """(rgba, pad, width): the text with its top at the font's ascender line; `width` is the advance of the text alone (the patch adds `pad` around it)."""
     f = font(path, px); asc, desc = f.getmetrics(); cell = max(f.getlength(d) for d in '0123456789')
     xs, x = [], 0.0
@@ -35,7 +35,7 @@ def text(s, px, path=VALUE_FONT, fill=(255, 255, 255), tabular=True):
     if not tabular: xs, x = [0.0], f.getlength(s)
     w = max(1, int(math.ceil(x))); m = Image.new('L', (w + 2, asc + desc)); d = ImageDraw.Draw(m)
     for ch, cx in zip(s if tabular else [s], xs): d.text((cx, asc), ch, font=f, fill=255, anchor='ls')
-    rgba, pad = shadowed(m, fill, px); return rgba, pad, x
+    rgba, pad = shadowed(m, fill, px, strength=0.9 if shadow != (0, 0, 0) else 0.65, shadow=shadow); return rgba, pad, x
 
 
 def _ss(size, draw_fn):

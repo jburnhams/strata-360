@@ -21,16 +21,21 @@ def _series(path, mtime):
 @functools.lru_cache(maxsize=4)
 def _schedule(rd, stamp):
     from strata360.gps import tracks
-    try: return tuple(tracks.stage_schedule(rd))
+    try:
+        sched = tuple(tracks.stage_schedule(rd))
+        try: dnf = tracks.dnf_info(rd)
+        except Exception as e:                                              # without it the last stage reads as if it finished (dropped loudly)
+            print(f'overlay: no real length for the unfinished stage: {type(e).__name__}: {e}'); dnf = None
+        return sched, dnf
     except Exception as e:                                                  # the stage text is dropped (loudly), the rest of the overlay stays
-        print(f'overlay: no stage text: {type(e).__name__}: {e}'); return ()
+        print(f'overlay: no stage text: {type(e).__name__}: {e}'); return (), None
 
 
 def _stages(track):
     """The stage schedule of the project the track file belongs to (its folder, or the folder above `tracks/`); empty for a track kept elsewhere."""
     import os
     rd = os.path.dirname(os.path.abspath(track)); rd = os.path.dirname(rd) if os.path.basename(rd) == 'tracks' else rd
-    if not os.path.exists(os.path.join(rd, 'race.json')) and not os.path.exists(os.path.join(rd, 'tracks.json')): return ()
+    if not os.path.exists(os.path.join(rd, 'race.json')) and not os.path.exists(os.path.join(rd, 'tracks.json')): return (), None
     stamp = tuple(os.path.getmtime(os.path.join(rd, n)) if os.path.exists(os.path.join(rd, n)) else 0 for n in ('tracks.json', 'track.fit', 'track.gpx', 'track.merged.npz'))
     return _schedule(rd, stamp)
 
@@ -41,7 +46,8 @@ def build(cfg, track, size, tiles=None, maps=True):
     from strata360.overlay.layout import Overlay, settings
     st = settings(cfg.get('overlay'))
     if not maps: st = {**st, 'elements': [e for e in st['elements'] if e not in ('route_map', 'local_map', 'credit')]}
-    return Overlay(_series(track, os.path.getmtime(track)), size, st, tz=cfg.get('timezone') or 'Europe/Brussels', tiles=tiles, stages=_stages(track) if 'stage' in st['elements'] else ())
+    stages, dnf = _stages(track) if 'stage' in st['elements'] else ((), None)
+    return Overlay(_series(track, os.path.getmtime(track)), size, st, tz=cfg.get('timezone') or 'Europe/Brussels', tiles=tiles, stages=stages, dnf=dnf)
 
 
 def for_project(folder, size, tiles=None):

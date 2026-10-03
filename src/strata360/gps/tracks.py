@@ -419,3 +419,28 @@ def stage_schedule(rd, zone_m=ZONE_M):
             near = np.flatnonzero((np.hypot((lon - fin['lon']) * kx, (lat - fin['lat']) * ky) <= zone_m) & (t > seq[-1][0]))
             if len(near): seq += [(float(t[near[0]]), 'At Finish')]
     seq.append((t1, 'After Race')); times = np.maximum.accumulate(np.array([s[0] for s in seq])); return [(float(a), s[1]) for a, s in zip(times, seq)]
+
+
+def dnf_info(rd, on_route_m=50.0):
+    """For a run that stopped before the end of the last route: how far along that route it got and how much of it was left, from the last point where the run was on the route (within `on_route_m` of it, after the last checkpoint): {remaining_m, route_m, progress_m, left_t, stage}.
+    The distance run in that stage is more than the progress along the route when the run went off course, so the real length of the stage is what was run in it plus `remaining_m`. None when the run reached the finish, there are no routes, or it was never on the last route."""
+    order, _ = route_order(rd); cur = current_path(rd)
+    if not order or not cur: return None
+    sched = stage_schedule(rd)
+    if not sched or any(l == 'At Finish' for _, l in sched): return None
+    last = max(order, key=lambda o: o['order']); tm = timing(rd); e = next((x for x in entries(rd) if x['id'] == last['id']), None)
+    if not tm or e is None: return None
+    from scipy.spatial import cKDTree
+    r = read(e['file']); g = np.isfinite(r['lat']) & np.isfinite(r['lon']); rlat, rlon = r['lat'][g], r['lon'][g]
+    if last['reversed']: rlat, rlon = rlat[::-1], rlon[::-1]
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t'])
+    lat0 = float(np.median(run['lat'][ok])); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    R = np.column_stack([(rlon - 5.0) * kx, (rlat - lat0) * ky]); seg = np.hypot(*np.diff(R, axis=0).T); s = np.concatenate([[0], np.cumsum(seg)]); u = np.arange(0, s[-1], 10.0)
+    F = np.column_stack([np.interp(u, s, R[:, 0]), np.interp(u, s, R[:, 1])])
+    start = max([a['t'] + tm['checkpoints'][k] for k, a in tm['arrivals'].items()] or [tm['start']]); sel = ok & (run['t'] >= start)
+    P = np.column_stack([(run['lon'][sel] - 5.0) * kx, (run['lat'][sel] - lat0) * ky]); t = run['t'][sel]
+    if not len(t): return None
+    d, nn = cKDTree(F).query(P); on = np.flatnonzero(d <= on_route_m)
+    if not len(on): return None
+    i = on[-1]; progress = float(u[nn[i]]); total = float(s[-1])
+    return dict(remaining_m=round(total - progress), route_m=round(total), progress_m=round(progress), left_t=float(t[i]), stage=f"Stage {last['order']}")

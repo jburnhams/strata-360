@@ -344,3 +344,18 @@ class TestRouteBearing:
 
     def test_at_the_end_the_last_bearing_stays(self):
         u = np.array([0, 0.0]); v = np.array([0, 0.0]); assert LY.route_bearing(u, v, 2, 0.0, 0.0, 5.0, previous=135.0) == 135.0
+
+
+class TestUnfinishedStage:
+    def test_the_last_stage_of_a_run_that_did_not_finish_shows_its_end_in_red_and_the_real_length_beside_it(self, series, tiles, texts, monkeypatch):
+        seen = []; real = D.text
+        def spy(s, *a, **kw): seen.append((s, kw.get('fill'), kw.get('shadow'))); return real(s, *a, **kw)
+        monkeypatch.setattr(D, 'text', spy)
+        stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'After Race')]
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, dnf=dict(remaining_m=900))               # the track runs 3 m/s: 2.1 km in the stage
+        patches = ov.patches(T0 + 400)
+        red = [s for s, f, _ in seen if f == (235, 40, 40)]; black = [(s, sh) for s, f, sh in seen if f == (0, 0, 0)]
+        assert red == ['2.1', '11m'] and (' /3.0 km', (255, 255, 255)) in black                         # the stage's end (distance and time) in red; the real 2.1 + 0.9 km in black with a light halo
+        assert len(patches) == 1 + 7                                                                      # the name, and the seven pieces of the second line
+        seen.clear(); ov.c._text.clear(); LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages).patches(T0 + 400)
+        assert not [1 for _, f, _ in seen if f == (235, 40, 40)]                                           # a stage that was finished (no dnf) is all white
