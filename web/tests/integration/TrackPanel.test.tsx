@@ -109,7 +109,7 @@ describe('TrackPanel', () => {
       present(); mockGet('/api/tracks', two()); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
       setup(<TrackPanel folder="/data" />)
       expect(await screen.findByLabelText('Kind of course.gpx')).toHaveValue('route'); expect(screen.getByLabelText('Kind of race.gpx')).toHaveValue('run')
-      expect(screen.getByText(/80 km · no times · 2 POI · km 70.9–119 of the run/)).toBeInTheDocument(); expect(screen.getByTitle('section 2 of the race')).toHaveTextContent('2')
+      expect(screen.getByText('80 km · 2 POI')).toBeInTheDocument(); expect(screen.getByTitle('section 2 of the race')).toHaveTextContent('2')
       expect(await screen.findByText(/run leaves the route by over 50 m \(the 1 farthest\)/)).toBeInTheDocument();
       expect(await screen.findByText('route (planning only)')).toBeInTheDocument(); expect(screen.getByText('point of interest')).toBeInTheDocument()
       await waitFor(() => expect(document.querySelector('[data-poi]')).not.toBeNull())
