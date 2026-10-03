@@ -22,7 +22,8 @@ export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
 export type TrackKind = 'run' | 'route'
 export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number }
 export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string }
-export interface TracksListing { tracks: TrackEntry[]; merged: { runs: string[]; samples: number; start_utc: string; end_utc: string; distance_km: number } | null; pois: Poi[]; runs: number }
+export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
+export interface TracksListing { divergences?: Divergence[]; tracks: TrackEntry[]; merged: { runs: string[]; samples: number; start_utc: string; end_utc: string; distance_km: number } | null; pois: Poi[]; runs: number }
 export interface ExtraLine { id: string; kind: TrackKind | 'merged'; name: string; lat: number[]; lon: number[] }
 export interface TrackClipFacts { local: string; daylight: string | null; elapsed_h: number | null; distance_km: number | null; percent: number | null; pace_min_km: number | null; gradient_pct: number | null; altitude_m: number | null; heart_rate: number | null; text: string }
 export interface TrackClip {

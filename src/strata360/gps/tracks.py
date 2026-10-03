@@ -194,7 +194,7 @@ def pois(path):
 
 
 def listing(rd):
-    """Everything the app shows: the tracks with their summaries and kinds, the merged run track when there is one, and the points of interest of all of them."""
+    """Everything the app shows: the tracks with their summaries and kinds, the merged run track when there is one, the points of interest of all of them, and where the race track leaves the routes (`divergences`)."""
     items = []; points = []
     for e in entries(rd):
         try: info = summary(e['file'])
@@ -207,4 +207,49 @@ def listing(rd):
         current_path(rd)
         try: merged = json.load(open(os.path.join(rd, MERGED_INFO)))
         except (OSError, ValueError): merged = None
-    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)))
+    try: div = divergences(rd)
+    except Exception: div = []                                                     # (the map is not worth failing the list over)
+    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div)
+
+
+_DIV = {}
+
+
+def divergences(rd, threshold_m=50.0, top=10, step_m=10.0, join_m=150.0):
+    """Where the race track leaves the routes by more than `threshold_m` (the distance to the nearest route of any: routes can be sections of the course). The race track is taken every `step_m` metres and each route is filled in to the same spacing, so the distance is within step_m / 2; stretches off the routes
+    less than `join_m` apart along the run are one divergence. Returns the `top` with the largest peak distance, biggest first: [{lat, lon, peak_m, length_m, km, t, line}] (lat, lon: the farthest point; km: along the race track; line: the stretch, thinned)."""
+    rts = [e for e in entries(rd) if e['kind'] == 'route']; cur = current_path(rd)
+    if not rts or not cur: return []
+    key = (cur, os.path.getmtime(cur), tuple((e['file'], os.path.getmtime(e['file'])) for e in rts), threshold_m, top)
+    if key in _DIV: return _DIV[key]
+    from scipy.spatial import cKDTree
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    if len(lat) < 2: return []
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    xy = lambda la, lo: np.column_stack([(lo - 5.0) * kx, (la - lat0) * ky])
+    def fill(p):                                                                   # points every <= step_m along a polyline
+        d = np.hypot(*np.diff(p, axis=0).T); s = np.concatenate([[0], np.cumsum(d)]); n = max(2, int(s[-1] / step_m) + 1); u = np.linspace(0, s[-1], n)
+        return np.column_stack([np.interp(u, s, p[:, 0]), np.interp(u, s, p[:, 1])]) if s[-1] > 0 else p[:1]
+    pts = []
+    for e in rts:
+        r = read(e['file']); g = np.isfinite(r['lat']) & np.isfinite(r['lon'])
+        if g.sum() >= 2: pts.append(fill(xy(r['lat'][g], r['lon'][g])))
+    if not pts: return []
+    tree = cKDTree(np.vstack(pts))
+    P = xy(lat, lon); s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))]); u = np.arange(0, s[-1], step_m)           # the race track every step_m along its own length
+    if len(u) < 2: return []
+    Q = np.column_stack([np.interp(u, s, P[:, 0]), np.interp(u, s, P[:, 1])]); tt = np.interp(u, s, t); d, _ = tree.query(Q); off = d > threshold_m
+    out = []; i = 0; n = len(u)
+    while i < n:
+        if not off[i]: i += 1; continue
+        j = i
+        while True:                                                                   # extend over short returns to the route
+            k = j + 1
+            while k < n and not off[k]: k += 1
+            if k < n and (k - j) * step_m < join_m: j = k
+            else: break
+        a, b = i, j; m = a + int(np.argmax(d[a:b + 1])); idx = np.unique(np.linspace(a, b, min(60, b - a + 1)).astype(int))
+        unxy = lambda q: (float(q[1] / ky + lat0), float(q[0] / kx + 5.0))
+        pk = unxy(Q[m]); out.append(dict(lat=round(pk[0], 6), lon=round(pk[1], 6), peak_m=round(float(d[m])), length_m=round((b - a + 1) * step_m), km=round(float(u[m]) / 1000.0, 1), t=float(tt[m]), line=[[round(unxy(Q[q])[0], 6), round(unxy(Q[q])[1], 6)] for q in idx]))
+        i = j + 1
+    out = sorted(out, key=lambda x: -x['peak_m'])[:top]; _DIV.clear(); _DIV[key] = out; return out

@@ -88,12 +88,13 @@ function RaceView({ folder, listing, onOpenClip, tz }: { folder: string; listing
   return (
     <div className="mt-3 space-y-2">
       {tiles && !tiles.ok && <p role="alert" className="text-sm text-amber-700">The map background is off: {tiles.error}</p>}
-      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} />
+      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} />
       <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
         <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
         {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#78716c' }} />not in the film</span>}
         {extras.some(e => e.kind === 'route') && <span><span className="mr-1 inline-block h-0 w-4 border-t-2 border-dashed align-middle" style={{ borderColor: '#2563eb' }} />route (planning only)</span>}
         {(listing?.runs ?? 0) > 1 && <span><span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: '#a3a3a3' }} />each run · <span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: '#15803d' }} />merged race track</span>}
+        {(listing?.divergences?.length ?? 0) > 0 && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-full bg-red-600 text-center align-middle text-[10px] font-bold leading-[14px] text-white">!</span>run leaves the route by over 50 m (the {listing?.divergences?.length} farthest)</span>}
         {(listing?.pois.length ?? 0) > 0 && <span><span className="mr-1 inline-block h-2.5 w-2.5 rotate-45 align-middle" style={{ background: '#f59e0b' }} />point of interest</span>}
         <span>click the map, then scroll to zoom</span>
         {tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}

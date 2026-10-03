@@ -34,6 +34,13 @@ describe('TrackMap', () => {
     expect(screen.getByTitle('Aid 1')).toBeInTheDocument(); lines.mockRestore()
   })
 
+  it('marks each place the run leaves the route with a red stretch and an exclamation mark', () => {
+    const lines = vi.spyOn(L, 'polyline')
+    const { container } = setup(<TrackMap {...props()} divergences={[{ lat: 50.05, lon: 5.05, peak_m: 348, length_m: 660, km: 72, t: 0, line: [[50.04, 5.04], [50.06, 5.06]] }]} />)
+    expect(screen.getByTitle('348 m off the route')).toHaveTextContent('!'); expect(container.querySelector('[data-divergence]')).not.toBeNull()
+    expect(lines.mock.calls.some(c => (c[1] as L.PolylineOptions).color === '#dc2626')).toBe(true); lines.mockRestore()
+  })
+
   it('colours a marker green when the draft plays the clip and grey when it does not', () => {
     setup(<TrackMap {...props()} />)
     expect(screen.getByTitle('Clip 0023').innerHTML).toContain('#16a34a'); expect(screen.getByTitle('Clip 0024').innerHTML).toContain('#78716c')

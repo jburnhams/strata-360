@@ -81,3 +81,15 @@ def test_points_of_interest_from_waypoints_and_named_route_points(tmp_path):
     out = TK.pois(str(p)); assert [q['name'] for q in out] == ['Aid station', 'Summit'] and out[0]['lat'] == 50.0005
     assert os.path.exists(str(p) + '.pois.json') and TK.pois(str(p)) == out
     rd = str(tmp_path / 'proj'); os.makedirs(rd); TK.add(rd, 'c.gpx', p.read_bytes()); assert [q['name'] for q in TK.listing(rd)['pois']] == ['Aid station', 'Summit']
+
+
+def test_divergences_are_stretches_off_every_route_ranked_by_how_far(tmp_path):
+    rd = str(tmp_path)
+    def pts(f): return [(50.0 + i * 1e-4, 5.0 + f(i)) for i in range(400)]                  # about 11 m per point going north
+    off = lambda i: (4.0e-3 if 100 <= i < 130 else 0) + (1.5e-3 if 250 <= i < 280 else 0)    # 0.0040 deg of lon ~ 286 m off; 0.0015 ~ 107 m off
+    TK.add(rd, 'run.gpx', gpx(pts(off))); TK.add(rd, 'course.gpx', gpx(pts(lambda i: 0.0), route=True, timed=False))
+    d = TK.divergences(rd); assert [x['peak_m'] // 10 for x in d] == [28, 10] and d[0]['length_m'] >= 300 and d[0]['km'] > 1 and len(d[0]['line']) > 1
+    assert d[0]['lat'] > 50.0 and abs(d[0]['lon'] - 5.004) < 5e-4
+    assert TK.divergences(rd, threshold_m=150) == [d[0]] or len(TK.divergences(rd, threshold_m=150)) == 1
+    assert TK.listing(rd)['divergences'][0]['peak_m'] == d[0]['peak_m']
+    assert TK.divergences(str(tmp_path / 'none')) == []
