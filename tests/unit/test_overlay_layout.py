@@ -390,5 +390,11 @@ class TestRouteElapsed:
         assert c.route_elapsed(T0 + 5000) == (1200.0 + 300.0, 2600.0)            # after the run: it stays where the run left the route
 
     def test_it_is_written_next_to_the_small_km(self, series, tiles, texts):
-        self.ov(series, tiles).patches(T0 + 200); assert 'route 0.3 / 2.6 km' in texts and 'km' in texts
+        self.ov(series, tiles).patches(T0 + 200); assert 'route 0.3 / 2.6 km' in texts and 'km' not in texts                    # instead of the small km label
+        texts.clear(); LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles).patches(T0 + 200); assert 'km' in texts and not [x for x in texts if x.startswith('route')]      # without routes: as before
         assert LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles).c.route_elapsed(T0) is None
+
+
+    def test_the_route_text_starts_under_the_start_of_the_big_figure(self, series, tiles):
+        ov = self.ov(series, tiles); big, route = ov.patches(T0 + 200)
+        assert route[0] + 2 >= big[0] and route[0] - big[0] < 2 * ov.c.s * 12                              # (the patches have a little padding each: they start within a few pixels of each other)

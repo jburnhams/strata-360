@@ -169,9 +169,11 @@ class Big:
         if e['metric'] == 'dist' and not (val is not None and math.isfinite(val)):                                     # before the run 0 km, after it the whole distance (the counter stays on the figure it reached)
             d = self.c.series.cols['dist_m']; d = d[np.isfinite(d)]
             if len(d): val = 0.0 if t <= float(self.c.series._pt[0]) else float(d[-1])
-        out = [self.c.text(e, e['x'], e['y'], fmt(e['metric'], val), 48, align='right'), self.c.text(e, e['x'], e['y'] + 56, e['label'], 16, label=True, align='right')]
-        if e['metric'] == 'dist' and (re_ := self.c.route_elapsed(t)) is not None:                                      # next to the small km: how far along the routes (all stages added up) of the whole route length
-            out.append(self.c.text(e, e['x'] + 10, e['y'] + 56, f'route {re_[0] / 1000:.1f} / {re_[1] / 1000:.1f} km', 16, label=True))
+        big = fmt(e['metric'], val); out = [self.c.text(e, e['x'], e['y'], big, 48, align='right')]; re_ = self.c.route_elapsed(t) if e['metric'] == 'dist' else None
+        if re_ is not None:                                                                                              # with routes: instead of the small km, how far along the routes (all stages added up) of their whole length, under the start of the big figure (it carries the km)
+            left = e['x'] - self.c._text[(big, 48, False)][2] / self.c.s
+            out.append(self.c.text(e, left, e['y'] + 56, f'route {re_[0] / 1000:.1f} / {re_[1] / 1000:.1f} km', 16, label=True))
+        else: out.append(self.c.text(e, e['x'], e['y'] + 56, e['label'], 16, label=True, align='right'))
         return out
 
 
