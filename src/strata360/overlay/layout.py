@@ -54,7 +54,7 @@ METRIC = dict(dist='dist_m', pace='pace_s_km', alt='alt_m', slope='slope_pct', h
 class _Ctx:
     """What the widgets share: frame size and scale, fonts, the series, the tiles, the time zone and a cache of drawn text."""
     def __init__(self, series, size, st, tz, tiles, stages=(), progress=None):
-        self.stages = list(stages); self.progress = progress or {}; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
+        self.stages = list(stages); self.progress = progress or {}; self._rs = None; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
         self._tiles = tiles if callable(tiles) and not isinstance(tiles, Tiles) else (lambda style: tiles) if tiles is not None else None; self._made = {}
         self.vfont, self.lfont = st.get('font') or D.VALUE_FONT, st.get('label_font') or st.get('font') or D.LABEL_FONT; self._text = {}
 
@@ -76,6 +76,19 @@ class _Ctx:
             if len(self._text) > 4000: self._text.clear()
             self._text[key] = D.text(s, px * self.s, self.lfont if label else self.vfont, tabular=not label)
         rgba, pad, w = self._text[key]; X, Y = self.at(el, x, y); return (X - pad - (w if align == 'right' else 0), Y - pad, rgba)
+
+    def route_elapsed(self, t):
+        """(metres of the routes covered so far, metres of all the routes): the completed stages' routes in full and the progress along the route of the stage in hand (gps/tracks.py `stage_progress`), so a run that strayed is behind where its distance says. None without route progress."""
+        if not self.progress or not self.stages: return None
+        if self._rs is None:
+            times = [a for a, _ in self.stages]; names = [b for _, b in self.stages]; self._rs = []
+            for name, pr in self.progress.items():
+                k = names.index(name) if name in names else None
+                self._rs.append((times[k] if k is not None else math.inf, times[k + 1] if k is not None and k + 1 < len(times) else math.inf, pr['route_m'], k is not None and k + 1 < len(names) and names[k + 1] != 'After Race', pr['t'], pr['prog']))
+        done = 0.0
+        for start, end, route, complete, ts, prog in self._rs:
+            if t >= start and len(ts): done += route if (complete and t >= end) else float(np.interp(t, ts, prog))
+        return done, sum(r[2] for r in self._rs)
 
     def runs(self, el, x, y, parts, px):
         """Text in several colours on one line, left to right from x: parts = [(string, fill)] or [(string, fill, shadow)] (a dark fill wants a light shadow)."""
@@ -155,7 +168,10 @@ class Big:
         if e['metric'] == 'dist' and not (val is not None and math.isfinite(val)):                                     # before the run 0 km, after it the whole distance (the counter stays on the figure it reached)
             d = self.c.series.cols['dist_m']; d = d[np.isfinite(d)]
             if len(d): val = 0.0 if t <= float(self.c.series._pt[0]) else float(d[-1])
-        return [self.c.text(e, e['x'], e['y'], fmt(e['metric'], val), 48, align='right'), self.c.text(e, e['x'], e['y'] + 56, e['label'], 16, label=True, align='right')]
+        out = [self.c.text(e, e['x'], e['y'], fmt(e['metric'], val), 48, align='right'), self.c.text(e, e['x'], e['y'] + 56, e['label'], 16, label=True, align='right')]
+        if e['metric'] == 'dist' and (re_ := self.c.route_elapsed(t)) is not None:                                      # next to the small km: how far along the routes (all stages added up) of the whole route length
+            out.append(self.c.text(e, e['x'] + 10, e['y'] + 56, f'route {re_[0] / 1000:.1f} / {re_[1] / 1000:.1f} km', 16, label=True))
+        return out
 
 
 class Stat:

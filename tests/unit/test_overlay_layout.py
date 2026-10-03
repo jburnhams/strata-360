@@ -372,3 +372,23 @@ class TestStageProgress:
         stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'Checkpoint 1'), (T0 + 900, 'After Race')]
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress={'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)
         assert ('11m', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)]
+
+
+class TestRouteElapsed:
+    def ov(self, series, tiles, texts_on=None):
+        ts = np.arange(T0 + 100, T0 + 501, 5.0); ts2 = np.arange(T0 + 600, T0 + 801, 5.0)
+        stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 500, 'Checkpoint 1'), (T0 + 600, 'Stage 2'), (T0 + 800, 'After Race')]
+        prog = {'Stage 1': dict(route_m=1200.0, t=ts, prog=(ts - ts[0]) * 3.0), 'Stage 2': dict(route_m=900.0, t=ts2, prog=np.minimum((ts2 - ts2[0]) * 3.0, 300.0)), 'Stage 3': dict(route_m=500.0, t=np.array([]), prog=np.array([]))}
+        return LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles, stages=stages, progress=prog)
+
+    def test_the_stages_are_added_up_against_the_total_of_all_the_routes(self, series, tiles):
+        c = self.ov(series, tiles).c
+        assert c.route_elapsed(T0 + 50) == (0.0, 2600.0)                          # before the first stage
+        assert c.route_elapsed(T0 + 200) == (300.0, 2600.0)                       # 100 s into stage 1 at 3 m/s
+        assert c.route_elapsed(T0 + 550) == (1200.0, 2600.0)                      # at the checkpoint: stage 1 in full
+        assert c.route_elapsed(T0 + 700) == (1200.0 + 300.0, 2600.0)             # stage 2: the route says 300 m (it strayed)
+        assert c.route_elapsed(T0 + 5000) == (1200.0 + 300.0, 2600.0)            # after the run: it stays where the run left the route
+
+    def test_it_is_written_next_to_the_small_km(self, series, tiles, texts):
+        self.ov(series, tiles).patches(T0 + 200); assert 'route 0.3 / 2.6 km' in texts and 'km' in texts
+        assert LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles).c.route_elapsed(T0) is None

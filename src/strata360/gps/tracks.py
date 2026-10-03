@@ -422,7 +422,7 @@ def stage_schedule(rd, zone_m=ZONE_M):
 
 
 def stage_progress(rd, on_route_m=50.0, every_s=5.0):
-    """How far along its route the run was at each moment of each stage: {'Stage N': {route_m, t (UTC seconds), prog (metres along the route)}}. The progress is the place on the route nearest to the run while the run is within `on_route_m` of it, and stays at the last such place while the run is off the route, so it is
+    """How far along its route the run was at each moment of each stage: {'Stage N': {route_m, t (UTC seconds), prog (metres along the route)}} (t and prog are empty for a stage the run did not get to). The progress is the place on the route nearest to the run while the run is within `on_route_m` of it, and stays at the last such place while the run is off the route, so it is
     what the route says has been covered, to set beside the distance actually run (they differ when the run went off course or missed a loop). Sampled every `every_s` seconds over the stage."""
     order, _ = route_order(rd); cur = current_path(rd); sched = stage_schedule(rd)
     if not order or not cur or not sched: return {}
@@ -432,12 +432,12 @@ def stage_progress(rd, on_route_m=50.0, every_s=5.0):
     times = [a for a, _ in sched]; out = {}
     for o in order:
         name = f"Stage {o['order']}"; k = next((j for j, (_, l) in enumerate(sched) if l == name), None)
-        if k is None or k + 1 >= len(sched) or o['id'] not in files: continue
+        if o['id'] not in files: continue
         r = read(files[o['id']]); g = np.isfinite(r['lat']) & np.isfinite(r['lon']); rl, ro = r['lat'][g], r['lon'][g]
         if o['reversed']: rl, ro = rl[::-1], ro[::-1]
         R = np.column_stack([(ro - 5.0) * kx, (rl - lat0) * ky]); s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(R, axis=0).T))]); u = np.arange(0, s[-1], 10.0); F = np.column_stack([np.interp(u, s, R[:, 0]), np.interp(u, s, R[:, 1])])
-        sel = np.flatnonzero((t >= times[k]) & (t <= times[k + 1]))
-        if len(sel) < 2: continue
+        sel = np.flatnonzero((t >= times[k]) & (t <= times[k + 1])) if k is not None and k + 1 < len(sched) else []
+        if len(sel) < 2: out[name] = dict(route_m=float(s[-1]), t=np.array([]), prog=np.array([])); continue                  # a stage the run never got to still has its length (for the total of the routes)
         sel = sel[::max(1, int(every_s / max(1e-9, float(np.median(np.diff(t[sel]))) or 1.0)))]; d, nn = cKDTree(F).query(P[sel]); prog = np.where(d <= on_route_m, u[nn], np.nan)
         last = 0.0; prog = prog.copy()
         for j in range(len(prog)):                                                                  # holds at the last place on the route while off it
