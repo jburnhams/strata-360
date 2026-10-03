@@ -67,6 +67,14 @@ def reproject(img, R, fov=FOV, size=OUT):
     return cv2.remap(img, ((lon / (2 * math.pi) + 0.5) * w).astype(np.float32), ((0.5 - lat / math.pi) * h).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 
 
+def reproject_equirect(img, R, size=(1920, 960)):
+    """The whole sphere out of an equirectangular picture, turned: each output direction (x right, y up, z forward, the centre column straight ahead) is looked up in the picture along R (as for `reproject`)."""
+    W, H = size; h, w = img.shape[:2]; lon = (np.arange(W) + 0.5) / W * 2 * math.pi - math.pi; lat = math.pi / 2 - (np.arange(H) + 0.5) / H * math.pi; lo, la = np.meshgrid(lon, lat)
+    ray = np.stack([np.sin(lo) * np.cos(la), np.sin(la), np.cos(lo) * np.cos(la)], -1) @ R.T
+    pl = np.arctan2(ray[..., 0], ray[..., 2]); pa = np.arctan2(ray[..., 1], np.hypot(ray[..., 0], ray[..., 2]))
+    return cv2.remap(img, ((pl / (2 * math.pi) + 0.5) * w).astype(np.float32), ((0.5 - pa / math.pi) * h).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+
+
 def level_view(heading, pitch=PITCH):
     """The view camera in the world (x east, y north, z up) looking at compass `heading` degrees and `pitch` up, level: columns right, up, forward."""
     h, p = math.radians(heading), math.radians(pitch); z = np.array([math.sin(h) * math.cos(p), math.cos(h) * math.cos(p), math.sin(p)]); x = np.array([math.cos(h), -math.sin(h), 0.0]); return np.stack([x, np.cross(x, z), z], axis=1)
@@ -187,7 +195,7 @@ def road_xy(line):
 
 class Rig:
     """What a section's camera needs: the pictures facing the way the runner went (`items`), how far along each is (`prog`, metres), the heading wanted at each (`hs`) and `view(i, yaw)`, the steady view out of picture i looking at compass `yaw`."""
-    def __init__(self, items, prog, hs, view): self.items, self.prog, self.hs, self.view, self.n = items, prog, hs, view, len(items)
+    def __init__(self, items, prog, hs, view, rot=None, img=None): self.items, self.prog, self.hs, self.view, self.n, self.rot, self.img = items, prog, hs, view, len(items), rot, img         # rot(i, yaw, pitch): the turn for a level view of picture i (360 sections only); img(i) the picture
 
 
 def build(rd, section, road=None, size=OUT, preview=False):
@@ -202,23 +210,40 @@ def build(rd, section, road=None, size=OUT, preview=False):
             if im is None: raise RuntimeError(f"{section['id']}: picture {its[i]['id']} has not been fetched")
             imgs[i] = im
         return imgs[i]
-    km = np.array([it['km'] for it in its]) * 1000.0; n = len(its); view = None
+    km = np.array([it['km'] for it in its]) * 1000.0; n = len(its); view = rot = None
     if prov == 'google':                                                                                      # views already looking along the road (see `fetch`): nothing to level or aim, only to blend
         prog = km; hs = np.zeros(n); view = lambda i, yaw: cv2.resize(img(i), size, interpolation=cv2.INTER_CUBIC)
     elif section['kind'] == '360' and prov == 'mapillary':
         meta = json.load(open(meta_path(rd, section))); pos = np.array([meta[it['id']]['computed_geometry']['coordinates'] for it in its]); la0 = pos[:, 1].mean()
         xy = np.stack([(pos[:, 0] - pos[0, 0]) * math.cos(math.radians(la0)) * 111320, (pos[:, 1] - pos[0, 1]) * 111320], 1); xy = np.stack([gaussian_filter1d(xy[:, 0], 1.0, mode='nearest'), gaussian_filter1d(xy[:, 1], 1.0, mode='nearest')], 1)
         prog = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]) + km[0]; Rc = [sfm_to_world(meta[it['id']]['computed_rotation']) for it in its]
-        hs = smooth_heading([heading_along(prog, xy, p, LOOK_M) for p in prog], SIGMA_HEADING['mapillary']); view = lambda i, yaw: reproject(img(i), FLIP @ Rc[i].T @ level_view(yaw), FOV, size)
+        hs = smooth_heading([heading_along(prog, xy, p, LOOK_M) for p in prog], SIGMA_HEADING['mapillary']); rot = lambda i, yaw, pitch=PITCH: FLIP @ Rc[i].T @ level_view(yaw, pitch); view = lambda i, yaw: reproject(img(i), rot(i, yaw), FOV, size)
     elif section['kind'] == '360':
         if not road: raise ValueError('a Panoramax 360 section needs the road (its line and where it starts) to aim along')
         meta = json.load(open(meta_path(rd, section))); rp, rxy = road_xy(road['line']); rp = rp + road['km0'] * 1000.0; prog = km
         ups = cached_ups(rd, section, [img(i) for i in range(n)], n, preview); ups = gaussian_filter1d(ups, SIGMA_UP, axis=0, mode='nearest'); ups /= np.linalg.norm(ups, axis=1, keepdims=True)
-        hs = smooth_heading([heading_along(rp, rxy, p, LOOK_M) for p in prog], SIGMA_HEADING['panoramax']); comp = [meta[it['id']]['compass_angle'] or 0.0 for it in its]; view = lambda i, yaw: reproject(img(i), view_in_picture(ups[i], comp[i], yaw), FOV, size)
+        hs = smooth_heading([heading_along(rp, rxy, p, LOOK_M) for p in prog], SIGMA_HEADING['panoramax']); comp = [meta[it['id']]['compass_angle'] or 0.0 for it in its]; rot = lambda i, yaw, pitch=PITCH: view_in_picture(ups[i], comp[i], yaw, pitch); view = lambda i, yaw: reproject(img(i), rot(i, yaw), FOV, size)
     else:
         prog = km; shifts = steady_flat([img(i) for i in range(n)]); view = lambda i, yaw: flat_view(img(i), shifts[i], size)
         hs = np.zeros(n)
-    return Rig(its, prog, hs, view)
+    return Rig(its, prog, hs, view, rot, img)
+
+
+def render_pano(rd, section, seconds, out, road=None, fps=24, size=(1920, 960), log=print, preview=True):
+    """Write a 360 video of a 360 section for looking around in: every picture turned level and so that the centre column looks along the road, blended between pictures, played through in `seconds`. For the page's viewer (WebGL), not for the film."""
+    rig = build(rd, section, road, OUT, preview)
+    if rig.rot is None: raise ValueError(f"{section['id']}: only a 360 section can be looked around in")
+    prog, hs, rot, img, n = rig.prog, rig.hs, rig.rot, rig.img, rig.n; L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); W, H = size
+    cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-c:v', 'libx264', '-crf', '27', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE); view = lambda i, yaw: reproject_equirect(img(i), rot(i, yaw, 0.0), size)
+    try:
+        for k in range(N):
+            pos = prog[0] + L * k / (N - 1); i = max(0, min(int(np.searchsorted(prog, pos, side='right') - 1), n - 2)); a = float(np.clip((pos - prog[i]) / max(prog[i + 1] - prog[i], 1e-6), 0, 1))
+            yaw = (hs[i] + ((hs[i + 1] - hs[i] + 180) % 360 - 180) * a) % 360; p.stdin.write(flow_blend(view(i, yaw), view(i + 1, yaw), a).tobytes())
+        p.stdin.close(); p.wait()
+    except BrokenPipeError: p.wait()
+    if p.returncode: raise RuntimeError('ffmpeg failed to write the 360 street view video')
+    os.replace(out + '.part.mp4', out); log(f"{section['id']}: 360 video, {N} frames over {L:.0f} m in {seconds:g} s"); return dict(frames=N)
 
 
 def ups_path(rd, section, preview=False): return meta_path(rd, section) + ('.preview' if preview else '') + '.ups.npy'

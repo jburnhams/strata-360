@@ -668,10 +668,10 @@ class TestStreetViewVideoApi(TestStreetViewApi):
     def test_the_command_makes_the_video_or_says_why_not(self, project, monkeypatch, capsys):
         import argparse
         from strata360 import cli, streetview as SV
-        key = self.key(project); made = []; monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print: made.append(s['key']) or '/x.mp4')
-        cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key)); assert made == [key] and 'done: /x.mp4' in capsys.readouterr().out
+        key = self.key(project); made = []; monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False: made.append((s['key'], pano)) or '/x.mp4')
+        cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key)); assert made == [(key, False)] and 'done: /x.mp4' in capsys.readouterr().out
         with pytest.raises(SystemExit, match='no section nope'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key='nope'))
-        monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print: (_ for _ in ()).throw(RuntimeError('boom')))
+        monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False: (_ for _ in ()).throw(RuntimeError('boom')))
         with pytest.raises(SystemExit, match='streetview-video: boom'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key))
 
 
@@ -736,3 +736,14 @@ class TestStreetViewLength(TestStreetViewApi):
         self.make_docs(project); rd = project.race_dir; s = SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})[0]; key = s['key']; q = dict(folder=project.folder, key=key)
         assert client.post('/api/streetview/length', json=dict(q, seconds=9999)).status_code == 400 and client.post('/api/streetview/length', json=dict(folder=project.folder, key='nope', seconds=5)).status_code == 404
         assert client.post('/api/streetview/length', json=dict(q, seconds=None)).json() == dict(key=key, seconds=None)
+
+
+class TestStreetViewPanoVideo(TestStreetViewVideoApi):
+    def test_the_360_video_is_its_own_file_started_only_for_a_360_section(self, client, project, fake_popen):
+        from strata360 import streetview as SV
+        key = self.key(project); rd = project.race_dir; s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key)
+        assert SV.video_path(rd, s, True) != SV.video_path(rd, s) and SV.video_path(rd, s, True).endswith('-360.mp4')
+        q = dict(folder=project.folder, key=key, pano='true'); assert client.get('/api/streetview/video', params=q).json()['exists'] is False and client.get('/api/streetview/video/file', params=q).status_code == 404
+        r = client.post('/api/streetview/video', json=dict(folder=project.folder, key=key, pano=True))
+        if s['kind'] == '360': assert r.json() == dict(started=True) and '--pano' in fake_popen.instances[-1].cmd
+        else: assert r.status_code == 400

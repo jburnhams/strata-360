@@ -25,6 +25,18 @@ class TestReproject:
         up = CAM.reproject(equirect(), CAM.Rx(math.radians(-45)), 60.0, (64, 36)); assert int(up[18, 32, 1]) > 180
 
 
+class TestEquirect:
+    def test_no_turn_gives_the_picture_back(self):
+        src = equirect(); out = CAM.reproject_equirect(src, np.eye(3), (360, 180)); ref = cv2.resize(src, (360, 180), interpolation=cv2.INTER_AREA)
+        assert np.abs(out.astype(int) - ref.astype(int)).mean() < 3
+
+    def test_turning_right_a_quarter_brings_the_right_of_the_picture_to_the_centre(self):
+        out = CAM.reproject_equirect(equirect(), CAM.Ry(math.radians(90)), (360, 180)); assert abs(int(out[90, 180, 2]) - 191) <= 4          # the centre column now shows what was a quarter of the way round
+
+    def test_an_upward_tilt_shows_the_upper_part_in_the_centre(self):
+        out = CAM.reproject_equirect(equirect(), CAM.Rx(math.radians(-45)), (360, 180)); assert int(out[90, 180, 1]) > 180
+
+
 class TestOrientation:
     def test_a_level_view_looks_along_the_compass_heading_with_up_up(self):
         V = CAM.level_view(90.0, 0.0); assert np.allclose(V[:, 2], [1, 0, 0]) and np.allclose(V[:, 1], [0, 0, 1]) and np.allclose(V[:, 0], [0, -1, 0])          # east, up; right of east is south

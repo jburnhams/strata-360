@@ -360,6 +360,19 @@ describe('the preview video of a section', () => {
     await within(group).getByLabelText('Possible').click(); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen[0].body).toMatchObject({ choice: 'possible' })
   })
 
+  it('offers a 360 video to look around in for a 360 section, made once, and played in the 360 viewer', async () => {
+    const sv = makeStreetView(); sv.sections[0] = makeSvSection({ kind: '360', angles: null }); await pick(sv)
+    const seen = recordRequests('/api/streetview/video'); let made = false
+    server.use(http.get('/api/streetview/video', ({ request }) => HttpResponse.json({ exists: made && new URL(request.url).searchParams.get('pano') === 'true', running: false, log: [], error: '', seconds: 12 })), http.post('/api/streetview/video', () => { made = true; return HttpResponse.json({ started: true }) }))
+    const { user } = { user: (await import('@testing-library/user-event')).default.setup() }
+    await user.click(await screen.findByRole('button', { name: 'Make a 360° video to look around in' })); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen.filter(r => r.method === 'POST')[0].body).toMatchObject({ pano: true })
+    expect(await screen.findByLabelText(/: look around$/)).toBeInTheDocument()
+  })
+
+  it('offers no 360 video for a flat camera', async () => {
+    const sv = makeStreetView(); sv.sections[0] = makeSvSection({ kind: '2d' }); await pick(sv); await screen.findByRole('button', { name: 'Make a preview video' }); expect(screen.queryByRole('button', { name: 'Make a 360° video to look around in' })).toBeNull()
+  })
+
   it('offers a video for Google like the others', async () => {
     const sv = makeStreetView(); sv.sections[0] = makeSvSection({ id: 'G1', key: 'google:g:1.20', provider: 'google', kind: '360', angles: null }); await pick(sv)
     expect(await screen.findByRole('button', { name: 'Make a preview video' })).toBeEnabled()

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
+import PanoPlayer from './PanoPlayer'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
 import type { StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
@@ -280,6 +281,7 @@ export function SectionContent({ folder, tz, section, onChoose, showChoice = tru
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
           {showChoice && <ChoiceRadios section={section} onChoose={onChoose} />}
           <SectionVideo folder={folder} section={section} />
+          {section.kind === '360' && <SectionVideo folder={folder} section={section} pano />}
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
               <li key={it.id}><button onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>
@@ -384,18 +386,20 @@ function Legend({ scale, hasClips }: { scale: { lo: number; hi: number }; hasCli
 }
 
 /** The preview video of a section: shown when it has been made, else a button to make it (in the background; kept, so it is made once). */
-function SectionVideo({ folder, section }: { folder: string; section: SvSectionInfo }) {
+function SectionVideo({ folder, section, pano = false }: { folder: string; section: SvSectionInfo; pano?: boolean }) {
   const [st, setSt] = useState<SvVideo>(), [err, setErr] = useState<string>(), running = !!st?.running
   useEffect(() => {
     let live = true; setSt(undefined); setErr(undefined)
-    const tick = () => api.svVideo(folder, section.key).then(v => live && setSt(v)).catch(e => live && setErr((e as Error).message))
+    const tick = () => api.svVideo(folder, section.key, pano).then(v => live && setSt(v)).catch(e => live && setErr((e as Error).message))
     tick(); const id = setInterval(tick, running ? 2500 : 30000); return () => { live = false; clearInterval(id) }
-  }, [folder, section.key, running])
-  const make = async () => { setErr(undefined); try { const r = await api.makeSvVideo(folder, section.key); if (!r.started && r.reason) setErr(r.reason); setSt(await api.svVideo(folder, section.key)) } catch (e) { setErr((e as Error).message) } }
+  }, [folder, section.key, running, pano])
+  const make = async () => { setErr(undefined); try { const r = await api.makeSvVideo(folder, section.key, pano); if (!r.started && r.reason) setErr(r.reason); setSt(await api.svVideo(folder, section.key, pano)) } catch (e) { setErr((e as Error).message) } }
   return (
-    <div className="mt-2" aria-label="Preview video">
-      {st?.exists && <video controls preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />}
-      {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">Make a preview video</button>}
+    <div className="mt-2" aria-label={pano ? 'Look around' : 'Preview video'}>
+      {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the 360° pictures with the camera held level along the road, which you can pan</div>}
+      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true)} label={`${NAME[section.provider]} ${section.id}`} />
+        : <video controls preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
+      {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
       {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept</span>}
       {running && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Making the video… {st?.log.slice(-1)[0] ?? ''}</p>}
       {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}

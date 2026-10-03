@@ -432,17 +432,18 @@ def default_seconds(s):
     lo, hi = clip_range(s); return round(max(lo, min(s['length_m'] / PREVIEW_MS, hi)), 1)
 
 
-def video_path(rd, s):
+def video_path(rd, s, pano=False):
     """Where the preview video of a (annotated) section is kept: named by the section and by what it is made from, so a changed section or camera gets a new one."""
-    h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}.mp4")
+    h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION, 'pano' if pano else 'view'], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}{'-360' if pano else ''}.mp4")
 
 
-def make_video(rd, s, log=print):
+def make_video(rd, s, log=print, pano=False):
     """Make the preview video of an (annotated) Mapillary or Panoramax section with the app's own camera, from the smaller copies of its pictures; kept (a finished one is not made again). Returns the path."""
     from strata360.edit import streetview_cam as CAM
-    out = video_path(rd, s)
+    out = video_path(rd, s, pano)
     if os.path.exists(out): return out
     CAM.fetch(rd, s, token=_key('MAPILLARY_TOKEN'), log=log, preview=True); os.makedirs(os.path.dirname(out), exist_ok=True)
+    if pano: CAM.render_pano(rd, s, default_seconds(s), out, road=road_of(rd, s), log=log); return out
     CAM.render(rd, s, default_seconds(s), out, road=road_of(rd, s), size=PREVIEW_SIZE, preview=True, log=log); return out
 
 
