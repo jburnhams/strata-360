@@ -953,6 +953,56 @@ def create_app(roots, token=None):
         if not p: raise HTTPException(404, 'there is no race track yet')
         return track.load(p)
 
+    def photo_rows(f):
+        """The photos with when and where each was taken (photos.py `located`) and the clip or gap its time falls in."""
+        from strata360 import photos as PH
+        from strata360.gps import track
+        cfg = config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}; p = config.track_path(f, cfg); run = track.load(p) if p else None; rd = config.race_dir(f); clips = []
+        for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
+            c = _j(d, 'clip.json')
+            if c: clips.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=c['video']['source_frames'] / c['video']['nominal_fps']))
+        try: gaps = gap_rows(f) if run is not None else []
+        except HTTPException: gaps = []
+        out = []
+        for e in PH.load(rd)['photos']:
+            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); out.append(r)
+        return sorted(out, key=lambda x: x['taken_utc'])
+
+    @api.get('/api/photos', dependencies=[Depends(auth)])
+    def get_photos(folder: str):                                                         # the photos with their time, place (own GPS first, else the run's position at that time), whether those disagree, and the clip or gap they fall in
+        f = folder_of(folder); return dict(photos=photo_rows(f), tz=(config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}).get('timezone') or 'Europe/Brussels')
+
+    @api.post('/api/photos', dependencies=[Depends(auth)])
+    async def post_photo(request: Request, folder: str, filename: str):                  # one photo as the raw request body (the page sends several one after the other)
+        from strata360 import photos as PH
+        f = folder_of(folder); data = await request.body(); cfg = config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}
+        try: e = PH.add(config.race_dir(f), filename, data, cfg.get('timezone') or 'Europe/Brussels')
+        except ValueError as ex: raise HTTPException(400, f'{filename}: {ex}')
+        return next(x for x in photo_rows(f) if x['id'] == e['id'])
+
+    @api.delete('/api/photos', dependencies=[Depends(auth)])
+    def delete_photo(folder: str, id: str):                                              # take a photo out (its files are kept under photos/removed)
+        from strata360 import photos as PH
+        f = folder_of(folder)
+        try: PH.remove(config.race_dir(f), id)
+        except KeyError: raise HTTPException(404, 'no such photo')
+        return dict(photos=photo_rows(f))
+
+    @api.get('/api/photos/thumb')
+    def get_photo_thumb(request: Request, folder: str, id: str, w: int = 480):           # a small copy, the right way up (an <img> cannot send headers: the cookie / query token authenticates)
+        from strata360 import photos as PH
+        auth(request); p = PH.thumb(config.race_dir(folder_of(folder)), id, w)
+        if not p: raise HTTPException(404, 'no such photo')
+        return FileResponse(p, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
+
+    @api.get('/api/photos/file')
+    def get_photo_file(request: Request, folder: str, id: str, original: bool = False):  # the photo to look at: a JPEG up to 3000 px wide whatever the format it came in (a browser cannot show a TIFF or a HEIC); original=1 sends the uploaded file as it was
+        from strata360 import photos as PH
+        auth(request); rd = config.race_dir(folder_of(folder)); e = next((x for x in PH.load(rd)['photos'] if x['id'] == id), None)
+        if e is None or not os.path.exists(os.path.join(rd, e['file'])): raise HTTPException(404, 'no such photo')
+        if original: return FileResponse(os.path.join(rd, e.get('original') or e['file']), headers={'Cache-Control': 'max-age=86400'})
+        return FileResponse(PH.thumb(rd, id, 3000), media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
+
     @api.get('/api/gaps', dependencies=[Depends(auth)])
     def get_gaps(folder: str):                                                           # the stretches of the race with no clip, each with its generated map clips
         from strata360.overlay import flyover as FO
