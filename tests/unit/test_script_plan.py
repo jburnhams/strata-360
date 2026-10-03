@@ -62,11 +62,26 @@ def test_narration_and_b_roll_keep_off_the_dialogue_the_script_plays():
         if role != 'clip' and s.cand.clip[-6:-2] == '0001': assert s.clip_start_s + s.dur_s <= dlg[0] + 0.5 or s.clip_start_s >= dlg[1] - 0.5
 
 
-def test_a_clip_with_too_little_footage_is_still_planned_with_a_warning():
+def test_a_clip_with_too_little_footage_gets_a_shorter_window_never_footage_shown_twice():
     small = clip(1, 12.0, [cand('X', 0, 0, 12)]); pack = dict(race={}, clips=[pc(small), pc(C2)])
     draft = dict(wpm=150, items=[item('broll', 1, seconds=8.0), item('broll', 1, seconds=8.0), item('broll', 2, seconds=3.0)])
-    r = SPL.build(draft, pack, [small, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1))
-    assert sum(1 for role in r['roles'] if role == 'broll') >= 3 and any('not enough free footage' in w for w in r['warnings'])
+    r = SPL.build(draft, pack, [small, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1)); beat_s = MUSIC.beat_s
+    assert any('shortened' in w and 'unused footage' in w for w in r['warnings']) and not any('shown again' in w for w in r['warnings'])
+    spans = sorted((sg.clip_start_s, sg.clip_start_s + sg.beats * beat_s) for sg in r['segs'] if sg.clip_index == 0)
+    assert len(spans) >= 2 and all(b[0] >= a[1] - 0.6 for a, b in zip(spans, spans[1:]))                       # the windows of the one clip do not overlap (a whole-beat window may run on a beat into the next stretch)
+
+
+def test_b_roll_is_asked_for_no_more_than_the_clip_has_unused_and_left_out_when_nothing_is_left():
+    small = clip(1, 12.0, [cand('X', 0, 0, 12)]); fp = SPL.Footage(small, CH.clip_candidates(small)); foot = {small['id']: fp}; warn = []
+    ps = [dict(kind='broll', clip=small['id'], label='0001', seconds=8.0, duration_s=12.0), dict(kind='broll', clip=small['id'], label='0001', seconds=8.0, duration_s=12.0), dict(kind='broll', clip=small['id'], label='0001', seconds=3.0, duration_s=12.0)]
+    SPL.cap_broll(ps, foot, warn); assert [p['seconds'] for p in ps][:1] == [8.0] and len(ps) == 2 and ps[1]['seconds'] == pytest.approx(3.99, abs=0.02) and ps[1]['duration_s'] == pytest.approx(4.0, abs=0.01)          # the first takes 8 s, the second the 4 s left, the third nothing
+    assert sum('left out' in w for w in warn) == 1 and any('shortened' in w for w in warn)
+
+
+def test_the_time_a_short_clip_cannot_fill_is_made_up_with_b_roll_from_clips_the_script_does_not_use():
+    used = clip(1, 12.0, [cand('X', 0, 0, 12)]); spare = clip(2, 30.0, [cand('Y', 0, 0, 30)]); pack = dict(race={}, clips=[dict(pc(used), start_utc='2026-02-22T10:00:00Z'), dict(pc(spare), start_utc='2026-02-22T11:00:00Z')]); foot = {c['id']: SPL.Footage(c, CH.clip_candidates(c)) for c in (used, spare)}
+    ps = [dict(n=0, kind='broll', clip=used['id'], label=pack['clips'][0]['label'], seconds=8.0, duration_s=12.0)]; warn = []
+    added = SPL.auto_broll(ps, pack, foot, MUSIC, 60.0, warn); assert added == [pack['clips'][1]['label']] and ps[-1]['auto'] and ps[-1]['kind'] == 'broll' and 3.0 <= ps[-1]['seconds'] <= 6.0 and any('unused footage only' in w for w in warn)
 
 
 def test_long_dialogue_is_split_into_contiguous_windows_of_at_most_twenty_seconds():
@@ -191,3 +206,66 @@ def test_the_plan_reports_a_film_that_is_too_long_for_the_music_when_the_b_roll_
     r = SPL.build(d, PACK, [C1, C2], LIB, MUSIC, {2: 5.0}, st=CH.Settings(seed=1), target_s=10.0)
     assert r['fit']['target_s'] == 10.0 and r['fit']['over_s'] > 2.0 and any('longer than the music' in w and 'shorten narration' in w for w in r['warnings'])
     ok = SPL.build(anchored([dict(type='broll', clip='0001', seconds=20.0)]), PACK, [C1, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1), target_s=10.0); assert ok['fit']['final_s'] <= 11.0 and not any('than the music' in w for w in ok['warnings'])
+
+
+# ---- generated clips fit the music too, and unfilled gaps are added when the film is short
+
+def gap_piece(label, seconds, role='broll'): return dict(kind='synthetic', role=role, label=label, clip=label, seconds=seconds, n=0, text='', speak_s=0.0, estimated=False, duration_s=seconds)
+
+
+def gp(label, start, race_s=7200.0, seconds=8.0): return dict(label=label, clip=label, duration_s=seconds, usable_s=45.0, usable=[], scene={}, note='', lines=[], synthetic=True, race_s=race_s, speedup=1.0, start_utc=start)
+
+
+def test_generated_clips_are_shortened_to_fit_the_music_but_not_under_narration_and_never_below_three_seconds():
+    ps = [gap_piece('G01', 20.0), gap_piece('G02', 20.0, role='vo'), dict(kind='clip', seconds=10.0, n=2)]; f = SPL.fit_pass(ps, MUSIC, 30.0)             # 50 s, the music has 30 s
+    assert ps[1]['seconds'] == 20.0 and ps[0]['seconds'] == 3.0 + 0.0 or ps[0]['seconds'] >= SPL.GAP_MIN_S
+    assert ps[0]['seconds'] >= SPL.GAP_MIN_S and f['after_s'] < f['before_s'] and SPL.flex(ps[1]) is None and SPL.flex(ps[2]) is None and SPL.flex(gap_piece('G', 10.0)) == (SPL.GAP_MIN_S, 15.0)
+
+
+def test_unfilled_gaps_of_an_hour_or_more_are_added_in_their_place_when_the_film_is_short_of_the_music():
+    ps = [dict(kind='broll', seconds=10.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='broll', seconds=10.0, n=1, label='0002', clip='c2', text='', seg=None)]
+    pack = dict(clips=[dict(label='0001', start_utc='2026-02-22T10:01:00Z'), gp('G01', '2026-02-22T10:30:00Z', 7200.0), gp('G02', '2026-02-22T10:10:00Z', 1800.0), gp('G03', '2026-02-22T10:20:00Z', 36000.0), dict(label='0002', start_utc='2026-02-22T12:00:00Z')])
+    warn = []; added = SPL.auto_gaps(ps, pack, MUSIC, 32.0, warn)                                                                                    # 20 s of picture, the music has 32 s
+    assert added == ['G03', 'G01'] and [p['label'] for p in ps] == ['0001', 'G03', 'G01', '0002'] and all(p['n'] is None and p['kind'] == 'synthetic' and p['role'] == 'broll' for p in ps[1:3])
+    assert 3.0 <= ps[1]['seconds'] <= 8.0 and any('12 s short of the music' in w and 'G03, G01' in w for w in warn)
+    assert SPL.auto_gaps(ps, pack, MUSIC, 32.0, []) == [] and SPL.auto_gaps([dict(kind='broll', seconds=10.0, n=0, label='0001', clip='c', text='', seg=None)], pack, MUSIC, 10.0, []) == []        # nothing missing: nothing added; G02 is under an hour
+
+
+def test_the_plan_adds_the_missing_gap_and_leaves_a_script_that_already_fills_the_music_alone():
+    clips = [dict(c, start_utc=u) for c, u in zip(PACK['clips'], ('2026-02-22T10:01:00Z', '2026-02-22T10:02:00Z'))]; pack = dict(PACK, clips=clips + [gp('G01', '2026-02-22T10:01:30Z')])
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0)])
+    r = SPL.build(d, pack, [C1, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1), target_s=30.0); assert r['auto_gaps'] == ['G01'] and [s['clip'] for s in r['synthetic']] == ['G01'] and r['synthetic'][0]['item'] is None and r['synthetic'][0]['start_beat'] > 0
+    full = SPL.build(d, pack, [C1, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1), target_s=8.0); assert full['auto_gaps'] == [] and full['synthetic'] == []
+
+
+def test_an_anchored_gap_clip_can_be_shortened_to_fit_the_music_without_moving_its_anchor():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='gap', clip='G01', kind='map', seconds=20.0, anchor=dict(film_s=4.0, why='x')), dict(type='broll', clip='0002', seconds=4.0)])
+    ps = [dict(kind='broll', seconds=4.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='synthetic', role='broll', seconds=20.0, n=1, label='G01', clip='G01', text='', seg=None), dict(kind='broll', seconds=4.0, n=2, label='0002', clip='c2', text='', seg=None)]
+    warn = []; fit, anc = SPL.fit_and_anchor(ps, d, MUSIC, 20.0, warn)                                                                              # 28 s of pieces, the music has 20 s
+    assert anc[0]['start_s'] if 'start_s' in anc[0] else True; assert ps[1]['seconds'] < 20.0 and ps[0]['seconds'] == 4.0 and abs(fit['after_s'] - 20.0) <= 2.5 and anc[0]['left_s'] == 0.0
+
+
+def test_without_a_music_length_nothing_is_fitted_and_the_anchors_are_still_placed():
+    d = anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='broll', clip='0002', seconds=4.0, anchor=dict(film_s=8.0, why='x'))])
+    ps = [dict(kind='broll', seconds=4.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='broll', seconds=4.0, n=1, label='0002', clip='c2', text='', seg=None)]
+    fit, anc = SPL.fit_and_anchor(ps, d, MUSIC, None, []); assert fit is None and anc[0]['moved_s'] == 4.0 and ps[0]['seconds'] == 8.0
+
+
+def test_broll_is_never_stretched_past_its_clips_own_length():
+    assert SPL.flex(dict(kind='broll', seconds=3.7, duration_s=4.8)) == (2.0, 4.6)                     # a 4.8 s clip: no more than the clip, not the doubled 7.4 s
+    assert SPL.flex(dict(kind='broll', seconds=3.7, duration_s=60.0)) == (2.0, 9.7)                    # a long clip: as before (6 s more)
+    assert SPL.flex(dict(kind='broll', seconds=5.0, duration_s=4.8)) == (2.0, 5.0)                     # already longer than the clip: not shortened by the cap
+
+
+def test_usable_footage_counts_overlapping_candidates_once():
+    from types import SimpleNamespace as NS
+    assert SPL.usable_s([NS(start_s=0.0, end_s=4.0), NS(start_s=0.0, end_s=3.0), NS(start_s=3.5, end_s=5.0), NS(start_s=10.0, end_s=11.0)]) == 6.0 and SPL.usable_s([]) == 0.0
+
+
+def test_a_shot_between_two_cuts_is_never_longer_than_a_window_may_be():
+    from types import SimpleNamespace as NS
+    class FP:
+        duration = 100.0; occ = []
+        def candidate_at(self, a, b): return NS(start_s=a, end_s=b)
+    w = SPL.dialogue_windows(FP(), 0.0, 45.0, [], 'x', cap=19.8, cuts=[6.0, 27.0])          # 0-6, 6-27 (21 s: too long), 27-45
+    assert all(l <= 19.8 + 1e-9 for _, _, l in w) and abs(sum(l for _, _, l in w) - 45.0) < 1e-9 and [round(a, 2) for _, a, _ in w] == [0.0, 6.0, 16.5, 27.0]

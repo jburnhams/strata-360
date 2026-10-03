@@ -4,7 +4,7 @@ Six 100-degree views around the camera's horizon (body frame: +Y is the front le
 the fisheye frames with maps computed once per clip, so a sample costs a decode plus six remaps. They are NOT stabilised: detectors do not need it, and
 keeping them body-fixed means the wearer (on the selfie stick) is always in the same view. Views are numbered by the yaw of their centre from the front
 lens: 0 front, 60, 120, 180 = straight at the wearer (rear lens), 240, 300."""
-import json, os, subprocess, numpy as np, cv2
+import json, math, os, subprocess, numpy as np, cv2
 from strata360.osv.calib import read_slots, Lens
 from strata360 import hw
 
@@ -208,6 +208,30 @@ def _speaker_at(segs, t):
     return None
 
 
+_STAB = {}
+
+
+def stab_fn(osv):
+    """clip time (seconds from the first frame) -> the 3x3 matrix that turns a direction of the upright world frame into the camera's body frame at that frame (`d_body = M d_E`, as StabViews uses), from the camera's orientation of every frame (50 Hz). Cached per file; None when the file cannot be read."""
+    if osv in _STAB: return _STAB[osv]
+    try:
+        from strata360.osv.calib import quat_to_R, imu_offsets
+        from strata360.osv.telemetry import read_frames, video_pts
+        P, B = imu_offsets(); T = read_frames(osv); Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); pts = np.asarray(video_pts(osv, 0), float); pts = pts - pts[0]
+        def M(t): return Ms[int(np.clip(np.searchsorted(pts, float(t) - 1e-4), 0, min(len(Ms), len(pts)) - 1))]
+    except Exception: M = None
+    _STAB[osv] = M; return M
+
+
+def face_offsets(me):
+    """(pitch above the person's box centre, yaw beside it), in degrees, of the CENTRE OF THE FACE (the middle of the detected head, between the eyes and the nose) for one identity sample; (None, None) when the face box or the person box is missing. The person box [x0, y0, x1, y1] is `height_deg` tall, which
+    gives the degrees per pixel of the detector's view; the face box sits inside it."""
+    box, fb, hgt = me.get('box'), me.get('face_box'), me.get('height_deg')
+    if not box or not fb or not hgt or box[3] - box[1] <= 1: return None, None
+    dpp = float(hgt) / (box[3] - box[1]); up = ((box[1] + box[3]) - (fb[1] + fb[3])) / 2.0 * dpp; side = ((fb[0] + fb[2]) - (box[0] + box[2])) / 2.0 * dpp
+    return round(up, 2), round(side / max(math.cos(math.radians(float(me.get('pitch') or 0.0))), 0.3), 2)
+
+
 def focus_samples(clip_dir, osv):
     """Where YOU (the wearer) are, once a second, for the player's "You" mode (cached in focus.json; derived from identity.json and speakers.json, nothing is recomputed).
     Each sample: t, world yaw and pitch in degrees (the direction in the upright world frame the preview is in), who ('you') and whether you are speaking. Only seconds where your face was found."""
@@ -215,7 +239,7 @@ def focus_samples(clip_dir, osv):
     if _sources_fresh(cache, clip_dir):
         try:
             d = json.load(open(cache))
-            if d.get('schema') == 5: return d['samples']
+            if d.get('schema') == 6: return d['samples']
         except ValueError: pass
     idp = os.path.join(clip_dir, 'identity.json')
     if not os.path.exists(idp): return []
@@ -224,9 +248,9 @@ def focus_samples(clip_dir, osv):
     for r in idn['samples']:
         me = r.get('me')
         if not me: continue
-        t = r['t_s']; hd = hdf(t)
-        out.append(dict(t=t, yaw=round((hd + me['yaw']) % 360.0, 1), pitch=round(me['pitch'], 1), height=me.get('height_deg'), head=None if me.get('head_up') is None else round(me['pitch'] + me['head_up'], 1), who='you', speaking=_speaker_at(segs, t) == 'wearer'))
-    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=5, samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out
+        t = r['t_s']; hd = hdf(t); face, fdy = face_offsets(me)
+        out.append(dict(t=t, yaw=round((hd + me['yaw']) % 360.0, 1), pitch=round(me['pitch'], 1), height=me.get('height_deg'), head=None if me.get('head_up') is None else round(me['pitch'] + me['head_up'], 1), face=None if face is None else round(me['pitch'] + face, 1), face_dyaw=fdy, who='you', speaking=_speaker_at(segs, t) == 'wearer'))
+    tmp = cache + f'.{os.getpid()}.tmp'; json.dump(dict(schema=6, samples=out), open(tmp, 'w')); os.replace(tmp, cache); return out
 
 
 def person_samples(clip_dir, osv):

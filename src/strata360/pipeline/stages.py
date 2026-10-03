@@ -155,6 +155,12 @@ def proxy(ctx):
     make_proxy(ctx.clip.osv, ctx.path('proxy.mp4'), p['size'], p['every_frames'], p['bitrate'], p.get('encoder', 'h264'))
 
 
+@stage('quality', 1, outputs=('quality_grid.npz',), deps=('proxy',), note='how good each direction looks, on a 15 degree grid twice a second, from plain image measurements (detail, blur, haze, contrast, colour, blown out or black): the guardrails for choosing a view (about a tenth of real time)')
+def quality(ctx):
+    from strata360.analysis import quality_grid as QG
+    QG.save(ctx.path(QG.FILE), QG.analyse(ctx.path('proxy.mp4')))
+
+
 @stage('thumb', 1, outputs=('thumb_quick.jpg',), deps=('motion',), soft_deps=('proxy',), note='a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early')
 def thumb(ctx):
     from strata360.analysis.thumbs import quick
@@ -165,7 +171,8 @@ def thumb(ctx):
        note='where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)')
 def _track_file(ctx):
     """The race track of the clip's project (track.fit / track.gpx in the project folder, or the older `gps` setting)."""
-    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = next((os.path.join(root, n) for n in ('track.fit', 'track.gpx') if os.path.exists(os.path.join(root, n))), None) or ctx.cfg.get('gps')
+    from strata360.gps import tracks
+    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = tracks.current_path(root) or ctx.cfg.get('gps')
     if not tp or not os.path.exists(tp): raise RuntimeError('no race track (track.fit / track.gpx in the project folder): add it in the app, then redo this stage')
     return root, tp
 
@@ -198,6 +205,13 @@ def identity(ctx):
     ctx.write('identity.json', ctx.stamped(I.analyse_clip(ctx.read('people.json'), np.load(ctx.path('faces.npy')), I.load_profile(path))))
 
 
+@stage('face_view', 1, outputs=('face_view.json',), deps=('identity', 'proxy'), default=False,
+       note='how clearly the wearer\'s face is seen once a second (YOLO pose: nose and both eyes on a stabilised crop of the proxy), so the close view of you is kept for clear faces; needs .venv-vision and models/')
+def face_view(ctx):
+    from strata360.analysis import face_view as FV
+    ctx.write('face_view.json', ctx.stamped(FV.analyse(str(ctx.dir), ctx.clip.osv, ctx.log)))
+
+
 @stage('scenes', 3, keys=('scenes_every_s',), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy',), default=False,
        note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags; and a scenery-only score with clarity that ignores people) from a local VLM on front and rear views every few seconds (slow: minutes per clip)')
 def scenes(ctx):
@@ -220,7 +234,7 @@ def speakers(ctx):
     ctx.write('speakers.json', ctx.stamped(doc)); np.save(ctx.path('speakers.npy'), emb)
 
 
-@stage('candidates', 4, outputs=('candidates.json',), deps=('motion', 'exposure', 'audio', 'transcribe', 'align', 'speakers', 'identity', 'scenes'),
+@stage('candidates', 6, outputs=('candidates.json',), deps=('motion', 'exposure', 'audio', 'transcribe', 'align', 'speakers', 'identity', 'scenes', 'quality'),
        note='the usable spans of the clip (only shake, a blocked lens or bad exposure make footage unusable) and overlapping candidates on them: different ways to see the same footage, in priority order (no video decoding)')
 def candidates(ctx):
     from strata360.analysis.candidates import build

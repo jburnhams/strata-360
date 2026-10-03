@@ -16,7 +16,7 @@ def test_every_gap_is_a_pack_clip_with_the_choices_for_filling_it_and_the_state_
     monkeypatch.setattr(X, 'context_at', lambda tr, a, b, tz: dict(covered=True, distance_km=250.0, elapsed_h=20.0, local_date='Sat 21 Feb', local_time='19:00')); monkeypatch.setattr(X, 'describe', lambda ctx: 'night, km 250')
     planned = SY.make(GAP, seconds=8.0, kind='flyover', approved=False); monkeypatch.setattr(SY, 'load', lambda folder: dict(clips=[dict(planned, status='planned')]))
     out = SP.gap_clips('x', object(), 'UTC'); assert [c['label'] for c in out] == ['G02', 'G03'] and all(c['synthetic'] and c['lines'] == [] and c['usable_s'] == SP.MAX_GAP_S for c in out)
-    a, b = out; assert a['duration_s'] == 8.0 and a['race_s'] == 5400.0 and [o['kind'] for o in a['options']] == ['map', 'flyover'] and 'approval' in a['options'][1]['note'] and a['planned'] == dict(kind='flyover', seconds=8.0, status='planned', approved=False)
+    a, b = out; assert a['duration_s'] == 8.0 and a['race_s'] == 5400.0 and [o['kind'] for o in a['options']] == ['map', 'flyover'] and 'default' in a['options'][1]['note'] and a['planned'] == dict(kind='flyover', seconds=8.0, status='planned', approved=False)
     assert b['planned'] is None and b['duration_s'] == SY.default_seconds(3600.0) and a['km'] == 250.0 and SP.gap_clips('x', None, 'UTC') == []
 
 
@@ -27,3 +27,9 @@ def test_the_prompt_text_describes_each_gap_and_the_music_with_its_sung_stretche
     text = SP.render(dict(race={}, clips=[c], music=music)); assert '=== CLIP G02: 8.0 s long' in text and 'NO FOOTAGE: a gap of 1.5 h' in text and 'km 233.5 to 307.1, +2078 m, night->night' in text and 'Already planned: flyover, 8.0 s (planned)' in text and 'the runner says nothing' in text
     assert 'THE MUSIC (times are FILM seconds' in text and 'length 245 s, 97 bpm' in text and '0-10 s 0.00; 10-20 s 0.36' in text and 'Sung (en): 20-50 s, 54-92 s' in text and 'often unavoidable' in text and '[21 s] a line' in text and '[60 s] another (doubtful)' in text
     assert 'instrumental' in SP.render(dict(race={}, clips=[], music=dict(music, lyrics=dict(instrumental=True)))) and 'THE MUSIC' not in SP.render(dict(race={}, clips=[], music=None))
+
+
+def test_the_pack_tells_the_writer_how_good_each_clips_picture_is_on_the_races_own_scale():
+    c = dict(label='0001', clip='C', duration_s=50.0, usable_s=40.0, usable=[], scene=dict(settings=['forest']), note='', lines=[], speech_s=0.0, speech_words=0, start_utc='2026-02-22T10:00:00Z', look=dict(ahead=6.2, behind=4.0, clarity_ahead=4.1, clarity_behind=3.0))
+    t = SP.render(dict(race={}, clips=[c])); assert 'picture quality' in t and 'scenery 6.2 ahead, 4.0 behind, clarity 4.1 ahead, 3.0 behind' in t and '0 worst to 10 best' in t
+    assert 'picture quality' not in SP.render(dict(race={}, clips=[dict(c, look=None)])) and 'scenery 6.2 ahead' in SP.render(dict(race={}, clips=[dict(c, look=dict(ahead=6.2, behind=None, clarity_ahead=None, clarity_behind=None))]))

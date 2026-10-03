@@ -20,6 +20,9 @@ const itemOf = (msg: string) => { const m = msg.match(/^item (\d+):/); return m 
 
 // The whole-race script, as written by the script writer from everything it knows: your own lines (words coloured as in the transcript: select words to mark them), narration, and b-roll, in film order.
 // "Revise" sends the draft back with your marks and pins and gets a new draft that keeps everything they do not touch; items new since the previous draft are flagged.
+/** An item's basis as a list: older drafts (and some model output) have one string. */
+function basisOf(it: { basis?: unknown }): string[] { return Array.isArray(it.basis) ? it.basis.map(String) : typeof it.basis === 'string' && it.basis.trim() ? [it.basis] : [] }
+
 export default function ScriptDraftPanel({ folder }: { folder: string }) {
   const [ver, setVer] = useState(0)
   const st = usePoll(() => api.script2(folder), 4000, [folder, ver])
@@ -123,12 +126,12 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
                           <span className="flex gap-1"><button className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white" onClick={() => void saveEdit(i, it)}>save (pins this wording)</button><button className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" onClick={() => setEditing(null)}>cancel</button></span>
                         </span>
                       ) : (<>
-                        <span data-vo={i} title={it.basis?.length ? 'based on: ' + it.basis.join(' · ') : undefined}>{highlight(edited[i] ?? it.text ?? '', pinTexts(it.clip), pins.vo_never ?? []).map((p, k) => <span key={k} className={p.kind === 'must' ? 'rounded bg-emerald-200 dark:bg-emerald-500/40' : p.kind === 'never' ? 'rounded bg-red-200 dark:bg-red-500/40' : ''}>{p.t}</span>)}</span>
+                        <span data-vo={i} title={basisOf(it).length ? 'based on: ' + basisOf(it).join(' · ') : undefined}>{highlight(edited[i] ?? it.text ?? '', pinTexts(it.clip), pins.vo_never ?? []).map((p, k) => <span key={k} className={p.kind === 'must' ? 'rounded bg-emerald-200 dark:bg-emerald-500/40' : p.kind === 'never' ? 'rounded bg-red-200 dark:bg-red-500/40' : ''}>{p.t}</span>)}</span>
                         <button className="ml-1 text-xs text-stone-400 hover:text-stone-700" aria-label={`Edit narration ${i + 1}`} title="edit the wording: your version is kept word for word in later drafts" onClick={() => { setText(edited[i] ?? it.text ?? ''); setEditing(i) }}>✎</button>
                       </>))}
                       {it.type === 'clip' && (words(it).some(Boolean) ? words(it) : <span>{it.text}</span>)}
                       {it.type === 'broll' && <span className="text-stone-500">{it.why}</span>}
-                      {it.type === 'gap' && <span className="text-stone-500">{it.kind === 'flyover' ? '3D flyover (needs your approval)' : '2D map'}, {it.seconds} s: {it.why}</span>}
+                      {it.type === 'gap' && <span className="text-stone-500">gap clip, {it.seconds} s: {it.why}</span>}
                       {it.view && <span className="ml-2 text-xs text-stone-500">{it.view} view of you</span>}
                       {it.anchor && <span className="ml-2 text-xs text-stone-500" title={it.anchor.why}>anchored at {it.anchor.film_s} s</span>}
                       {diff.added.has(i) && <span className="ml-2 rounded bg-emerald-200 px-1 text-xs text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100">new</span>}

@@ -27,6 +27,62 @@
    }
   },
   {
+   "id": "scenery",
+   "family": "hold",
+   "dur": [
+    3,
+    6,
+    16
+   ],
+   "energy": 0.4,
+   "hero": false,
+   "max_share": 0.25,
+   "cooldown": 1,
+   "max_consecutive": 2,
+   "max_uses": 99,
+   "beats": "beat",
+   "dialogue_ok": false,
+   "scale": "wide",
+   "needs": {
+    "scenery_ok": [
+     2.0,
+     0.5
+    ],
+    "steady": [
+     0.5,
+     null
+    ]
+   }
+  },
+  {
+   "id": "free_view",
+   "family": "hold",
+   "dur": [
+    2,
+    5,
+    12
+   ],
+   "energy": 0.4,
+   "hero": false,
+   "max_share": 0.15,
+   "cooldown": 1,
+   "max_consecutive": 1,
+   "max_uses": 99,
+   "beats": "beat",
+   "dialogue_ok": false,
+   "scale": "medium",
+   "needs": {
+    "free_ok": [
+     2.0,
+     0.4
+    ],
+    "steady": [
+     0.5,
+     null
+    ]
+   }
+  },
+  {
    "id": "selfie_hold",
    "family": "hold",
    "dur": [
@@ -64,10 +120,10 @@
    ],
    "energy": 0.3,
    "hero": false,
-   "max_share": 0.2,
+   "max_share": 0.06,
    "cooldown": 1,
    "max_consecutive": 2,
-   "max_uses": 99,
+   "max_uses": 3,
    "beats": "beat",
    "dialogue_ok": true,
    "scale": "tight",

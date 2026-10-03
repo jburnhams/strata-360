@@ -25,7 +25,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
   const kindOf = (g: Gap): GapKind => kinds[g.id] ?? (g.clips.find(x => x.id === g.id)?.kind === 'flyover' ? 'flyover' : 'map')
   const flyover = data.flyover ?? { available: true, note: '' }
   const hours = (g: Gap) => `${(g.duration_s / 3600).toFixed(1)} h`
-  const state = (c: GapClip) => c.rendering ? (c.progress || 'rendering…') : c.error ? `failed: ${c.error}` : c.approved === false && !c.exists ? `planned by the script: ${c.kind === 'flyover' ? '3D flyover' : 'clip'} waiting for your approval` : c.exists ? `ready · ${c.kind === 'flyover' ? '3D · ' : ''}${c.seconds} s for ${(c.duration_s / 3600).toFixed(1)} h (x${c.speedup})` : 'planned'
+  const state = (c: GapClip) => c.rendering ? (c.progress || 'rendering…') : c.error ? `failed: ${c.error}` : c.exists ? `ready · ${c.kind === 'flyover' ? '3D · ' : ''}${c.seconds} s for ${(c.duration_s / 3600).toFixed(1)} h (x${c.speedup})` : 'planned'
   return (
     <div className="mt-4">
       <div className="mb-1 flex items-baseline gap-2"><b>Gaps in the footage</b><span className="text-xs text-stone-500">{data.gaps.length} · a generated clip can fill each one</span></div>
@@ -49,7 +49,7 @@ export default function GapsPanel({ folder }: { folder: string }) {
                     <option value="map">{KIND_LABEL.map}</option>
                     <option value="flyover" disabled={!flyover.available} title={flyover.note || undefined}>{KIND_LABEL.flyover}{flyover.available ? '' : ' (not installed)'}</option>
                   </select>
-                  <button disabled={!!c?.rendering} className="rounded bg-emerald-700 px-2 py-1 text-white disabled:opacity-50" onClick={() => generate(g)}>{c?.exists ? 'Regenerate' : c?.approved === false ? 'Approve and render' : BUTTON[kindOf(g)]}</button>
+                  <button disabled={!!c?.rendering} className="rounded bg-emerald-700 px-2 py-1 text-white disabled:opacity-50" onClick={() => generate(g)}>{c?.exists ? 'Regenerate' : BUTTON[kindOf(g)]}</button>
                   {c?.exists && <button className="text-emerald-700 underline dark:text-emerald-400" onClick={() => setOpen(open === g.id ? undefined : g.id)}>{open === g.id ? 'Hide' : 'Watch'}</button>}
                   {c && !c.rendering && <button aria-label={`Remove ${g.id} clip`} className="text-stone-500 underline" onClick={() => run(() => api.deleteGapClip(folder, c.id))}>Remove</button>}
                 </span>

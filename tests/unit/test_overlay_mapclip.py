@@ -48,10 +48,8 @@ def test_the_zoom_is_closer_when_the_clip_is_slower(series, tiles):
     assert slow.z.mean() > fast.z.mean() and fast.z.min() >= MC.ZOOM[0] and slow.z.max() <= MC.ZOOM[1]
 
 
-def test_the_clock_runs_at_the_speed_up(series, tiles, monkeypatch):
-    c = clip(series, tiles); seen = []; orig = c.overlay.apply
-    monkeypatch.setattr(c.overlay, 'apply', lambda img, t: (seen.append(t), orig(img, t))[1])
-    c.frame(0); c.frame(10); assert seen[1] - seen[0] == pytest.approx(10 * c.speedup / c.fps)
+def test_the_picture_has_no_overlay_the_film_adds_its_own(series, tiles):
+    c = clip(series, tiles); assert not hasattr(c, 'overlay') and not hasattr(c, 'gap') and c.frame(3).shape == (180, 320, 3)
 
 
 def test_a_stretch_without_length_is_refused(series, tiles):
@@ -64,3 +62,12 @@ def test_render_writes_an_mp4(series, tiles, tmp_path):
     out = str(tmp_path / 'x' / 'g.mp4'); seen = []; MC.render(clip(series, tiles, seconds=1.0, fps=10.0), out, progress=lambda d, n: seen.append((d, n)), bitrate='1M')
     assert seen[-1] == (10, 10) and not (tmp_path / 'x' / 'g.mp4.part.mp4').exists()
     n = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', out], capture_output=True, text=True).stdout.strip(); assert n == '10'
+
+
+def test_the_whole_route_on_screen_is_drawn_in_one_colour_and_the_stretch_is_not_marked(series, tiles, monkeypatch):
+    from strata360.overlay import draw as D
+    calls = []; real = D.route_line
+    monkeypatch.setattr(D, 'route_line', lambda img, u, v, colour=(230, 20, 20), width=3.0: (calls.append((tuple(colour), int(np.isfinite(u).sum()))), real(img, u, v, colour, width))[1])
+    c = clip(series, tiles); c.frame(3)
+    coloured = [(col, n) for col, n in calls if col != (0, 0, 0)]
+    assert coloured == [(MC.ROUTE, len(series.route_lat))]                                          # every point of the route, in one colour: no red-behind, white-ahead split, no stretch drawn differently

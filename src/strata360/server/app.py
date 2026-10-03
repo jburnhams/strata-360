@@ -21,6 +21,35 @@ MAX_WORKERS = 3
 FINAL_JOBS = {}; FILM_JOBS = {}
 TILES = {}                    # map style -> overlay.tiles.Tiles (one per style, shared by every request)
 TILE_FETCH = None             # tests replace this: fetch(url) -> bytes
+_NOISE = ('unsupported hash type', 'code for hash', 'hashlib.py', 'globals()[__func_name]', '__get_builtin_constructor', '__get_openssl_constructor')
+
+
+def clean_log(lines):
+    """Log lines without the interpreter's start-up noise (a pyenv Python 3.13 without blake2 prints a hashlib traceback into every job's log): the web panels show the last line, which must be the job's own."""
+    lines = list(lines); out = []
+    for i, l in enumerate(lines):
+        if any(n in l for n in _NOISE) or set(l.strip()) <= set('^~') and l.strip(): continue
+        if l.startswith('Traceback') and i + 1 < len(lines) and 'hashlib.py' in lines[i + 1]: continue
+        out.append(l)
+    return out
+
+
+def scenic_samples(d, osv):
+    """The Scenic aim's samples for a clip ([{t, yaw, pitch}], edit/scenery.py `samples`), cached in `scenic_view.json` and made again when the quality grid is newer; [] without a grid."""
+    from strata360.analysis import quality_grid as QG
+    cache, grid_file = os.path.join(d, 'scenic_view.json'), os.path.join(d, QG.FILE)
+    if not os.path.exists(grid_file): return []
+    try:
+        if os.path.getmtime(cache) >= os.path.getmtime(grid_file): return json.load(open(cache))
+    except (OSError, ValueError): pass
+    try:
+        from strata360.edit import clip_views as CV, scenery as SC
+        v = CV.load(d, osv); out = SC.samples(v['grid'], v['heading'], v['prior'], v['boxes'])
+        with open(cache + '.tmp', 'w') as f: json.dump(out, f)
+        os.replace(cache + '.tmp', cache); return out
+    except Exception: return []
+
+
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
@@ -295,8 +324,8 @@ def create_app(roots, token=None):
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/clip/audio')
-    def get_clip_audio(request: Request, folder: str, clip: str, kind: str = 'original'):  # the clip's stored sound: original (lossless) or cleaned (Range requests work); <audio> cannot send headers, so the cookie/query token authenticates
-        auth(request); f = folder_of(folder); name = 'audio_clean.flac' if kind == 'clean' else 'audio_original.flac'; p = os.path.join(_cd(f, clip), name)
+    def get_clip_audio(request: Request, folder: str, clip: str, kind: str = 'original'):  # the clip's stored sound: original (lossless), cleaned, or the background without speech (Range requests work); <audio> cannot send headers, so the cookie/query token authenticates
+        auth(request); f = folder_of(folder); name = {'clean': 'audio_clean.flac', 'background': 'audio_background.flac'}.get(kind, 'audio_original.flac'); p = os.path.join(_cd(f, clip), name)
         if not os.path.exists(p): raise HTTPException(404, 'not made yet')
         return FileResponse(p, media_type='audio/flac', headers={'Cache-Control': 'no-cache'})
 
@@ -315,7 +344,7 @@ def create_app(roots, token=None):
         if ev:
             from strata360.analysis import sound_events as SE
             out['sounds'] = dict(seconds=SE.category_seconds(ev), windows=[dict(t0=w['t0'], t1=w['t1'], cats={k: v for k, v in w['cats'].items() if v >= 0.2}, top=w['top'][:3]) for w in ev['windows']], hints={c: list(h) for c, h in SE.HINTS.items()})
-        out['audio_files'] = dict(original=os.path.exists(os.path.join(d, 'audio_original.flac')), clean=os.path.exists(os.path.join(d, 'audio_clean.flac')))
+        out['audio_files'] = dict(original=os.path.exists(os.path.join(d, 'audio_original.flac')), clean=os.path.exists(os.path.join(d, 'audio_clean.flac')), background=os.path.exists(os.path.join(d, 'audio_background.flac')))
         mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
             from strata360.analysis.views import focus_samples, person_samples
@@ -326,6 +355,7 @@ def create_app(roots, token=None):
             from strata360.edit import attention as AT
             vq = load_quality(d); out['clarity'] = AT.clarity_samples(vq) if vq is not None and len(vq['t']) else []
         except Exception: out['clarity'] = []
+        out['scenic'] = scenic_samples(d, (c.get('source_files') or {}).get('osv'))                      # the best people-free direction over time (the "Scenic" aim), kept beside the quality grid it comes from
         out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
         th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th and {**th, 'overlay': TH.overlay_fresh(d)}; out['places'] = _j(d, 'places.json')
@@ -751,9 +781,53 @@ def create_app(roots, token=None):
                 if os.path.exists(q): os.replace(q, q + '.replaced')                       # keep the previous file next to it, never silently lose it
         dest = os.path.join(rd, 'track' + ext); open(dest, 'wb').write(data)
         from strata360.gps.overview import overview
-        try: return overview(dest)
+        from strata360.gps import tracks as TKS
+        try: o = overview(dest)
         except Exception as e:
             os.replace(dest, dest + '.bad'); raise HTTPException(400, f'could not read that file: {type(e).__name__}: {e}')
+        TKS.update_merged(rd); return o
+
+    # The project's tracks: any number of FIT / GPX files, each a run (merged into the one race track) or a route (shown on the overview map for planning only)
+    @api.get('/api/tracks', dependencies=[Depends(auth)])
+    def get_tracks(folder: str):                                                         # every track with kind and summary, the merged run track, and the points of interest
+        from strata360.gps import tracks as TKS
+        return TKS.listing(config.race_dir(folder_of(folder)))
+
+    @api.post('/api/tracks', dependencies=[Depends(auth)])
+    async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
+        from strata360.gps import tracks as TKS
+        f = folder_of(folder); data = await request.body(); rd = config.race_dir(f)
+        try: return TKS.add(rd, filename, data, kind or None)
+        except ValueError as e: raise HTTPException(400, str(e))
+
+    @api.post('/api/tracks/kind', dependencies=[Depends(auth)])
+    def post_tracks_kind(body: dict):                                        # mark a track run or route (the merged race track follows)
+        from strata360.gps import tracks as TKS
+        rd = config.race_dir(folder_of(body.get('folder')))
+        try: TKS.set_kind(rd, str(body.get('id')), str(body.get('kind')))
+        except KeyError: raise HTTPException(404, 'no such track')
+        except ValueError as e: raise HTTPException(400, str(e))
+        return TKS.listing(rd)
+
+    @api.delete('/api/tracks', dependencies=[Depends(auth)])
+    def delete_tracks(folder: str, id: str):                                             # take a track out (its file is kept under tracks/removed)
+        from strata360.gps import tracks as TKS
+        rd = config.race_dir(folder_of(folder))
+        try: TKS.remove(rd, id)
+        except KeyError: raise HTTPException(404, 'no such track')
+        return TKS.listing(rd)
+
+    @api.get('/api/tracks/line', dependencies=[Depends(auth)])
+    def get_tracks_line(folder: str, id: str, limit: int = 3000):                        # the line of one track (id, or `merged`) for the overview map: lat, lon (no times needed)
+        from strata360.gps import tracks as TKS
+        import numpy as np
+        rd = config.race_dir(folder_of(folder))
+        if id == 'merged': p = os.path.join(rd, TKS.MERGED); p = p if os.path.exists(p) else None
+        else: p = next((e['file'] for e in TKS.entries(rd) if e['id'] == id), None)
+        if not p: raise HTTPException(404, 'no such track')
+        tr = TKS.read(p); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']); lat, lon = tr['lat'][ok], tr['lon'][ok]
+        idx = np.unique(np.linspace(0, len(lat) - 1, max(2, min(limit, len(lat)))).astype(int))
+        return dict(id=id, lat=[round(float(lat[i]), 6) for i in idx], lon=[round(float(lon[i]), 6) for i in idx])
 
     @api.get('/api/edit', dependencies=[Depends(auth)])
     def get_edit(folder: str):                                                           # settings, overrides, the saved plan, the technique list and the newest script's lines by segment id
@@ -773,9 +847,10 @@ def create_app(roots, token=None):
         return dict(edit=e, techniques=[dict(id=t.id, family=t.family, hero=t.hero, dur=list(t.dur), dialogue_ok=t.dialogue_ok) for t in lib.values()], script=lines)
 
     @api.post('/api/edit/propose', dependencies=[Depends(auth)])
-    def post_propose(body: dict):                                                        # {folder, length_s?, bpm?, seed?, keep?}
+    def post_propose(body: dict):                                                        # {folder, length_s?, bpm?, seed?, keep?, replace?}: the beat planner's film (it replaces a film planned from the script only with `replace`)
         from strata360.edit import project as PJ, optimise as O
         f = folder_of(body.get('folder'))
+        if ((PJ.load(f).get('plan') or {}).get('source') == 'script') and not body.get('replace'): raise HTTPException(409, 'the film is planned from the script: this would replace it with the beat planner\'s arrangement of the clips (send replace to do that)')
         try: return dict(edit=PJ.propose(f, {k: body.get(k) for k in ('length_s', 'bpm', 'seed')}, keep=bool(body.get('keep', True))))
         except O.Infeasible as e: raise HTTPException(400, str(e))
 
@@ -803,7 +878,7 @@ def create_app(roots, token=None):
         from strata360.edit import project as PJ
         pj = PLAN_JOBS.get(f); plan = (PJ.load(f).get('plan') or {}); ppath = os.path.join(SD._dir(f), 'plan.log')
         plan_info = dict(source=plan.get('source', 'beats'), script=plan.get('script'), windows=len(plan.get('segments') or []), length_s=(plan.get('film') or {}).get('length_s'), warnings=plan.get('warnings') or [], generated_at=plan.get('generated_at')) if plan else None
-        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, plan=plan_info, plan_running=bool(pj and pj.poll() is None), plan_exit=(None if pj is None or pj.poll() is None else pj.returncode), plan_log=(open(ppath).read().splitlines()[-6:] if os.path.exists(ppath) else []), last_exit=(None if running or j is None else j.returncode), log=(open(lp).read().splitlines()[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
+        return dict(draft=doc, drafts=SD.list_drafts(f), pins=SD.load_pins(f), running=running, plan=plan_info, plan_running=bool(pj and pj.poll() is None), plan_exit=(None if pj is None or pj.poll() is None else pj.returncode), plan_log=(clean_log(open(ppath).read().splitlines())[-6:] if os.path.exists(ppath) else []), last_exit=(None if running or j is None else j.returncode), log=(clean_log(open(lp).read().splitlines())[-12:] if os.path.exists(lp) else []), used=used, key_configured=_llm_key(f))
 
     def _llm_key(f):
         from strata360.edit import llm_remote
@@ -881,7 +956,7 @@ def create_app(roots, token=None):
             except ValueError: raise HTTPException(400, 'from/to: epoch seconds or an ISO time')
         t0, t1 = when(body.get('from')), when(body.get('to')); cid = body.get('id') or (gap['id'] if t0 is None and t1 is None else None)
         if not cid: raise HTTPException(400, 'a stretch of a gap needs an id')
-        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid, kind=body.get('kind') or 'map', size=body.get('size'))
+        try: clip = SY.make(gap, seconds=body.get('seconds'), speedup=body.get('speedup'), t0=t0, t1=t1, id=cid, kind=body.get('kind') or 'map', size=body.get('size'), by='user')
         except ValueError as e: raise HTTPException(400, str(e))
         return SY.upsert(f, clip)
 
@@ -898,7 +973,6 @@ def create_app(roots, token=None):
         f = folder_of(body.get('folder')); cid = str(body.get('id') or '')
         c = next((c for c in SY.load(f)['clips'] if c['id'] == cid), None)
         if c is None: raise HTTPException(404, 'no such planned clip')
-        if c.get('approved') is False: raise HTTPException(409, f"{cid} was planned by the script and is not approved yet: approve it first (a {c['kind']} render takes machine time)")
         job = GAP_JOBS.get(f)
         if job and job[1].poll() is None: return dict(started=False, reason=f'{job[0]} is already being rendered')
         d = os.path.join(config.race_dir(f), 'synthetic'); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, cid + '.log'), 'wb')
@@ -1001,7 +1075,7 @@ def create_app(roots, token=None):
                 latest.pop('facts', None); latest['file'] = os.path.basename(files[-1])
             except ValueError: latest = None
         log = ''
-        try: log = open(os.path.join(rd, 'script_job.log')).read()[-600:]
+        try: log = '\n'.join(clean_log(open(os.path.join(rd, 'script_job.log')).read().splitlines()))[-600:]
         except OSError: pass
         cfg = config.load(f).get('llm', {}) if os.path.exists(os.path.join(rd, 'race.json')) else {}
         prov = cfg.get('provider', 'vertex'); providers = {k: dict(models=v['models'], default=v['default'], configured=LR.key_configured(k)) for k, v in LR.PROVIDERS.items()}

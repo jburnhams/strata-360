@@ -32,6 +32,11 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
   }
   if (!d) return err ? <p className="text-red-600">{err}</p> : <PanelSkeleton title="Timeline" rows={8} />
   const plan = d.edit.plan, s = d.edit.settings, ov = d.edit.overrides
+  /** The beat planner's film replaces a film planned from the script: ask first (the script plan is rebuilt from the Film script panel). */
+  const ownPlan = (f: () => Promise<{ edit: EditResponse['edit'] }>) => {
+    if (plan?.source === 'script' && !window.confirm('The film is planned from your script. This replaces it with the beat planner\'s own arrangement of the clips (you can plan the script again from the Film script panel). Continue?')) return
+    return run(f)
+  }
   const total = plan?.film.length_s ?? 1
   const input = 'w-20 rounded-lg border border-stone-300 bg-stone-50 px-2 py-1 text-sm dark:border-stone-700 dark:bg-stone-950'
   return (
@@ -43,8 +48,8 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
         <div className="flex flex-wrap items-end gap-3 text-sm">
           <label>Film length (s)<input type="number" min={20} max={900} value={length} onChange={e => setLength(Number(e.target.value))} className={`${input} ml-2`} /></label>
           <label>Tempo (bpm)<input type="number" min={60} max={200} value={bpm} onChange={e => setBpm(Number(e.target.value))} className={`${input} ml-2`} /></label>
-          <button disabled={busy} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50" onClick={() => run(() => api.propose(folder, { length_s: length, bpm, keep: true }))}>{plan ? 'Re-plan' : 'Propose a film'}</button>
-          {plan && <button disabled={busy} className="rounded-lg border border-stone-300 px-3 py-2 disabled:opacity-50 dark:border-stone-700" title="a different arrangement of techniques (same moments)" onClick={() => run(() => api.propose(folder, { seed: s.seed + 1, keep: false }))}>Another version</button>}
+          <button disabled={busy} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50" onClick={() => ownPlan(() => api.propose(folder, { length_s: length, bpm, keep: true, replace: true }))}>{plan ? 'Re-plan' : 'Propose a film'}</button>
+          {plan && <button disabled={busy} className="rounded-lg border border-stone-300 px-3 py-2 disabled:opacity-50 dark:border-stone-700" title="a different arrangement of techniques (same moments)" onClick={() => ownPlan(() => api.propose(folder, { seed: s.seed + 1, keep: false, replace: true }))}>Another version</button>}
           {(Object.keys(ov.tech_force).length + Object.keys(ov.transitions ?? {}).length + ov.locked.length + ov.bans_cands.length + ov.bans_techs.length + Object.keys(ov.clip_weight).length) > 0 &&
             <button disabled={busy} className="text-xs underline" onClick={() => run(() => api.override(folder, { action: 'reset' }))}>clear my changes</button>}
           {busy && <span className="text-stone-500">planning…</span>}

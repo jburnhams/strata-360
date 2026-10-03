@@ -51,6 +51,9 @@ def load_clips(folder):
         cd = json.load(open(cp)); clips.append(dict(id=cj['clip_id'], start_utc=cj['time']['start_utc'], duration_s=cj['video']['source_frames'] / cj['video']['nominal_fps'], candidates=cd['candidates'], unusable=cd.get('unusable') or []))
         try: clips[-1]['alignment'] = json.load(open(d + 'alignment.json')).get('segments') or []         # exact speech spans for the rough plan (edit/blocks.py)
         except (OSError, ValueError): pass
+        try:
+            fv = json.load(open(d + 'face_view.json')); clips[-1]['face_view'] = [(s['t'], s['score']) for s in fv.get('samples') or []]; clips[-1]['face_clear'] = float(fv.get('clear', 0.5))      # how clearly the wearer's face is seen, once a second (analysis/face_view.py)
+        except (OSError, ValueError, KeyError): pass
     return clips, missing
 
 
@@ -104,29 +107,60 @@ def serialise(segs, clips, music, lib, locked_wids=()):
         out.append(dict(id=sg.parts['wid'], index=i, clip=sg.cand.clip, cand_id=sg.cand.id, cand_start_s=sg.cand.start_s, cand_end_s=sg.cand.end_s, film_start_s=round(sg.start * music.beat_s, 3), start_beat=sg.start, beats=sg.beats,
                         dur_s=round(dur, 3), clip_start_s=sg.clip_start_s, in_s=sg.in_s, utc_start=t0.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z', utc_end=(t0 + dt.timedelta(seconds=dur)).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
                         energy=round(float(sg.cand.energy), 3), technique=sg.tech.id, family=sg.tech.family, hero=sg.tech.hero, variant_seed=sg.variant_seed, forced=sg.forced, speech=bool(sg.parts.get('speech', sg.cand.speech)), kind=getattr(sg.cand, 'kind', 'span'), view=getattr(sg.cand, 'view', 'ahead'), locked=sg.parts['wid'] in locked_wids,
-                        options=sg.parts['options']))
+                        options=sg.parts['options'], voice_span=sg.parts.get('voice_span')))
     return out
 
 
-def apply_gap_items(folder, draft, log=print):
-    """Plan, in synthetic.json, the generated clip each `gap` item of the draft asks for (its kind and length), so that it can be rendered afterwards (rendering is its own step; a 3D flyover asked for by the script waits for your
-    approval). A clip already planned for the same kind and length is left as it is; one with another kind or length is planned again (a render of the old one no longer matches). Returns the clips planned."""
+def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
+    """Plan, in synthetic.json, the generated clip every item of the draft that uses a gap needs, so that it can be rendered afterwards (rendering is its own step, started from the Gaps panel):
+      a `gap` item       the length it names; HOW it is drawn (2D map or 3D flyover) is the planner's choice (`synthetic.choose_kind`), not the script's, except that a clip already rendered, or one you made by hand, keeps its kind;
+      a `broll` item     its length, in the kind already planned for the gap (else the planner's choice);
+      a `vo` item        narration over the gap: the clip is at least as long as the narration needs (its lead-in, the spoken length from `voice_s` or the words at `wpm`, its tail), in the planned kind (else the planner's choice).
+    A clip already planned for the same kind and long enough is left as it is; one of another kind or too short is planned again (a render of the old one no longer matches. Returns the clips planned."""
+    from strata360.edit import script_plan as SPL, synthetic as SY
+    from strata360.gps import gaps as GP, track
+    from strata360.pipeline import config
+    voice_s = voice_s or {}; items = [(n, it) for n, it in enumerate(draft.get('items') or []) if norm_label(it.get('clip', '')).startswith('G') and it.get('type') in ('gap', 'broll', 'vo')]
+    if not items: return []
+    cfg = config.load(folder); tp = config.track_path(folder, cfg); tz = cfg.get('timezone', 'Europe/Brussels')
+    if not tp: raise O.Infeasible('the script uses gaps but there is no race track')
+    gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}; last = None
+    def kind_of(old, gap, sec):
+        """A rendered clip and one you made keep their kind; otherwise the planner chooses (and remembers the last choice for the variety)."""
+        nonlocal last
+        k = old['kind'] if old and (old.get('by') == 'user' or old.get('exists') or old.get('file')) else SY.choose_kind(gap, sec, last); last = k; return k
+    for n, it in items:
+        gid = norm_label(it.get('clip', ''))
+        if gid not in gaps: log(f'item {n + 1}: no such gap {gid}; skipped'); continue
+        old = docs.get(gid)
+        if it['type'] == 'vo':
+            text = (it.get('text') or '').strip(); speak = voice_s.get(n); speak = len(text.split()) * 60.0 / wpm if speak is None else speak
+            need = round(SPL.LEAD_S + speak + SPL.TAIL_S, 2); kind = kind_of(old, gaps[gid], max(need, SY.MIN_SECONDS))
+            if old and old['kind'] == kind and old['seconds'] >= need - 0.05: continue
+            sec = max(need, old['seconds'] if old and old['kind'] == kind else SY.default_seconds(gaps[gid]['duration_s']))
+        else:
+            sec = round(float(it.get('seconds') or 0), 2); kind = kind_of(old, gaps[gid], sec)
+            if old and old['kind'] == kind and abs(old['seconds'] - sec) < 0.05: continue
+        try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind)
+        except ValueError as e: log(f'item {n + 1}: {gid}: {e}; skipped'); continue
+        made.append(SY.upsert(folder, clip)); log(f"planned {kind} clip {gid} for {clip['seconds']:g} s"); docs[gid] = made[-1]
+    return made
+
+
+def sync_gap_clips(folder, specs, log=print):
+    """Make synthetic.json match the plan's generated clips: the plan may have shortened or lengthened one to fit the music, or added a gap the script left out (`specs` are the plan's `synthetic` entries: clip, seconds). A clip that is
+    missing is planned as the 2D map; one of another length is planned again in its own kind. Returns the clips planned."""
     from strata360.edit import synthetic as SY
     from strata360.gps import gaps as GP, track
     from strata360.pipeline import config
-    items = [it for it in draft.get('items') or [] if it.get('type') == 'gap']
-    if not items: return []
-    cfg = config.load(folder); tp = config.track_path(folder, cfg); tz = cfg.get('timezone', 'Europe/Brussels')
-    if not tp: raise O.Infeasible('the script has gap items but there is no race track')
-    gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}
-    for it in items:
-        gid = norm_label(it.get('clip', ''))
-        if gid not in gaps: log(f'gap item {gid}: no such gap; skipped'); continue
-        kind = it.get('kind') or 'map'; sec = round(float(it.get('seconds') or 0), 2); old = docs.get(gid)
-        if old and old['kind'] == kind and abs(old['seconds'] - sec) < 0.05: continue
-        try: clip = SY.make(gaps[gid], seconds=sec, kind=kind, approved=kind != 'flyover')
-        except ValueError as e: log(f'gap item {gid}: {e}; skipped'); continue
-        made.append(SY.upsert(folder, clip)); log(f'planned {kind} clip {gid} for {sec:g} s' + (' (waiting for your approval)' if made[-1]['approved'] is False else ''))
+    docs = {c['id']: c for c in SY.load(folder)['clips']}; todo = [sp for sp in specs if sp['clip'] not in docs or abs(docs[sp['clip']]['seconds'] - sp['seconds']) > 0.05]
+    if not todo: return []
+    cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []; last = None
+    for sp in todo:
+        old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
+        kind = old['kind'] if old and (old.get('by') == 'user' or old.get('file')) else SY.choose_kind(gaps[sp['clip']], sec, last)           # the planner chooses again for the new length (a clip shortened to 4 s is a map), unless it is rendered or yours
+        last = kind
+        clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
     return made
 
 
@@ -139,7 +173,7 @@ def insert_synthetic(folder, ser, specs, beat_s):
         c = docs[sp['clip']]; dur = round(sp['beats'] * beat_s, 3); c.setdefault('file', os.path.join('synthetic', c['id'] + '.mp4'))        # a clip not rendered yet has its file named already
         out.append(dict(id=f"{c['id']}@0.00", index=0, clip=c['id'], cand_id=f"{c['id']}:map", cand_start_s=0.0, cand_end_s=c['seconds'], film_start_s=round(sp['start_beat'] * beat_s, 3), start_beat=sp['start_beat'], beats=sp['beats'], dur_s=dur,
                         clip_start_s=0.0, in_s=0.0, utc_start=c['t0'], utc_end=c['t1'], energy=0.5, technique='map', family='generated', hero=False, variant_seed=0, forced=False, speech=False, kind='synthetic', view=None, options=[],
-                        synthetic=os.path.normpath(os.path.join(rd, c['file'])), role=sp['role'], item=sp['item'], energy_hi=False))
+                        synthetic=os.path.normpath(os.path.join(rd, c['file'])), synthetic_seconds=c['seconds'], role=sp['role'], item=sp['item'], energy_hi=False))
     out.sort(key=lambda g: g['start_beat'])
     for i, g in enumerate(out): g['index'] = i
     return out
@@ -148,28 +182,30 @@ def insert_synthetic(folder, ser, specs, beat_s):
 def plan_from_script(folder, draft_name=None, log=print):
     """Make the film's plan from the whole-race script (edit/script_draft.py, edit/script_plan.py) and save it as the plan: the script's dialogue, narration and b-roll in order, in windows of whole beats, the
     narration timed by how long the voice takes to say it. Also writes script2/lines.json, the narration the voice-over builder speaks and places. Raises O.Infeasible with the reason."""
-    from strata360.edit import script_draft as SD, script_pack as SP, script_plan as SPL, synthetic as SY, transitions as TR, voiceover as VO
+    from strata360.edit import pans as PN, script_draft as SD, script_pack as SP, script_plan as SPL, synthetic as SY, transitions as TR, voiceover as VO
     edit = load(folder); clips, missing = load_clips(folder); names = SD.list_drafts(folder); name = draft_name or (names[-1] if names else None); draft = SD.load_draft(folder, name)
     if not draft: raise O.Infeasible('there is no script draft yet: write one first (strata360 script-draft)')
     if not clips: raise O.Infeasible('no candidates yet: the candidates stage has to finish for at least one clip')
     lib = TQ.load(); mus = music_info(folder, edit['settings']); bpm = float(mus['bpm']) if mus else float(edit['settings']['bpm']); bar = int(mus['bar_beats']) if mus else int(edit['settings']['bar_beats'])
     music = O.Music(bpm=bpm, beats=1, bar_beats=bar, sections=[tuple(x) for x in mus['sections']] if mus else [(0, 10 ** 9, 0.5)])
-    apply_gap_items(folder, draft, log); pack = SP.build(folder); vo_items = [(n, it) for n, it in enumerate(draft['items']) if it.get('type') == 'vo' and (it.get('text') or '').strip()]
+    pack = SP.build(folder); vo_items = [(n, it) for n, it in enumerate(draft['items']) if it.get('type') == 'vo' and (it.get('text') or '').strip()]
     by_label = {c['label']: c['clip'] for c in pack['clips']}; seg_of = {n: SPL.seg_id(by_label.get(norm_label(it.get('clip', '')), ''), it['text']) for n, it in vo_items}
     spoken = VO.line_durations(folder, [dict(seg=seg_of[n], text=it['text'].strip()) for n, it in vo_items], log); voice_s = {n: spoken[seg_of[n]] for n, _ in vo_items if seg_of[n] in spoken}
+    if apply_gap_items(folder, draft, log, voice_s, float(draft.get('wpm') or 150.0)): pack = SP.build(folder)                           # the clips the draft needs for its gaps (the narration is spoken by now, so a clip is made as long as the voice needs)
     o = edit['overrides']; st = CH.Settings(seed=int(edit['settings']['seed']), tech_force=dict(o['tech_force']), bans_techs=frozenset(o['bans_techs']))
     res = SPL.build(draft, pack, clips, lib, music, voice_s, wpm=float(draft.get('wpm') or 150.0), st=st, target_s=((pack.get('music') or {}).get('length_s')))
     music = O.Music(bpm=bpm, beats=res['beats'], bar_beats=bar, sections=music.sections); ser = serialise(res['segs'], clips, music, lib)
     for g, role, k in zip(ser, res['roles'], res['piece_of']): g['role'] = role; g['item'] = res['pieces'][k]['n']; g['energy_hi'] = g['energy'] >= 0.6
-    ser = insert_synthetic(folder, ser, res.get('synthetic') or [], music.beat_s)
+    sync_gap_clips(folder, res.get('synthetic') or [], log); ser = insert_synthetic(folder, ser, res.get('synthetic') or [], music.beat_s)
     for g in ser:
-        if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + (' (a 3D flyover the script asked for: approve it in the Gaps panel)' if (next((c for c in SY.load(folder)['clips'] if c['id'] == g['clip']), {}).get('approved') is False) else '') + '; the film shows a card until it is')
+        if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
+    PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
     now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     edit['plan'] = dict(generated_at=now, source='script', script=name, film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=bpm, bar_beats=bar, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
-                        segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [], fit=res.get('fit'))
+                        segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [], fit=res.get('fit'), auto_gaps=res.get('auto_gaps') or [])
     save(folder, edit); rd = config.race_dir(folder); os.makedirs(os.path.join(rd, 'script2'), exist_ok=True); p = os.path.join(rd, VO.SCRIPT2_LINES); json.dump(dict(draft=name, generated_at=now, lines=res['lines']), open(p + '.tmp', 'w'), indent=1); os.replace(p + '.tmp', p)
     return edit
 

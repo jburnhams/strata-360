@@ -64,7 +64,8 @@ def plan_one(view, **ft):
 
 
 def test_a_requested_view_is_used_when_the_footage_has_it_and_said_not_to_be_when_it_does_not():
-    assert plan_one('close', you_close=0.9, you_far=0.9)[0] == 'selfie_close' and plan_one('far', you_close=0.9, you_far=0.9)[0] == 'selfie_far' and plan_one('mid', you_close=0.9, you_far=0.9)[0] == 'selfie_hold'
+    assert plan_one('far', you_close=0.9, you_far=0.9)[0] == 'selfie_far' and plan_one('mid', you_close=0.9, you_far=0.9)[0] == 'selfie_hold'
+    tech, warns = plan_one('close', you_close=0.9, you_far=0.9); assert tech != 'selfie_close' and any('close view of you was asked for' in w and 'mid view of you next to it' in w for w in warns)             # a lone window has no mid view next to it to glide with: the close view is only for the windows of a talking stretch cut into shots
     tech, warns = plan_one('far', you_close=0.9)
     assert tech != 'selfie_far' and any('far view of you was asked for' in w for w in warns)
 
@@ -94,3 +95,56 @@ def test_the_pack_tells_the_writer_which_views_a_clip_has_and_for_how_much_of_it
     assert SP.you_views(cands) == dict(mid=0.8, close=0.9, far=0.23) and SP.you_views([dict(kind='span', start_s=0.0, end_s=10.0, features=dict(protagonist=0.05))]) is None
     c = dict(label='0001', clip='C', duration_s=50.0, usable_s=40.0, usable=[], scene={}, note='', lines=[], speech_s=0.0, speech_words=0, you_views=dict(mid=0.8, close=0.9, far=0.23), start_utc='2026-02-22T10:00:00Z')
     assert 'views of you' in SP.render(dict(race={}, clips=[c])) and 'close (a face zoom) 90%' in SP.render(dict(race={}, clips=[c])) and 'views of you' not in SP.render(dict(race={}, clips=[dict(c, you_views=dict(mid=0.8, close=0.1, far=0.0))]))
+
+
+def test_cuts_in_a_pause_snap_to_whole_beats_so_the_shots_meet():
+    assert SPL.snap_cuts([6.1], [(5.6, 6.6)], 0.0, 0.5, end=20.0) == [6.0]
+    assert SPL.snap_cuts([6.0], [(5.9, 6.1), (7.0, 8.2)], 0.0, 0.7, end=20.0) == [7.0]             # the first pause holds no beat boundary (4.2, 4.9 ... 5.6, 6.3): the next that does is used
+    assert SPL.snap_cuts([6.0], [(5.95, 6.05)], 0.0, 0.7, end=20.0) == [6.0]                         # none within reach: the middle stays
+
+
+def test_join_runs_starts_the_second_shot_where_the_first_ends_but_never_past_the_pause():
+    from types import SimpleNamespace as NS
+    def pair(start_b, spans):
+        a = NS(cand=NS(clip='c', start_s=0.0), clip_start_s=10.0, beats=10, in_s=10.0); b = NS(cand=NS(clip='c', start_s=0.0), clip_start_s=start_b, beats=8, in_s=start_b)
+        wa, wb = NS(_piece=0, _start=10.0), NS(_piece=0, _start=start_b); SPL.join_runs([a, b], [wa, wb], [dict(pause_spans=spans)], 0.6); return b
+    assert pair(15.7, [(15.4, 16.2)]).clip_start_s == 16.0                       # the first runs to 16.0 (10 beats of 0.6 s): the second starts there
+    assert pair(15.7, [(15.4, 15.8)]).clip_start_s == 15.8                       # only to the end of the pause
+    assert pair(15.7, []).clip_start_s == 16.0                                   # no pause (a cut inside speech, busy footage): the second shot runs straight on from the first
+
+
+def test_the_face_centre_comes_from_the_face_box_inside_the_person_box():
+    from strata360.analysis import views
+    me = dict(box=[100, 100, 200, 300], face_box=[130, 110, 170, 170], height_deg=40.0, pitch=0.0)              # 200 px tall = 40 degrees: 0.2 degrees a pixel; the face centre is 60 px above the box centre and level with it sideways
+    assert views.face_offsets(me) == (12.0, 0.0)
+    assert views.face_offsets(dict(me, face_box=[150, 110, 190, 170])) == (12.0, 4.0) and views.face_offsets(dict(me, face_box=None)) == (None, None) and views.face_offsets(dict(me, height_deg=None)) == (None, None)
+    assert views.face_offsets(dict(me, pitch=60.0))[1] == pytest.approx(0.0, abs=1e-6) and views.face_offsets(dict(me, face_box=[150, 110, 190, 170], pitch=60.0))[1] == pytest.approx(8.0)       # sideways offsets grow towards the pole
+
+
+def test_the_close_view_centres_the_face_where_the_detector_found_it_and_is_a_little_wider_than_before():
+    from strata360.edit import framing as FR, techniques as T2
+    assert T2.CLOSE_FOV == 58.0
+    lib = TQ.load(); you = lambda **k: [dict(t=8.0 + i, yaw=200.0, pitch=-30.0, height=45.0, head=-8.0, who='you', speaking=False, **k) for i in range(10)]
+    seg = dict(id='c@10', clip='c', clip_start_s=10.0, dur_s=4.0, technique='selfie_close', variant_seed=1); data = lambda s: dict(person=[], you=s, heading=lambda t: 30.0, speakers=[])
+    p0 = FR.resolve_segment(seg, lib, data(you())); p1 = FR.resolve_segment(seg, lib, data(you(face=-26.0, face_dyaw=2.0)))
+    assert p1['keyframes'][0]['pitch'] == pytest.approx(-26.0, abs=0.5) and p1['keyframes'][0]['yaw'] == pytest.approx(202.0, abs=0.5)            # the face centre, not an estimate from the top of the head
+    assert p0['keyframes'][0]['pitch'] == pytest.approx(-8.0 - 0.30 * 45.0, abs=1.0) and p1['keyframes'][0]['fov'] == 58.0                            # without the face box: the head-top estimate as before
+
+
+def test_the_close_view_is_for_dialogue_and_used_at_most_three_times_while_the_mid_view_has_a_bias():
+    from strata360.edit import chrono as CH
+    assert LIB['selfie_close'].max_uses == 3 and LIB['selfie_close'].max_share <= 0.06 and CH.Settings().tech_bias['selfie_hold'] > 0 and 'selfie_close' not in CH.Settings().tech_bias
+
+
+def test_you_are_tracked_at_the_frame_rate_through_the_cameras_own_motion_and_the_window_shortens_where_you_move_about():
+    from strata360.edit import framing as FR
+    # a camera that swings about its vertical axis by up to 40 degrees while you stay 2 m in front of it (fixed in the body frame): the detections (1 Hz) are where you are IN THE WORLD
+    swing = lambda t: np.radians(40.0) * np.sin(2 * np.pi * 0.7 * t)
+    def stab(t):
+        a = swing(t); return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])           # d_body = M d_world
+    world_yaw = lambda t: float(np.degrees(np.arctan2(*(stab(t).T @ np.array([0.0, 1.0, 0.0]))[:2])))              # you are straight ahead in the body frame
+    samples = [dict(t=float(t), yaw=world_yaw(t), pitch=0.0) for t in range(0, 12)]
+    abs_t = np.arange(2.0, 8.0, 0.04); yaw, pitch = FR.you_track(samples, stab, abs_t); truth = np.array([np.radians(world_yaw(t)) for t in abs_t])
+    err = np.degrees(np.abs(((yaw - truth + np.pi) % (2 * np.pi)) - np.pi)); assert err.max() < 1.0 and np.abs(pitch).max() < 1e-6                     # frame-rate truth although the detections are a second apart
+    assert FR.you_track(samples[:1], stab, abs_t) is None and FR.you_track(samples, None, abs_t) is None
+    far = FR.you_track(samples, stab, np.array([40.0])); assert np.isnan(far[0][0])                              # no detection within 2.5 s: nothing

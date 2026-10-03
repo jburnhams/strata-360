@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent } from '@testing-library/react'
+import L from 'leaflet'
 import TrackMap from '../../src/components/TrackMap'
 import { screen, setup } from '../utils/render'
 import { makeTrackClip, makeTrackLine } from '../utils/factories'
@@ -23,6 +24,14 @@ describe('TrackMap', () => {
     setup(<TrackMap {...props()} />)
     expect(screen.getByRole('application', { name: 'Race map' })).toBeInTheDocument()
     expect(screen.getByTitle('Clip 0023')).toHaveTextContent('0023'); expect(screen.getByTitle('Clip 0024')).toHaveTextContent('0024'); expect(screen.queryByTitle('Clip 0001')).not.toBeInTheDocument()
+  })
+
+  it('draws routes dashed and runs plain under the race track, and a marker with a tooltip for each point of interest', () => {
+    const lines = vi.spyOn(L, 'polyline')
+    setup(<TrackMap {...props()} extras={[{ id: 't2', kind: 'route', name: 'course.gpx', lat: [50, 50.1], lon: [5, 5.1] }, { id: 't3', kind: 'run', name: 'watch.fit', lat: [50, 50.2], lon: [5, 5.2] }]} pois={[{ name: 'Aid 1', lat: 50.05, lon: 5.05, ele: 120, sym: '', desc: 'water', track: 't2' }]} />)
+    const opts = lines.mock.calls.map(c => c[1] as L.PolylineOptions)
+    expect(opts.some(o => o.color === '#2563eb' && o.dashArray)).toBe(true); expect(opts.some(o => o.color === '#a3a3a3' && !o.dashArray)).toBe(true)
+    expect(screen.getByTitle('Aid 1')).toBeInTheDocument(); lines.mockRestore()
   })
 
   it('colours a marker green when the draft plays the clip and grey when it does not', () => {
