@@ -26,7 +26,10 @@ export interface Poi { name: string; lat: number; lon: number; ele: number | nul
 export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
 export interface Timing { total_s: number; start: number; end: number; checkpoints: Record<string, number>; sections: Record<string, number>; ran_m?: Record<string, number>; arrivals?: Record<string, { t: number; elapsed_s: number; km: number }>; ascent_m?: number; descent_m?: number; consistent: boolean }
 export interface EndMarkers { start: { lat: number; lon: number; t: number }; end: { lat: number; lon: number; t: number; km: number; elapsed_s: number }; finish: { lat: number; lon: number } | null }
+export interface PhotoAnalysis { setting?: string; description?: string; tags?: string[]; lighting?: string; weather?: string; scenery?: number; clarity?: number; people?: number; me?: boolean; face_clear?: boolean; place?: string; exposure?: string; quality?: string; overlay?: boolean; stages: string[] }
+export interface PhotoJob { running: boolean; log: string[]; error: string }
 export interface Photo {
+  analysis?: PhotoAnalysis
   id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
   loc: { lat: number; lon: number; source: 'photo gps' | 'run track' } | null; apart_m: number | null; flag: string | null; where: { kind: 'clip' | 'gap'; id: string } | null
 }
@@ -156,7 +159,8 @@ export const api = {
     if (!r.ok) throw new Error(`${file.name}: ${j.detail || `HTTP ${r.status}`}`)
     return j as TrackEntry
   },
-  photos: (folder: string) => call<{ photos: Photo[]; tz: string }>('/api/photos?' + q({ folder })),
+  photos: (folder: string) => call<{ photos: Photo[]; tz: string; job?: PhotoJob }>('/api/photos?' + q({ folder })),
+  analysePhotos: (folder: string, body: { stages?: string[]; photo?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/photos/analyse', { folder, ...body }),
   uploadPhoto: async (folder: string, file: File) => {
     const r = await fetch('/api/photos?' + q({ folder, filename: file.name }), { method: 'POST', body: file })
     const j = await r.json().catch(() => ({}))
@@ -165,6 +169,7 @@ export const api = {
   },
   deletePhoto: async (folder: string, id: string) => { const r = await fetch('/api/photos?' + q({ folder, id }), { method: 'DELETE' }); if (!r.ok) throw new Error(`HTTP ${r.status}`) },
   photoThumb: (folder: string, id: string, w = 480) => '/api/photos/thumb?' + q({ folder, id, w: String(w) }),
+  photoOverlay: (folder: string, id: string) => '/api/photos/thumb?' + q({ folder, id, overlay: '1' }),
   photoFile: (folder: string, id: string) => '/api/photos/file?' + q({ folder, id }),
   setCutoff: (folder: string, key: string, text: string) => call<TracksListing>('/api/tracks/cutoff', { folder, key, text }),
   setTrackKind: (folder: string, id: string, kind: TrackKind) => call<TracksListing>('/api/tracks/kind', { folder, id, kind }),

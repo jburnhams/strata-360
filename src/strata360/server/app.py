@@ -51,6 +51,7 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+PHOTO_JOBS = {}               # folder -> Popen of a running `strata360 photos-analyse`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
 PLAN_JOBS = {}                # folder -> Popen of a running `strata360 script-plan`
@@ -963,14 +964,25 @@ def create_app(roots, token=None):
             if c: clips.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=c['video']['source_frames'] / c['video']['nominal_fps']))
         try: gaps = gap_rows(f) if run is not None else []
         except HTTPException: gaps = []
+        from strata360.analysis import photo_analysis as PA
         out = []
         for e in PH.load(rd)['photos']:
-            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); out.append(r)
+            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); out.append(r)
         return sorted(out, key=lambda x: x['taken_utc'])
+
+    def photo_job(f):
+        """The state of the photo analysis: whether it is running, the end of its log, and the last failure (a stage that could not run says why)."""
+        from strata360.analysis import photo_analysis as PA
+        job = PHOTO_JOBS.get(f); running = bool(job and job.poll() is None); lines = []
+        try: lines = open(os.path.join(PA.adir(config.race_dir(f)), 'run.log'), errors='replace').read().strip().splitlines()
+        except OSError: pass
+        lines = [l for l in lines if 'unsupported hash type' not in l and not l.startswith(('Traceback', '  File', '    ', 'ValueError: unsupported', 'ERROR:root'))]
+        fail = next((l for l in reversed(lines) if 'FAILED' in l or l.startswith('photos-analyse:')), '')
+        return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
 
     @api.get('/api/photos', dependencies=[Depends(auth)])
     def get_photos(folder: str):                                                         # the photos with their time, place (own GPS first, else the run's position at that time), whether those disagree, and the clip or gap they fall in
-        f = folder_of(folder); return dict(photos=photo_rows(f), tz=(config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}).get('timezone') or 'Europe/Brussels')
+        f = folder_of(folder); return dict(photos=photo_rows(f), job=photo_job(f), tz=(config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}).get('timezone') or 'Europe/Brussels')
 
     @api.post('/api/photos', dependencies=[Depends(auth)])
     async def post_photo(request: Request, folder: str, filename: str):                  # one photo as the raw request body (the page sends several one after the other)
@@ -979,6 +991,17 @@ def create_app(roots, token=None):
         try: e = PH.add(config.race_dir(f), filename, data, cfg.get('timezone') or 'Europe/Brussels')
         except ValueError as ex: raise HTTPException(400, f'{filename}: {ex}')
         return next(x for x in photo_rows(f) if x['id'] == e['id'])
+
+    @api.post('/api/photos/analyse', dependencies=[Depends(auth)])
+    def post_photos_analyse(body: dict):                                                 # {folder, stages?: [..], photo?: [ids], force?}: run the clip stages that make sense for a photo over the photos, in the background at the lowest priority (`strata360 photos-analyse`)
+        from strata360.analysis import photo_analysis as PA
+        f = folder_of(body.get('folder')); stages = [str(s) for s in body.get('stages') or []]; bad = [s for s in stages if s not in PA.VERSIONS]
+        if bad: raise HTTPException(400, f'unknown photo stage(s) {", ".join(bad)}: one of {", ".join(PA.ORDER)}')
+        job = PHOTO_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='the photos are already being analysed')
+        cmd = [*oslib.cli_command(), 'photos-analyse', f] + (['--stages', ','.join(stages)] if stages else []) + [x for p in body.get('photo') or [] for x in ('--photo', str(p))] + (['--force'] if body.get('force') else [])
+        d = PA.adir(config.race_dir(f)); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'run.log'), 'wb')
+        PHOTO_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.delete('/api/photos', dependencies=[Depends(auth)])
     def delete_photo(folder: str, id: str):                                              # take a photo out (its files are kept under photos/removed)
@@ -989,9 +1012,15 @@ def create_app(roots, token=None):
         return dict(photos=photo_rows(f))
 
     @api.get('/api/photos/thumb')
-    def get_photo_thumb(request: Request, folder: str, id: str, w: int = 480):           # a small copy, the right way up (an <img> cannot send headers: the cookie / query token authenticates)
+    def get_photo_thumb(request: Request, folder: str, id: str, w: int = 480, overlay: bool = False):  # a small copy, the right way up (an <img> cannot send headers: the cookie / query token authenticates); overlay=1: the picture with the race overlay as it was then, once the thumb_overlay stage has made it
         from strata360 import photos as PH
-        auth(request); p = PH.thumb(config.race_dir(folder_of(folder)), id, w)
+        from strata360.analysis import photo_analysis as PA
+        auth(request); rd = config.race_dir(folder_of(folder))
+        if overlay:
+            o = os.path.join(PA.adir(rd), f'{id}-overlay.jpg')
+            if os.path.exists(o): return FileResponse(o, media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
+            raise HTTPException(404, 'no overlay version of this photo yet')
+        p = PH.thumb(rd, id, w)
         if not p: raise HTTPException(404, 'no such photo')
         return FileResponse(p, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
 

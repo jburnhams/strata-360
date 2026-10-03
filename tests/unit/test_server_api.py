@@ -487,3 +487,21 @@ class TestPhotosApi(TestGapClipsApi):
         q = dict(folder=project.folder, filename='notes.txt'); assert client.post('/api/photos', params=q, content=b'x' * 300).status_code == 400
         r = client.post('/api/photos', params=dict(folder=project.folder, filename='bad.jpg'), content=b'x' * 300); assert r.status_code == 400 and r.json()['detail'].startswith('bad.jpg: ')
         assert client.get('/api/photos', params=dict(folder=project.folder)).json()['photos'] == []
+
+
+class TestPhotoAnalysisApi(TestPhotosApi):
+    def test_the_analysis_is_started_in_the_background_and_its_results_are_in_the_list(self, client, project, fake_popen):
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
+        r = client.post('/api/photos/analyse', json=dict(folder=project.folder, stages=['scenes', 'exposure'], photo=['p1'], force=True)); assert r.json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'photos-analyse' in cmd and cmd[cmd.index('--stages') + 1] == 'scenes,exposure' and cmd[cmd.index('--photo') + 1] == 'p1' and '--force' in cmd
+        assert client.post('/api/photos/analyse', json=dict(folder=project.folder, stages=['audio'])).status_code == 400
+        j = client.get('/api/photos', params=q).json(); assert j['job']['running'] is True and j['photos'][0]['analysis']['stages'] == [] and client.post('/api/photos/analyse', json=dict(folder=project.folder)).json()['started'] is False
+
+    def test_results_and_an_overlay_picture_are_served(self, client, project):
+        from strata360.analysis import photo_analysis as PA
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60)); rd = project.race_dir
+        assert client.get('/api/photos/thumb', params=dict(q, id='p1', overlay=1)).status_code == 404
+        doc = PA.load_doc(rd, 'p1'); doc['scenes'] = dict(ok=True, setting='trail', description='x', tags=['a'], scenery=7.0, clarity=4.0); doc['stages']['scenes'] = dict(version=1, key='k'); PA.save_doc(rd, doc)
+        os.makedirs(PA.adir(rd), exist_ok=True); open(os.path.join(PA.adir(rd), 'p1-overlay.jpg'), 'wb').write(b'\xff\xd8jpeg')
+        a = client.get('/api/photos', params=q).json()['photos'][0]['analysis']; assert a['scenery'] == 7.0 and a['tags'] == ['a'] and a['stages'] == ['scenes']
+        assert client.get('/api/photos/thumb', params=dict(q, id='p1', overlay=1)).content == b'\xff\xd8jpeg'

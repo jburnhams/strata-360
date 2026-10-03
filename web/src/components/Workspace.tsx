@@ -27,7 +27,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   const meta = usePoll(() => api.meta(folder), 60000, [folder])
   const clips = usePoll(() => api.clips(folder).then(r => r.clips), 8000, [folder])
   const [photoTick, setPhotoTick] = useState(0)
-  const photoData = usePoll(() => api.photos(folder), 15000, [folder, photoTick]); const photos = photoData?.photos; const tz = meta?.timezone ?? photoData?.tz ?? 'Europe/Brussels'
+  const photoData = usePoll(() => api.photos(folder), 8000, [folder, photoTick]); const photos = photoData?.photos; const tz = meta?.timezone ?? photoData?.tz ?? 'Europe/Brussels'
   const openWhere = (w: { kind: 'clip' | 'gap'; id: string }) => { setFocus(undefined); setSel(w.kind === 'gap' ? `@gap:${w.id}` : w.id) }
   const gaps = usePoll(() => api.gaps(folder).then(r => r.gaps), 8000, [folder])
   const [overlay, setOverlay] = useThumbOverlay()
@@ -54,7 +54,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <FilmDetails folder={folder} />
             <ProjectProgress folder={folder} onResults={() => setSel('@timeline')} />
             <TrackPanel folder={folder} tz={tz} photos={photos} onOpenPhoto={p => p.where && openWhere(p.where)} onOpenClip={c => { setFocus(undefined); setSel(c) }} onOpenGap={g => { setFocus(undefined); setSel(`@gap:${g}`) }} />
-            <PhotosPanel folder={folder} photos={photos} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} onOpen={openWhere} />
+            <PhotosPanel folder={folder} photos={photos} tz={tz} job={photoData?.job} onChanged={() => setPhotoTick(t => t + 1)} onOpen={openWhere} />
             <MusicPanel folder={folder} />
             <ClockPanel folder={folder} />
             <WhoPanel folder={folder} />
