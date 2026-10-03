@@ -505,3 +505,28 @@ class TestPhotoAnalysisApi(TestPhotosApi):
         os.makedirs(PA.adir(rd), exist_ok=True); open(os.path.join(PA.adir(rd), 'p1-overlay.jpg'), 'wb').write(b'\xff\xd8jpeg')
         a = client.get('/api/photos', params=q).json()['photos'][0]['analysis']; assert a['scenery'] == 7.0 and a['tags'] == ['a'] and a['stages'] == ['scenes']
         assert client.get('/api/photos/thumb', params=dict(q, id='p1', overlay=1)).content == b'\xff\xd8jpeg'
+
+
+class TestPhotoMotionApi(TestPhotosApi):
+    def test_the_move_is_planned_from_what_was_found_in_the_photo_and_the_choice_is_saved(self, client, project):
+        from strata360.analysis import photo_analysis as PA
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
+        doc = PA.load_doc(project.race_dir, 'p1'); doc['people'] = dict(w=80, h=60, people=[], faces=[dict(box=[10, 10, 24, 24], score=0.9, pose=[0, 0, 0], emb=0)]); doc['identity'] = dict(me=dict(face=0, sim=0.9, box=[10, 10, 24, 24]), n_people=1, others=0, threshold=0.45); PA.save_doc(project.race_dir, doc)
+        pl = client.get('/api/photos/motion', params=dict(q, id='p1', style='push_in', seconds=5)).json()
+        assert pl['style'] == 'push_in' and pl['duration_s'] == 5.0 and pl['subjects'][0]['label'] == 'you' and len(pl['windows']) == 2 and all(0 <= v <= 1 for w in pl['windows'] for v in w) and pl['settings'] == dict(style='auto', seconds=6.0, seed=0)
+        saved = client.post('/api/photos/motion', json=dict(q, id='p1', style='reveal', seconds=8, seed=3)); assert saved.status_code == 200 and saved.json()['style'] == 'reveal' and saved.json()['settings'] == dict(style='reveal', seconds=8.0, seed=3)
+        assert client.get('/api/photos/motion', params=dict(q, id='p1')).json()['duration_s'] == 8.0
+        assert client.post('/api/photos/motion', json=dict(q, id='p1', style='spin')).status_code == 400 and client.post('/api/photos/motion', json=dict(q, id='p1', seconds=100)).status_code == 400 and client.post('/api/photos/motion', json=dict(q, id='p9')).status_code == 404
+        assert client.post('/api/photos/motion', json=dict(q, id='p1', style='auto', seconds=6, seed=0)).json()['settings'] == dict(style='auto', seconds=6.0, seed=0) and client.get('/api/photos/motion', params=dict(q, id='p9')).status_code == 404
+
+
+class TestPhotoMotionVideo(TestPhotosApi):
+    def test_the_video_is_made_once_per_move_and_served(self, client, project, monkeypatch):
+        from strata360.edit import photo_motion as PM
+        self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60)); made = []
+        def fake(path, img, pl, size, fps=25.0): made.append((size, pl['style'])); open(path, 'wb').write(b'mp4'); return 1
+        monkeypatch.setattr(PM, 'write_video', fake)
+        a = client.get('/api/photos/motion/video', params=dict(q, id='p1', style='pull_out', seconds=4, w=640)); assert a.status_code == 200 and a.headers['content-type'] == 'video/mp4' and a.content == b'mp4' and made == [((640, 360), 'pull_out')]
+        client.get('/api/photos/motion/video', params=dict(q, id='p1', style='pull_out', seconds=4, w=640)); assert len(made) == 1                                           # kept
+        client.get('/api/photos/motion/video', params=dict(q, id='p1', style='push_in', seconds=4, w=640)); assert len(made) == 2 and client.get('/api/photos/motion/video', params=dict(q, id='p9')).status_code == 404
+        monkeypatch.setattr(PM, 'write_video', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('ffmpeg failed (1): x'))); r = client.get('/api/photos/motion/video', params=dict(q, id='p1', style='hold', seconds=3)); assert r.status_code == 500 and 'ffmpeg failed' in r.json()['detail']

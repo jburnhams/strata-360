@@ -98,3 +98,18 @@ class TestFiles:
         assert e['file'].endswith('.converted.jpg') and e['original'].endswith('.HEIC') and e['time_source'] == 'camera clock + offset'
         monkeypatch.setattr(PH, 'convert_heic', lambda path: None)
         with pytest.raises(ValueError, match='pillow-heif'): PH.add(str(tmp_path), 'IMG_2.heic', b'heic' * 100)
+
+
+class TestMotionSettings:
+    def test_defaults_are_not_stored_and_changes_are_checked(self, tmp_path):
+        rd = str(tmp_path); e = PH.add(rd, 'a.jpg', jpeg()); assert PH.motion_of(e) == dict(style='auto', seconds=6.0, seed=0)
+        assert PH.set_motion(rd, 'p1', style='pan', seconds=9) == dict(style='pan', seconds=9.0, seed=0) and PH.load(rd)['photos'][0]['motion'] == dict(style='pan', seconds=9.0, seed=0)
+        assert PH.set_motion(rd, 'p1', seed=4)['style'] == 'pan'                                                                  # only what is sent changes
+        PH.set_motion(rd, 'p1', style='auto', seconds=6, seed=0); assert 'motion' not in PH.load(rd)['photos'][0]
+        for bad in (dict(style='spin'), dict(seconds=1), dict(seconds=99), dict(seconds='x'), dict(speed=3)):
+            with pytest.raises(ValueError): PH.set_motion(rd, 'p1', **bad)
+        with pytest.raises(KeyError): PH.set_motion(rd, 'p9', style='pan')
+
+    def test_the_size_is_as_the_photo_is_shown(self, tmp_path):
+        ex = Image.Exif(); ex[0x0112] = 6; ex.get_ifd(0x8769)[0x9003] = '2026:02:20 14:12:17'; b = io.BytesIO(); Image.new('RGB', (80, 40)).save(b, 'JPEG', exif=ex)       # turned a quarter: shown 40 x 80
+        e = PH.add(str(tmp_path), 'a.jpg', b.getvalue() + b'\0' * 200); assert (e['width'], e['height']) == (40, 80)

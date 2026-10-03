@@ -34,7 +34,7 @@ export default function PhotosPanel({ folder, photos, tz, job, onChanged, onOpen
       {!job?.running && job?.error && <p role="alert" className="mb-2 text-sm text-red-600">The analysis stopped: {job.error}</p>}
       {errs.length > 0 && <ul role="alert" className="mb-2 space-y-0.5 text-sm text-red-600">{errs.map((e, i) => <li key={i}>{e}</li>)}</ul>}
       {photos && photos.length === 0 && !busy && <p className="text-sm text-stone-500">No photos yet. Add the ones you took during the race (or drop them here): the time in each says where in the race it was taken.</p>}
-      <div className="flex flex-wrap gap-4">{(photos ?? []).map(p => <PhotoCard key={p.id} folder={folder} p={p} tz={tz} onOpen={onOpen} onRemove={() => remove(p)} />)}</div>
+      <div className="flex flex-wrap gap-4">{(photos ?? []).map(p => <PhotoCard key={p.id} folder={folder} p={p} tz={tz} onOpen={onOpen} onRemove={() => remove(p)} onMotion={onChanged} />)}</div>
     </section>
   )
 }

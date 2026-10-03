@@ -72,15 +72,20 @@ class TestRun:
             calls.append(('vlm', sorted(images))); return {k: (dict(setting='trail', description='a path', people=1, tags=['trees', 'path'], lighting='overcast', weather='cloud', scenic=0.4, energy=0.3), dict(score=6, clarity=4, reason='ok')) for k in images}
         return detect, vlm
 
+    def objs(self, calls):
+        def objects(images, tmp):
+            calls.append(('objects', sorted(images))); return {k: dict(w=64, h=48, objects=[dict(label='bicycle', conf=0.8, box=[1, 1, 20, 20]), dict(label='bottle', conf=0.6, box=[2, 2, 5, 9]), dict(label='bottle', conf=0.5, box=[30, 2, 33, 9])]) for k in images}
+        return objects
+
     def test_all_the_stages_run_once_and_a_second_run_does_nothing(self, project, monkeypatch, tmp_path):
         ids = self.project_with_photos(project); monkeypatch.chdir(tmp_path); os.makedirs('profiles'); np.savez('profiles/me.npz', centroid=np.array([1.0] + [0] * 511, np.float32), samples=np.array([[1.0] + [0] * 511], np.float32), threshold=0.5)
         calls = []; detect, vlm = self.fakes(calls); rev = lambda la, lo, d: dict(village='Nadrin'); near = lambda la, lo, d: []
-        done = PA.run(project.folder, detect=detect, vlm=vlm, reverse=rev, nearby=near)
-        assert {s: sorted(v) for s, v in done.items()} == {s: sorted(ids) for s in PA.ORDER} and [c[0] for c in calls] == ['detect', 'vlm']                              # the models are loaded once for all the photos
+        objects = self.objs(calls); done = PA.run(project.folder, detect=detect, vlm=vlm, reverse=rev, nearby=near, objects=objects)
+        assert {s: sorted(v) for s, v in done.items()} == {s: sorted(ids) for s in PA.ORDER} and [c[0] for c in calls] == ['detect', 'objects', 'vlm']                              # the models are loaded once for all the photos
         doc = PA.load_doc(project.race_dir, ids[0]); assert doc['identity']['me']['face'] == 0 and doc['face_view']['clear'] is True and doc['scenes']['scenery'] == 6.0 and doc['scenes']['tags'] == ['trees', 'path'] and doc['exposure']['verdict'] == 'ok'
         assert doc['places']['covered'] is False and doc['thumb_overlay']['made'] is False and os.path.exists(os.path.join(PA.adir(project.race_dir), f'{ids[0]}.npy')) and set(doc['stages']) == set(PA.ORDER)      # (no GPS and no track here)
-        again = PA.run(project.folder, detect=detect, vlm=vlm, reverse=rev, nearby=near); assert all(v == [] for v in again.values()) and len(calls) == 2
-        s = PA.summary(doc); assert s['scenery'] == 6.0 and s['me'] is True and s['people'] == 1 and s['face_clear'] is True and s['tags'] == ['trees', 'path'] and s['stages'] == sorted(PA.ORDER)
+        again = PA.run(project.folder, detect=detect, vlm=vlm, reverse=rev, nearby=near, objects=objects); assert all(v == [] for v in again.values()) and len(calls) == 3
+        s = PA.summary(doc); assert s['scenery'] == 6.0 and s['me'] is True and s['people'] == 1 and s['face_clear'] is True and s['tags'] == ['trees', 'path'] and s['stages'] == sorted(PA.ORDER) and s['objects'] == [dict(label='bottle', n=2), dict(label='bicycle', n=1)]
 
     def test_a_changed_photo_or_force_redoes_what_depends_on_it(self, project, monkeypatch, tmp_path):
         ids = self.project_with_photos(project, 1); calls = []; detect, vlm = self.fakes(calls); kw = dict(stages=['exposure', 'quality', 'people', 'scenes'], detect=detect, vlm=vlm)
@@ -97,7 +102,7 @@ class TestRun:
     def test_unknown_stages_and_nothing_to_do(self, project):
         with pytest.raises(ValueError, match='unknown photo stage'): PA.run(project.folder, stages=['audio'])
         assert PA.run(project.folder, stages=['exposure']) == {'exposure': []}
-        assert 'ingest' in PA.NOT_APPLICABLE and not set(PA.ORDER) & set(PA.NOT_APPLICABLE)
+        assert 'objects' in PA.ORDER and 'ingest' in PA.NOT_APPLICABLE and not set(PA.ORDER) & set(PA.NOT_APPLICABLE)
 
     def test_the_overlay_is_drawn_on_a_photo_taken_during_the_run(self, project, monkeypatch):
         import sys, types

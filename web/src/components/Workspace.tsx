@@ -65,8 +65,8 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <TranscriptPanel folder={folder} clips={clips ?? []} tz={meta?.timezone ?? 'Europe/Brussels'} onOpen={(c, t) => { setFocus(t); setSel(c) }} />
           </div>
         ) : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
-          : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} photos={photos} tz={tz} />
-          : <ClipView folder={folder} clip={sel} focus={focus} photos={photos} tz={tz} />}
+          : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} photos={photos} tz={tz} onPhotosChanged={() => setPhotoTick(t => t + 1)} />
+          : <ClipView folder={folder} clip={sel} focus={focus} photos={photos} tz={tz} onPhotosChanged={() => setPhotoTick(t => t + 1)} />}
       </div>
     </div>
   )

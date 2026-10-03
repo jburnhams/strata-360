@@ -48,11 +48,11 @@ describe('PhotosPanel', () => {
 })
 
 describe('PhotosPanel analysis', () => {
-  const analysed = makePhoto({ analysis: { stages: ['scenes', 'places'], setting: 'trail', weather: 'cloud', description: 'A muddy path through trees.', scenery: 7, clarity: 4, tags: ['trees', 'mud'], place: 'Nadrin (Luxembourg)', people: 2, me: true, face_clear: true, exposure: 'dark', quality: 'ok', overlay: true } })
+  const analysed = makePhoto({ analysis: { stages: ['scenes', 'places'], setting: 'trail', weather: 'cloud', description: 'A muddy path through trees.', scenery: 7, clarity: 4, tags: ['trees', 'mud'], objects: [{ label: 'bottle', n: 2 }, { label: 'bicycle', n: 1 }], place: 'Nadrin (Luxembourg)', people: 2, me: true, face_clear: true, exposure: 'dark', quality: 'ok', overlay: true } })
 
   it('shows what the analysis found on each photo', () => {
     setup(<PhotosPanel folder="/data" photos={[analysed, makePhoto({ id: 'p2', name: 'IMG_2.jpg', analysis: { stages: [] } })]} tz="UTC" onChanged={() => {}} onOpen={() => {}} />)
-    const a = document.querySelector('[data-photo="p1"] [data-analysis]')!; expect(a).toHaveTextContent('A muddy path through trees.'); expect(a).toHaveTextContent('Nadrin (Luxembourg) · trail, cloud · scenery 7/10, clarity 4/5 · 2 people, you among them (face clear) · looks dark')
+    const a = document.querySelector('[data-photo="p1"] [data-analysis]')!; expect(a).toHaveTextContent('A muddy path through trees.'); expect(a).toHaveTextContent('Nadrin (Luxembourg) · trail, cloud · scenery 7/10, clarity 4/5 · 2 people, you among them (face clear) · objects: 2 bottle, bicycle · looks dark')
     expect(a).toHaveTextContent('treesmud'); expect(a.querySelector('a')!.getAttribute('href')).toContain('overlay=1'); expect(document.querySelector('[data-photo="p2"] [data-analysis]')).toBeNull()
   })
 

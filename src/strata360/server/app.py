@@ -967,7 +967,7 @@ def create_app(roots, token=None):
         from strata360.analysis import photo_analysis as PA
         out = []
         for e in PH.load(rd)['photos']:
-            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); out.append(r)
+            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); r['motion'] = PH.motion_of(e); out.append(r)
         return sorted(out, key=lambda x: x['taken_utc'])
 
     def photo_job(f):
@@ -991,6 +991,47 @@ def create_app(roots, token=None):
         try: e = PH.add(config.race_dir(f), filename, data, cfg.get('timezone') or 'Europe/Brussels')
         except ValueError as ex: raise HTTPException(400, f'{filename}: {ex}')
         return next(x for x in photo_rows(f) if x['id'] == e['id'])
+
+    def photo_plan(f, pid, style=None, seconds=None, seed=None):
+        """The pan and zoom for a photo: its saved settings (or those asked for) applied to what the analysis found in it: the plan (edit/photo_motion.py) with the first and last windows as fractions of the picture, for drawing on it."""
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        from strata360.edit import photo_motion as PM
+        rd = config.race_dir(f); e = next((x for x in PH.load(rd)['photos'] if x['id'] == pid), None)
+        if e is None: raise HTTPException(404, 'no such photo')
+        m = PH.motion_of(e); st = style or m['style']; sec = float(seconds if seconds is not None else m['seconds']); sd = int(seed if seed is not None else m['seed'])
+        path = os.path.join(rd, e['file']); size = PH.oriented_size(path)
+        try: pl = PM.plan(size, sec, st, PM.focals(PA.load_doc(rd, pid), PA.read_bgr(path, 480)), sd)
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        w, h = pl['size']; pl['windows'] = [[round(v / d, 4) for v, d in zip(PM.crop_at(pl, t), (w, h, w, h))] for t in (0.0, pl['duration_s'])]; pl['settings'] = m; return pl
+
+    @api.get('/api/photos/motion', dependencies=[Depends(auth)])
+    def get_photo_motion(folder: str, id: str, style: str = '', seconds: float | None = None, seed: int | None = None):   # the pan and zoom plan for a photo (the saved settings unless style / seconds / seed are given), to show its path
+        return photo_plan(folder_of(folder), id, style or None, seconds, seed)
+
+    @api.post('/api/photos/motion', dependencies=[Depends(auth)])
+    def post_photo_motion(body: dict):                                                   # {folder, id, style?, seconds?, seed?}: save the pan and zoom chosen for a photo; returns the plan
+        from strata360 import photos as PH
+        f = folder_of(body.get('folder')); pid = str(body.get('id') or '')
+        try: PH.set_motion(config.race_dir(f), pid, **{k: body[k] for k in ('style', 'seconds', 'seed') if k in body})
+        except KeyError: raise HTTPException(404, 'no such photo')
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        return photo_plan(f, pid)
+
+    @api.get('/api/photos/motion/video')
+    def get_photo_motion_video(request: Request, folder: str, id: str, style: str = '', seconds: float | None = None, seed: int | None = None, w: int = 960):   # the move as a small MP4 to watch (made when first asked for, kept); a <video> cannot send headers: the cookie / query token authenticates
+        import hashlib
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        from strata360.edit import photo_motion as PM
+        auth(request); f = folder_of(folder); rd = config.race_dir(f); pl = photo_plan(f, id, style or None, seconds, seed); w = max(320, min(int(w), 1920)); w -= w % 2; h = int(round(w / pl['aspect'])) // 2 * 2
+        e = next(x for x in PH.load(rd)['photos'] if x['id'] == id); src = os.path.join(rd, e['file'])
+        key = hashlib.sha1(json.dumps([pl['keys'], w, h, os.path.getmtime(src), pl['size']]).encode()).hexdigest()[:12]; out = os.path.join(rd, 'photos', 'motion', f'{id}-{key}.mp4')
+        if not os.path.exists(out):
+            os.makedirs(os.path.dirname(out), exist_ok=True); tmp = out + '.part.mp4'
+            try: PM.write_video(tmp, PA.read_bgr(src, 2400), pl, (w, h)); os.replace(tmp, out)
+            except RuntimeError as ex: raise HTTPException(500, str(ex))
+        return FileResponse(out, media_type='video/mp4', headers={'Cache-Control': 'max-age=86400'})
 
     @api.post('/api/photos/analyse', dependencies=[Depends(auth)])
     def post_photos_analyse(body: dict):                                                 # {folder, stages?: [..], photo?: [ids], force?}: run the clip stages that make sense for a photo over the photos, in the background at the lowest priority (`strata360 photos-analyse`)

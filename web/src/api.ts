@@ -26,10 +26,13 @@ export interface Poi { name: string; lat: number; lon: number; ele: number | nul
 export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
 export interface Timing { total_s: number; start: number; end: number; checkpoints: Record<string, number>; sections: Record<string, number>; ran_m?: Record<string, number>; arrivals?: Record<string, { t: number; elapsed_s: number; km: number }>; ascent_m?: number; descent_m?: number; consistent: boolean }
 export interface EndMarkers { start: { lat: number; lon: number; t: number }; end: { lat: number; lon: number; t: number; km: number; elapsed_s: number }; finish: { lat: number; lon: number } | null }
-export interface PhotoAnalysis { setting?: string; description?: string; tags?: string[]; lighting?: string; weather?: string; scenery?: number; clarity?: number; people?: number; me?: boolean; face_clear?: boolean; place?: string; exposure?: string; quality?: string; overlay?: boolean; stages: string[] }
+export interface PhotoAnalysis { objects?: { label: string; n: number }[]; setting?: string; description?: string; tags?: string[]; lighting?: string; weather?: string; scenery?: number; clarity?: number; people?: number; me?: boolean; face_clear?: boolean; place?: string; exposure?: string; quality?: string; overlay?: boolean; stages: string[] }
+export type MotionStyle = 'push_in' | 'pull_out' | 'pan' | 'drift' | 'reveal' | 'hold'
+export interface MotionSettings { style: 'auto' | MotionStyle; seconds: number; seed: number }
+export interface MotionPlan { style: MotionStyle; duration_s: number; zmax: number; seed: number; subjects: { cx: number; cy: number; w: number; h: number; weight: number; label: string }[]; windows: number[][]; size: number[]; settings: MotionSettings }
 export interface PhotoJob { running: boolean; log: string[]; error: string }
 export interface Photo {
-  analysis?: PhotoAnalysis
+  motion?: MotionSettings; analysis?: PhotoAnalysis
   id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
   loc: { lat: number; lon: number; source: 'photo gps' | 'run track' } | null; apart_m: number | null; flag: string | null; where: { kind: 'clip' | 'gap'; id: string } | null
 }
@@ -160,6 +163,9 @@ export const api = {
     return j as TrackEntry
   },
   photos: (folder: string) => call<{ photos: Photo[]; tz: string; job?: PhotoJob }>('/api/photos?' + q({ folder })),
+  photoMotion: (folder: string, id: string, p: Partial<MotionSettings> = {}) => call<MotionPlan>('/api/photos/motion?' + q({ folder, id, ...(p.style ? { style: p.style } : {}), ...(p.seconds != null ? { seconds: String(p.seconds) } : {}), ...(p.seed != null ? { seed: String(p.seed) } : {}) })),
+  saveMotion: (folder: string, id: string, p: Partial<MotionSettings>) => call<MotionPlan>('/api/photos/motion', { folder, id, ...p }),
+  photoMotionVideo: (folder: string, id: string, p: MotionSettings, w = 960) => '/api/photos/motion/video?' + q({ folder, id, style: p.style, seconds: String(p.seconds), seed: String(p.seed), w: String(w) }),
   analysePhotos: (folder: string, body: { stages?: string[]; photo?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/photos/analyse', { folder, ...body }),
   uploadPhoto: async (folder: string, file: File) => {
     const r = await fetch('/api/photos?' + q({ folder, filename: file.name }), { method: 'POST', body: file })

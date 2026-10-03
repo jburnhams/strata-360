@@ -6,6 +6,7 @@
   people         the persons (YOLO pose) and faces (InsightFace, with the head pose and an embedding) in it                         (the clip `people` stage; `.venv-vision`)
   identity       which face is the wearer (the face profile from `who`), and how many people are in shot                           (the clip `identity` stage)
   face_view      whether the wearer's face is seen clearly (found, not tilted far forward, not turned far away)                   (the clip `face_view` stage)
+  objects        the everyday objects in it (YOLO11, 80 classes: bicycle, car, dog, bottle, backpack, bench, boat, sign ...) with boxes; people are left to `people`   (photos only: not run for clips)
   scenes         the scene described by the local vision model: setting, light, weather, tags, a scenery score 1 to 10 and clarity (the clip `scenes` stage; `.venv-vision`)
   thumb_overlay  the picture with the race overlay as it was at the time the photo was taken                                       (the clip `thumb_overlay` stage)
 
@@ -19,9 +20,9 @@ import datetime as dt, hashlib, json, os, shutil, subprocess, tempfile
 import numpy as np
 
 SCHEMA = 1
-VERSIONS = dict(exposure=1, quality=1, places=1, people=1, identity=1, face_view=1, scenes=1, thumb_overlay=1)
+VERSIONS = dict(exposure=1, quality=1, places=1, people=1, objects=1, identity=1, face_view=1, scenes=1, thumb_overlay=1)
 ORDER = tuple(VERSIONS)
-MODEL_STAGES = ('people', 'scenes')                      # need `.venv-vision` and the models
+MODEL_STAGES = ('people', 'objects', 'scenes')                      # need `.venv-vision` and the models
 NOT_APPLICABLE = ('ingest', 'audio_extract', 'audio_clean', 'audio_background', 'audio_events', 'audio', 'transcribe', 'align', 'transcript_check', 'speakers', 'motion', 'proxy', 'thumb', 'thumb_best', 'candidates')
 ME_MIN_DET = 0.5
 WORK_PX = 1600                                            # photos are looked at this wide (longest side) by the measurements and the detectors
@@ -131,6 +132,16 @@ def run_detect(images, tmp):
     return {int(k): v for k, v in json.load(open(out_json))['images'].items()}, np.load(out_npy)
 
 
+def run_objects(images, tmp):
+    """{index: {w, h, objects: [{label, conf, box}]}} for the BGR images {index: array}, by analysis/photo_objects.py in `.venv-vision`."""
+    import cv2
+    py, src = _py_src()
+    for k, im in images.items(): cv2.imwrite(os.path.join(tmp, f'p{k:05d}.jpg'), im, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    out_json = os.path.join(tmp, 'objects.json')
+    subprocess.run([py, '-m', 'strata360.analysis.photo_objects', tmp, out_json], check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
+    return {int(k): v for k, v in json.load(open(out_json))['images'].items()}
+
+
 def run_vlm(images, tmp, models=None):
     """{index: (log answer, scenery answer)} for the BGR images, by the local vision model (analysis/scenes_vlm.py) run twice: the general description and the scenery rating."""
     import cv2
@@ -151,7 +162,7 @@ def run_vlm(images, tmp, models=None):
 def _key(*parts): return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
-def run(folder, stages=None, only=None, force=False, log=print, detect=run_detect, vlm=run_vlm, reverse=None, nearby=None):
+def run(folder, stages=None, only=None, force=False, log=print, detect=run_detect, vlm=run_vlm, reverse=None, nearby=None, objects=run_objects):
     """Run the stages (all of ORDER, or `stages`) over the photos (all, or the ids in `only`), redoing only what is out of date unless `force`. Returns {stage: [photo ids it was run for]}; a stage that failed for lack of something (a profile, the models) raises after the others have been tried."""
     from strata360 import photos as PH
     from strata360.gps import context as X, track
@@ -198,6 +209,12 @@ def run(folder, stages=None, only=None, force=False, log=print, detect=run_detec
                         elif os.path.exists(npy): os.replace(npy, npy + '.old')                                                                                   # (no faces now: the old embeddings no longer belong to it)
                         stamp(stage, r, d)
                 finally: shutil.rmtree(tmp, ignore_errors=True)
+            elif stage == 'objects':
+                tmp = tempfile.mkdtemp(prefix='s360photo_', dir=os.path.join(rd, 'photos') if os.path.isdir(os.path.join(rd, 'photos')) else None)
+                try:
+                    order = {i: r for i, r in enumerate(rs)}; found = objects({i: img(r) for i, r in order.items()}, tmp)
+                    for i, r in order.items(): stamp(stage, r, found.get(i) or dict(w=0, h=0, objects=[]))
+                finally: shutil.rmtree(tmp, ignore_errors=True)
             elif stage == 'identity':
                 from strata360.analysis import identity as I
                 if not os.path.exists(prof_path): raise RuntimeError(f'no wearer profile {prof_path}: run ./strata360 who RACE --me N (or --auto) first')
@@ -239,6 +256,10 @@ def summary(doc):
     if s.get('ok'): out.update(setting=s.get('setting'), description=s.get('description'), tags=(s.get('tags') or [])[:5], lighting=s.get('lighting'), weather=s.get('weather'))
     if s.get('scenery') is not None: out['scenery'] = s['scenery']
     if s.get('clarity') is not None: out['clarity'] = s['clarity']
+    if doc.get('objects'):
+        counts = {}
+        for o in doc['objects'].get('objects') or []: counts[o['label']] = counts.get(o['label'], 0) + 1
+        out['objects'] = [dict(label=k, n=v) for k, v in sorted(counts.items(), key=lambda kv: -kv[1])[:8]]
     if doc.get('identity'): out.update(people=doc['identity']['n_people'], me=bool(doc['identity']['me']))
     if doc.get('face_view') and doc['face_view'].get('found'): out['face_clear'] = doc['face_view']['clear']
     if (doc.get('places') or {}).get('covered'): out['place'] = doc['places']['summary']['text']
