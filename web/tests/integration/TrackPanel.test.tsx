@@ -128,10 +128,11 @@ describe('TrackPanel', () => {
 
     it('shows the time on each route and at each checkpoint, adding up to the run time', async () => {
       present(); const l = two(); l.tracks[1].order = 1; l.tracks[1].time_s = 3600 + 12 * 60 + 5; l.tracks[1].ran_km = 12.1; l.tracks[1].pace_s_km = 359; l.tracks[1].ascent_m = 420; l.tracks[1].descent_m = 180; l.tracks[0].time_s = undefined
-      l.timing = { total_s: 3600 + 12 * 60 + 5 + 35 * 60, start: 0, end: 1, checkpoints: { '1': 35 * 60 }, sections: { t2: 3600 + 12 * 60 + 5 }, consistent: true, ascent_m: 2400, descent_m: 2100 }
+      l.timing = { total_s: 3600 + 12 * 60 + 5 + 35 * 60, start: 0, end: 1, checkpoints: { '1': 35 * 60 }, sections: { t2: 3600 + 12 * 60 + 5 }, ran_m: { t2: 12100 }, consistent: true, ascent_m: 2400, descent_m: 2100 }
       mockGet('/api/tracks', l); setup(<TrackPanel folder="/data" />)
-      const row = (await screen.findByText('Checkpoint 1')).closest('li')!; expect(row).toHaveTextContent('0:35:00'); expect(screen.getByText(/^1:12:05/)).toHaveTextContent('12.1 km run · 5:59 /km · ↑420 m ↓180 m')
-      expect(document.querySelector('[data-timing]')).toHaveTextContent('Run time 1:47:05 = routes 1:12:05 + checkpoints 0:35:00 · climb 2,400 m, descent 2,100 m')
+      const row = (await screen.findByText('Checkpoint 1')).closest('li')!; expect(row).toHaveTextContent('0:35:00'); expect(screen.getByTitle(/time on this route/)).toHaveTextContent('12.1 km run · 5:59 /km · ↑420 m ↓180 m')
+      const tot = document.querySelector('[data-timing]')!; expect(tot).toHaveTextContent('Total time 1:47:05'); expect(tot).toHaveTextContent('Checkpoints 0:35:00'); expect(tot).toHaveTextContent('Running time 1:12:05')
+      expect(tot).toHaveTextContent('Running pace 5:57 /km (12.1 km)'); expect(tot).toHaveTextContent('Ascent 2,400 m'); expect(tot).toHaveTextContent('Descent 2,100 m'); expect(tot.closest('li')!.previousElementSibling).toHaveTextContent('race.gpx')                  // (right after the run's row)
     })
 
     it('marks a track a run, refreshing the race track and the list', async () => {

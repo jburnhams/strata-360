@@ -129,7 +129,8 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: 
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string>(), input = useRef<HTMLInputElement>(null)
   const act = async (f: () => Promise<unknown>) => { setBusy(true); setErr(undefined); try { await f() } catch (e) { setErr((e as Error).message) } finally { try { await onChange() } finally { setBusy(false) } } }
   const add = (files: FileList | File[] | null) => act(async () => { for (const f of Array.from(files ?? [])) await api.addTrack(folder, f) })
-  const rows = listing?.tracks ?? []
+  const rows = listing?.tracks ?? [], tm = listing?.timing, lastRun = rows.reduce((a, r, i) => (r.kind === 'run' ? i : a), -1)
+  const cpTime = tm ? Object.values(tm.checkpoints).reduce((a, b) => a + b, 0) : 0, runTime = tm ? tm.total_s - cpTime : 0, ranKm = tm?.ran_m ? Object.values(tm.ran_m).reduce((a, b) => a + b, 0) / 1000 : 0
   return (
     <div className="mt-3 rounded-lg border border-stone-200 p-3 text-sm dark:border-stone-800" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); add(e.dataTransfer.files) }}>
       <input ref={input} type="file" accept=".fit,.gpx" multiple hidden aria-label="Add track files" onChange={e => { add(e.target.files); e.target.value = '' }} />
@@ -140,7 +141,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: 
       <p className="mb-2 text-xs text-stone-500">Mark each file a run (the recording; several runs are merged into the race track) or a route (a planned or official course, shown on the map for planning only).</p>
       {rows.length === 0 && <p className="text-stone-500">No tracks listed.</p>}
       <ul className="space-y-1">
-        {rows.map(x => (<Fragment key={x.id}>
+        {rows.map((x, ix) => (<Fragment key={x.id}>
           <li data-highlighted={hot === x.id || pinned.includes(x.id) ? '' : undefined} onMouseEnter={() => setHot(x.id)} onMouseLeave={() => setHot(null)}
             className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded px-1 ${hot === x.id || pinned.includes(x.id) ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : ''}`}>
             {x.kind === 'route' && <span className="w-6 text-center text-xs font-semibold text-blue-700 dark:text-blue-400" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
@@ -158,12 +159,20 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: 
               <span className="flex-1">Checkpoint {x.order}</span><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
             </li>
           )}
+          {tm && x.kind === 'run' && ix === lastRun && (
+            <li data-timing="" className="rounded bg-stone-100 px-2 py-1 text-sm dark:bg-stone-800">
+              <div className="flex flex-wrap gap-x-5 gap-y-1 tabular-nums">
+                <span title="first to last point of the run">Total time <b>{hms(tm.total_s)}</b></span>
+                <span title="time at the checkpoints, from the first slow arrival to the last slow leaving">Checkpoints <b>{hms(cpTime)}</b></span>
+                <span title="total time without the checkpoints">Running time <b>{hms(runTime)}</b></span>
+                {ranKm > 0 && <span title="the distance actually run over the running time">Running pace <b>{pace(runTime / ranKm)}</b> /km <span className="text-xs text-stone-500">({ranKm.toFixed(1)} km)</span></span>}
+                {tm.ascent_m != null && <span>Ascent <b>{tm.ascent_m.toLocaleString()} m</b></span>}{tm.descent_m != null && <span>Descent <b>{tm.descent_m.toLocaleString()} m</b></span>}
+              </div>
+              {!tm.consistent && <div className="text-xs text-red-600">The checkpoints do not come in order along the run: check them.</div>}
+            </li>
+          )}
         </Fragment>))}
       </ul>
-      {listing?.timing && (
-        <p className="mt-2 text-sm" data-timing="">Run time <b className="tabular-nums">{hms(listing.timing.total_s)}</b>
-          <span className="text-xs text-stone-500"> = routes {hms(Object.values(listing.timing.sections).reduce((a, b) => a + b, 0))} + checkpoints {hms(Object.values(listing.timing.checkpoints).reduce((a, b) => a + b, 0))}{listing.timing.ascent_m != null ? ` · climb ${listing.timing.ascent_m.toLocaleString()} m, descent ${listing.timing.descent_m?.toLocaleString()} m` : ''}{listing.timing.consistent ? '' : ' (the checkpoints do not come in order along the run: check them)'}</span></p>
-      )}
       {listing?.merged && <p className="mt-2 text-xs text-stone-500">Race track = {listing.merged.runs.length} runs merged · {listing.merged.distance_km} km · {listing.merged.samples.toLocaleString()} points</p>}
       {err && <p role="alert" className="mt-2 text-red-600">{err}</p>}
     </div>
