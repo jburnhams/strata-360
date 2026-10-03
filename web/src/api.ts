@@ -31,6 +31,17 @@ export type MotionStyle = 'push_in' | 'pull_out' | 'pan' | 'drift' | 'reveal' | 
 export interface MotionSettings { style: 'auto' | MotionStyle; seconds: number | null; seed: number }       // seconds null: the length follows how busy the photo is (2 to 3 s)
 export interface MotionPlan { style: MotionStyle; duration_s: number; zmax: number; seed: number; subjects: { cx: number; cy: number; w: number; h: number; weight: number; label: string }[]; windows: number[][]; size: number[]; settings: MotionSettings }
 export interface PhotoJob { running: boolean; log: string[]; error: string }
+export type SvProvider = 'mapillary' | 'panoramax' | 'google'
+export interface SvItem { id: string; km: number; lat: number; lon: number; a?: number; b: number; t?: number; u?: string }
+/** One capture run (a sequence, or a run of Google panoramas) along one road stretch. `angles` (flat cameras): how many frames face forward / right / back / left of the way the runner went. */
+export interface SvSection { id: string; provider: SvProvider; stretch: string; kind: '360' | '2d'; km0: number; km1: number; length_m: number; frames: number; spacing_m: number | null; years: number[]; camera: string | null; size: number[] | null; seq: string; angles: Record<string, number> | null; items: SvItem[] }
+export interface SvStretch { id: string; km0: number; km1: number; length_m: number; highways: string[]; names: string[]; line: [number, number][] }
+export interface SvRoads { id: string; total_km: number; stretches: SvStretch[]; run: [number, number][] }
+export interface SvStageStatus { done: boolean; stale?: boolean; stretches?: number; sections?: number; frames?: number; km: number }
+export interface StreetView {
+  status: Record<'roads' | SvProvider, SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { sections: SvSection[]; frames: number; km: number } | null>
+  job: PhotoJob; keys: { mapillary: boolean; google: boolean }
+}
 export interface Photo {
   must?: boolean; motion?: MotionSettings; analysis?: PhotoAnalysis
   id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
@@ -162,6 +173,9 @@ export const api = {
     if (!r.ok) throw new Error(`${file.name}: ${j.detail || `HTTP ${r.status}`}`)
     return j as TrackEntry
   },
+  streetview: (folder: string) => call<StreetView>('/api/streetview?' + q({ folder })),
+  runStreetview: (folder: string, body: { stages?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/streetview/run', { folder, ...body }),
+  streetviewImage: (folder: string, provider: SvProvider, id: string, w = 256) => '/api/streetview/image?' + q({ folder, provider, id, w: String(w) }),
   photos: (folder: string) => call<{ photos: Photo[]; tz: string; job?: PhotoJob }>('/api/photos?' + q({ folder })),
   photoMotion: (folder: string, id: string, p: Partial<MotionSettings> = {}) => call<MotionPlan>('/api/photos/motion?' + q({ folder, id, ...(p.style ? { style: p.style } : {}), ...(p.seconds != null ? { seconds: String(p.seconds) } : {}), ...(p.seed != null ? { seed: String(p.seed) } : {}) })),
   saveMotion: (folder: string, id: string, p: Partial<MotionSettings>) => call<MotionPlan>('/api/photos/motion', { folder, id, ...p }),

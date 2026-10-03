@@ -541,3 +541,43 @@ class TestPhotoUse(TestPhotosApi):
         SY.upsert(project.folder, SY.make_photo(dict(id='p1', taken_utc=self.T0 + 60, file='x'), 5.0, dict(style='auto', seed=0))); assert [c['id'] for c in SY.load(project.folder)['clips']] == ['P1']
         client.delete('/api/photos', params=dict(q, id='p1')); assert SY.load(project.folder)['clips'] == []
         client.post('/api/photos', params=dict(q, filename='b.jpg'), content=self.jpeg(70)); assert client.post('/api/photos/settings', json=dict(q, id='p2', must=False)).json()['must'] is False
+
+
+class TestStreetViewApi(TestGapClipsApi):
+    def make_docs(self, project):
+        from strata360 import streetview as SV
+        rd = project.race_dir; roads = dict(schema=1, id='r1', stretches=[dict(id='R1', km0=1.0, km1=1.5, length_m=500, highways=['residential'], names=['Rue A'], line=[[50.0, 5.0], [50.001, 5.0]])], run=[[50.0, 5.0]], total_km=2)
+        SV._save(rd, 'roads', roads)
+        sec = dict(id='M1', provider='mapillary', stretch='R1', kind='2d', km0=1.0, km1=1.2, length_m=200, frames=2, spacing_m=100, years=[2024], camera=None, size=None, seq='s', angles={'forward': 2}, items=[dict(id='m1', km=1.0, lat=50.0, lon=5.0, a=0, b=0)])
+        SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [sec], roads))
+
+    def test_the_page_gets_stretches_sections_status_and_which_keys_are_set(self, client, project, monkeypatch):
+        from strata360.edit import llm_remote as LR
+        monkeypatch.setattr(LR, 'secret', lambda n: 'x' if n == 'MAPILLARY_TOKEN' else None)
+        q = dict(folder=project.folder); j = client.get('/api/streetview', params=q).json()
+        assert j['roads'] is None and j['status']['roads']['done'] is False and j['keys'] == dict(mapillary=True, google=False) and j['job'] == dict(running=False, log=[], error='')
+        self.make_docs(project); j = client.get('/api/streetview', params=q).json()
+        assert j['roads']['stretches'][0]['id'] == 'R1' and j['providers']['mapillary']['sections'][0]['id'] == 'M1' and j['providers']['google'] is None
+        assert j['status']['mapillary'] == dict(done=True, stale=False, sections=1, frames=2, km=0.2) and j['status']['roads'] == dict(done=True, stretches=1, km=0.5)
+
+    def test_the_stages_are_started_in_the_background_one_job_at_a_time(self, client, project, fake_popen):
+        r = client.post('/api/streetview/run', json=dict(folder=project.folder, stages=['roads', 'mapillary'], force=True)); assert r.json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'streetview' in cmd and cmd[cmd.index('--stages') + 1] == 'roads,mapillary' and '--force' in cmd
+        assert client.post('/api/streetview/run', json=dict(folder=project.folder, stages=['bing'])).status_code == 400
+        assert client.get('/api/streetview', params=dict(folder=project.folder)).json()['job']['running'] is True
+        assert client.post('/api/streetview/run', json=dict(folder=project.folder)).json()['started'] is False
+
+    def test_the_failure_of_a_stage_is_shown(self, client, project):
+        from strata360 import streetview as SV
+        os.makedirs(SV.adir(project.race_dir), exist_ok=True); open(os.path.join(SV.adir(project.race_dir), 'run.log'), 'w').write('roads: 3 stretches\nstreetview: mapillary: no MAPILLARY_TOKEN in secrets.env\n')
+        assert 'no MAPILLARY_TOKEN' in client.get('/api/streetview', params=dict(folder=project.folder)).json()['job']['error']
+
+    def test_pictures_only_for_frames_the_stage_found_and_google_ones_are_not_kept(self, client, project, monkeypatch):
+        from strata360 import streetview as SV
+        self.make_docs(project); q = dict(folder=project.folder, provider='mapillary', id='m1')
+        monkeypatch.setattr(SV, 'image', lambda rd, provider, doc, item_id, w, **k: (_ for _ in ()).throw(KeyError(item_id)) if item_id != 'm1' else b'\xff\xd8jpg')
+        r = client.get('/api/streetview/image', params=q); assert r.status_code == 200 and r.content == b'\xff\xd8jpg' and r.headers['content-type'] == 'image/jpeg'
+        assert client.get('/api/streetview/image', params=dict(q, id='other')).status_code == 404 and client.get('/api/streetview/image', params=dict(q, provider='bing')).status_code == 400
+        assert client.get('/api/streetview/image', params=dict(q, provider='google')).status_code == 200
+        monkeypatch.setattr(SV, 'image', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('mapillary answered 500')))
+        assert client.get('/api/streetview/image', params=q).status_code == 502

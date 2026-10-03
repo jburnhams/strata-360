@@ -51,6 +51,7 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+STREETVIEW_JOBS = {}          # folder -> Popen of a running `strata360 streetview`
 PHOTO_JOBS = {}               # folder -> Popen of a running `strata360 photos-analyse`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
@@ -979,6 +980,43 @@ def create_app(roots, token=None):
         lines = [l for l in lines if 'unsupported hash type' not in l and not l.startswith(('Traceback', '  File', '    ', 'ValueError: unsupported', 'ERROR:root'))]
         fail = next((l for l in reversed(lines) if 'FAILED' in l or l.startswith('photos-analyse:')), '')
         return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
+
+    def streetview_job(f):
+        """Whether the street view stages are running, the end of their log and the last failure."""
+        from strata360 import streetview as SV
+        job = STREETVIEW_JOBS.get(f); running = bool(job and job.poll() is None); lines = []
+        try: lines = open(os.path.join(SV.adir(config.race_dir(f)), 'run.log'), errors='replace').read().strip().splitlines()
+        except OSError: pass
+        fail = next((l for l in reversed(lines) if l.startswith('streetview:')), '')
+        return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
+
+    @api.get('/api/streetview', dependencies=[Depends(auth)])
+    def get_streetview(folder: str):                                                     # the road stretches, each provider's sections of imagery, what stage is done, the running job, and which keys are set
+        from strata360 import streetview as SV
+        from strata360.edit import llm_remote as LR
+        f = folder_of(folder); rd = config.race_dir(f)
+        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: SV.load(rd, p) for p in SV.PROVIDERS}, job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
+
+    @api.post('/api/streetview/run', dependencies=[Depends(auth)])
+    def post_streetview_run(body: dict):                                                 # {folder, stages?: [..], force?}: make the stages in the background at the lowest priority
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); stages = [str(s) for s in body.get('stages') or []]; bad = [s for s in stages if s not in SV.STAGES]
+        if bad: raise HTTPException(400, f'unknown street view stage(s) {", ".join(bad)}: one of {", ".join(SV.STAGES)}')
+        job = STREETVIEW_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='street view is already being worked out')
+        cmd = [*oslib.cli_command(), 'streetview', f] + (['--stages', ','.join(stages)] if stages else []) + (['--force'] if body.get('force') else [])
+        d = SV.adir(config.race_dir(f)); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'run.log'), 'wb')
+        STREETVIEW_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/streetview/image')
+    def get_streetview_image(request: Request, folder: str, provider: str, id: str, w: int = 640):   # one frame as a JPEG (an <img> cannot send headers: the cookie / query token authenticates); only frames the stage found can be asked for
+        from strata360 import streetview as SV
+        auth(request); rd = config.race_dir(folder_of(folder))
+        if provider not in SV.PROVIDERS: raise HTTPException(400, f'provider is one of {", ".join(SV.PROVIDERS)}')
+        try: data = SV.image(rd, provider, SV.load(rd, provider), id, w)
+        except KeyError: raise HTTPException(404, 'no such frame')
+        except RuntimeError as ex: raise HTTPException(502, str(ex))
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store' if provider == 'google' else 'max-age=86400'})
 
     @api.get('/api/photos', dependencies=[Depends(auth)])
     def get_photos(folder: str):                                                         # the photos with their time, place (own GPS first, else the run's position at that time), whether those disagree, and the clip or gap they fall in
