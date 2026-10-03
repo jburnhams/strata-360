@@ -204,7 +204,77 @@ def end_markers(rd):
                 finish=dict(lat=last['end'][0], lon=last['end'][1]) if last else None)
 
 
-def listing(rd):
+def finish_info(rd):
+    """The finish of the routes for the Tracks list (the finish line, not where the run ended): {reached, route_m, covered_m, t, elapsed_s, km, time_s}. route_m is the length of all the routes and covered_m how much of that the run covered (the stages added up, as on the overlay).
+    When the run came to the end of the last route (the At Finish stage) `reached` is True and t, elapsed_s, km (from the start of the run) and time_s (how long it stayed to the end of the run) say when; otherwise those are None. None without routes."""
+    order, _ = route_order(rd); cur = current_path(rd)
+    if not order or not cur: return None
+    sched = stage_schedule(rd); tm = timing(rd); prog = stage_progress(rd)
+    if not sched or not tm or not prog: return None
+    names = [l for _, l in sched]; covered = 0.0
+    for name, pr in prog.items():
+        k = names.index(name) if name in names else None
+        if k is None or not len(pr['t']): continue
+        covered += pr['route_m'] if (k + 1 < len(names) and names[k + 1] != 'After Race') else float(pr['prog'][-1])                                   # a stage with something after it other than the end of the run was completed
+    out = dict(reached=False, route_m=round(sum(p['route_m'] for p in prog.values())), covered_m=round(covered), t=None, elapsed_s=None, km=None, time_s=None)
+    fin = next((a for a, l in sched if l == 'At Finish'), None)
+    if fin is not None:
+        run = read(cur); ok = np.isfinite(run['t']) & np.isfinite(run['lat']) & np.isfinite(run['lon']); tt = run['t'][ok]; cum = _dist(run['lat'][ok], run['lon'][ok])
+        out.update(reached=True, t=float(fin), elapsed_s=round(float(fin - tm['start'])), km=round(float(np.interp(fin, tt, cum)) / 1000.0, 1), time_s=round(float(tm['end'] - fin)))
+    return out
+
+
+def _cutoff_text(rd): return _manifest(rd).get('cutoffs') or {}
+
+
+def cutoff_contexts(rd, tz='Europe/Brussels'):
+    """What a typed cut-off needs to be understood, for the checkpoints ('cp:N') and the finish ('finish'): {key: ctx} (see gps/cutoffs.py), with the time the run reached each, as time since the start."""
+    from strata360.gps import cutoffs as CU
+    tm = timing(rd)
+    if not tm: return {}
+    arr = {int(k): v['elapsed_s'] for k, v in tm['arrivals'].items()}; left = {int(k): arr[int(k)] + tm['checkpoints'][k] for k in tm['arrivals']}; n = len(tm['arrivals']); saved = _cutoff_text(rd); out = {}; prev_cut = None
+    fin = finish_info(rd)
+    for k in range(1, n + 1):
+        prev_ref = prev_cut if prev_cut is not None else (arr.get(k - 1, 0))
+        out[f'cp:{k}'] = dict(start=tm['start'], tz=tz, prev_ref_s=prev_ref, last_departure_s=left.get(k - 1, 0), arrival_s=arr[k])
+        prev_cut = _cutoff_resolved(saved.get(f'cp:{k}'), out[f'cp:{k}'])
+    prev_ref = prev_cut if prev_cut is not None else arr.get(n, 0)
+    if fin: out['finish'] = dict(start=tm['start'], tz=tz, prev_ref_s=prev_ref, last_departure_s=left.get(n, 0), arrival_s=fin['elapsed_s'] if fin['reached'] else None)
+    return out
+
+
+def _cutoff_resolved(text, ctx):
+    from strata360.gps import cutoffs as CU
+    if not text: return None
+    try: return CU.parse(text, ctx)['elapsed_s']
+    except ValueError: return None
+
+
+def set_cutoff(rd, key, text, tz='Europe/Brussels'):
+    """Save the cut-off typed for a checkpoint ('cp:N') or the finish ('finish'); empty text clears it. Raises ValueError (with a message to show) when the text is not understood, KeyError for an unknown key."""
+    from strata360.gps import cutoffs as CU
+    ctx = cutoff_contexts(rd, tz).get(key)
+    if ctx is None: raise KeyError(key)
+    doc = _manifest(rd); cuts = doc.setdefault('cutoffs', {}); text = (text or '').strip()
+    if not text: cuts.pop(key, None)
+    else: CU.parse(text, ctx); cuts[key] = text
+    _save(rd, doc)
+
+
+def cutoffs(rd, tz='Europe/Brussels'):
+    """The saved cut-offs as the app shows them: {key: {text, kind, elapsed_s, arrival_s, margin_s}} (margin: seconds to spare, negative when late; None when the run did not get there), or {text, error}."""
+    from strata360.gps import cutoffs as CU
+    saved = _cutoff_text(rd); ctxs = cutoff_contexts(rd, tz); out = {}
+    for key, text in saved.items():
+        ctx = ctxs.get(key)
+        if ctx is None: continue
+        try: r = CU.parse(text, ctx)
+        except ValueError as e: out[key] = dict(text=text, error=str(e)); continue
+        out[key] = dict(text=text, kind=r['kind'], elapsed_s=r['elapsed_s'], arrival_s=ctx['arrival_s'], margin_s=None if ctx['arrival_s'] is None else r['elapsed_s'] - ctx['arrival_s'])
+    return out
+
+
+def listing(rd, tz='Europe/Brussels'):
     """Everything the app shows: the tracks with their summaries and kinds, the merged run track when there is one, the points of interest of all of them, and where the race track leaves the routes (`divergences`)."""
     items = []; points = []
     try: order, marks = route_order(rd)
@@ -232,11 +302,15 @@ def listing(rd):
     except Exception: tm = {}
     try: mk = end_markers(rd)
     except Exception: mk = None
+    try: fi = finish_info(rd)
+    except Exception: fi = None
+    try: cuts = cutoffs(rd, tz)
+    except Exception: cuts = {}
     for x in items:
         if x['id'] in tm.get('sections', {}):
             i = x['id']; x['time_s'] = tm['sections'][i]; x['ran_km'] = round(tm['ran_m'][i] / 1000.0, 1); x['ascent_m'], x['descent_m'] = tm['climb'][i]
             if tm['ran_m'][i] >= 100: x['pace_s_km'] = round(tm['sections'][i] / (tm['ran_m'][i] / 1000.0))                         # (the time between the checkpoints over the distance run in it)
-    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div, timing=tm or None, markers=mk)
+    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div, timing=tm or None, markers=mk, finish=fi, cutoffs=cuts)
 
 
 _DIV = {}

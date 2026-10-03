@@ -55,6 +55,12 @@ describe('TrackMap', () => {
     expect(screen.getByTitle('Start')).toBeInTheDocument(); expect(screen.getByTitle('Finish line')).toBeInTheDocument(); expect(screen.getByTitle('End of the run')).toBeInTheDocument()
   })
 
+  it('rings the finish line, and only that, when the finish is highlighted', () => {
+    const ends = { start: { lat: 50, lon: 5, t: 0 }, end: { lat: 50.1, lon: 5.2, t: 10, km: 1, elapsed_s: 10 }, finish: { lat: 50.12, lon: 5.22 } }
+    const { container, rerender } = setup(<TrackMap {...props()} ends={ends} />); expect(container.querySelector('[data-end-hl]')).toBeNull()
+    rerender(<TrackMap {...props()} ends={ends} ringEnds />); const hl = container.querySelectorAll('[data-end-hl]'); expect(hl).toHaveLength(1); expect(hl[0].getAttribute('data-end')).toBe('finish')
+  })
+
   it('has no finish line without a route', () => {
     const { container } = setup(<TrackMap {...props()} ends={{ start: { lat: 50, lon: 5, t: 0 }, end: { lat: 50.1, lon: 5.2, t: 10, km: 1, elapsed_s: 10 }, finish: null }} />)
     expect(container.querySelector('[data-end="finish"]')).toBeNull(); expect(container.querySelector('[data-end="end"]')).not.toBeNull()

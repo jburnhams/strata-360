@@ -787,11 +787,14 @@ def create_app(roots, token=None):
             os.replace(dest, dest + '.bad'); raise HTTPException(400, f'could not read that file: {type(e).__name__}: {e}')
         TKS.update_merged(rd); return o
 
+    def tz_of(f):                                                                        # the race's time zone (for cut-offs given as a time of day)
+        rd = config.race_dir(f); return (config.load(f) if os.path.exists(os.path.join(rd, 'race.json')) else {}).get('timezone') or 'Europe/Brussels'
+
     # The project's tracks: any number of FIT / GPX files, each a run (merged into the one race track) or a route (shown on the overview map for planning only)
     @api.get('/api/tracks', dependencies=[Depends(auth)])
     def get_tracks(folder: str):                                                         # every track with kind and summary, the merged run track, and the points of interest
         from strata360.gps import tracks as TKS
-        return TKS.listing(config.race_dir(folder_of(folder)))
+        f = folder_of(folder); return TKS.listing(config.race_dir(f), tz_of(f))
 
     @api.post('/api/tracks', dependencies=[Depends(auth)])
     async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
@@ -807,7 +810,16 @@ def create_app(roots, token=None):
         try: TKS.set_kind(rd, str(body.get('id')), str(body.get('kind')))
         except KeyError: raise HTTPException(404, 'no such track')
         except ValueError as e: raise HTTPException(400, str(e))
-        return TKS.listing(rd)
+        return TKS.listing(rd, tz_of(folder_of(body.get('folder'))))
+
+    @api.post('/api/tracks/cutoff', dependencies=[Depends(auth)])
+    def post_tracks_cutoff(body: dict):                                                  # {folder, key: 'cp:N' | 'finish', text}: the cut-off typed for a checkpoint or the finish (empty clears); read in any common form (gps/cutoffs.py)
+        from strata360.gps import tracks as TKS
+        f = folder_of(body.get('folder')); rd = config.race_dir(f)
+        try: TKS.set_cutoff(rd, str(body.get('key')), str(body.get('text') or ''), tz_of(f))
+        except KeyError: raise HTTPException(404, 'no such checkpoint')
+        except ValueError as e: raise HTTPException(400, str(e))
+        return TKS.listing(rd, tz_of(f))
 
     @api.delete('/api/tracks', dependencies=[Depends(auth)])
     def delete_tracks(folder: str, id: str):                                             # take a track out (its file is kept under tracks/removed)
@@ -815,7 +827,7 @@ def create_app(roots, token=None):
         rd = config.race_dir(folder_of(folder))
         try: TKS.remove(rd, id)
         except KeyError: raise HTTPException(404, 'no such track')
-        return TKS.listing(rd)
+        return TKS.listing(rd, tz_of(folder_of(folder)))
 
     @api.get('/api/tracks/line', dependencies=[Depends(auth)])
     def get_tracks_line(folder: str, id: str, limit: int = 3000):                        # the line of one track (id, or `merged`) for the overview map: lat, lon (no times needed)

@@ -148,6 +148,24 @@ describe('TrackPanel', () => {
       await user.click(screen.getByRole('button', { name: 'Highlight checkpoint 1 on the map' })); await user.unhover(row); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).toBeNull())                  // (while the pointer is on the row it is still pointed at)
     })
 
+    it('lists the finish of the routes after the last one, and highlights it on the map', async () => {
+      present(); const l = two(); l.tracks[1].order = 1
+      l.finish = { reached: false, route_m: 349300, covered_m: 336800, t: null, elapsed_s: null, km: null, time_s: null }
+      l.markers = { start: { lat: 50, lon: 5, t: 1_771_700_000 }, end: { lat: 50.1, lon: 5.2, t: 1_771_800_000, km: 367, elapsed_s: 100000 }, finish: { lat: 50.12, lon: 5.22 } }
+      mockGet('/api/tracks', l); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText(/^Finish \(not reached\)/)).closest('li')!; expect(row).toHaveTextContent('routes 349.3 km, covered 336.8 km')
+      await user.hover(row); expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(document.querySelector('[data-end-hl]')).not.toBeNull()); await user.unhover(row)
+      await waitFor(() => expect(document.querySelector('[data-end-hl]')).toBeNull())
+      await user.click(screen.getByRole('button', { name: 'Highlight the finish on the map' })); await user.unhover(row); await waitFor(() => expect(document.querySelector('[data-end-hl]')).not.toBeNull())
+    })
+
+    it('says when the run got to the finish and how long it stayed', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.finish = { reached: true, route_m: 100000, covered_m: 100000, t: 1_771_700_000, elapsed_s: 7200, km: 99.5, time_s: 600 }
+      mockGet('/api/tracks', l); setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText(/^Finish/)).closest('li')!; expect(row).toHaveTextContent('km 99.5 · 2:00:00 since start · arrived Sat 21 Feb'); expect(row).toHaveTextContent('0:10:00'); expect(row).not.toHaveTextContent('not reached')
+    })
+
     it('marks a track a run, refreshing the race track and the list', async () => {
       present(); const seen = recordRequests('/api/tracks/kind'); let marked = false
       const after = makeTracksListing({ runs: 2, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'run' })], merged: { runs: ['main', 't2'], samples: 200, start_utc: '', end_utc: '', distance_km: 90 } })

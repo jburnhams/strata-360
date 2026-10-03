@@ -237,3 +237,12 @@ def test_progress_along_the_route_holds_where_the_run_left_it_while_the_run_is_o
     on = p['prog'][p['t'] < t0 + 580]; assert on[-1] > 1600 and np.all(np.diff(on) >= -1)                                       # moving along the route
     off = p['prog'][p['t'] > t0 + 800]; assert off.max() - off.min() < 50 and 1700 <= off[-1] <= 1900                          # then it stays where the run left the route
     assert TK.stage_progress(str(tmp_path / 'none')) == {}
+
+
+def test_the_finish_entry_is_the_routes_finish_and_says_whether_the_run_got_there(tmp_path):
+    rd = str(tmp_path); _stop_run(rd, [('one.gpx', (0, 121)), ('two.gpx', (121, 361))])                                     # the run ends 2670 m into the second route (7170 m long)
+    f = TK.finish_info(rd); assert f['reached'] is False and f['t'] is None and f['time_s'] is None and 3590 + 7170 - 40 <= f['route_m'] <= 3600 + 7170 + 40
+    assert 3590 + 2640 <= f['covered_m'] <= 3600 + 2700 and TK.listing(rd)['finish'] == f
+    rd2 = str(tmp_path / 'fin'); os.makedirs(rd2); _stop_run(rd2, [('one.gpx', (0, 121)), ('two.gpx', (121, 211))])        # it got to the end
+    g = TK.finish_info(rd2); assert g['reached'] is True and 0 <= g['time_s'] < 200 and 2300 < g['elapsed_s'] < 2499 and 5.5 < g['km'] < 6.4 and abs(g['covered_m'] - g['route_m']) < 100
+    assert TK.finish_info(str(tmp_path / 'none')) is None
