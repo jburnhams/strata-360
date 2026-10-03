@@ -186,3 +186,12 @@ def test_route_times_and_checkpoint_times_add_up_to_the_run_time(tmp_path):
     assert TK.timing(str(tmp_path / 'none')) == {}
     one = next(x for x in ls['tracks'] if x['name'] == 'one.gpx'); assert 3.5 <= one['ran_km'] <= 3.7 and 300 <= one['pace_s_km'] <= 340 and 55 <= one['ascent_m'] <= 62 and one['descent_m'] == 0 and 55 <= ls['timing']['ascent_m'] <= 62 and ls['timing']['descent_m'] == 0
     ar = tm['arrivals'][1]; assert ar['elapsed_s'] == round(ar['t'] - tm['start']) and 3.5 <= ar['km'] <= 3.7 and 1190 <= ar['elapsed_s'] <= 1230                  # at the first checkpoint: km and time from the start of the run
+
+
+def test_start_finish_and_end_of_the_run_markers(tmp_path):
+    rd = str(tmp_path); north = lambda a, b: [(50.0 + i * 1e-4, 5.0) for i in range(a, b)]
+    assert TK.end_markers(rd) is None
+    TK.add(rd, 'run.gpx', gpx(north(0, 500)))
+    m = TK.end_markers(rd); assert m['finish'] is None and m['start']['lat'] == 50.0 and abs(m['end']['lat'] - 50.0499) < 1e-6 and 5.4 < m['end']['km'] < 5.6 and m['end']['elapsed_s'] == 499
+    TK.add(rd, 'one.gpx', gpx(north(0, 300), route=True, timed=False)); TK.add(rd, 'two.gpx', gpx(north(300, 800), route=True, timed=False))                     # the second route is longer than the run: the finish line is its end
+    m = TK.end_markers(rd); assert abs(m['finish']['lat'] - 50.0799) < 1e-4 and m['end']['lat'] < m['finish']['lat'] and TK.listing(rd)['markers']['finish'] == m['finish']

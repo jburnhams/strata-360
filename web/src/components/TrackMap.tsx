@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import type { Divergence, ExtraLine, Poi, Stop, TrackClip, TrackLine } from '../api'
+import type { Divergence, EndMarkers, ExtraLine, Poi, Stop, TrackClip, TrackLine } from '../api'
 import { nearestIndex } from '../trackMath'
 
 const GREEN = '#16a34a', GREY = '#78716c', ROUTE = '#2563eb', RUN = '#a3a3a3'
@@ -34,8 +34,8 @@ const DETAIL_ZOOM_STEPS = 1.5          // this far in from the first view the ma
 // The race on a Leaflet map (the background is the server's map tiles when `background` is given, else the track on a plain ground). Zoom with the buttons, the wheel, a double click or touch; drag to pan; the arrows button resets the view.
 // Every clip has a marker at the middle of its stretch of track (the stretch is drawn thick; green = the newest script draft plays it), hover for its card, click to open it. Zooming in fetches the track for the
 // part in view in more detail. Hovering the track moves the cursor shared with the charts.
-export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, onOpenClip, fetchDetail, background, extras = [], pois = [], divergences = [], highlight = [], onHoverTrack, onToggleTrack, tz = 'Europe/Brussels' }: {
-  tz?: string;   highlight?: ExtraLine[]; onHoverTrack?: (id: string | null) => void; onToggleTrack?: (id: string) => void; divergences?: Divergence[]; extras?: ExtraLine[]; pois?: Poi[]; background?: { url: string; tilePx: number }; base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
+export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, onOpenClip, fetchDetail, background, extras = [], pois = [], divergences = [], highlight = [], onHoverTrack, onToggleTrack, tz = 'Europe/Brussels', ends }: {
+  ends?: EndMarkers | null; tz?: string;   highlight?: ExtraLine[]; onHoverTrack?: (id: string | null) => void; onToggleTrack?: (id: string) => void; divergences?: Divergence[]; extras?: ExtraLine[]; pois?: Poi[]; background?: { url: string; tilePx: number }; base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
   onOpenClip: (id: string) => void; fetchDetail: (bbox: [number, number, number, number]) => Promise<TrackLine>
 }) {
   const el = useRef<HTMLDivElement>(null), marks = useRef<L.Marker[]>([]), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.Marker | null>(null), detail = useRef<L.Polyline | null>(null), baseLine = useRef<L.Polyline | null>(null), extra = useRef<L.LayerGroup | null>(null), hl = useRef<L.LayerGroup | null>(null)
@@ -98,12 +98,21 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
       const mk = L.marker([p.lat, p.lon], { icon, title: p.name || 'Point of interest', keyboard: false }).addTo(g)
       if (p.name || p.desc) mk.bindTooltip(p.name + (p.ele != null ? ` · ${Math.round(p.ele)} m` : '') + (p.desc ? ` — ${p.desc}` : ''), { direction: 'top', offset: [0, -6] })
     }
+    if (ends) {                                                                                  // the start (green), the finish line (the end of the last route) and where the run ended (red)
+      const dot = (kind: string, html: string, bg: string, tip: string, ll: [number, number], title: string, z: number) => L.marker(ll, {
+        icon: L.divIcon({ className: '', html: `<div data-end="${kind}" style="width:26px;height:26px;border-radius:50%;background:${bg};color:#fff;border:2.5px solid #fff;font:700 13px/21px ui-sans-serif,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.6)">${html}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] }), title, keyboard: false, zIndexOffset: z,
+      }).bindTooltip(tip, { direction: 'top', offset: [0, -12] }).addTo(g)
+      const when = (t: number) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(',', '') } catch { return '' } }
+      dot('start', '▶', '#16a34a', `Start · ${when(ends.start.t)}`, [ends.start.lat, ends.start.lon], 'Start', 700)
+      if (ends.finish) L.marker([ends.finish.lat, ends.finish.lon], { icon: L.divIcon({ className: '', html: '<div data-end="finish" style="width:26px;height:26px;border-radius:50%;border:2.5px solid #fff;background:conic-gradient(#000 25%, #fff 0 50%, #000 0 75%, #fff 0);box-shadow:0 1px 4px rgba(0,0,0,.6)"></div>', iconSize: [26, 26], iconAnchor: [13, 13] }), title: 'Finish line', keyboard: false, zIndexOffset: 650 }).bindTooltip('Finish line (the end of the last route)', { direction: 'top', offset: [0, -12] }).addTo(g)
+      dot('end', '■', '#dc2626', `End of the run · km ${ends.end.km} · ${when(ends.end.t)}`, [ends.end.lat, ends.end.lon], 'End of the run', 680)
+    }
     for (const d of divergences) {                                                                // where the race track leaves the routes: the stretch in red and an exclamation mark at the farthest point
       L.polyline(d.line, { color: '#dc2626', weight: 4, opacity: 0.9, interactive: false }).addTo(g)
       const icon = L.divIcon({ className: '', html: '<div data-divergence="" style="width:20px;height:20px;border-radius:50%;background:#dc2626;color:#fff;border:1.5px solid #fff;font:700 13px/17px ui-sans-serif,sans-serif;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.5)">!</div>', iconSize: [20, 20], iconAnchor: [10, 10] })
       L.marker([d.lat, d.lon], { icon, title: `${d.peak_m} m off the route`, keyboard: false, zIndexOffset: 500 }).bindTooltip(`${d.peak_m} m off the route at most · ${(d.length_m / 1000).toFixed(2)} km long · km ${d.km} of the run`, { direction: 'top', offset: [0, -8] }).addTo(g)
     }
-  }, [extras, pois, divergences, base, tz])
+  }, [extras, pois, divergences, base, tz, ends])
 
   useEffect(() => {                                                                             // the tracks being pointed at or picked in the list: bold yellow with a black outline, on top of everything
     const g = hl.current; if (!g) return; g.clearLayers()

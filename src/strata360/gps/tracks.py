@@ -193,6 +193,17 @@ def pois(path):
     return out
 
 
+def end_markers(rd):
+    """Where the race starts and stops on the map: {start: {lat, lon, t}, end: {lat, lon, t, km, elapsed_s} (the last point of the run), finish: {lat, lon} (the end of the last route in race order; None without routes)}; None without a run."""
+    cur = current_path(rd)
+    if not cur: return None
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t'])
+    if ok.sum() < 2: return None
+    lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]; order, _ = route_order(rd); last = max(order, key=lambda o: o['order']) if order else None
+    return dict(start=dict(lat=float(lat[0]), lon=float(lon[0]), t=float(t[0])), end=dict(lat=float(lat[-1]), lon=float(lon[-1]), t=float(t[-1]), km=round(float(_dist(lat, lon)[-1]) / 1000.0, 1), elapsed_s=round(float(t[-1] - t[0]))),
+                finish=dict(lat=last['end'][0], lon=last['end'][1]) if last else None)
+
+
 def listing(rd):
     """Everything the app shows: the tracks with their summaries and kinds, the merged run track when there is one, the points of interest of all of them, and where the race track leaves the routes (`divergences`)."""
     items = []; points = []
@@ -219,11 +230,13 @@ def listing(rd):
     except Exception: div = []                                                     # (the map is not worth failing the list over)
     try: tm = timing(rd)
     except Exception: tm = {}
+    try: mk = end_markers(rd)
+    except Exception: mk = None
     for x in items:
         if x['id'] in tm.get('sections', {}):
             i = x['id']; x['time_s'] = tm['sections'][i]; x['ran_km'] = round(tm['ran_m'][i] / 1000.0, 1); x['ascent_m'], x['descent_m'] = tm['climb'][i]
             if tm['ran_m'][i] >= 100: x['pace_s_km'] = round(tm['sections'][i] / (tm['ran_m'][i] / 1000.0))                         # (the time between the checkpoints over the distance run in it)
-    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div, timing=tm or None)
+    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div, timing=tm or None, markers=mk)
 
 
 _DIV = {}

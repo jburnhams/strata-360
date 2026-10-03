@@ -49,6 +49,17 @@ describe('TrackMap', () => {
     route.fire('mouseover'); route.fire('mouseout'); route.fire('click'); expect(hover.mock.calls).toEqual([['t2'], [null]]); expect(toggle).toHaveBeenCalledWith('t2'); lines.mockRestore()
   })
 
+  it('marks the start in green, the finish line from the route and where the run ended in red', () => {
+    const { container } = setup(<TrackMap {...props()} tz="UTC" ends={{ start: { lat: 50, lon: 5, t: 1_771_700_000 }, end: { lat: 50.1, lon: 5.2, t: 1_771_800_000, km: 379.4, elapsed_s: 100000 }, finish: { lat: 50.12, lon: 5.22 } }} />)
+    for (const k of ['start', 'finish', 'end']) expect(container.querySelector(`[data-end="${k}"]`)).not.toBeNull()
+    expect(screen.getByTitle('Start')).toBeInTheDocument(); expect(screen.getByTitle('Finish line')).toBeInTheDocument(); expect(screen.getByTitle('End of the run')).toBeInTheDocument()
+  })
+
+  it('has no finish line without a route', () => {
+    const { container } = setup(<TrackMap {...props()} ends={{ start: { lat: 50, lon: 5, t: 0 }, end: { lat: 50.1, lon: 5.2, t: 10, km: 1, elapsed_s: 10 }, finish: null }} />)
+    expect(container.querySelector('[data-end="finish"]')).toBeNull(); expect(container.querySelector('[data-end="end"]')).not.toBeNull()
+  })
+
   it('numbers the checkpoints between routes', () => {
     const { container } = setup(<TrackMap {...props()} pois={[{ name: 'Checkpoint 2', lat: 50.05, lon: 5.05, ele: null, sym: 'checkpoint', desc: 'a → b', track: 'checkpoint', n: 2 }]} />)
     expect(screen.getByTitle('Checkpoint 2')).toHaveTextContent('2'); expect(container.querySelector('[data-checkpoint]')).not.toBeNull()
