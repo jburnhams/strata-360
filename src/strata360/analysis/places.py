@@ -8,6 +8,9 @@ all workers share one rate limiter (a lock file in the project's cache) and ever
 Clips outside the race track (before the start, after the finish) get no positions and say so."""
 import datetime as dt, hashlib, json, math, os, time, urllib.parse, urllib.request
 from strata360 import oslib
+from strata360.gps import osm
+
+OVERPASS = 'https://overpass-api.de/api/interpreter'
 
 SCHEMA_VERSION = 1
 UA = 'strata360-personal-race-film/0.1 (local tool; reverse geocoding of my own race track)'
@@ -51,7 +54,7 @@ def reverse(lat, lon, cache_dir, url='https://nominatim.openstreetmap.org/revers
     return dict(display_name=r.get('display_name'), **{k: a[k] for k in keep if k in a})
 
 
-def nearby(lat, lon, cache_dir, url='https://overpass-api.de/api/interpreter', radius=1000, limit=14):
+def nearby(lat, lon, cache_dir, url=OVERPASS, radius=1000, limit=14):
     ql = (f'[out:json][timeout:25];('
           f'nwr(around:{radius},{lat:.5f},{lon:.5f})[name][place];'
           f'nwr(around:{radius},{lat:.5f},{lon:.5f})[name][natural~"^(peak|water|spring|cave_entrance|wood|heath|wetland|cliff|rock)$"];'
@@ -60,7 +63,9 @@ def nearby(lat, lon, cache_dir, url='https://overpass-api.de/api/interpreter', r
           f'nwr(around:{radius},{lat:.5f},{lon:.5f})[name][amenity~"^(restaurant|cafe|bar|pub|place_of_worship|drinking_water|shelter|toilets)$"];'
           f'nwr(around:{radius},{lat:.5f},{lon:.5f})[name][leisure~"^(park|nature_reserve|sports_centre|pitch)$"];'
           f'nwr(around:{radius},{lat:.5f},{lon:.5f})[name][route~"^(hiking|foot)$"];);out center 120;')
-    r = _get(url, cache_dir, f'ovp|{url}|{lat:.3f}|{lon:.3f}|{radius}', data=urllib.parse.urlencode({'data': ql}).encode(), timeout=60)
+    key = f'ovp|{url}|{lat:.3f}|{lon:.3f}|{radius}'
+    if url == OVERPASS: r = osm.pool(cache_dir).query(ql, key=key)                                   # the public server: spread over the mirrors (same cache files as before)
+    else: r = _get(url, cache_dir, key, data=urllib.parse.urlencode({'data': ql}).encode(), timeout=60)   # a server of your own: only that one
     if not r: return None
     seen = {};
     for e in r.get('elements', []):
@@ -87,7 +92,7 @@ def analyse(clip_json, track, cache_dir, cfg=None):
     """places.json body for one clip: the start, middle and end of it (positions at those UTC instants from the race track), each with an address and named places nearby."""
     import numpy as np
     cfg = (cfg or {}).get('places', {}) or {}
-    nom, ovp, radius = cfg.get('nominatim', 'https://nominatim.openstreetmap.org/reverse'), cfg.get('overpass', 'https://overpass-api.de/api/interpreter'), int(cfg.get('radius_m', 1000))
+    nom, ovp, radius = cfg.get('nominatim', 'https://nominatim.openstreetmap.org/reverse'), cfg.get('overpass', OVERPASS), int(cfg.get('radius_m', 1000))
     t0 = dt.datetime.fromisoformat(clip_json['time']['start_utc'].replace('Z', '+00:00')).timestamp(); dur = clip_json['video']['source_frames'] / clip_json['video']['nominal_fps']
     T = track['t']; ok = np.isfinite(track['lat'])
     if t0 + dur < T[0] - 30 or t0 > T[-1] + 30: return dict(schema=SCHEMA_VERSION, covered=False, note='outside the race track (no position for this clip)', points=[], source='OpenStreetMap (Nominatim, Overpass)')
