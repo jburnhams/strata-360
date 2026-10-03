@@ -264,3 +264,54 @@ def image(rd, provider, doc, item_id, w=640, fetch=_bytes, get=_get):
         data = fetch(it['u'])
     else: raise KeyError(provider)
     os.makedirs(rd_img, exist_ok=True); tmp = f'{f}.{os.getpid()}.tmp'; open(tmp, 'wb').write(data); os.replace(tmp, f); return data
+
+
+# --- which sections are worth showing, which overlap, and what you chose ----------------------------------------------------------------------------------------------------------
+MIN_FRAMES, MIN_LENGTH_M, MAX_SPACING_M = 30, 150, 10.0       # a section is plausible when it has this many pictures (2 s of film at 15 a second), is this long and has pictures no further apart than this
+PLAY_FPS = 15                                                    # how many source pictures a second the film shows
+CHOICES = ('possible', 'must')
+
+
+def section_key(s): return f"{s['provider']}:{s['seq']}:{s['km0']:.2f}"                  # stays the same when the stage is run again (the numbers M1.. may move)
+
+
+def judge(s):
+    """(plausible, why not): whether a section has enough pictures, close enough together, over enough road, to make a clip of it. Google's are never offered (its terms do not allow its pictures in a film; kept for looking at only)."""
+    if s['provider'] == 'google': return False, 'Google\'s terms do not allow its pictures in a film'
+    if s['frames'] < MIN_FRAMES: return False, f"only {s['frames']} pictures (needs {MIN_FRAMES})"
+    if s['length_m'] < MIN_LENGTH_M: return False, f"only {s['length_m']} m long (needs {MIN_LENGTH_M} m)"
+    if s['spacing_m'] is None or s['spacing_m'] > MAX_SPACING_M: return False, f"pictures {s['spacing_m']} m apart (needs {MAX_SPACING_M:g} m or less)"
+    return True, ''
+
+
+def overlaps(sections, share=0.3):
+    """{id: [ids of the sections that cover the same road]}: two sections overlap when the stretch they share is at least `share` of the shorter one. Same road, different source or date."""
+    out = {s['id']: [] for s in sections}
+    for i, a in enumerate(sections):
+        for b in sections[i + 1:]:
+            both = min(a['km1'], b['km1']) - max(a['km0'], b['km0'])
+            if both > 0 and both * 1000 >= share * min(a['length_m'], b['length_m'], 1e9): out[a['id']].append(b['id']); out[b['id']].append(a['id'])
+    return out
+
+
+def choices(rd):
+    try: return {k: v for k, v in json.load(open(os.path.join(adir(rd), 'choices.json'))).items() if v in CHOICES}
+    except (OSError, ValueError): return {}
+
+
+def set_choice(rd, key, choice):
+    """Mark a section (by its key) as `possible` or `must` for the film, or clear it with 'none'. Returns the choice."""
+    if choice not in (*CHOICES, 'none'): raise ValueError(f'choice is one of {", ".join(CHOICES)} or none')
+    c = choices(rd)
+    if choice == 'none': c.pop(key, None)
+    else: c[key] = choice
+    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(c, open(tmp, 'w'), indent=1); os.replace(tmp, p); return choice
+
+
+def annotate(rd, docs):
+    """Every section of the provider docs {provider: doc or None} with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
+    out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); ch = choices(rd)
+    for s in out:
+        s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
+        s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key'])
+    return sorted(out, key=lambda s: (s['km0'], s['provider']))

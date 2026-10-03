@@ -994,8 +994,8 @@ def create_app(roots, token=None):
     def get_streetview(folder: str):                                                     # the road stretches, each provider's sections of imagery, what stage is done, the running job, and which keys are set
         from strata360 import streetview as SV
         from strata360.edit import llm_remote as LR
-        f = folder_of(folder); rd = config.race_dir(f)
-        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: SV.load(rd, p) for p in SV.PROVIDERS}, job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
+        f = folder_of(folder); rd = config.race_dir(f); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}
+        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
 
     @api.post('/api/streetview/run', dependencies=[Depends(auth)])
     def post_streetview_run(body: dict):                                                 # {folder, stages?: [..], force?}: make the stages in the background at the lowest priority
@@ -1007,6 +1007,16 @@ def create_app(roots, token=None):
         cmd = [*oslib.cli_command(), 'streetview', f] + (['--stages', ','.join(stages)] if stages else []) + (['--force'] if body.get('force') else [])
         d = SV.adir(config.race_dir(f)); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'run.log'), 'wb')
         STREETVIEW_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.post('/api/streetview/choice', dependencies=[Depends(auth)])
+    def post_streetview_choice(body: dict):                                              # {folder, key, choice: 'none' | 'possible' | 'must'}: whether the film may use this section (the writer is only told about the ones you chose)
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); rd = config.race_dir(f); key = str(body.get('key') or '')
+        if not any(x['key'] == key for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})): raise HTTPException(404, 'no such street view section')
+        choice = str(body.get('choice') or '')
+        try: SV.set_choice(rd, key, choice)
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        return dict(key=key, choice=None if choice == 'none' else choice)
 
     @api.get('/api/streetview/image')
     def get_streetview_image(request: Request, folder: str, provider: str, id: str, w: int = 640):   # one frame as a JPEG (an <img> cannot send headers: the cookie / query token authenticates); only frames the stage found can be asked for

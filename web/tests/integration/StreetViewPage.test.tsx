@@ -60,7 +60,7 @@ describe('StreetViewPage', () => {
     serve(); const { user } = setup(<StreetViewPage folder="/data" />)
     await user.click((await screen.findAllByRole('row'))[1])
     expect(screen.getByText(/A flat camera, facing: forward 3 · back 1/)).toBeInTheDocument()
-    const imgs = screen.getAllByRole('img').filter(i => i.getAttribute('src')?.startsWith('/api/streetview/image')); expect(imgs.map(i => i.getAttribute('alt'))).toEqual(['Mapillary forward (3)', 'Mapillary back (1)'])
+    const imgs = screen.getAllByRole('img').filter(i => /^Mapillary (forward|back)/.test(i.getAttribute('alt') ?? '')); expect(imgs.map(i => i.getAttribute('alt'))).toEqual(['Mapillary forward (3)', 'Mapillary back (1)'])
     expect(imgs[0].getAttribute('src')).toBe('/api/streetview/image?folder=%2Fdata&provider=mapillary&id=m2&w=256')
     await user.click(screen.getByRole('button', { name: 'Picture at back (1)' })); expect(screen.getByAltText('Larger picture').getAttribute('src')).toContain('id=m4&w=1024')
     await user.click(screen.getByText('Close the larger picture')); expect(screen.queryByAltText('Larger picture')).not.toBeInTheDocument()
@@ -80,7 +80,7 @@ describe('StreetViewPage', () => {
   })
 
   it('says so when no provider has been run', async () => {
-    const sv = makeStreetView(); sv.providers = { mapillary: null, panoramax: null, google: null }; serve(sv); setup(<StreetViewPage folder="/data" />)
+    const sv = makeStreetView(); sv.providers = { mapillary: null, panoramax: null, google: null }; sv.sections = []; serve(sv); setup(<StreetViewPage folder="/data" />)
     expect(await screen.findByText('No street view sections yet: run a provider above.')).toBeInTheDocument()
   })
 
@@ -95,9 +95,42 @@ describe('StreetViewPage', () => {
   })
 
   it('draws a Google section with its own marker', async () => {
-    const sv = makeStreetView(); sv.providers.google = { sections: [makeSvSection({ id: 'G1', provider: 'google', kind: '360', angles: null, items: [{ id: 'g1', km: 1.2, lat: 50.001, lon: 5.001, b: 90 }] })], frames: 1, km: 0.3 }; sv.status.google = { done: true, stale: false, sections: 1, frames: 1, km: 0.3 }; serve(sv)
+    const sv = makeStreetView(); sv.providers.google = { frames: 1, km: 0.3 }; sv.sections.push(makeSvSection({ id: 'G1', key: 'google:g:1.20', plausible: false, why_not: "Google's terms do not allow its pictures in a film", provider: 'google', kind: '360', angles: null, items: [{ id: 'g1', km: 1.2, lat: 50.001, lon: 5.001, b: 90 }] })); sv.status.google = { done: true, stale: false, sections: 1, frames: 1, km: 0.3 }; serve(sv)
     const { user } = setup(<StreetViewPage folder="/data" />); await user.click(await screen.findByRole('button', { name: 'Google G1' }))
     expect(screen.getByAltText('Google km 1.2').getAttribute('src')).toContain('provider=google')
+  })
+})
+
+describe('the sections that could be used in the film', () => {
+  it('lists only the plausible sections, with details, previews and a count of the rest', async () => {
+    serve(); setup(<StreetViewPage folder="/data" />)
+    const card = await screen.findByLabelText('Sections that could be used'); expect(within(card).getAllByRole('listitem').filter(l => l.hasAttribute('data-section'))).toHaveLength(1)
+    const m1 = card.querySelector('[data-section="M1"]')!; expect(m1).toHaveTextContent('Mapillary M1 · 2D'); expect(m1).toHaveTextContent('km 1.2 to 1.5'); expect(m1).toHaveTextContent('4 pictures, one every 100 m'); expect(m1).toHaveTextContent('plays 2.7 s at 15 pictures a second (about 360 km/h)'); expect(m1).toHaveTextContent('faces forward 3 · back 1')
+    expect(within(m1 as HTMLElement).getAllByRole('img').length).toBeGreaterThanOrEqual(2); expect(card).toHaveTextContent('1 of 2 sections have enough pictures'); expect(card).toHaveTextContent('1 more sections are too short or too sparse')
+  })
+
+  it('saves the choice made for a section: not used, possible or must include', async () => {
+    const sv = makeStreetView(); sv.sections[0].choice = 'possible'; serve(sv); const seen = recordRequests('/api/streetview/choice'); server.use(http.post('/api/streetview/choice', () => HttpResponse.json({ key: 'mapillary:s1:1.20', choice: 'must' })))
+    const { user } = setup(<StreetViewPage folder="/data" />); const group = await screen.findByRole('group', { name: 'Use Mapillary M1 in the film' })
+    expect(within(group).getByLabelText('Possible')).toBeChecked(); expect(within(group).getByLabelText('Not used')).not.toBeChecked()
+    await user.click(within(group).getByLabelText('Must include')); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen[0].body).toEqual({ folder: '/data', key: 'mapillary:s1:1.20', choice: 'must' })
+    await user.click(within(group).getByLabelText('Not used')); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(2)); expect(seen[1].body).toMatchObject({ choice: 'none' })
+  })
+
+  it('says when sections over the same road come from different sources, in the cards and in the list', async () => {
+    const sv = makeStreetView(); sv.sections[0].overlaps = ['P1']; sv.sections.push(makeSvSection({ id: 'P1', key: 'panoramax:c:1.25', provider: 'panoramax', kind: '360', angles: null, km0: 1.25, km1: 1.45, length_m: 200, overlaps: ['M1'], items: [{ id: 'p1', km: 1.3, lat: 50.001, lon: 5.0025, b: 90 }] })); serve(sv); setup(<StreetViewPage folder="/data" />)
+    const note = (await screen.findAllByRole('note'))[0]; expect(note).toHaveTextContent('Overlaps the same road as Panoramax P1 (km 1.25 to 1.45)'); expect(screen.getAllByRole('note')).toHaveLength(2)
+    const rows = screen.getAllByRole('row'); expect(rows[1]).toHaveTextContent('P1'); expect(within(rows[1]).getByText('P1')).toHaveClass('text-amber-700')
+  })
+
+  it('reports a failure to save the choice', async () => {
+    serve(); server.use(http.post('/api/streetview/choice', () => HttpResponse.json({ detail: 'no such street view section' }, { status: 404 })))
+    const { user } = setup(<StreetViewPage folder="/data" />); await user.click(await screen.findByLabelText('Possible')); expect(await screen.findByRole('alert')).toHaveTextContent(/404|no such/)
+  })
+
+  it('says so when no section has enough pictures', async () => {
+    const sv = makeStreetView(); sv.sections.forEach(s => { s.plausible = false }); serve(sv); setup(<StreetViewPage folder="/data" />)
+    expect(await screen.findByText('None of the sections found has enough pictures yet.')).toBeInTheDocument()
   })
 })
 

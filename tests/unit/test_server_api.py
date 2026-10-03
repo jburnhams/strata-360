@@ -557,8 +557,21 @@ class TestStreetViewApi(TestGapClipsApi):
         q = dict(folder=project.folder); j = client.get('/api/streetview', params=q).json()
         assert j['roads'] is None and j['status']['roads']['done'] is False and j['keys'] == dict(mapillary=True, google=False) and j['job'] == dict(running=False, log=[], error='')
         self.make_docs(project); j = client.get('/api/streetview', params=q).json()
-        assert j['roads']['stretches'][0]['id'] == 'R1' and j['providers']['mapillary']['sections'][0]['id'] == 'M1' and j['providers']['google'] is None
+        assert j['roads']['stretches'][0]['id'] == 'R1' and [x['id'] for x in j['sections']] == ['M1'] and j['providers'] == dict(mapillary=dict(frames=2, km=0.2), panoramax=None, google=None)
         assert j['status']['mapillary'] == dict(done=True, stale=False, sections=1, frames=2, km=0.2) and j['status']['roads'] == dict(done=True, stretches=1, km=0.5)
+
+    def test_sections_come_with_whether_they_are_plausible_what_they_overlap_and_the_choice_made(self, client, project):
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir; roads = SV.load(rd, 'roads'); base = SV.load(rd, 'mapillary')['sections'][0]
+        good = dict(base, id='M2', seq='s2', km0=1.1, km1=1.3, length_m=200, frames=40, spacing_m=5.0); other = dict(base, id='P1', provider='panoramax', seq='c', km0=1.15, km1=1.25, length_m=100, frames=12, spacing_m=8.0)
+        SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [base, good], roads)); SV._save(rd, 'panoramax', SV.provider_doc('panoramax', [other], roads)); q = dict(folder=project.folder)
+        by = {x['id']: x for x in client.get('/api/streetview', params=q).json()['sections']}
+        assert by['M1']['plausible'] is False and 'only 2 pictures' in by['M1']['why_not'] and by['M2']['plausible'] is True and by['M2']['play_s'] == 2.7 and by['M2']['speed_ms'] == 75.0
+        assert by['M2']['overlaps'] == ['M1', 'P1'] and by['P1']['overlaps'] == ['M1', 'M2'] and by['M1']['overlaps'] == ['M2', 'P1'] and by['M2']['choice'] is None and by['M2']['key'] == 'mapillary:s2:1.10'
+        assert client.post('/api/streetview/choice', json=dict(folder=project.folder, key='mapillary:s2:1.10', choice='must')).json() == dict(key='mapillary:s2:1.10', choice='must')
+        assert {x['id']: x['choice'] for x in client.get('/api/streetview', params=q).json()['sections']}['M2'] == 'must'
+        assert client.post('/api/streetview/choice', json=dict(folder=project.folder, key='mapillary:s2:1.10', choice='none')).json()['choice'] is None and {x['id']: x['choice'] for x in client.get('/api/streetview', params=q).json()['sections']}['M2'] is None
+        assert client.post('/api/streetview/choice', json=dict(folder=project.folder, key='nope', choice='must')).status_code == 404 and client.post('/api/streetview/choice', json=dict(folder=project.folder, key='mapillary:s2:1.10', choice='maybe')).status_code == 400
 
     def test_the_stages_are_started_in_the_background_one_job_at_a_time(self, client, project, fake_popen):
         r = client.post('/api/streetview/run', json=dict(folder=project.folder, stages=['roads', 'mapillary'], force=True)); assert r.json() == dict(started=True)

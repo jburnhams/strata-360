@@ -38,8 +38,11 @@ export interface SvSection { id: string; provider: SvProvider; stretch: string; 
 export interface SvStretch { id: string; km0: number; km1: number; length_m: number; highways: string[]; names: string[]; line: [number, number][] }
 export interface SvRoads { id: string; total_km: number; stretches: SvStretch[]; run: [number, number][] }
 export interface SvStageStatus { done: boolean; stale?: boolean; stretches?: number; sections?: number; frames?: number; km: number }
+export type SvChoice = 'possible' | 'must'
+/** A section with what the page needs: a key that survives the stage being run again, whether it could make a clip (and why not), how long it plays at 15 pictures a second and how fast that looks, the sections over the same road, and your choice. */
+export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; speed_ms: number | null; overlaps: string[]; choice: SvChoice | null }
 export interface StreetView {
-  status: Record<'roads' | SvProvider, SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { sections: SvSection[]; frames: number; km: number } | null>
+  status: Record<'roads' | SvProvider, SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { frames: number; km: number } | null>; sections: SvSectionInfo[]
   job: PhotoJob; keys: { mapillary: boolean; google: boolean }
 }
 export interface Photo {
@@ -175,6 +178,7 @@ export const api = {
   },
   streetview: (folder: string) => call<StreetView>('/api/streetview?' + q({ folder })),
   runStreetview: (folder: string, body: { stages?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/streetview/run', { folder, ...body }),
+  setStreetviewChoice: (folder: string, key: string, choice: SvChoice | 'none') => call<{ key: string; choice: SvChoice | null }>('/api/streetview/choice', { folder, key, choice }),
   streetviewImage: (folder: string, provider: SvProvider, id: string, w = 256) => '/api/streetview/image?' + q({ folder, provider, id, w: String(w) }),
   photos: (folder: string) => call<{ photos: Photo[]; tz: string; job?: PhotoJob }>('/api/photos?' + q({ folder })),
   photoMotion: (folder: string, id: string, p: Partial<MotionSettings> = {}) => call<MotionPlan>('/api/photos/motion?' + q({ folder, id, ...(p.style ? { style: p.style } : {}), ...(p.seconds != null ? { seconds: String(p.seconds) } : {}), ...(p.seed != null ? { seed: String(p.seed) } : {}) })),
