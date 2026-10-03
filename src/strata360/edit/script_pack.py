@@ -157,16 +157,17 @@ def streetview_clips(folder, tr, tz):
     from strata360 import streetview as SV
     from strata360.gps import context as X
     from strata360.pipeline import config
-    rd = config.race_dir(folder); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; ch = SV.chosen(rd, docs)
+    from strata360.pipeline import notes as N
+    rd = config.race_dir(folder); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; ch = SV.chosen(rd, docs); notes = N.load(folder).get('clips') or {}
     if not ch or tr is None: return []
     dist, ts = SV.track_dist(tr); by_id = {c['id']: c for c in ch}; out = []
     for sec in ch:
-        t0 = float(np.interp(sec['km0'] * 1000, dist, ts)); t1 = float(np.interp(sec['km1'] * 1000, dist, ts)); tm = (t0 + t1) / 2; mid = sec['items'][len(sec['items']) // 2]; dur = round(min(max(sec['frames'] / SV.PLAY_FPS, sec['min_s']), sec['max_s']), 1)
+        t0 = float(np.interp(sec['km0'] * 1000, dist, ts)); t1 = float(np.interp(sec['km1'] * 1000, dist, ts)); tm = (t0 + t1) / 2; mid = sec['items'][len(sec['items']) // 2]; dur = sec['seconds'] if sec.get('seconds') else round(min(max(sec['frames'] / SV.PLAY_FPS, sec['min_s']), sec['max_s']), 1)
         caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap = caps[len(caps) // 2] if caps else None
         f = dict(source=sec['provider'], camera='a 360 camera' if sec['kind'] == '360' else 'a flat camera facing ' + ', '.join(k for k, v in (sec.get('angles') or {}).items() if v), km0=sec['km0'], km1=sec['km1'], length_m=sec['length_m'], pictures=sec['frames'], spacing_m=sec['spacing_m'],
                  min_s=sec['min_s'], max_s=sec['max_s'], years=sec['years'], captured=X._local(cap, tz).strftime('%a %d %b %Y %H:%M') if cap else None, same_road=[c['label'] for c in ch if c['id'] in sec['overlaps'] and c['id'] in by_id])
-        d = dict(label=sec['label'], clip=sec['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=sec['max_s'], usable=[(sec['min_s'], sec['max_s'])], synthetic=True, streetview=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
-                 settings=dict(kind=None, mode=None, seconds=None, must=sec['choice'] == 'must'), planned=None, sv_facts=f)
+        d = dict(label=sec['label'], clip=sec['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=sec['max_s'], usable=[(sec['min_s'], sec['max_s'])], synthetic=True, streetview=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note=(notes.get(sec['label']) or '').strip(), lines=[], speech_s=0.0, speech_words=0,
+                 settings=dict(kind=None, mode='set' if sec.get('seconds') else None, seconds=sec.get('seconds'), must=sec['choice'] == 'must'), planned=None, sv_facts=f)
         ctx = X.context_at(tr, t0, t1, tz); d['track'] = X.describe(ctx)
         if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
         out.append(d)

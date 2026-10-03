@@ -200,3 +200,12 @@ class TestNearestClips:
         s = sec('M1', km0=5.0, km1=5.3, items=[dict(id='a', km=5.0, lat=50.2, lon=5.79, t=1), dict(id='b', km=5.3, lat=50.2, lon=5.79, t=2)])
         out = SV.annotate(str(tmp_path), {'mapillary': doc(s)}, self.track(), [self.clip('0003', 6.0, 7.0)], [])[0]['near']; assert out['after']['label'] == '0003' and out['before'] is None
         assert SV.annotate(str(tmp_path), {'mapillary': doc(s)})[0]['near'] is None
+
+
+class TestLength:
+    def test_a_length_is_kept_within_what_the_section_can_play_and_cleared(self, tmp_path):
+        rd = str(tmp_path); a = sec('M1'); docs = {'mapillary': doc(a)}; s = SV.annotate(rd, docs)[0]
+        assert SV.set_length(rd, s, 12) == 12.0 and SV.annotate(rd, docs)[0]['seconds'] == 12.0
+        with pytest.raises(ValueError, match='can play'): SV.set_length(rd, s, 0.5)
+        with pytest.raises(ValueError, match='number'): SV.set_length(rd, s, 'long')
+        assert SV.set_length(rd, s, None) is None and SV.annotate(rd, docs)[0]['seconds'] is None

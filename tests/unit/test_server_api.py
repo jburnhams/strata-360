@@ -728,3 +728,11 @@ class TestStreetViewPromote:
 class TestStreetViewChosen:
     def test_the_chosen_sections_come_with_when_the_runner_passed_them(self, client, project):
         r = client.get('/api/streetview/chosen', params=dict(folder=project.folder)); assert r.status_code == 200 and isinstance(r.json()['sections'], list)
+
+
+class TestStreetViewLength(TestStreetViewApi):
+    def test_a_length_is_set_refused_outside_what_the_section_plays_and_cleared(self, client, project):
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir; s = SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})[0]; key = s['key']; q = dict(folder=project.folder, key=key)
+        assert client.post('/api/streetview/length', json=dict(q, seconds=9999)).status_code == 400 and client.post('/api/streetview/length', json=dict(folder=project.folder, key='nope', seconds=5)).status_code == 404
+        assert client.post('/api/streetview/length', json=dict(q, seconds=None)).json() == dict(key=key, seconds=None)

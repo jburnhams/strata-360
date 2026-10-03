@@ -19,6 +19,7 @@ import GapView from './GapView'
 import PhotosPanel from './PhotosPanel'
 import StreetViewPage from './StreetViewPage'
 import PhotoPage from './PhotoPage'
+import SvItemPage from './SvItemPage'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -49,7 +50,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             : timeline(clips, gaps ?? [], (photos ?? []).filter(p => p.use), svChosen ?? []).map(e => e.kind === 'clip' ? <Row key={e.id} folder={folder} c={e.c} overlay={overlay} active={sel === e.id} onClick={() => { setFocus(undefined); setSel(e.id) }} />
               : e.kind === 'gap' ? <GapRow key={e.id} g={e.g} active={sel === `@gap:${e.g.id}`} onClick={() => { setFocus(undefined); setSel(`@gap:${e.g.id}`) }} />
               : e.kind === 'photo' ? <PhotoRow key={e.id} folder={folder} p={e.p} active={sel === `@photo:${e.p.id}`} onClick={() => { setFocus(undefined); setSel(`@photo:${e.p.id}`) }} />
-              : <SvRow key={e.id} s={e.s} active={sel === '@streetview'} onClick={() => setSel('@streetview')} />)}
+              : <SvRow key={e.id} s={e.s} active={sel === `@sv:${e.s.key}`} onClick={() => { setFocus(undefined); setSel(`@sv:${e.s.key}`) }} />)}
         </ul>
       </aside>
       <div className="min-w-0">
@@ -72,6 +73,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         ) : sel === '@streetview' ? <StreetViewPage folder={folder} tz={tz} />
           : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
           : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} />
+          : sel.startsWith('@sv:') ? <SvItemPage folder={folder} item={(svChosen ?? []).find(x => x.key === sel.slice(4))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
           : sel.startsWith('@photo:') ? <PhotoPage folder={folder} photo={photos?.find(p => p.id === sel.slice(7))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
           : <ClipView folder={folder} clip={sel} focus={focus} />}
       </div>

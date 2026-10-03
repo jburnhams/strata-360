@@ -342,7 +342,7 @@ def overlaps(sections, share=0.3):
 def _state(rd):
     try: d = json.load(open(os.path.join(adir(rd), 'choices.json')))
     except (OSError, ValueError): d = {}
-    return dict(choices={k: v for k, v in (d.get('choices') or {}).items() if v in CHOICES}, labels=d.get('labels') or {}, next=int(d.get('next') or 1))
+    return dict(choices={k: v for k, v in (d.get('choices') or {}).items() if v in CHOICES}, labels=d.get('labels') or {}, next=int(d.get('next') or 1), lengths={k: float(v) for k, v in (d.get('lengths') or {}).items() if isinstance(v, (int, float))})
 
 
 def choices(rd): return _state(rd)['choices']
@@ -356,7 +356,21 @@ def set_choice(rd, key, choice):
     else:
         st['choices'][key] = choice
         if key not in st['labels']: st['labels'][key] = st['next']; st['next'] += 1
-    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(st, open(tmp, 'w'), indent=1); os.replace(tmp, p); return choice
+    _save_state(rd, st); return choice
+
+
+def _save_state(rd, st):
+    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(st, open(tmp, 'w'), indent=1); os.replace(tmp, p)
+
+
+def set_length(rd, s, seconds):
+    """Fix how long the film shows a section (an annotated one), within what it can play (`min_s` to `max_s`), or leave it to the plan with None. Returns the length or None. ValueError when it is not allowed."""
+    st = _state(rd)
+    if seconds is None: st['lengths'].pop(s['key'], None); _save_state(rd, st); return None
+    try: v = round(float(seconds), 1)
+    except (TypeError, ValueError): raise ValueError('the length is a number of seconds')
+    if not s['min_s'] <= v <= s['max_s']: raise ValueError(f"this section can play {s['min_s']} to {s['max_s']} seconds")
+    st['lengths'][s['key']] = v; _save_state(rd, st); return v
 
 
 LIT, DARK_BELOW = 0.0, -6.0       # the sun's height (degrees): at or above LIT the scene is lit by the sun; below DARK_BELOW (past civil twilight) it is dark. Between them is dusk or dawn: it fits either
@@ -404,7 +418,7 @@ def annotate(rd, docs, tr=None, clips=None, gaps=None):
     out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; have = {section_key(s) for s in out}; out += [dict(s) for s in manual_sections(rd) if section_key(s) not in have]; ov = overlaps(out); st = _state(rd); ch = st['choices']; qs = quality_of(rd)
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['near'] = nearest_clips(s, clips, tr, gaps) if tr is not None else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
+        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['near'] = nearest_clips(s, clips, tr, gaps) if tr is not None else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['seconds'] = st['lengths'].get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
 
 

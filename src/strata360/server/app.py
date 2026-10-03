@@ -1058,13 +1058,25 @@ def create_app(roots, token=None):
         return dict(key=key, choice=None if choice == 'none' else choice)
 
     @api.get('/api/streetview/chosen', dependencies=[Depends(auth)])
-    def get_streetview_chosen(folder: str):                                              # the street view sections chosen for the film (possible or must), each with when the runner passed it: they sit among the clips in the sidebar
+    def get_streetview_chosen(folder: str):                                              # the street view sections chosen for the film (possible or must), each with when the runner passed it, its length setting and what the newest script draft says over it: they sit among the clips in the sidebar and have a page like a gap
         from strata360 import streetview as SV
+        from strata360.edit import script_draft as SD
         f = folder_of(folder); rd = config.race_dir(f); tr = sv_track(f); out = []
         if tr is None: return dict(sections=out)
+        said = {}
+        for n, it in enumerate((SD.load_draft(f) or {}).get('items') or []):
+            lab = norm_label(it.get('clip', ''))
+            if lab.startswith('V'): said.setdefault(lab, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
         for s in SV.chosen(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}):
-            a, b = SV.passed(s, tr); out.append(dict(key=s['key'], label=s['label'], id=s['id'], provider=s['provider'], kind=s['kind'], choice=s['choice'], t0=a, t1=b, length_m=s['length_m'], quality=(s.get('quality') or {}).get('grade')))
+            a, b = SV.passed(s, tr); out.append(dict(key=s['key'], label=s['label'], id=s['id'], provider=s['provider'], kind=s['kind'], choice=s['choice'], t0=a, t1=b, length_m=s['length_m'], quality=(s.get('quality') or {}).get('grade'), min_s=s['min_s'], max_s=s['max_s'], seconds=s.get('seconds'), default_s=SV.default_seconds(s), script=said.get(s['label'], [])))
         return dict(sections=sorted(out, key=lambda x: x['t0']))
+
+    @api.post('/api/streetview/length', dependencies=[Depends(auth)])
+    def post_streetview_length(body: dict):                                              # {folder, key, seconds | null}: fix how long the film shows this section (within what it can play), or leave it to the plan
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); rd, s = sv_section(f, str(body.get('key') or ''))
+        try: return dict(key=s['key'], seconds=SV.set_length(rd, s, body.get('seconds')))
+        except ValueError as ex: raise HTTPException(400, str(ex))
 
     @api.post('/api/streetview/promote', dependencies=[Depends(auth)])
     def post_streetview_promote(body: dict):                                             # {folder, provider, id, sequence, lat, lon}: make a capture run found by the nearest-street-view search a section like the others

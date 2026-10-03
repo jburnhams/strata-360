@@ -246,24 +246,39 @@ function SvMap({ routes, probe, onPick, roads, run, sections, clips, scale, sel,
   return <div ref={el} role="application" aria-label="Map of the road parts and street view coverage" className="h-[480px] w-full overflow-hidden rounded-lg bg-stone-200 dark:bg-stone-800" />
 }
 
-function Detail({ folder, tz, section, stretch, sections, onSel, onChoose }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onChoose: (key: string, c: SvChoice | 'none') => void; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
-  const [big, setBig] = useState<{ provider: SvProvider; id: string }>()
-  useEffect(() => { setBig(undefined) }, [section?.id])
+/** What is known about when a section was filmed and passed and where it sits among the footage: the light warning, the times, the nearest footage each way and the sections over the same road. Shared by the candidates and the section's page in the film list. */
+export function SectionFacts({ s, tz, by }: { s: SvSectionInfo; tz: string; by: Map<string, SvSectionInfo> }) {
   return (
-    <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
-      {stretch && <div className="text-sm"><span className="font-medium">{stretch.names.join(', ') || 'Unnamed road'}</span> · {stretch.highways.join(', ')} · {span(stretch)} · {metres(stretch.length_m)} of the run on this road
-        {!section && <span className="text-stone-600 dark:text-stone-400"> · {sections.length ? `${sections.length} section${sections.length === 1 ? '' : 's'} of street view` : 'no street view found'}</span>}</div>}
-      {!section && sections.length > 0 && <ul className="mt-2 flex flex-wrap gap-2">{sections.map(s => <li key={s.id}><button onClick={() => onSel({ kind: 'section', id: s.id })} className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-600">{NAME[s.provider]} {kindLabel(s)} · {metres(s.length_m)}</button></li>)}</ul>}
-      {section && (
+    <>
+      {s.light?.warning && <p className="text-xs font-medium text-red-700 dark:text-red-400" role="note" data-light>⚠ {s.light.warning}</p>}
+      <p className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(s.filmed?.[0], tz)} · you pass it {when(s.passed?.[0], tz)}{s.has_video && <span className="ml-2 rounded bg-sky-700 px-1.5 text-white">preview video ready</span>}</p>
+      {s.near && <p className={`text-xs ${s.near.overlaps.length ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}`} data-near>{s.near.in_gap ? `Fills gap ${s.near.in_gap}. ` : ''}Nearest footage: {nearText(s.near)}</p>}
+      {s.overlaps.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}
+    </>
+  )
+}
+
+/** Not used / Possible / Must include for a section (any section: one that is not a candidate can still be used). */
+export function ChoiceRadios({ section, onChoose }: { section: SvSectionInfo; onChoose: (key: string, c: SvChoice | 'none') => void }) {
+  return (
+    <fieldset className="mt-1 flex flex-wrap items-center gap-3 text-sm" aria-label={`Use ${NAME[section.provider]} ${section.id} in the film (details)`}>
+      {CHOICES.map(c => <label key={c.v} className="flex items-center gap-1"><input type="radio" name={`use-detail-${section.key}`} checked={(section.choice ?? 'none') === c.v} onChange={() => onChoose(section.key, c.v)} />{c.label}</label>)}
+      {!section.plausible && <span className="text-xs text-amber-700 dark:text-amber-400">Not a candidate ({section.why_not}), but you can still use it.</span>}
+    </fieldset>
+  )
+}
+
+/** One section as the street view page shows it: what it is, when it was filmed and passed, its camera, the choice for the film, the preview video and its pictures. The section's page in the film list reuses it. */
+export function SectionContent({ folder, tz, section, onChoose, showChoice = true }: { folder: string; tz: string; section: SvSectionInfo; onChoose: (key: string, c: SvChoice | 'none') => void; showChoice?: boolean }) {
+  const [big, setBig] = useState<{ provider: SvProvider; id: string }>()
+  useEffect(() => { setBig(undefined) }, [section.id])
+  return (
         <div className="mt-2">
           <div className="text-sm"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[section.provider] }} /><span className="font-medium">{NAME[section.provider]} · {kindLabel(section)}</span> · {span(section)} · {metres(section.length_m)} · {section.frames} pictures{section.spacing_m != null ? `, one every ${section.spacing_m} m` : ''}
             {section.years.length > 0 && ` · ${section.years.join(', ')}`}{section.camera && ` · ${section.camera}`}{section.size && ` · ${section.size[0]}×${section.size[1]}`}</div>
           <div className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(section.filmed?.[0], tz)}{section.filmed && section.filmed[1] - section.filmed[0] > 60 ? ` to ${when(section.filmed[1], tz)}` : ''} · you pass it {when(section.passed?.[0], tz)}{section.passed ? ` to ${when(section.passed[1], tz).split(' ').slice(-1)[0]}` : ''}</div>
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
-          <fieldset className="mt-1 flex flex-wrap items-center gap-3 text-sm" aria-label={`Use ${NAME[section.provider]} ${section.id} in the film (details)`}>
-            {CHOICES.map(c => <label key={c.v} className="flex items-center gap-1"><input type="radio" name={`use-detail-${section.key}`} checked={(section.choice ?? 'none') === c.v} onChange={() => onChoose(section.key, c.v)} />{c.label}</label>)}
-            {!section.plausible && <span className="text-xs text-amber-700 dark:text-amber-400">Not a candidate ({section.why_not}), but you can still use it.</span>}
-          </fieldset>
+          {showChoice && <ChoiceRadios section={section} onChoose={onChoose} />}
           <SectionVideo folder={folder} section={section} />
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
@@ -273,7 +288,16 @@ function Detail({ folder, tz, section, stretch, sections, onSel, onChoose }: { f
           </ul>
           {big && <div className="mt-2"><img src={api.streetviewImage(folder, big.provider, big.id, 1024)} alt="Larger picture" className="max-h-[480px] rounded" /><button className="block text-xs underline" onClick={() => setBig(undefined)}>Close the larger picture</button></div>}
         </div>
-      )}
+  )
+}
+
+function Detail({ folder, tz, section, stretch, sections, onSel, onChoose }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onChoose: (key: string, c: SvChoice | 'none') => void; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
+  return (
+    <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
+      {stretch && <div className="text-sm"><span className="font-medium">{stretch.names.join(', ') || 'Unnamed road'}</span> · {stretch.highways.join(', ')} · {span(stretch)} · {metres(stretch.length_m)} of the run on this road
+        {!section && <span className="text-stone-600 dark:text-stone-400"> · {sections.length ? `${sections.length} section${sections.length === 1 ? '' : 's'} of street view` : 'no street view found'}</span>}</div>}
+      {!section && sections.length > 0 && <ul className="mt-2 flex flex-wrap gap-2">{sections.map(s => <li key={s.id}><button onClick={() => onSel({ kind: 'section', id: s.id })} className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-600">{NAME[s.provider]} {kindLabel(s)} · {metres(s.length_m)}</button></li>)}</ul>}
+      {section && <SectionContent folder={folder} tz={tz} section={section} onChoose={onChoose} />}
     </div>
   )
 }
@@ -324,10 +348,7 @@ function Candidates({ folder, tz, sections, all, sel, onSel, onChoose }: { folde
               <Quality q={s.quality} />
               {s.label && <span className="rounded bg-emerald-700 px-1.5 text-xs text-white">called {s.label} in the script</span>}
             </div>
-            {s.light?.warning && <p className="text-xs font-medium text-red-700 dark:text-red-400" role="note" data-light>⚠ {s.light.warning}</p>}
-            <p className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(s.filmed?.[0], tz)} · you pass it {when(s.passed?.[0], tz)}{s.has_video && <span className="ml-2 rounded bg-sky-700 px-1.5 text-white">preview video ready</span>}</p>
-            {s.near && <p className={`text-xs ${s.near.overlaps.length ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}`} data-near>{s.near.in_gap ? `Fills gap ${s.near.in_gap}. ` : ''}Nearest footage: {nearText(s.near)}</p>}
-            {s.overlaps.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}
+            <SectionFacts s={s} tz={tz} by={by} />
             <div className="mt-1 flex flex-wrap items-center gap-3">
               <ul className="flex gap-1">{previews(s).filter((_, i, a) => a.length <= 3 || i % Math.ceil(a.length / 3) === 0).slice(0, 3).map(({ it, label }) => <li key={it.id}><img loading="lazy" src={api.streetviewImage(folder, s.provider, it.id, 256)} alt={`${NAME[s.provider]} ${s.id} ${label}`} className="h-16 w-24 rounded object-cover" /></li>)}</ul>
               <fieldset className="flex gap-3 text-sm" aria-label={`Use ${NAME[s.provider]} ${s.id} in the film`}>
