@@ -93,6 +93,19 @@ def split_points(start, seconds, pauses, target=SPLIT_TARGET_S, floor=SPLIT_MIN_
     return cuts
 
 
+def chain_windows(wins, beat_s, duration, speech, broll=False):
+    """The shots of one piece as [(candidate, start, length, beats)] in whole beats. A talking stretch cut into several shots is played straight through: a shot is rounded UP to whole beats, so it runs past the point where the next one was meant to start;
+    the next one then picks up exactly where the last ended (it is shorter by the difference, and left out if nothing is left of it), so no words and no picture are heard or seen twice. `duration` is the clip's length."""
+    out = []; prev_end = None
+    for c, start, length in wins:
+        if speech and prev_end is not None and start < prev_end - 1e-6:
+            length -= prev_end - start; start = prev_end
+            if length < 0.4 * beat_s: continue                                                              # (a sliver the last shot already covers is not worth a shot of its own)
+        beats = max(1, int(round(length / beat_s))) if broll else max(1, int(math.ceil(length / beat_s - 1e-9))); dur = beats * beat_s; start = max(min(start, duration - dur), 0.0)
+        out.append((c, start, length, beats)); prev_end = start + dur
+    return out
+
+
 def pieces(draft, pack, voice_s, wpm):
     """The script as pieces in order: [{n, kind, clip, label, seconds, ...}]. `voice_s` maps the item number to how long the narration takes to speak (missing: estimated from the words)."""
     by_label = {c['label']: c for c in pack['clips']}; lines = {l['id']: l for c in pack['clips'] for l in c['lines']}; out = []; warn = []
@@ -419,9 +432,8 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
             if short > 1e-6:
                 c0, s0, l0 = wins[-1]; grow = min(short, max(cap_p - l0, 0.0)); wins[-1] = (c0, s0, l0 + grow)
                 warn.append(f"item {p['n'] + 1}: the narration needs {p['seconds']:.1f} s but clip {p['label']} has {p['seconds'] - short:.1f} s of footage for it; the last frame is held" + (f" for {short - grow:.1f} s more than a window allows" if short - grow > 1e-6 else '') + ' (choices: shorten the line, move it to a longer clip, or let the hold stand)')
-        for c, start, length in wins:
-            speech = p['kind'] == 'clip'; beats = max(1, int(math.ceil(length / beat_s - 1e-9))) if p['kind'] != 'broll' else max(1, int(round(length / beat_s)))
-            dur = beats * beat_s; start = max(min(start, fp.duration - dur), 0.0)
+        for c, start, length, beats in chain_windows(wins, beat_s, fp.duration, p['kind'] == 'clip', p['kind'] == 'broll'):
+            speech = p['kind'] == 'clip'; dur = beats * beat_s
             w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.view = p.get('view'); w.face = fp.face_share(start, start + dur); w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
             windows.append(w); roles.append(p['kind']); first_window.setdefault(k, len(windows) - 1)
     if not windows and not any(p['kind'] == 'synthetic' for p in ps): raise O.Infeasible('the script has no windows: no item could be matched to footage')

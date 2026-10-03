@@ -16,6 +16,7 @@ PAN_TAU = 0.35                             # velocity eases towards the wanted o
 JUMP_DEG = 28.0; JUMP_AFTER_S = 0.3        # further than this, for this long: move once, fast
 JUMP_S = 0.5                               # duration of the jump (smoothstep)
 FACE_BELOW_TOP = 0.30                      # the face centre is this fraction of the person's height below the top of the detection
+TALK_FACE_HIGH = 0.06                      # a talking shot of you puts the centre of the face this fraction of the frame height above the middle
 HEAD_MARGIN = 0.08                         # the top of the head stays at least this fraction of the frame height below the top edge: a hard requirement
 
 

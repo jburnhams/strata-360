@@ -168,3 +168,11 @@ def test_the_warning_for_a_view_that_was_asked_for_but_is_not_possible_gives_the
     busy = asked('close', beats=16, steady=0.0, you_close=0.9); assert len(busy) == 1 and 'the window is 8.0 s but a close view of you may last at most 3.0 s in footage this busy (steadiness 0%)' in busy[0]
     short = asked('mid', beats=2, you_close=0.9); assert len(short) == 1 and 'the window is 1.0 s but this view lasts 2 to 15 s' in short[0]
     assert not asked('mid', you_close=0.9) and 'whole bars' not in ''.join(asked('mid', beats=3, protagonist=0.1))
+
+
+def test_a_talking_shot_of_you_is_aimed_at_the_face_not_the_top_of_the_head():
+    without = FR.resolve_segment(seg('dialogue_hold'), LIB, data(you())); assert without['subject'] == 'you'
+    faced = [dict(x, face=-20.0) for x in you()]; with_face = FR.resolve_segment(seg('dialogue_hold'), LIB, data(faced))
+    vf = aim.vfov_deg(with_face['keyframes'][0]['fov']); assert with_face['keyframes'][0]['pitch'] == pytest.approx(-20.0 - aim.TALK_FACE_HIGH * vf, abs=1.0)              # the face centre, a little above the middle of the frame
+    assert with_face['keyframes'][0]['pitch'] != pytest.approx(without['keyframes'][0]['pitch'], abs=1.0)                                                            # not where the head-top aim puts the camera
+    other = FR.resolve_segment(seg('selfie_far'), LIB, data(faced)); assert other['keyframes'][0]['pitch'] == pytest.approx(-5.0, abs=1.0)                           # the other shots are not moved by it
