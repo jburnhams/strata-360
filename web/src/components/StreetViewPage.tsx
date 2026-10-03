@@ -281,7 +281,7 @@ export function SectionContent({ folder, tz, section, onChoose, showChoice = tru
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
           {showChoice && <ChoiceRadios section={section} onChoose={onChoose} />}
           <SectionVideo folder={folder} section={section} />
-          {section.kind === '360' && <SectionVideo folder={folder} section={section} pano />}
+          {section.kind === '360' && section.provider !== 'google' && <SectionVideo folder={folder} section={section} pano />}
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
               <li key={it.id}><button onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>

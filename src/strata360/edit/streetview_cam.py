@@ -232,7 +232,7 @@ def build(rd, section, road=None, size=OUT, preview=False):
 def render_pano(rd, section, seconds, out, road=None, fps=24, size=(1920, 960), log=print, preview=True):
     """Write a 360 video of a 360 section for looking around in: every picture turned level and so that the centre column looks along the road, blended between pictures, played through in `seconds`. For the page's viewer (WebGL), not for the film."""
     rig = build(rd, section, road, OUT, preview)
-    if rig.rot is None: raise ValueError(f"{section['id']}: only a 360 section can be looked around in")
+    if rig.rot is None: raise ValueError(f"{section['id']}: only a Mapillary or Panoramax 360 section can be looked around in (for Google only the view along the road is fetched)")
     prog, hs, rot, img, n = rig.prog, rig.hs, rig.rot, rig.img, rig.n; L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); W, H = size
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-c:v', 'libx264', '-crf', '27', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE); view = lambda i, yaw: reproject_equirect(img(i), rot(i, yaw, 0.0), size)

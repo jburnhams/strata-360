@@ -1120,7 +1120,7 @@ def create_app(roots, token=None):
     def post_streetview_video(body: dict):                                                # {folder, key, pano?}: make the preview video (pano: the 360 one to look around in, 360 sections only) in the background (nothing to do when it exists)
         from strata360 import streetview as SV
         f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd, s = sv_section(f, key); pano = bool(body.get('pano'))
-        if pano and s['kind'] != '360': raise HTTPException(400, 'only a 360 section can be looked around in')
+        if pano and (s['kind'] != '360' or s['provider'] == 'google'): raise HTTPException(400, 'only a Mapillary or Panoramax 360 section can be looked around in (for Google only the view along the road is fetched)')
         if os.path.exists(SV.video_path(rd, s, pano)): return dict(started=False, reason='the video is already made')
         if any(p.poll() is None for (ff, _, _p), p in STREETVIEW_VIDEO_JOBS.items() if ff == f): return dict(started=False, reason='another preview video is being made')
         out = SV.video_path(rd, s, pano); os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')

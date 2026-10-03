@@ -745,5 +745,12 @@ class TestStreetViewPanoVideo(TestStreetViewVideoApi):
         assert SV.video_path(rd, s, True) != SV.video_path(rd, s) and SV.video_path(rd, s, True).endswith('-360.mp4')
         q = dict(folder=project.folder, key=key, pano='true'); assert client.get('/api/streetview/video', params=q).json()['exists'] is False and client.get('/api/streetview/video/file', params=q).status_code == 404
         r = client.post('/api/streetview/video', json=dict(folder=project.folder, key=key, pano=True))
-        if s['kind'] == '360': assert r.json() == dict(started=True) and '--pano' in fake_popen.instances[-1].cmd
+        if s['kind'] == '360' and s['provider'] != 'google': assert r.json() == dict(started=True) and '--pano' in fake_popen.instances[-1].cmd
         else: assert r.status_code == 400
+
+
+class TestStreetViewPanoGoogle(TestStreetViewApi):
+    def test_a_google_section_cannot_be_looked_around_in(self, client, project):
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir; g = dict(SV.load(rd, 'mapillary')['sections'][0], id='G1', provider='google', seq='g', kind='360'); SV._save(rd, 'google', SV.provider_doc('google', [g], SV.load(rd, 'roads')))
+        r = client.post('/api/streetview/video', json=dict(folder=project.folder, key=SV.section_key(g), pano=True)); assert r.status_code == 400 and 'Google' in r.json()['detail']
