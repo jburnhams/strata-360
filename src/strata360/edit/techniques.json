@@ -509,7 +509,7 @@
    "hero": false,
    "max_share": 0.6,
    "cooldown": 0,
-   "max_consecutive": 3,
+   "max_consecutive": 1,
    "max_uses": 99,
    "beats": "beat",
    "dialogue_ok": true,
