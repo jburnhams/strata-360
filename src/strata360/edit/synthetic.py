@@ -115,3 +115,14 @@ def set_settings(folder, gid, **fields):
     else: allset[gid] = cur
     if not allset: doc.pop('settings', None)
     save(folder, doc); return cur
+
+
+PHOTO_SIZE = '3840x2160'        # a photo clip is made at 4K from the photo (the film scales it down for the preview)
+
+
+def make_photo(entry, seconds, motion, fps=30.0):
+    """The clip for a photo (a still with a pan and zoom, edit/photo_motion.py) shown for `seconds`: id P3 for photo p3, kind `photo`, covering the one moment it was taken (t0 = t1), so the film's overlay shows the race as it was then. `motion` is the photo's {style, seconds, seed}."""
+    pid = str(entry['id']).upper(); iso = _iso(entry['taken_utc'])
+    if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
+    c = dict(id=pid, kind='photo', photo=entry['id'], gap=None, t0=iso, t1=iso, duration_s=0.0, seconds=round(float(seconds), 2), speedup=1.0, fps=float(fps), style=dict(style=motion['style'], seed=int(motion['seed'])), status='planned', size=PHOTO_SIZE, approved=True, by='planner')
+    c['key'] = hashlib.sha1(json.dumps([c['kind'], entry['id'], entry.get('file'), round(c['seconds'], 2), c['fps'], c['style'], PHOTO_SIZE, 1], sort_keys=True).encode()).hexdigest()[:12]; return c

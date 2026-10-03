@@ -31,6 +31,7 @@ export function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }: { folde
         <div className="text-stone-500" title={`how the time was worked out: ${p.time_source}`}>{p.track ? `${hms(p.track.elapsed_s)} into the race · km ${p.track.km}` : 'not on the run'} · {p.time_source}</div>
         <div className="text-stone-500">{p.loc ? `${p.loc.lat.toFixed(4)}, ${p.loc.lon.toFixed(4)} (${p.loc.source})` : 'no position'}{p.apart_m != null ? ` · ${p.apart_m} m from the run` : ''}</div>
         {p.analysis && <Analysis folder={folder} id={p.id} a={p.analysis} />}
+        <label className="flex items-center gap-1.5" title="The film uses this photo: the script writer is told to, and the plan adds it where it was taken if the script leaves it out"><input type="checkbox" aria-label={`Use ${p.name} in the film`} checked={!!p.must} onChange={e => api.setPhotoMust(folder, p.id, e.target.checked).then(() => onMotion?.())} /> Use in the film</label>
         <PhotoMotion folder={folder} p={p} onChanged={() => onMotion?.()} />
         {p.flag && <div role="alert" className="text-amber-700 dark:text-amber-400">⚠ {p.flag}</div>}
         <div className="flex gap-3">

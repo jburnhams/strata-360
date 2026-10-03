@@ -73,6 +73,16 @@ describe('PhotosPanel analysis', () => {
   })
 })
 
+describe('Use in the film', () => {
+  it('marks a photo to be used in the film, and shows it ticked once it is', async () => {
+    const seen = recordRequests('/api/photos/settings'); server.use(http.post('/api/photos/settings', () => HttpResponse.json({ id: 'p1', must: true }))); const changed = vi.fn()
+    const { user, rerender } = setup(<PhotosPanel folder="/data" photos={[makePhoto()]} tz="UTC" onChanged={changed} onOpen={() => {}} />)
+    const box = screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' }); expect(box).not.toBeChecked(); await user.click(box)
+    await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', id: 'p1', must: true })); await waitFor(() => expect(changed).toHaveBeenCalled())
+    rerender(<PhotosPanel folder="/data" photos={[makePhoto({ must: true })]} tz="UTC" onChanged={changed} onOpen={() => {}} />); expect(screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' })).toBeChecked()
+  })
+})
+
 describe('PhotoStrip', () => {
   const photos = [makePhoto(), makePhoto({ id: 'p2', where: { kind: 'gap', id: 'G03' } }), makePhoto({ id: 'p3', where: null })]
   it('shows only the photos whose time falls in the clip or gap', () => {

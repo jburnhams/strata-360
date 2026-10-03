@@ -122,6 +122,32 @@ def gap_clips(folder, tr, tz):
     return out
 
 
+MAX_PHOTO_S = 12.0                     # the longest a photo is shown in the film
+MIN_PHOTO_S = 2.5
+
+
+def photo_clips(folder, tr, tz):
+    """Every photo of the project (photos.py) as a pack clip `P1`..., in time order with the clips: no footage and no words, a still the writer may show for a few seconds (a `photo` item) or put narration over; with when and where it was taken, what the photo analysis found in it
+    (the scene, the place, who is in it, the objects) and whether you marked it to be used."""
+    import datetime as dt
+    from strata360 import photos as PH
+    from strata360.analysis import photo_analysis as PA
+    from strata360.gps import context as X
+    from strata360.pipeline import config
+    rd = config.race_dir(folder); rows = PH.load(rd)['photos']
+    if not rows: return []
+    out = []
+    for e in rows:
+        lab = PH.label_of(e); mo = PH.motion_of(e); doc = PA.load_doc(rd, e['id']); a = PA.summary(doc); sec = round(min(max(float(mo['seconds']), MIN_PHOTO_S), MAX_PHOTO_S), 1); t = e['taken_utc']
+        d = dict(label=lab, clip=lab, start_utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=MAX_PHOTO_S, usable=[(0.0, MAX_PHOTO_S)], synthetic=True, photo=True, race_s=0.0, speedup=1.0, scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
+                 settings=dict(kind=None, mode=None, seconds=None, must=bool(e.get('must'))), planned=None, photo_facts=dict(name=e['name'], camera=e.get('camera') or '', **{k: v for k, v in a.items() if k != 'stages'}))
+        if tr is not None:
+            ctx = X.context_at(tr, t, t, tz); d['track'] = X.describe(ctx)
+            if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
+        out.append(d)
+    return out
+
+
 def music_facts(folder):
     """What the writer is told about the music, in FILM time (the film starts at the track's first downbeat): its length, tempo, the sections with their energy, and the lyrics (lyrics.py): where it is sung and the words heard
     (rough: the times are right, the words are often wrong). None when there is no track."""
@@ -158,7 +184,7 @@ def build(folder, tz=None):
             if pj.get('covered') and pj.get('summary'): d['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '')
         d['look'] = look_of(cdir, scale); d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
         d['speech_s'] = round(sum(l['t1'] - l['t0'] for l in d['lines']), 1); d['speech_words'] = sum(l['words'] for l in d['lines']); out.append(d)
-    out = sorted(out + gap_clips(folder, tr, tz), key=lambda c: c['start_utc'])
+    out = sorted(out + gap_clips(folder, tr, tz) + photo_clips(folder, tr, tz), key=lambda c: c['start_utc'])
     story = None
     try:
         from strata360.gps import tracks as TKS
@@ -194,8 +220,14 @@ def render(pack, with_usable=False, marks=None):
             L += [f"  [{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') for p in ly['phrases'][:45]]
     L += ['', f"CLIPS (all {len(pack['clips'])}, in shooting order; the film follows this order)"]
     for c in pack['clips']:
-        L.append(f"\n=== CLIP {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
-        if c.get('synthetic'):
+        L.append(f"\n=== {'PHOTO' if c.get('photo') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
+        if c.get('photo'):
+            f = c.get('photo_facts') or {}; L.append(f"A PHOTO the runner took (a still: no footage and no words); show it with a photo item of {MIN_PHOTO_S:g} to {MAX_PHOTO_S:g} s (the editor pans and zooms on it), or put a vo item over it. Use the ones that add to the story; leave the rest." + (' THE RUNNER WANTS THIS PHOTO IN THE FILM (MUST INCLUDE): give it a photo item.' if (c.get('settings') or {}).get('must') else ''))
+            bits = [f.get('description'), ('place: ' + f['place']) if f.get('place') else '', ('setting: ' + f['setting'] + (', ' + f['weather'] if f.get('weather') and f['weather'] != 'unknown' else '')) if f.get('setting') else '', ('scenery ' + format(f['scenery'], 'g') + '/10') if f.get('scenery') is not None else '',
+                    ('people in it: ' + str(f['people']) + (', the runner among them' + (' (face clear)' if f.get('face_clear') else ' (face not clear)' if f.get('face_clear') is False else '') if f.get('me') else '')) if f.get('people') is not None else '',
+                    ('objects: ' + ', '.join((str(o['n']) + ' ' if o['n'] > 1 else '') + o['label'] for o in f['objects'])) if f.get('objects') else '', ('tags: ' + ', '.join(f['tags'])) if f.get('tags') else '', ('picture looks ' + f['exposure']) if f.get('exposure') not in (None, 'ok') else '', ('picture is ' + f['quality']) if f.get('quality') not in (None, 'ok') else '']
+            L.append('the photo: ' + '; '.join(b for b in bits if b) if any(bits) else 'the photo has not been analysed (no description yet).')
+        elif c.get('synthetic'):
             g = c.get('gap') or {}; pl = c.get('planned')
             L.append(f"NO FOOTAGE: a gap of {c['race_s'] / 3600:.1f} h between clips ({g.get('local_start')} to {g.get('local_end')}, km {g.get('km_start')} to {g.get('km_end')}, +{g.get('ascent_m')} m{', ' + g['daylight'] if g.get('daylight') else ''}); {int(round(100 * (g.get('moving_share') or 0)))}% of it spent moving. "
                      f"Fill it with a generated clip: a generated clip (the planner draws it as a 2D map or a 3D terrain flyover: you only give its length), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
@@ -214,5 +246,5 @@ def render(pack, with_usable=False, marks=None):
         if c['lines']:
             L.append(f"the runner says ({c['speech_s']} s of speech, {c['speech_words']} words):")
             for l in c['lines']: L.append(f"  [{l['id']}] {l['t0']:.1f}-{l['t1']:.1f} s ({l['t1'] - l['t0']:.1f} s): {l['text']}" + ('' if l['lang'] == 'en' else f" (translated from {l['lang']})") + {'must': '   <<< MUST INCLUDE', 'never': '   <<< DO NOT USE'}.get(marks.get(l['id']), ''))
-        else: L.append('the runner says nothing in this clip.')
+        elif not c.get('photo'): L.append('the runner says nothing in this clip.')
     return '\n'.join(L)

@@ -32,7 +32,7 @@ export interface MotionSettings { style: 'auto' | MotionStyle; seconds: number; 
 export interface MotionPlan { style: MotionStyle; duration_s: number; zmax: number; seed: number; subjects: { cx: number; cy: number; w: number; h: number; weight: number; label: string }[]; windows: number[][]; size: number[]; settings: MotionSettings }
 export interface PhotoJob { running: boolean; log: string[]; error: string }
 export interface Photo {
-  motion?: MotionSettings; analysis?: PhotoAnalysis
+  must?: boolean; motion?: MotionSettings; analysis?: PhotoAnalysis
   id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
   loc: { lat: number; lon: number; source: 'photo gps' | 'run track' } | null; apart_m: number | null; flag: string | null; where: { kind: 'clip' | 'gap'; id: string } | null
 }
@@ -174,6 +174,7 @@ export const api = {
     return j as Photo
   },
   deletePhoto: async (folder: string, id: string) => { const r = await fetch('/api/photos?' + q({ folder, id }), { method: 'DELETE' }); if (!r.ok) throw new Error(`HTTP ${r.status}`) },
+  setPhotoMust: (folder: string, id: string, must: boolean) => call<{ id: string; must: boolean }>('/api/photos/settings', { folder, id, must }),
   photoThumb: (folder: string, id: string, w = 480) => '/api/photos/thumb?' + q({ folder, id, w: String(w) }),
   photoOverlay: (folder: string, id: string) => '/api/photos/thumb?' + q({ folder, id, overlay: '1' }),
   photoFile: (folder: string, id: string) => '/api/photos/file?' + q({ folder, id }),

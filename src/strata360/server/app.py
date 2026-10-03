@@ -1033,6 +1033,13 @@ def create_app(roots, token=None):
             except RuntimeError as ex: raise HTTPException(500, str(ex))
         return FileResponse(out, media_type='video/mp4', headers={'Cache-Control': 'max-age=86400'})
 
+    @api.post('/api/photos/settings', dependencies=[Depends(auth)])
+    def post_photo_settings(body: dict):                                                 # {folder, id, must}: use this photo in the film (the plan adds it where its time falls if the script leaves it out)
+        from strata360 import photos as PH
+        f = folder_of(body.get('folder')); pid = str(body.get('id') or '')
+        try: return dict(id=pid, must=PH.set_must(config.race_dir(f), pid, bool(body.get('must'))))
+        except KeyError: raise HTTPException(404, 'no such photo')
+
     @api.post('/api/photos/analyse', dependencies=[Depends(auth)])
     def post_photos_analyse(body: dict):                                                 # {folder, stages?: [..], photo?: [ids], force?}: run the clip stages that make sense for a photo over the photos, in the background at the lowest priority (`strata360 photos-analyse`)
         from strata360.analysis import photo_analysis as PA
@@ -1050,6 +1057,8 @@ def create_app(roots, token=None):
         f = folder_of(folder)
         try: PH.remove(config.race_dir(f), id)
         except KeyError: raise HTTPException(404, 'no such photo')
+        from strata360.edit import synthetic as SY
+        SY.remove(f, PH.label_of(id))                                                    # its clip in the plan goes too
         return dict(photos=photo_rows(f))
 
     @api.get('/api/photos/thumb')

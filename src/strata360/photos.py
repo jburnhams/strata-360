@@ -122,6 +122,20 @@ def oriented_size(path):
     im = Image.open(path); w, h = im.size; o = im.getexif().get(0x0112); return (h, w) if o in (5, 6, 7, 8) else (w, h)
 
 
+def label_of(entry_or_id):
+    """The name the script and the plan call a photo: p3 -> P3."""
+    return str(entry_or_id['id'] if isinstance(entry_or_id, dict) else entry_or_id).upper()
+
+
+def set_must(rd, pid, must):
+    """Mark a photo to be used in the film (the plan adds it where its time falls if the script leaves it out), or not. Raises KeyError for an unknown photo."""
+    doc = load(rd); e = next((p for p in doc['photos'] if p['id'] == pid), None)
+    if e is None: raise KeyError(pid)
+    if must: e['must'] = True
+    else: e.pop('must', None)
+    _save(rd, doc); return bool(must)
+
+
 MOTION_DEFAULT = dict(style='auto', seconds=6.0, seed=0)
 
 

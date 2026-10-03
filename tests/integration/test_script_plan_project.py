@@ -119,3 +119,30 @@ def test_a_generated_clip_is_made_as_long_as_its_whole_beat_window_so_nothing_is
     monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.0 for l in lines}); SD.save_draft(gap_folder, gap_draft(seconds=13.3)); p = PJ.plan_from_script(gap_folder)['plan']
     syn = [g for g in p['segments'] if g.get('synthetic')][0]; c = SY.load(gap_folder)['clips'][0]
     assert abs(c['seconds'] - syn['dur_s']) < 0.011 and abs(syn['synthetic_seconds'] - syn['dur_s']) < 0.011 and syn['dur_s'] >= 13.3 - 1e-6        # a whole number of beats, the clip exactly that long
+
+
+def test_a_photo_item_becomes_a_planned_clip_with_its_move_rendered_to_the_planned_length(folder, monkeypatch):
+    """A photo in the script is a picture-only generated clip: its pan and zoom is rendered (ffmpeg) to the whole-beat window the plan gives it, at the moment the photo was taken."""
+    import io, subprocess
+    from PIL import Image
+    from strata360 import photos as PH
+    from strata360.edit import synthetic as SY
+    rd = os.path.join(folder, 'strata360'); ex = Image.Exif(); ex.get_ifd(0x8769)[0x9003] = '2026:02:22 10:01:30'; ex.get_ifd(0x8769)[0x9011] = '+00:00'; b = io.BytesIO(); Image.new('RGB', (1600, 900), (60, 130, 90)).save(b, 'JPEG', exif=ex)
+    PH.add(rd, 'view.jpg', b.getvalue() + b'\0' * 200); monkeypatch.setattr(SY, 'PHOTO_SIZE', '640x360')                                             # (a small render: this tests the wiring, not the 4K)
+    draft = draft_for(folder); draft['items'].insert(2, dict(type='photo', clip='P1', seconds=4.0)); SD.save_draft(folder, draft)
+    monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.5 for l in lines}); edit = PJ.plan_from_script(folder); segs = edit['plan']['segments']
+    ph = [g for g in segs if g['clip'] == 'P1']; assert len(ph) == 1 and ph[0]['role'] == 'broll' and ph[0]['utc_start'] == ph[0]['utc_end'] == '2026-02-22T10:01:30Z' and ph[0]['synthetic'].endswith(os.path.join('synthetic', 'P1.mp4')) and os.path.exists(ph[0]['synthetic'])
+    clip = next(c for c in SY.load(folder)['clips'] if c['id'] == 'P1'); assert clip['kind'] == 'photo' and abs(clip['seconds'] - ph[0]['dur_s']) < 0.02 and clip['seconds'] >= 3.0
+    info = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,duration', '-of', 'csv=p=0', ph[0]['synthetic']], capture_output=True, text=True).stdout.strip().split(',')
+    assert info[:2] == ['640', '360'] and abs(float(info[2]) - clip['seconds']) < 0.2 and not [w for w in edit['plan']['warnings'] if 'not rendered' in w]
+
+
+def test_a_photo_marked_must_use_is_planned_even_when_the_script_does_not_name_it(folder, monkeypatch):
+    import io
+    from PIL import Image
+    from strata360 import photos as PH
+    from strata360.edit import synthetic as SY
+    rd = os.path.join(folder, 'strata360'); ex = Image.Exif(); ex.get_ifd(0x8769)[0x9003] = '2026:02:22 10:02:10'; ex.get_ifd(0x8769)[0x9011] = '+00:00'; b = io.BytesIO(); Image.new('RGB', (1600, 900), (60, 130, 90)).save(b, 'JPEG', exif=ex)
+    PH.add(rd, 'view.jpg', b.getvalue() + b'\0' * 200); PH.set_must(rd, 'p1', True); monkeypatch.setattr(SY, 'PHOTO_SIZE', '640x360'); SD.save_draft(folder, draft_for(folder))
+    monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.5 for l in lines}); edit = PJ.plan_from_script(folder)
+    assert [g['clip'] for g in edit['plan']['segments'] if g['clip'] == 'P1'] == ['P1'] and any('because you marked them to use' in w for w in edit['plan']['warnings'])
