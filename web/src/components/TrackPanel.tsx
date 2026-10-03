@@ -57,7 +57,7 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe
         {stat('Altitude', t.min_altitude_m != null ? `${t.min_altitude_m}–${t.max_altitude_m}` : null, 'm')}{stat('Heart rate', t.avg_hr != null ? `${t.avg_hr} (max ${t.max_hr})` : null)}{stat('Points', t.samples?.toLocaleString())}
       </div>
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
-      <TracksList folder={folder} listing={listing} onChange={changed} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
+      <TracksList folder={folder} listing={listing} onChange={changed} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
       <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
       <GapsPanel folder={folder} />
     </div>
@@ -124,8 +124,9 @@ function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle
 
 // The project's tracks: every uploaded FIT / GPX file marked a run (merged into the one race track) or a route (the course, shown on the map for planning only).
 const pace = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+const stamp = (t: number, tz: string) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(',', '') } catch { return new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') } }
 const hms = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}`
-function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onChange: () => Promise<void> } & Pick) {
+function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz }: { folder: string; listing?: TracksListing; onChange: () => Promise<void>; tz: string } & Pick) {
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string>(), input = useRef<HTMLInputElement>(null)
   const act = async (f: () => Promise<unknown>) => { setBusy(true); setErr(undefined); try { await f() } catch (e) { setErr((e as Error).message) } finally { try { await onChange() } finally { setBusy(false) } } }
   const add = (files: FileList | File[] | null) => act(async () => { for (const f of Array.from(files ?? [])) await api.addTrack(folder, f) })
@@ -156,7 +157,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: 
           {x.order != null && listing?.timing?.checkpoints[String(x.order)] != null && (
             <li data-checkpoint-row="" className="flex items-center gap-x-3 rounded px-1 text-xs text-blue-800 dark:text-blue-300">
               <span className="w-6 text-center"><span className="inline-block h-4 min-w-4 rounded-full bg-blue-700 px-1 text-center text-[10px] font-bold leading-4 text-white">{x.order}</span></span>
-              <span className="flex-1">Checkpoint {x.order}</span><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
+              <span className="flex-1">Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-stone-500" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</span><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
             </li>
           )}
           {tm && x.kind === 'run' && ix === lastRun && (

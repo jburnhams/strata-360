@@ -363,7 +363,7 @@ def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
 
 
 def timing(rd):
-    """The time of the run split between the checkpoints and the routes: {total_s, start, end, checkpoints: {n: seconds}, sections: {route id: seconds}, ran_m: {route id: metres actually run in it}, climb: {route id: [ascent, descent] in metres}, ascent_m, descent_m (the whole run), consistent}. The run, from its first sample to its last, is cut at each checkpoint's arrival and departure (a checkpoint the run never slowed at is a moment, 0 s):
+    """The time of the run split between the checkpoints and the routes: {total_s, start, end, checkpoints: {n: seconds}, sections: {route id: seconds}, ran_m: {route id: metres actually run in it}, climb: {route id: [ascent, descent] in metres}, arrivals: {n: {t (UTC), elapsed_s, km}} (arrival at each checkpoint, from the start of the run), ascent_m, descent_m (the whole run), consistent}. The run, from its first sample to its last, is cut at each checkpoint's arrival and departure (a checkpoint the run never slowed at is a moment, 0 s):
     section k is from the departure from checkpoint k - 1 (the start of the run for the first) to the arrival at checkpoint k (the end of the run for the last one reached), so the checkpoint times and the section times add up to `total_s` exactly. Routes beyond the last checkpoint the run reached have no time. `consistent` is False if the
     checkpoints came out of order along the run (a section would be negative)."""
     order, marks = route_order(rd); cur = current_path(rd)
@@ -372,11 +372,11 @@ def timing(rd):
     if len(t) < 2: return {}
     from strata360.gps.overview import ascent_descent
     alt = run['alt'][ok]; cum = _dist(run['lat'][ok], run['lon'][ok]); metres = lambda a, b: float(np.interp(b, t, cum) - np.interp(a, t, cum)); up_down = lambda a, b: ascent_descent(alt[(t >= a) & (t <= b)])                  # distance actually covered between two times
-    t0, t1 = float(t.min()), float(t.max()); ids = [o['id'] for o in sorted(order, key=lambda o: o['order'])]; secs = {}; cps = {}; dist = {}; climb = {}; prev = t0; consistent = True
+    t0, t1 = float(t.min()), float(t.max()); ids = [o['id'] for o in sorted(order, key=lambda o: o['order'])]; secs = {}; cps = {}; dist = {}; climb = {}; arrivals = {}; prev = t0; consistent = True
     for k, rid in enumerate(ids, 1):
         c = stops.get(k) if k < len(ids) else None
         if c is None:
             secs[rid] = t1 - prev; dist[rid] = metres(prev, t1); climb[rid] = up_down(prev, t1); consistent = consistent and t1 >= prev; break                                                   # the run ended in this section (or this is the last one)
         a = c['arrived'] if c['arrived'] is not None else c['passed']; l = c['left'] if c['left'] is not None else c['passed']
-        secs[rid] = a - prev; dist[rid] = metres(prev, a); climb[rid] = up_down(prev, a); cps[k] = l - a; consistent = consistent and a >= prev and l >= a; prev = l
-    return dict(total_s=round(t1 - t0), start=t0, end=t1, checkpoints={k: round(v) for k, v in cps.items()}, sections={k: round(v) for k, v in secs.items()}, ran_m={k: round(v) for k, v in dist.items()}, climb={k: [round(v[0]), round(v[1])] for k, v in climb.items()}, ascent_m=round(ascent_descent(alt)[0]), descent_m=round(ascent_descent(alt)[1]), consistent=bool(consistent))
+        arrivals[k] = dict(t=a, elapsed_s=round(a - t0), km=round(metres(t0, a) / 1000.0, 1)); secs[rid] = a - prev; dist[rid] = metres(prev, a); climb[rid] = up_down(prev, a); cps[k] = l - a; consistent = consistent and a >= prev and l >= a; prev = l
+    return dict(total_s=round(t1 - t0), start=t0, end=t1, checkpoints={k: round(v) for k, v in cps.items()}, sections={k: round(v) for k, v in secs.items()}, ran_m={k: round(v) for k, v in dist.items()}, arrivals=arrivals, climb={k: [round(v[0]), round(v[1])] for k, v in climb.items()}, ascent_m=round(ascent_descent(alt)[0]), descent_m=round(ascent_descent(alt)[1]), consistent=bool(consistent))

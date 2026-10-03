@@ -185,3 +185,4 @@ def test_route_times_and_checkpoint_times_add_up_to_the_run_time(tmp_path):
     ls = TK.listing(rd); r = {t['name']: t.get('time_s') for t in ls['tracks'] if t['kind'] == 'route'}; assert r['one.gpx'] > 1150 and r['two.gpx'] > 800 and r['three.gpx'] is None and ls['timing']['total_s'] == 2499
     assert TK.timing(str(tmp_path / 'none')) == {}
     one = next(x for x in ls['tracks'] if x['name'] == 'one.gpx'); assert 3.5 <= one['ran_km'] <= 3.7 and 300 <= one['pace_s_km'] <= 340 and 55 <= one['ascent_m'] <= 62 and one['descent_m'] == 0 and 55 <= ls['timing']['ascent_m'] <= 62 and ls['timing']['descent_m'] == 0
+    ar = tm['arrivals'][1]; assert ar['elapsed_s'] == round(ar['t'] - tm['start']) and 3.5 <= ar['km'] <= 3.7 and 1190 <= ar['elapsed_s'] <= 1230                  # at the first checkpoint: km and time from the start of the run
