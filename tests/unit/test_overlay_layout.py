@@ -432,3 +432,23 @@ class TestCutoffsOnTheOverlay:
         with_cut = ys(self.ov(series, tiles, ['clock'], self.cut)); without = ys(self.ov(series, tiles, ['clock']))
         assert len(with_cut) == 4 and len(without) == 3
         elapsed, cut, day, date = sorted(with_cut); assert elapsed < cut < day < date and without[0] == elapsed - 0 and day > without[1] and date > without[2]       # (the day and date are lower than without a cut-off line)
+
+
+class TestPlaceBadges:
+    def xy(self, la, lo): return ((lo - 5.0) * 1000.0, (50.0 - la) * 1000.0)
+
+    def test_start_checkpoints_and_finish_are_marked(self):
+        b = LY.place_badges(dict(start=(50.0, 5.0), finish=(49.9, 5.1), checkpoints=[(1, 49.97, 5.03), (2, 49.93, 5.07)]), self.xy, 15)
+        assert len(b) == 4 and [round(x) for x, y, _ in b] == [0, 30, 70, 100]                    # start, 1, 2, finish (in that order, the finish last so it is on top)
+        assert all(p.shape[2] == 4 and p[..., 3].max() == 255 for _, _, p in b)
+
+    def test_a_start_next_to_the_finish_is_left_out(self):
+        near = LY.place_badges(dict(start=(50.0, 5.0), finish=(50.0, 5.01), checkpoints=[]), self.xy, 15); far = LY.place_badges(dict(start=(50.0, 5.0), finish=(50.0, 5.1), checkpoints=[]), self.xy, 15)
+        assert len(near) == 1 and len(far) == 2                                                       # a loop: just the finish
+        assert LY.place_badges(None, self.xy, 15) == [] and len(LY.place_badges(dict(start=(50.0, 5.0), finish=None, checkpoints=[]), self.xy, 15)) == 1
+
+    def test_the_maps_draw_them_under_the_position_arrow(self, series, tiles):
+        places = dict(start=(50.0, 5.0), finish=None, checkpoints=[(1, 50.001, 5.0)])
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['route_map']}, tz='UTC', tiles=tiles, places=places); p = ov.patches(T0 + 300)
+        assert len(p) == 6 and p[-1][2].shape == D.arrow(14, 0).shape or p[-1][2].shape[0] > 10         # base, route, done, 2 badges, the arrow last (on top)
+        assert LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['route_map']}, tz='UTC', tiles=tiles).patches(T0 + 300).__len__() == 4

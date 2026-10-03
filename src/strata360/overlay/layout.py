@@ -53,8 +53,8 @@ METRIC = dict(dist='dist_m', pace='pace_s_km', alt='alt_m', slope='slope_pct', h
 
 class _Ctx:
     """What the widgets share: frame size and scale, fonts, the series, the tiles, the time zone and a cache of drawn text."""
-    def __init__(self, series, size, st, tz, tiles, stages=(), progress=None, cutoffs=None):
-        self.stages = list(stages); self.progress = progress or {}; self.cutoffs = cutoffs or {}; self.cutoff_row = 28 if self.cutoffs else 0; self._rs = None; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
+    def __init__(self, series, size, st, tz, tiles, stages=(), progress=None, cutoffs=None, places=None):
+        self.places = places; self.stages = list(stages); self.progress = progress or {}; self.cutoffs = cutoffs or {}; self.cutoff_row = 28 if self.cutoffs else 0; self._rs = None; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
         self._tiles = tiles if callable(tiles) and not isinstance(tiles, Tiles) else (lambda style: tiles) if tiles is not None else None; self._made = {}
         self.vfont, self.lfont = st.get('font') or D.VALUE_FONT, st.get('label_font') or st.get('font') or D.LABEL_FONT; self._text = {}
 
@@ -252,6 +252,16 @@ def route_bearing(u, v, n, x0, y0, look, previous=0.0, step=5.0):
     return round(math.degrees(math.atan2(u[j] - x0, -(v[j] - y0))) % 360 / step) * step % 360
 
 
+def place_badges(places, to_xy, diameter):
+    """[(x, y, badge patch)] of the start, the finish and the numbered checkpoints on a map: `to_xy(lat, lon)` gives a place's position in the picture. The start is left out when it is so close to the finish that the two would overlap (a loop: just the finish)."""
+    if not places: return []
+    out = []; fin = to_xy(*places['finish']) if places.get('finish') else None; st = to_xy(*places['start'])
+    if fin is None or math.hypot(st[0] - fin[0], st[1] - fin[1]) >= diameter * 1.1: out.append((*st, D.badge('', diameter, 'start')))
+    for n, la, lo in places.get('checkpoints') or []: out.append((*to_xy(la, lo), D.badge(str(n), diameter, 'number')))
+    if fin is not None: out.append((*fin, D.badge('', diameter, 'finish')))
+    return out
+
+
 class RouteMap:
     """The whole route on its map, the position marker moving along it."""
     def __init__(self, c, el): self.c, self.el = c, el; self.base = None
@@ -261,7 +271,7 @@ class RouteMap:
         span = max(np.ptp(wx), np.ptp(wy), 1e-9); self.k = S * 0.86 / span; self.cx, self.cy = (wx.min() + wx.max()) / 2, (wy.min() + wy.max()) / 2; self.S = S
         pic = np.asarray(c.tiles(c.style(e)).picture(self.cx, self.cy, self.k, S, S)).copy()
         self.u, self.w = (wx - self.cx) * self.k + S / 2, (wy - self.cy) * self.k + S / 2
-        self.route_layer = None
+        self.route_layer = None; d = 15 * c.s; self.badges = place_badges(c.places, lambda la, lo: ((lambda p: ((p[0] - self.cx) * self.k + S / 2, (p[1] - self.cy) * self.k + S / 2))(world(la, lo))), d)                  # (static: placed once)
         self.base = D.framed(pic, e['radius'] * c.s, c.st['map_opacity'], outline=e.get('outline', (0, 0, 0)), outline_w=1.5 * c.s); self.dot = D.marker(6 * c.s); self.ahead = None
         self.round = D.rounded(S, e['radius'] * c.s); self.done = None
         self.route_layer = D.line_layer((S, S), [(self.u, self.w, TODO_W * c.s, RUN_COLOUR)], clip=self.round, opacity=float(c.st['line_opacity']))       # the whole route thin in the medium red, on its own (not part of the see-through map); the part already run is drawn over it darker (a little thinner) each frame
@@ -270,7 +280,8 @@ class RouteMap:
         if self.base is None: self._build()
         X, Y = self.c.at(self.el, self.el['x'], self.el['y']); u, w = self._xy(t)
         arrow = D.arrow(22 * self.c.s, self._bearing(t, u, w)); h = arrow.shape[0] / 2
-        return [(X, Y, self.base), (X, Y, self.route_layer), (X, Y, self._run(t, u, w)), (X + u - h, Y + w - h, arrow)]
+        marks = [(X + bx - b.shape[1] / 2, Y + by - b.shape[0] / 2, b) for bx, by, b in self.badges]                   # start, checkpoints, finish: over the route lines, under the position
+        return [(X, Y, self.base), (X, Y, self.route_layer), (X, Y, self._run(t, u, w)), *marks, (X + u - h, Y + w - h, arrow)]
 
     def _bearing(self, t, u, w, look=12.0):
         """The direction the route goes on from the marker, looked at `look` px of the map ahead (a long way, on a map of the whole race): where the runner is going to go, not the way the last seconds went."""
@@ -329,9 +340,11 @@ class LocalMap:
             lines = D.line_layer((S, S), [(u, v, 2 * self.c.s, RUN_COLOUR), (np.concatenate([u[:n], [S / 2]]), np.concatenate([v[:n], [S / 2]]), 3 * self.c.s, DONE_DARK)],
                                  clip=D.rounded(S, self.el['radius'] * self.c.s), opacity=float(self.c.st['line_opacity']))     # the whole route in the medium red, the part already run over it in the darker red (as on the whole-route map, with the close-up's own thicknesses)
             bearing = route_bearing(u, v, n, S / 2, S / 2, 9 * self.c.s, previous=self.last[3] if self.last else 0.0)                            # a short way ahead: this map is zoomed in, so it is the local direction of the route
-            self.last = (key, D.framed(pic, self.el['radius'] * self.c.s, self.c.st['map_opacity'], outline=self.el.get('outline'), outline_w=2 * self.c.s), lines, bearing)
+            dm = 18 * self.c.s; marks = [m for m in place_badges(self.c.places, lambda la, lo: ((lambda p: ((p[0] - wx) * k + S / 2, (p[1] - wy) * k + S / 2))(world(la, lo))), dm)
+                                         if dm / 2 <= m[0] <= S - dm / 2 and dm / 2 <= m[1] <= S - dm / 2]                      # only those in view (and clear of the rounded edge)
+            self.last = (key, D.framed(pic, self.el['radius'] * self.c.s, self.c.st['map_opacity'], outline=self.el.get('outline'), outline_w=2 * self.c.s), lines, bearing, marks)
         X, Y = self.c.at(self.el, self.el['x'], self.el['y']); arrow = D.arrow(20 * self.c.s, self.last[3]); h = arrow.shape[0] / 2
-        return [(X, Y, self.last[1]), (X, Y, self.last[2]), (X + S / 2 - h, Y + S / 2 - h, arrow)]
+        return [(X, Y, self.last[1]), (X, Y, self.last[2]), *[(X + bx - b.shape[1] / 2, Y + by - b.shape[0] / 2, b) for bx, by, b in self.last[4]], (X + S / 2 - h, Y + S / 2 - h, arrow)]
 
 
 class Credit:
@@ -355,8 +368,8 @@ def settings(st=None):
 class Overlay:
     """overlay.apply(frame, t) draws the overlay for UTC seconds t onto an RGB frame (uint8 or uint16) in place. `tiles` defaults to the configured style (fetched and cached on first use)."""
 
-    def __init__(self, series, size, st=None, tz='Europe/Brussels', tiles=None, stages=(), progress=None, cutoffs=None):
-        self.st = settings(st); self.c = _Ctx(series, size, self.st, tz, tiles, stages, progress, cutoffs)
+    def __init__(self, series, size, st=None, tz='Europe/Brussels', tiles=None, stages=(), progress=None, cutoffs=None, places=None):
+        self.st = settings(st); self.c = _Ctx(series, size, self.st, tz, tiles, stages, progress, cutoffs, places)
         els = {n: {**ELEMENTS[n], **self.st['layout'].get(n, {})} for n in self.st['elements']}
         styles = [self.c.style(e) for e in els.values() if e['kind'] in ('route_map', 'local_map')]
         for st_ in styles: self.c.tiles(st_)                                                                        # a missing map key is reported now, not hours into a render

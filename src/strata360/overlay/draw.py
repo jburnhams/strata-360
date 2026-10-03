@@ -137,6 +137,26 @@ def arrow(size, angle, fill=(0, 102, 255), edge=(0, 0, 0)):
     return np.dstack([rgb, outer * 255]).round().astype(np.uint8)
 
 
+@functools.lru_cache(maxsize=64)
+def badge(label, diameter, kind='number'):
+    """RGBA round badge `diameter` px across (a little more with the edge): `number` a blue disc with the label in white, `start` a green disc with a play triangle, `finish` a chequered disc; all with a white edge."""
+    s = int(math.ceil(diameter)) + 4; c = s / 2; r = diameter / 2; e = max(1.0, diameter / 9)
+    outer = np.asarray(_ss((s, s), lambda d, k: d.ellipse([(c - r) * k, (c - r) * k, (c + r) * k, (c + r) * k], fill=255)), np.float32) / 255
+    inner = np.asarray(_ss((s, s), lambda d, k: d.ellipse([(c - r + e) * k, (c - r + e) * k, (c + r - e) * k, (c + r - e) * k], fill=255)), np.float32) / 255
+    if kind == 'finish':
+        yy, xx = np.mgrid[:s, :s]; g = max(2.0, (2 * r) / 4); chk = (((xx - (c - r)) // g + (yy - (c - r)) // g) % 2 == 0).astype(np.float32)[..., None]; body = np.repeat((1 - chk) * 255, 3, axis=2)
+    else:
+        fill = (22, 163, 74) if kind == 'start' else (29, 78, 216); body = np.broadcast_to(np.asarray(fill, np.float32), (s, s, 3)).copy()
+        if kind == 'start':
+            tri = np.asarray(_ss((s, s), lambda d, k: d.polygon([((c - r * 0.3) * k, (c - r * 0.5) * k), ((c - r * 0.3) * k, (c + r * 0.5) * k), ((c + r * 0.55) * k, c * k)], fill=255)), np.float32) / 255
+            body = body * (1 - tri[..., None]) + 255 * tri[..., None]
+        else:
+            f = font(VALUE_FONT, max(6, int(round(diameter * 0.62)))); m = Image.new('L', (s, s)); ImageDraw.Draw(m).text((c, c), str(label), font=f, fill=255, anchor='mm'); tm = np.asarray(m, np.float32)[..., None] / 255
+            body = body * (1 - tm) + 255 * tm
+    rgb = 255 * (1 - inner[..., None]) + body * inner[..., None]
+    return np.dstack([rgb, outer * 255]).round().astype(np.uint8)
+
+
 def composite(frame, patches):
     """Lay RGBA patches [(x, y, rgba uint8)] onto an RGB frame (uint8 or uint16 code values) in place; parts outside the frame are cut off."""
     top = 65535.0 if frame.dtype == np.uint16 else 255.0; H, W = frame.shape[:2]

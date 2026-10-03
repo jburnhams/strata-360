@@ -250,6 +250,14 @@ def _cutoff_resolved(text, ctx):
     except ValueError: return None
 
 
+def overlay_places(rd):
+    """Where the start, the finish (the end of the last route) and the checkpoints are, for the overlay maps: {start: (lat, lon), finish: (lat, lon) or None, checkpoints: [(n, lat, lon)]}; None without a run."""
+    em = end_markers(rd)
+    if not em: return None
+    _, marks = route_order(rd)
+    return dict(start=(em['start']['lat'], em['start']['lon']), finish=(em['finish']['lat'], em['finish']['lon']) if em['finish'] else None, checkpoints=[(m['n'], m['lat'], m['lon']) for m in marks])
+
+
 def overlay_cutoffs(rd, tz='Europe/Brussels'):
     """The cut-offs for the overlay, as time since the start of the run: {'start': UTC seconds of the start, 'stage': {'Stage N': the cut-off at the end of that stage (its checkpoint, or the finish for the last)}, 'cp': {N: cut-off of checkpoint N}, 'finish': cut-off of the finish}; only those set and understood."""
     order, _ = route_order(rd); tm = timing(rd) if order else None
