@@ -360,17 +360,22 @@ def set_choice(rd, key, choice):
     os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(st, open(tmp, 'w'), indent=1); os.replace(tmp, p); return choice
 
 
-BRIGHT, DARK = {'day', 'golden hour'}, {'twilight', 'night'}
+LIT, DARK_BELOW = 0.0, -6.0       # the sun's height (degrees): at or above LIT the scene is lit by the sun; below DARK_BELOW (past civil twilight) it is dark. Between them is dusk or dawn: it fits either
+
+
+def sun_phrase(e):
+    """The sun's height in words: 'the sun 6° above the horizon (daylight)'."""
+    return f'the sun {abs(e):.0f}° {"above" if e >= 0 else "below"} the horizon ({"daylight" if e > 6 else "golden-hour light" if e >= 0 else "dusk or dawn" if e >= DARK_BELOW else "dark"})'
 
 
 def light(sec, tr):
-    """The light a section was filmed in against the light the runner had there: {captured, race, warning}. The warning says so when a daytime view would be shown for a stretch run in the dark (or the other way round); None when they fit or are unknown. `tr` is the race track."""
+    """The light a section was filmed in against the light the runner had there, from the sun's height at the real date, time and place of each (so the time of year counts: 19:00 in February is dark, in July broad daylight): {captured, race, captured_sun, race_sun, warning}.
+    The warning says so when a view lit by the sun would be shown for a stretch run in the dark (past civil twilight), or the other way round, and gives both heights; None when they fit (dusk and dawn fit either) or are unknown. `tr` is the race track."""
     from strata360.gps import context as X, clock as CK
     d, t = track_dist(tr); mid = sec['items'][len(sec['items']) // 2]; caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap_t = caps[len(caps) // 2] if caps else None
-    race_t = float(np.interp((sec['km0'] + sec['km1']) / 2 * 1000, d, t)); day = lambda tt: X.daylight(CK.sun_elevation_deg(mid['lat'], mid['lon'], tt)) if tt else None; cap, race = day(cap_t), day(race_t); warn = None
-    said = {'day': 'in daylight', 'golden hour': 'in golden-hour light', 'twilight': 'at twilight', 'night': 'at night'}
-    if (cap in BRIGHT and race in DARK) or (cap in DARK and race in BRIGHT): warn = f'Filmed {said[cap]}, but the runner passes here {said[race]}: it would look wrong in the film.'
-    return dict(captured=cap, race=race, warning=warn)
+    race_t = float(np.interp((sec['km0'] + sec['km1']) / 2 * 1000, d, t)); sun = lambda tt: float(CK.sun_elevation_deg(mid['lat'], mid['lon'], tt)) if tt else None; ce, re = sun(cap_t), sun(race_t); warn = None
+    if ce is not None and ((ce >= LIT and re < DARK_BELOW) or (ce < DARK_BELOW and re >= LIT)): warn = f'Filmed with {sun_phrase(ce)}, but the runner passes here with {sun_phrase(re)}: it would look wrong in the film.'
+    return dict(captured=None if ce is None else X.daylight(ce), race=X.daylight(re), captured_sun=None if ce is None else round(ce, 1), race_sun=round(re, 1), warning=warn)
 
 
 def passed(s, tr):

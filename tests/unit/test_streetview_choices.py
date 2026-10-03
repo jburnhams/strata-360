@@ -67,27 +67,34 @@ def utc(*a): return dt.datetime(*a, tzinfo=dt.timezone.utc).timestamp()
 class TestLight:
     DAY = utc(2024, 3, 7, 12)
 
-    def section(self): return sec('M1', items=[dict(id='a', km=1.0, lat=50.13, lon=5.79, t=self.DAY), dict(id='b', km=1.2, lat=50.13, lon=5.79, t=self.DAY + 5), dict(id='c', km=1.3, lat=50.13, lon=5.79, t=self.DAY + 9)])
+    def section(self, t=None): return sec('M1', items=[dict(id='a', km=1.0, lat=50.13, lon=5.79, t=t or self.DAY), dict(id='b', km=1.2, lat=50.13, lon=5.79, t=(t or self.DAY) + 5), dict(id='c', km=1.3, lat=50.13, lon=5.79, t=(t or self.DAY) + 9)])
 
     def track(self, t0):
         import numpy as np
         n = 3000; d = 3.0 * np.arange(n); return dict(t=t0 + np.arange(n), lat=50.13 + d / 111195.0, lon=np.full(n, 5.79), dist=d)
 
-    def test_a_daytime_view_for_a_stretch_run_in_the_dark_is_warned_about(self):
-        out = SV.light(self.section(), self.track(utc(2024, 9, 15, 22)))            # the run is at midnight local time, a kilometre in
-        assert out['captured'] == 'day' and out['race'] == 'night' and out['warning'] == 'Filmed in daylight, but the runner passes here at night: it would look wrong in the film.'
+    def test_a_view_in_the_sun_for_a_stretch_run_in_the_dark_is_warned_about_with_both_heights(self):
+        out = SV.light(self.section(), self.track(utc(2024, 9, 15, 22)))                                                  # filmed at noon, run at midnight local time
+        assert out['captured'] == 'day' and out['race'] == 'night' and out['captured_sun'] > 20 and out['race_sun'] < -20 and 'the sun' in out['warning'] and 'above the horizon (daylight)' in out['warning'] and 'below the horizon (dark)' in out['warning'] and out['warning'].endswith('it would look wrong in the film.')
 
-    def test_no_warning_when_the_light_fits_or_is_unknown(self):
-        noon = SV.light(self.section(), self.track(utc(2024, 9, 15, 11))); assert noon['race'] in ('day', 'golden hour') and noon['warning'] is None
-        undated = sec('M1', items=[dict(id='a', km=1.0, lat=50.13, lon=5.79), dict(id='b', km=1.3, lat=50.13, lon=5.79)]); assert SV.light(undated, self.track(utc(2024, 9, 15, 11)))['captured'] is None and SV.light(undated, self.track(utc(2024, 9, 15, 22)))['warning'] is None
+    def test_the_time_of_year_counts_the_same_clock_time_is_dark_in_february_and_fine_in_july(self):
+        filmed = utc(2024, 3, 7, 16, 44)                                                                                  # 17:44 local on 7 March: the sun about 6 degrees up
+        feb = SV.light(self.section(filmed), self.track(utc(2026, 2, 20, 17, 58) - 1000 / 3.0)); assert 5 < feb['captured_sun'] < 7 and feb['race_sun'] < -8 and 'below the horizon (dark)' in feb['warning']
+        july = SV.light(self.section(filmed), self.track(utc(2026, 7, 20, 16, 58) - 1000 / 3.0)); assert july['race_sun'] > 15 and july['warning'] is None and july['race'] == 'day'                       # 18:58 in July: broad daylight
 
-    def test_a_night_view_for_a_stretch_run_in_the_day_is_warned_about(self):
-        s = self.section(); s['items'] = [dict(i, t=utc(2024, 3, 7, 0)) for i in s['items']]                    # filmed at midnight
-        out = SV.light(s, self.track(utc(2024, 9, 15, 11))); assert out['captured'] == 'night' and out['warning'] == 'Filmed at night, but the runner passes here in daylight: it would look wrong in the film.'
+    def test_dusk_and_dawn_fit_either_way_and_unknown_times_give_no_warning(self):
+        dusk = SV.light(self.section(utc(2024, 3, 7, 12)), self.track(utc(2026, 2, 20, 17, 25) - 1000 / 3.0)); assert -6 <= dusk['race_sun'] < 6 and dusk['warning'] is None                       # 18:25 in February: the sun just set, still light enough
+        undated = sec('M1', items=[dict(id='a', km=1.0, lat=50.13, lon=5.79), dict(id='b', km=1.3, lat=50.13, lon=5.79)]); out = SV.light(undated, self.track(utc(2024, 9, 15, 22))); assert out['captured'] is None and out['captured_sun'] is None and out['warning'] is None
+
+    def test_a_view_in_the_dark_for_a_stretch_run_in_the_sun_is_warned_about(self):
+        out = SV.light(self.section(utc(2024, 3, 7, 0)), self.track(utc(2024, 9, 15, 11))); assert out['captured'] == 'night' and 'below the horizon (dark)' in out['warning'].split('but')[0] and 'above the horizon' in out['warning'].split('but')[1]
 
     def test_annotate_adds_the_light_when_it_has_the_track(self, tmp_path):
         docs = {'mapillary': doc(self.section())}; assert SV.annotate(str(tmp_path), docs)[0]['light'] is None
         assert SV.annotate(str(tmp_path), docs, self.track(utc(2024, 9, 15, 22)))[0]['light']['warning']
+
+    def test_the_sun_in_words(self):
+        assert SV.sun_phrase(22.8) == 'the sun 23° above the horizon (daylight)' and SV.sun_phrase(3.0) == 'the sun 3° above the horizon (golden-hour light)' and SV.sun_phrase(-3.0) == 'the sun 3° below the horizon (dusk or dawn)' and SV.sun_phrase(-9.5) == 'the sun 10° below the horizon (dark)'
 
 
 class TestQualityStage:
