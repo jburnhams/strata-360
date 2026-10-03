@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type MotionPlan, type MotionSettings, type MotionStyle, type Photo } from '../api'
+import StepVideo from './FrameStep'
 
 // The pan and zoom for a photo, so it can be used in the film like a shot: choose the move (or leave it to "auto", which looks at the shape of the photo and what is in it), how long it lasts and a shuffle for another take;
 // the start (green) and end (red) windows are drawn on the picture, and "Watch" plays the move. "Use this move" keeps the choice for the photo.
@@ -43,7 +44,7 @@ export default function PhotoMotion({ folder, p, onChanged }: { folder: string; 
                 <button className="text-emerald-700 underline dark:text-emerald-400" onClick={() => setWatch(!watch)}>{watch ? 'Hide' : 'Watch'}</button>
                 <button disabled={!changed} className="rounded bg-emerald-700 px-2 py-0.5 text-white disabled:opacity-40" onClick={use}>Use this move</button>
               </div>
-              {watch && <video aria-label={`Move for ${p.name}`} className="w-72 rounded" controls autoPlay loop src={api.photoMotionVideo(folder, p.id, { style: plan.style, seconds: plan.duration_s, seed: s.seed })} />}
+              {watch && <StepVideo aria-label={`Move for ${p.name}`} className="w-72 rounded" autoPlay loop src={api.photoMotionVideo(folder, p.id, { style: plan.style, seconds: plan.duration_s, seed: s.seed })} />}
             </>
           )}
         </div>

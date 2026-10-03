@@ -10,7 +10,7 @@ import datetime as dt, json, math, os, re, time
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
 from strata360.edit.script_pack import norm_label
 
-PROMPT_VERSION = 12
+PROMPT_VERSION = 13
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
 VO_PAUSE_S = 0.25             # breathing room after a narration item
 ANCHOR_SLACK_S = 8.0          # an anchor further than this from where the items put it is sent back (the editor stretches b-roll for small differences)
@@ -46,12 +46,15 @@ RULES
 9. REVISING. When a CURRENT DRAFT is supplied, you are revising it, not starting again: keep every item the new constraints do not touch, with the same wording and the same choice of lines, and change only what the constraints and the target length require. Return the whole revised script.
 10. THE MUSIC. The film is cut to the track you are given (its sections, bars and, when it has words, where it is sung). Let the music's energy follow the story: quiet sections for the slow, hard or reflective parts, the loud sections for the pushes and the ending. Narration over singing is normal and often unavoidable (the music is turned down under the voice): do not contort the script to avoid it, but where a line matters most, a gap in the singing is a good place for it. The song's words (rough recognition) tell you what it is about: use a hook where it meets the film (for example a line about not sleeping over the night), never to quote it.
 11. FIXED PARTS. Anything the user has fixed (MUST INCLUDE, DO NOT USE, narration to use word for word, phrases never to say) is not up for discussion. Plan the film around the fixed parts: they leave a known amount of time for everything else.
+12. NOTES AND PINNED NARRATION PER CLIP, GAP OR PHOTO. The runner's notes for a clip, gap or photo, and the narration they marked MUST INCLUDE for it, belong to roughly that moment of the film, not to the exact seconds of that item. Use them where they fit best around it. When the item is too short for them, let the narration run on into the item just before or after it (never further away), and do not stretch the item just to fit the words.
+13. THE LENGTH. Hit the target length (the checks need it), but tell the user honestly whether it suits the material and the music: set "length_note" to "fits" when the target is about right, "too_long" when the target forces padding or repeats or dull parts, "too_short" when the material or the music clearly needs more room, with "ideal_s" your estimate of the best length in seconds and a one or two sentence "why" (what would be lost or padded, which sections of the music).
 '''
 
 SCHEMA = '''Return ONE JSON object and nothing else:
 {
   "title": "short film title",
   "story": "two or three sentences: the arc you chose and why",
+  "length_note": {"verdict": "fits | too_long | too_short", "ideal_s": 230, "why": "one or two sentences: does the target length (and the music) suit the material? what would you cut or add?"},
   "items": [
     {"type": "vo",    "clip": "0004", "text": "narration the runner speaks over the picture of that clip", "words": 23, "basis": ["a short quote or paraphrase of what the narration rests on (the notes, the track line, the runner's words)", "or a transcript line id such as 0008.03"], "t": 12.5},
     {"type": "clip",  "clip": "0008", "from": "0008.01", "to": "0008.03", "why": "why these lines belong", "t": 31.0, "view": "close" (optional: mid | close | far)},
@@ -103,6 +106,15 @@ def tidy(d):
         if isinstance(it, dict) and 'basis' in it:
             b = it['basis']; it['basis'] = [] if b is None else [str(x) for x in b] if isinstance(b, (list, tuple)) else [str(b)] if str(b).strip() else []
     return d
+
+
+def length_note(script):
+    """The writer's view on whether the target length suits the material: {verdict: fits | too_long | too_short, ideal_s, why}, or None when it gave none (or nonsense)."""
+    n = (script or {}).get('length_note')
+    if not isinstance(n, dict) or n.get('verdict') not in ('fits', 'too_long', 'too_short'): return None
+    try: ideal = round(float(n['ideal_s']), 0) if n.get('ideal_s') is not None else None
+    except (TypeError, ValueError): ideal = None
+    return dict(verdict=n['verdict'], ideal_s=ideal, why=str(n.get('why') or '').strip()[:600])
 
 
 def parse(text):
@@ -256,7 +268,7 @@ def write(pack, target_s, wpm, pins=None, draft=None, chat=None, retries=2, mode
     if not script and best is not None: script, rep, probs = best[:3]; log('the last attempt could not be read: keeping the closest earlier one')
     warns = GR.check(script, pack, ptxt) if script else []
     resolve(script, pack, wpm); warns = warns + (director_notes(script, pack) if script else [])
-    return dict(version=1, prompt_version=PROMPT_VERSION, created=dt.datetime.now().isoformat(timespec='seconds'), model=model, provider=provider, target_s=round(target_s, 1), wpm=wpm, title=script.get('title'), story=script.get('story'),
+    return dict(version=1, prompt_version=PROMPT_VERSION, created=dt.datetime.now().isoformat(timespec='seconds'), model=model, provider=provider, target_s=round(target_s, 1), wpm=wpm, title=script.get('title'), story=script.get('story'), length_note=length_note(script),
                 items=script.get('items') or [], skipped=script.get('skipped') or [], report=rep, problems=probs, warnings=warns, pins=pins or {}, revised=bool(draft), runs=runs)
 
 

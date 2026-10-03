@@ -1,0 +1,29 @@
+import { useState } from 'react'
+import { api, type SvChoice, type SvChosen } from '../api'
+import { usePoll } from '../usePoll'
+import ItemPage, { LengthField } from './ItemPage'
+import { ChoiceRadios, SectionContent, SectionFacts } from './StreetViewPage'
+
+// A street view section used in the film as a page of its own, with the sections of a gap or a photo (ItemPage) and, as the preview, everything the street view page shows for it: when it was filmed and passed, the light, the
+// footage near it, the camera, the preview video and the pictures. The choice (not used, possible, must include) is here too.
+export default function SvItemPage({ folder, item, tz, onChanged }: { folder: string; item?: SvChosen; tz: string; onChanged: () => void }) {
+  const [err, setErr] = useState<string>(), [tick, setTick] = useState(0)
+  const data = usePoll(() => api.streetview(folder), 8000, [folder, tick])
+  if (!item) return <p className="text-sm text-stone-500">That street view section is not chosen for the film any more.</p>
+  const section = data?.sections.find(x => x.key === item.key), by = new Map((data?.sections ?? []).map(x => [x.id, x]))
+  const run = async (fn: () => Promise<unknown>) => { setErr(undefined); try { await fn() } catch (e) { setErr((e as Error).message) } setTick(t => t + 1); onChanged() }
+  const choose = (key: string, c: SvChoice | 'none') => run(() => api.setStreetviewChoice(folder, key, c))
+  const names = { mapillary: 'Mapillary', panoramax: 'Panoramax', google: 'Google' }
+  return (
+    <ItemPage folder={folder} noun="street view section" must={item.choice === 'must'} script={item.script} err={err} noteClip={item.label} noteTitle="Notes for this street view section" notePlaceholder="What is this road? What was it like to run, what to mention or avoid…"
+      heading={<>Street view {item.label} <span className="text-sm font-normal text-stone-500">{names[item.provider]} · {item.kind === '360' ? '360°' : '2D'} · {Math.round(item.length_m)} m</span></>}
+      sub={item.quality ? `clip quality: ${item.quality}` : undefined}
+      preview={section ? <><SectionContent folder={folder} tz={tz} section={section} onChoose={choose} onHires={(key, on) => run(() => api.setSvHires(folder, key, on))} showChoice={false} /><div className="mt-2 space-y-0.5"><SectionFacts s={section} tz={tz} by={by} /></div></> : <p className="text-sm text-stone-500">Loading the section…</p>}
+      settings={<>
+        <div className="flex items-center gap-2"><span className="w-24 text-stone-500">Drawn as</span><span>along the road, with a steady virtual camera</span></div>
+        <LengthField id={item.key} mode={item.seconds == null ? '' : 'set'} seconds={item.seconds} modes={['set']} min={item.min_s} max={item.max_s} fallback={item.default_s} onChange={(_, seconds) => run(() => api.setSvLength(folder, item.key, seconds))} />
+        <div className="sm:col-span-2"><ChoiceRadios section={section ?? ({ provider: item.provider, id: item.id, key: item.key, choice: item.choice, plausible: true, why_not: '' } as never)} onChoose={choose} /></div>
+      </>}
+      help={item.seconds != null ? `The film shows this section for exactly this long (it can play ${item.min_s} to ${item.max_s} s); the music fit never changes it.` : `The plan sets the length to fit the music, anywhere from ${item.min_s} to ${item.max_s} s (the same road played faster or slower).`} />
+  )
+}

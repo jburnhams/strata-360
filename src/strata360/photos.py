@@ -127,11 +127,25 @@ def label_of(entry_or_id):
     return str(entry_or_id['id'] if isinstance(entry_or_id, dict) else entry_or_id).upper()
 
 
-def set_must(rd, pid, must):
-    """Mark a photo to be used in the film (the plan adds it where its time falls if the script leaves it out), or not. Raises KeyError for an unknown photo."""
+def is_used(e):
+    """Whether the photo is an option for the film (ticked "Use in the film"): the script writer may show it, it sits among the clips in the sidebar and counts as footage when gaps are found. A photo marked `must` is used too."""
+    return bool(e.get('use') or e.get('must'))
+
+
+def set_use(rd, pid, use):
+    """Make a photo an option for the film, or not (taking it out also clears `must`). Raises KeyError for an unknown photo."""
     doc = load(rd); e = next((p for p in doc['photos'] if p['id'] == pid), None)
     if e is None: raise KeyError(pid)
-    if must: e['must'] = True
+    if use: e['use'] = True
+    else: e.pop('use', None); e.pop('must', None)
+    _save(rd, doc); return bool(use)
+
+
+def set_must(rd, pid, must):
+    """Mark a photo MUST be used in the film (the plan adds it where its time falls if the script leaves it out; it is used too), or not. Raises KeyError for an unknown photo."""
+    doc = load(rd); e = next((p for p in doc['photos'] if p['id'] == pid), None)
+    if e is None: raise KeyError(pid)
+    if must: e['must'] = True; e['use'] = True
     else: e.pop('must', None)
     _save(rd, doc); return bool(must)
 

@@ -21,7 +21,7 @@ function Analysis({ folder, id, a }: { folder: string; id: string; a: NonNullabl
 }
 
 /** One photo: its picture (a JPEG copy, click for the larger one), when it was taken and how that was worked out, where, and a warning when its own position and the run's disagree. */
-export function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }: { folder: string; p: Photo; tz: string; onOpen?: (w: NonNullable<Photo['where']>) => void; onRemove?: () => void; onMotion?: () => void }) {
+export default function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }: { folder: string; p: Photo; tz: string; onOpen?: () => void; onRemove?: () => void; onMotion?: () => void }) {
   return (
     <figure data-photo={p.id} className="w-56 text-xs">
       <a href={api.photoFile(folder, p.id)} target="_blank" rel="noreferrer" title={`${p.name} (${p.width} x ${p.height}): click for the larger picture`}>
@@ -31,27 +31,14 @@ export function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }: { folde
         <div className="text-stone-500" title={`how the time was worked out: ${p.time_source}`}>{p.track ? `${hms(p.track.elapsed_s)} into the race · km ${p.track.km}` : 'not on the run'} · {p.time_source}</div>
         <div className="text-stone-500">{p.loc ? `${p.loc.lat.toFixed(4)}, ${p.loc.lon.toFixed(4)} (${p.loc.source})` : 'no position'}{p.apart_m != null ? ` · ${p.apart_m} m from the run` : ''}</div>
         {p.analysis && <Analysis folder={folder} id={p.id} a={p.analysis} />}
-        <label className="flex items-center gap-1.5" title="The film uses this photo: the script writer is told to, and the plan adds it where it was taken if the script leaves it out"><input type="checkbox" aria-label={`Use ${p.name} in the film`} checked={!!p.must} onChange={e => api.setPhotoMust(folder, p.id, e.target.checked).then(() => onMotion?.())} /> Use in the film</label>
+        <label className="flex items-center gap-1.5" title="An option for the film: the script writer may show this photo, and it is in the film list on the left (open it there to make it a must)"><input type="checkbox" aria-label={`Use ${p.name} in the film`} checked={!!p.use} onChange={e => api.setPhotoUse(folder, p.id, e.target.checked).then(() => onMotion?.())} /> Use in the film</label>
         <PhotoMotion folder={folder} p={p} onChanged={() => onMotion?.()} />
         {p.flag && <div role="alert" className="text-amber-700 dark:text-amber-400">⚠ {p.flag}</div>}
         <div className="flex gap-3">
-          {onOpen && p.where && <button className="text-emerald-700 underline dark:text-emerald-400" onClick={() => onOpen(p.where!)}>{p.where.kind === 'gap' ? `gap ${p.where.id}` : `clip ${p.where.id.replace(/^CAM_\d+_(\d+)_D$/, '$1')}`}</button>}
-          {onOpen && !p.where && <span className="text-stone-500">between clips</span>}
+          {onOpen && p.use && <button className="text-emerald-700 underline dark:text-emerald-400" onClick={onOpen}>Open in the film list</button>}
           {onRemove && <button aria-label={`Remove ${p.name}`} className="text-stone-500 underline" onClick={onRemove}>Remove</button>}
         </div>
       </figcaption>
     </figure>
-  )
-}
-
-/** The photos taken during a clip or gap (their time falls in it), for its page. */
-export default function PhotoStrip({ folder, photos, tz, kind, id, onChanged }: { folder: string; photos?: Photo[]; tz: string; kind: 'clip' | 'gap'; id: string; onChanged?: () => void }) {
-  const mine = (photos ?? []).filter(p => p.where?.kind === kind && p.where.id === id)
-  if (!mine.length) return null
-  return (
-    <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
-      <h3 className="mb-2 text-sm font-semibold">Photos taken {kind === 'gap' ? 'in this gap' : 'during this clip'} <span className="font-normal text-stone-500">({mine.length})</span></h3>
-      <div className="flex flex-wrap gap-4">{mine.map(p => <PhotoCard key={p.id} folder={folder} p={p} tz={tz} onMotion={onChanged} />)}</div>
-    </section>
   )
 }

@@ -22,7 +22,7 @@ def photo_clip(label='P1', must=False, start='2026-02-20T14:12:17Z', seconds=6.0
 class TestPack:
     def test_a_photo_is_a_pack_clip_with_what_the_analysis_found_and_whether_it_must_be_used(self, project):
         from strata360.analysis import photo_analysis as PA
-        rd = project.race_dir; PH.add(rd, 'a.jpg', jpeg()); PH.add(rd, 'b.jpg', jpeg(local='2026:02:20 15:00:00')); PH.set_must(rd, 'p2', True); PH.set_motion(rd, 'p1', seconds=4)                                                          # p1 has a length of its own; p2 follows how busy it is
+        rd = project.race_dir; PH.add(rd, 'a.jpg', jpeg()); PH.add(rd, 'b.jpg', jpeg(local='2026:02:20 15:00:00')); PH.set_use(rd, 'p1', True); PH.set_must(rd, 'p2', True); PH.set_motion(rd, 'p1', seconds=4)                                                          # p1 has a length of its own; p2 follows how busy it is
         doc = PA.load_doc(rd, 'p1'); doc['scenes'] = dict(ok=True, setting='trail', description='A path in the trees.', tags=['trees'], weather='cloud', scenery=7.0, clarity=4.0); doc['identity'] = dict(me=dict(face=0), n_people=2, others=1, threshold=0.45); doc['stages'] = dict(scenes={}, identity={}); PA.save_doc(rd, doc)
         a, b = SP.photo_clips(project.folder, None, 'UTC'); assert (a['label'], b['label']) == ('P1', 'P2') and a['photo'] and a['synthetic'] and a['duration_s'] == 4.0 and a['settings'] == dict(kind=None, mode='set', seconds=4.0, must=False) and b['duration_s'] == 2.5 and b['settings']['mode'] is None and a['settings']['must'] is False and b['settings']['must'] is True and a['start_utc'] == '2026-02-20T14:12:17Z'
         assert a['photo_facts']['description'] == 'A path in the trees.' and a['photo_facts']['scenery'] == 7.0 and a['photo_facts']['people'] == 2 and a['photo_facts']['me'] is True and a['race_s'] == 0.0 and a['usable_s'] == 4.0 and b['usable_s'] == SP.MAX_PHOTO_S
@@ -97,3 +97,11 @@ class TestClip:
         calls = []; self.fake_render(monkeypatch, calls); logs = []
         assert PCL.sync(project.folder, [dict(clip='G03', seconds=8.0), dict(clip='P9', seconds=5.0)], logs.append) == [] and calls == [] and any('not in the project any more' in l for l in logs)
         assert PCL.is_photo_label('P12') and not PCL.is_photo_label('G01') and not PCL.is_photo_label('PX')
+
+
+def test_only_photos_ticked_to_use_are_options_a_must_photo_is_used_and_unticking_clears_must(project):
+    rd = project.race_dir; PH.add(rd, 'a.jpg', jpeg()); PH.add(rd, 'b.jpg', jpeg(local='2026:02:20 15:00:00'))
+    assert SP.photo_clips(project.folder, None, 'UTC') == [] and not PH.is_used(PH.load(rd)['photos'][0])
+    PH.set_use(rd, 'p1', True); assert [c['label'] for c in SP.photo_clips(project.folder, None, 'UTC')] == ['P1']
+    PH.set_must(rd, 'p2', True); assert PH.is_used(PH.load(rd)['photos'][1]) and [c['label'] for c in SP.photo_clips(project.folder, None, 'UTC')] == ['P1', 'P2']
+    PH.set_use(rd, 'p2', False); e = PH.load(rd)['photos'][1]; assert not PH.is_used(e) and 'must' not in e

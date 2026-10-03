@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react'
 import { api, type Photo, type PhotoJob } from '../api'
-import { PhotoCard } from './PhotoStrip'
+import PhotoCard from './PhotoCard'
 
 // The photos you took during the race: add them here (any common format; HEIC is converted). Each is placed in the race by the time stamp in the photo and on the map by its own GPS position, else by where the run was at that time;
 // when the two disagree it says so. They are listed under the clip or gap they fall in, and have an icon on the overview map.
-export default function PhotosPanel({ folder, photos, tz, job, onChanged, onOpen }: { folder: string; photos?: Photo[]; tz: string; job?: PhotoJob; onChanged: () => void; onOpen: (w: NonNullable<Photo['where']>) => void }) {
+export default function PhotosPanel({ folder, photos, tz, job, onChanged, onOpen }: { folder: string; photos?: Photo[]; tz: string; job?: PhotoJob; onChanged: () => void; onOpen: (p: Photo) => void }) {
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<string>(), [errs, setErrs] = useState<string[]>([])
   const add = async (files: FileList | File[] | null) => {
@@ -34,7 +34,7 @@ export default function PhotosPanel({ folder, photos, tz, job, onChanged, onOpen
       {!job?.running && job?.error && <p role="alert" className="mb-2 text-sm text-red-600">The analysis stopped: {job.error}</p>}
       {errs.length > 0 && <ul role="alert" className="mb-2 space-y-0.5 text-sm text-red-600">{errs.map((e, i) => <li key={i}>{e}</li>)}</ul>}
       {photos && photos.length === 0 && !busy && <p className="text-sm text-stone-500">No photos yet. Add the ones you took during the race (or drop them here): the time in each says where in the race it was taken.</p>}
-      <div className="flex flex-wrap gap-4">{(photos ?? []).map(p => <PhotoCard key={p.id} folder={folder} p={p} tz={tz} onOpen={onOpen} onRemove={() => remove(p)} onMotion={onChanged} />)}</div>
+      <div className="flex flex-wrap gap-4">{(photos ?? []).map(p => <PhotoCard key={p.id} folder={folder} p={p} tz={tz} onOpen={() => onOpen(p)} onRemove={() => remove(p)} onMotion={onChanged} />)}</div>
     </section>
   )
 }
