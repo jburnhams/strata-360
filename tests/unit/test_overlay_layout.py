@@ -93,27 +93,27 @@ class TestPlacement:
 class TestMaps:
     def test_route_map_is_built_once_and_the_marker_moves(self, series, tiles):
         ov = overlay(series, tiles, elements=['route_map']); a = ov.patches(T0); n = len(tiles.fetch.urls); b = ov.patches(T0 + 600)
-        assert len(tiles.fetch.urls) == n and a[0][2] is b[0][2] and b[2][1] < a[2][1]                            # same base picture; running north moves the marker up
+        assert len(tiles.fetch.urls) == n and a[0][2] is b[0][2] and b[3][1] < a[3][1]                            # same base picture; running north moves the marker up
 
     def test_route_fills_the_route_map(self, series, tiles):
-        ov = overlay(series, tiles, elements=['route_map']); y_start = ov.patches(T0)[2][1]; y_end = ov.patches(T0 + 899)[2][1]
+        ov = overlay(series, tiles, elements=['route_map']); y_start = ov.patches(T0)[3][1]; y_end = ov.patches(T0 + 899)[3][1]
         assert abs(y_start - y_end) == pytest.approx(256 * 0.86, abs=2)
 
     def test_the_part_already_run_is_a_darker_line_over_the_whole_route(self, series, tiles):
-        ov = overlay(series, tiles, elements=['route_map']); first = ov.patches(T0 - 100)[1][2]; mid = ov.patches(T0 + 450)[1][2]; end = ov.patches(T0 + 899)[1][2]
+        ov = overlay(series, tiles, elements=['route_map']); first = ov.patches(T0 - 100)[2][2]; mid = ov.patches(T0 + 450)[2][2]; end = ov.patches(T0 + 899)[2][2]
         covered = lambda p: int((p[..., 3] > 0).sum())
         assert covered(first) == 0 and 0 < covered(mid) < covered(end) and tuple(mid[mid[..., 3] > 0][0][:3]) == LY.DONE_DARK                                   # nothing run yet; more run later
-        base = ov.patches(T0)[0][2]; assert base[..., 3].max() > 0 and ov.patches(T0 + 450)[0][2] is base                                                        # the whole route (medium red) is in the base picture, drawn once
+        whole = ov.patches(T0)[1][2]; assert whole[..., 3].max() >= 150 and tuple(whole[whole[..., 3] > 0][0][:3]) == LY.RUN_COLOUR and ov.patches(T0 + 450)[1][2] is whole      # the whole route (medium red) is its own layer at full opacity, drawn once
 
     def test_local_map_draws_the_run_part_stronger_than_the_part_to_come(self, series, tiles):
-        ov = overlay(series, tiles, elements=['local_map']); pic = ov.patches(T0 + 450)[0][2]
-        rgb = pic[..., :3].reshape(-1, 3).astype(int); strong = (np.abs(rgb - np.array(LY.RUN_COLOUR)).sum(1) < 30).sum(); pale = (np.abs(rgb - np.array(LY.TODO_COLOUR)).sum(1) < 30).sum()
+        ov = overlay(series, tiles, elements=['local_map']); pic = ov.patches(T0 + 450)[1][2]; assert pic[..., 3].max() >= 200                                       # (the lines are a layer of their own, at full opacity)
+        rgb = pic[pic[..., 3] > 0][:, :3].astype(int); strong = (np.abs(rgb - np.array(LY.RUN_COLOUR)).sum(1) < 30).sum(); pale = (np.abs(rgb - np.array(LY.TODO_COLOUR)).sum(1) < 30).sum()
         assert strong > 0 and pale > 0
 
     def test_local_map_keeps_the_marker_in_the_middle(self, series, tiles):
         ov = overlay(series, tiles, elements=['local_map'])
         for t in (T0, T0 + 450):
-            (X, Y, m), (mx, my, dot) = ov.patches(t); assert (mx + dot.shape[1] / 2, my + dot.shape[0] / 2) == pytest.approx((X + 128, Y + 128))
+            (X, Y, m), lines, (mx, my, dot) = ov.patches(t); assert (mx + dot.shape[1] / 2, my + dot.shape[0] / 2) == pytest.approx((X + 128, Y + 128))
 
     def test_local_map_reuses_its_backing_while_close(self, series, tiles):
         ov = overlay(series, tiles, elements=['local_map']); w = ov.widgets[0]
@@ -155,13 +155,13 @@ class TestMapStyles:
 class TestLocalMap:
     def test_centre_shows_the_tile_under_the_runner(self, series, tiles):
         ov = overlay(series, tiles, elements=['local_map'], auto_zoom=False, local_zoom=14.3, map_opacity=1.0); t = T0 + 300
-        (X, Y, m), _ = ov.patches(t); wx, wy = TL.world(*series.position(t)); n = 2 ** 14; k = 2 ** 14.3; wx += 20 / k        # 20 px east of the runner, off the route line
+        (X, Y, m), *_ = ov.patches(t); wx, wy = TL.world(*series.position(t)); n = 2 ** 14; k = 2 ** 14.3; wx += 20 / k        # 20 px east of the runner, off the route line
         assert tuple(m[128, 148, :3]) == tile_colour(14, int(wx * n / 256), int(wy * n / 256))
 
     def test_pans_by_fractions_of_a_pixel(self, tiles):
         ov = overlay(Series(race_track(n=900, speed=0.5)), tiles, elements=['local_map'], auto_zoom=False)    # walking: well under a pixel a frame
-        a = ov.patches(T0 + 300)[0][2].copy(); b = ov.patches(T0 + 300.04)[0][2]; assert not np.array_equal(a, b) and np.abs(a.astype(int) - b).max() < 60
-
+        a = ov.patches(T0 + 300); b = ov.patches(T0 + 300.04); assert a[0][2] is not b[0][2] and a[1][2] is not b[1][2]                  # drawn again at the new place, not held until a whole pixel
+        c = ov.patches(T0 + 300.04); assert c[0][2] is b[0][2] and c[1][2] is b[1][2]                                                      # but not again for the same place
     def test_reused_while_standing_still(self, tiles):
         tr = race_track(n=900); tr['lat'][400:500] = tr['lat'][400]; tr['dist'][400:500] = tr['dist'][400]
         ov = overlay(Series(tr), tiles, elements=['local_map']); a = ov.patches(T0 + 420)[0][2]; assert ov.patches(T0 + 470)[0][2] is a
@@ -323,3 +323,11 @@ class TestArrow:
         ov = overlay(series, tiles, elements=['route_map']); ov.patches(T0); w = ov.widgets[0]
         assert w._bearing(T0 + 300, *w._xy(T0 + 300)) in (0.0, 355.0, 5.0)                          # the test track runs due north: up the map
         end = w._bearing(T0 + 899, *w._xy(T0 + 899)); assert end in (0.0, 355.0, 5.0)                 # at the end it keeps its direction
+
+
+class TestLineOpacity:
+    def test_the_lines_are_a_layer_of_their_own_whatever_the_map_is_and_can_be_made_see_through(self, series, tiles):
+        full = overlay(series, tiles, elements=['route_map', 'local_map'], map_opacity=0.3).patches(T0 + 450); half = overlay(series, tiles, elements=['route_map', 'local_map'], map_opacity=0.3, line_opacity=0.5).patches(T0 + 450)
+        for k in (1, 2):                                                                                   # the whole route and the part run (the local map's lines are its second patch)
+            assert full[k][2][..., 3].max() >= 150 and half[k][2][..., 3].max() == pytest.approx(full[k][2][..., 3].max() * 0.5, abs=2)
+        assert full[0][2][..., 3][100, 100] == round(0.3 * 255)                                            # the map itself stays see-through

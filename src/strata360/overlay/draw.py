@@ -111,6 +111,15 @@ def line_mask(shape, u, v, width, ss=4):
     return np.asarray(im.reduce(ss), np.float32) / 255
 
 
+def line_layer(shape, layers, clip=None, opacity=1.0):
+    """RGBA patch of route lines [(u, v, width, colour), ...] painted in that order (later over earlier, by coverage), cut by the 0..1 mask `clip` and made see-through by `opacity`; the lines are not part of any map picture, so their opacity is their own."""
+    h, w = shape[:2]; prem = np.zeros((h, w, 3), np.float32); a = np.zeros((h, w), np.float32)
+    for u, v, width, colour in layers:
+        m = line_mask(shape, u, v, width); prem = prem * (1 - m[..., None]) + np.asarray(colour, np.float32) * m[..., None]; a = a * (1 - m) + m
+    with np.errstate(invalid='ignore', divide='ignore'): rgb = np.where(a[..., None] > 0, prem / a[..., None], 0.0)
+    return np.dstack([rgb, a * (clip if clip is not None else 1.0) * opacity * 255]).round().astype(np.uint8)
+
+
 def blend_line(img, u, v, colour, width):
     """Like route_line, but for any thickness: the route laid over an RGB uint8 image in place by its coverage."""
     a = line_mask(img.shape, u, v, width)[..., None]; img[:] = np.round(img.astype(np.float32) * (1 - a) + np.asarray(colour, np.float32) * a).astype(np.uint8); return img

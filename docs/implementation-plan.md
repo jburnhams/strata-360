@@ -447,3 +447,5 @@ Overlay maps: the whole-route map draws the whole route thin in the medium red, 
 Checkpoint rows in the Tracks list work like the track rows: pointing at one rings that checkpoint on the map in bold yellow, clicking it keeps it highlighted (click again to let go).
 
 Whole-route map lines and marker: lines are drawn at fractions of a pixel (`draw.line_mask`: supersampled), the whole route 1.35 px and the part run 1.65 px (was 1 and 2). The position marker on this map is an arrow (`draw.arrow`) that points the way the route goes on from the marker, looked at 12 map px ahead (not the way the last seconds went), in 5 degree steps; the close-up map keeps its round marker.
+
+Route lines are full opacity: they are layers of their own over the (60% see-through) map pictures, on both maps, with their own `line_opacity` setting in race.json `overlay` (default 1.0). The arrow and the map outline already were.

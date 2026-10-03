@@ -37,7 +37,7 @@ ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the 
     'local_map': dict(kind='local_map', x=1644, y=304, h='right', size=256, radius=35, outline=(255, 0, 0), style='tf-outdoors'),
     'credit': dict(kind='credit', x=1900, y=566, h='right', size=11),
 }
-DEFAULTS = dict(enabled=True, style=None, elements=[e for e in ELEMENTS if e != 'credit'], scale=1.0, map_opacity=0.6, local_zoom=14, auto_zoom=True, zoom_range=1.5, font=None, label_font=None, layout={})
+DEFAULTS = dict(enabled=True, line_opacity=1.0, style=None, elements=[e for e in ELEMENTS if e != 'credit'], scale=1.0, map_opacity=0.6, local_zoom=14, auto_zoom=True, zoom_range=1.5, font=None, label_font=None, layout={})
 DASH = '–'
 
 
@@ -204,15 +204,16 @@ class RouteMap:
         span = max(np.ptp(wx), np.ptp(wy), 1e-9); self.k = S * 0.86 / span; self.cx, self.cy = (wx.min() + wx.max()) / 2, (wy.min() + wy.max()) / 2; self.S = S
         pic = np.asarray(c.tiles(c.style(e)).picture(self.cx, self.cy, self.k, S, S)).copy()
         self.u, self.w = (wx - self.cx) * self.k + S / 2, (wy - self.cy) * self.k + S / 2
-        D.blend_line(pic, self.u, self.w, RUN_COLOUR, TODO_W * c.s)                                  # the whole route thin in the medium red; the part already run is drawn over it darker (a little thinner) each frame
+        self.route_layer = None
         self.base = D.framed(pic, e['radius'] * c.s, c.st['map_opacity'], outline=e.get('outline', (0, 0, 0)), outline_w=1.5 * c.s); self.dot = D.marker(6 * c.s); self.ahead = None
         self.round = D.rounded(S, e['radius'] * c.s); self.done = None
+        self.route_layer = D.line_layer((S, S), [(self.u, self.w, TODO_W * c.s, RUN_COLOUR)], clip=self.round, opacity=float(c.st['line_opacity']))       # the whole route thin in the medium red, on its own (not part of the see-through map); the part already run is drawn over it darker (a little thinner) each frame
 
     def patches(self, t, v):
         if self.base is None: self._build()
         X, Y = self.c.at(self.el, self.el['x'], self.el['y']); u, w = self._xy(t)
         arrow = D.arrow(22 * self.c.s, self._bearing(t, u, w)); h = arrow.shape[0] / 2
-        return [(X, Y, self.base), (X, Y, self._run(t, u, w)), (X + u - h, Y + w - h, arrow)]
+        return [(X, Y, self.base), (X, Y, self.route_layer), (X, Y, self._run(t, u, w)), (X + u - h, Y + w - h, arrow)]
 
     def _bearing(self, t, u, w, look=12.0, step=5.0):
         """Degrees clockwise from up of the direction the route takes from the marker, looked at a little way on (`look` px of the map): where the runner is going to go rather than the way the last few seconds went. Rounded to `step` degrees."""
@@ -231,14 +232,12 @@ class RouteMap:
         wx, wy = world(*self.c.series.position(t)); return (wx - self.cx) * self.k + self.S / 2, (wy - self.cy) * self.k + self.S / 2
 
     def _run(self, t, u, w):
-        """The part of the route already run (to the marker) in the darker red, as a patch the map's see-through-ness is applied to; drawn again only when the marker has moved on."""
+        """The part of the route already run (to the marker) in the darker red, as a patch with the lines' own opacity; drawn again only when the marker has moved on."""
         s = self.c.series; n = int(np.searchsorted(s._pt, t, 'right')); key = (n, round(u, 1), round(w, 1))
         if self.done is None or self.done[0] != key:
-            shape = (self.S, self.S); step = max(1, n // 1500); a = np.zeros(shape, np.float32)
-            if n >= 1:
-                xs = np.concatenate([self.u[:n:step], [u]]); ys = np.concatenate([self.w[:n:step], [w]])
-                a = D.line_mask(shape, xs, ys, DONE_W * self.c.s) * self.round * self.c.st['map_opacity']
-            self.done = (key, np.dstack([np.broadcast_to(np.array(DONE_DARK, np.uint8), (self.S, self.S, 3)), (a * 255).round().astype(np.uint8)]))
+            shape = (self.S, self.S); step = max(1, n // 1500); layers = []
+            if n >= 1: layers = [(np.concatenate([self.u[:n:step], [u]]), np.concatenate([self.w[:n:step], [w]]), DONE_W * self.c.s, DONE_DARK)]
+            self.done = (key, D.line_layer(shape, layers, clip=self.round, opacity=float(self.c.st['line_opacity'])))
         return self.done[1]
 
 
@@ -277,11 +276,11 @@ class LocalMap:
             M = np.array([[1 / r, 0, (wx - b[0]) * kb + self.B / 2 - S / 2 / r], [0, 1 / r, (wy - b[1]) * kb + self.B / 2 - S / 2 / r]])
             pic = cv2.warpAffine(b[2], M, (S, S), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
             u, v = (self.rw[0] - wx) * k + S / 2, (self.rw[1] - wy) * k + S / 2; n = int(np.searchsorted(self.c.series._pt, t, 'right'))
-            D.route_line(pic, u, v, colour=TODO_COLOUR, width=2 * self.c.s)                                      # the route still to come, paler; the part already run over it in the strong colour
-            D.route_line(pic, np.concatenate([u[:n], [S / 2]]), np.concatenate([v[:n], [S / 2]]), colour=RUN_COLOUR, width=3 * self.c.s)
-            self.last = (key, D.framed(pic, self.el['radius'] * self.c.s, self.c.st['map_opacity'], outline=self.el.get('outline'), outline_w=2 * self.c.s))
+            lines = D.line_layer((S, S), [(u, v, 2 * self.c.s, TODO_COLOUR), (np.concatenate([u[:n], [S / 2]]), np.concatenate([v[:n], [S / 2]]), 3 * self.c.s, RUN_COLOUR)],
+                                 clip=D.rounded(S, self.el['radius'] * self.c.s), opacity=float(self.c.st['line_opacity']))     # the route still to come, paler; the part already run over it in the strong colour
+            self.last = (key, D.framed(pic, self.el['radius'] * self.c.s, self.c.st['map_opacity'], outline=self.el.get('outline'), outline_w=2 * self.c.s), lines)
         X, Y = self.c.at(self.el, self.el['x'], self.el['y']); r = self.dot.shape[0] / 2
-        return [(X, Y, self.last[1]), (X + S / 2 - r, Y + S / 2 - r, self.dot)]
+        return [(X, Y, self.last[1]), (X, Y, self.last[2]), (X + S / 2 - r, Y + S / 2 - r, self.dot)]
 
 
 class Credit:
