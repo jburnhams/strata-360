@@ -190,9 +190,16 @@ class Profile:
         return [p for p in out if p[2].shape[1] > 0]
 
 
-RUN_COLOUR, TODO_COLOUR = (230, 20, 20), (242, 168, 168)                                  # the close-up map: the route already run, and the route still to come (paler)
+RUN_COLOUR = (230, 20, 20)                                                                  # both maps: the whole route in this medium red,
 TODO_W, DONE_W = 1.35, 1.65                                                                 # line widths on the whole-route map (px at 1080p): the whole route, and the part already run
-DONE_DARK = (140, 0, 0)                                                                    # the whole-route map: the whole route is in RUN_COLOUR and the part already run is darker
+DONE_DARK = (140, 0, 0)                                                                    # and the part already run in this darker red
+
+
+def route_bearing(u, v, n, x0, y0, look, previous=0.0, step=5.0):
+    """Degrees clockwise from up (rounded to `step`) of the direction the route takes from the marker at (x0, y0), which is at point n of the route (picture coordinates u, v): to the first later point `look` px away, so how far ahead is looked at is the map's scale; at the very end the previous bearing stays."""
+    d = np.hypot(u[n:] - x0, v[n:] - y0); far = np.flatnonzero(d >= look); j = n + int(far[0]) if len(far) else (len(u) - 1 if n < len(u) else None)
+    if j is None or np.hypot(u[j] - x0, v[j] - y0) < 0.5: return previous
+    return round(math.degrees(math.atan2(u[j] - x0, -(v[j] - y0))) % 360 / step) * step % 360
 
 
 class RouteMap:
@@ -215,17 +222,10 @@ class RouteMap:
         arrow = D.arrow(22 * self.c.s, self._bearing(t, u, w)); h = arrow.shape[0] / 2
         return [(X, Y, self.base), (X, Y, self.route_layer), (X, Y, self._run(t, u, w)), (X + u - h, Y + w - h, arrow)]
 
-    def _bearing(self, t, u, w, look=12.0, step=5.0):
-        """Degrees clockwise from up of the direction the route takes from the marker, looked at a little way on (`look` px of the map): where the runner is going to go rather than the way the last few seconds went. Rounded to `step` degrees."""
+    def _bearing(self, t, u, w, look=12.0):
+        """The direction the route goes on from the marker, looked at `look` px of the map ahead (a long way, on a map of the whole race): where the runner is going to go, not the way the last seconds went."""
         n = int(np.searchsorted(self.c.series._pt, t, 'right')); key = (n, round(u), round(w))
-        if self.ahead is None or self.ahead[0] != key:
-            L = look * self.c.s; d = np.hypot(self.u[n:] - u, self.w[n:] - w); far = np.flatnonzero(d >= L)
-            if len(far): j = n + int(far[0])
-            elif n < len(self.u): j = len(self.u) - 1
-            else: j = None
-            if j is not None and np.hypot(self.u[j] - u, self.w[j] - w) >= 0.5: ang = math.degrees(math.atan2(self.u[j] - u, -(self.w[j] - w))) % 360
-            else: ang = self.ahead[1] if self.ahead else 0.0                                                    # at the very end: keep the last direction
-            self.ahead = (key, round(ang / step) * step % 360)
+        if self.ahead is None or self.ahead[0] != key: self.ahead = (key, route_bearing(self.u, self.w, n, u, w, look * self.c.s, previous=self.ahead[1] if self.ahead else 0.0))
         return self.ahead[1]
 
     def _xy(self, t):
@@ -276,11 +276,12 @@ class LocalMap:
             M = np.array([[1 / r, 0, (wx - b[0]) * kb + self.B / 2 - S / 2 / r], [0, 1 / r, (wy - b[1]) * kb + self.B / 2 - S / 2 / r]])
             pic = cv2.warpAffine(b[2], M, (S, S), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
             u, v = (self.rw[0] - wx) * k + S / 2, (self.rw[1] - wy) * k + S / 2; n = int(np.searchsorted(self.c.series._pt, t, 'right'))
-            lines = D.line_layer((S, S), [(u, v, 2 * self.c.s, TODO_COLOUR), (np.concatenate([u[:n], [S / 2]]), np.concatenate([v[:n], [S / 2]]), 3 * self.c.s, RUN_COLOUR)],
-                                 clip=D.rounded(S, self.el['radius'] * self.c.s), opacity=float(self.c.st['line_opacity']))     # the route still to come, paler; the part already run over it in the strong colour
-            self.last = (key, D.framed(pic, self.el['radius'] * self.c.s, self.c.st['map_opacity'], outline=self.el.get('outline'), outline_w=2 * self.c.s), lines)
-        X, Y = self.c.at(self.el, self.el['x'], self.el['y']); r = self.dot.shape[0] / 2
-        return [(X, Y, self.last[1]), (X, Y, self.last[2]), (X + S / 2 - r, Y + S / 2 - r, self.dot)]
+            lines = D.line_layer((S, S), [(u, v, 2 * self.c.s, RUN_COLOUR), (np.concatenate([u[:n], [S / 2]]), np.concatenate([v[:n], [S / 2]]), 3 * self.c.s, DONE_DARK)],
+                                 clip=D.rounded(S, self.el['radius'] * self.c.s), opacity=float(self.c.st['line_opacity']))     # the whole route in the medium red, the part already run over it in the darker red (as on the whole-route map, with the close-up's own thicknesses)
+            bearing = route_bearing(u, v, n, S / 2, S / 2, 9 * self.c.s, previous=self.last[3] if self.last else 0.0)                            # a short way ahead: this map is zoomed in, so it is the local direction of the route
+            self.last = (key, D.framed(pic, self.el['radius'] * self.c.s, self.c.st['map_opacity'], outline=self.el.get('outline'), outline_w=2 * self.c.s), lines, bearing)
+        X, Y = self.c.at(self.el, self.el['x'], self.el['y']); arrow = D.arrow(20 * self.c.s, self.last[3]); h = arrow.shape[0] / 2
+        return [(X, Y, self.last[1]), (X, Y, self.last[2]), (X + S / 2 - h, Y + S / 2 - h, arrow)]
 
 
 class Credit:

@@ -105,10 +105,10 @@ class TestMaps:
         assert covered(first) == 0 and 0 < covered(mid) < covered(end) and tuple(mid[mid[..., 3] > 0][0][:3]) == LY.DONE_DARK                                   # nothing run yet; more run later
         whole = ov.patches(T0)[1][2]; assert whole[..., 3].max() >= 150 and tuple(whole[whole[..., 3] > 0][0][:3]) == LY.RUN_COLOUR and ov.patches(T0 + 450)[1][2] is whole      # the whole route (medium red) is its own layer at full opacity, drawn once
 
-    def test_local_map_draws_the_run_part_stronger_than_the_part_to_come(self, series, tiles):
+    def test_local_map_draws_the_run_part_darker_than_the_whole_route(self, series, tiles):
         ov = overlay(series, tiles, elements=['local_map']); pic = ov.patches(T0 + 450)[1][2]; assert pic[..., 3].max() >= 200                                       # (the lines are a layer of their own, at full opacity)
-        rgb = pic[pic[..., 3] > 0][:, :3].astype(int); strong = (np.abs(rgb - np.array(LY.RUN_COLOUR)).sum(1) < 30).sum(); pale = (np.abs(rgb - np.array(LY.TODO_COLOUR)).sum(1) < 30).sum()
-        assert strong > 0 and pale > 0
+        rgb = pic[pic[..., 3] > 0][:, :3].astype(int); dark = (np.abs(rgb - np.array(LY.DONE_DARK)).sum(1) < 30).sum(); medium = (np.abs(rgb - np.array(LY.RUN_COLOUR)).sum(1) < 30).sum()
+        assert dark > 0 and medium > 0
 
     def test_local_map_keeps_the_marker_in_the_middle(self, series, tiles):
         ov = overlay(series, tiles, elements=['local_map'])
@@ -331,3 +331,16 @@ class TestLineOpacity:
         for k in (1, 2):                                                                                   # the whole route and the part run (the local map's lines are its second patch)
             assert full[k][2][..., 3].max() >= 150 and half[k][2][..., 3].max() == pytest.approx(full[k][2][..., 3].max() * 0.5, abs=2)
         assert full[0][2][..., 3][100, 100] == round(0.3 * 255)                                            # the map itself stays see-through
+
+
+class TestRouteBearing:
+    def test_points_to_the_first_later_point_that_is_far_enough_away(self):
+        u = np.array([0, 0, 0, 10, 20, 30.0]); v = np.array([0, 0, 0, 0, 0, 0.0])            # the route goes east along the picture
+        assert LY.route_bearing(u, v, 1, 0.0, 0.0, 5.0) == 90.0 and LY.route_bearing(np.array([0, 0, 0.0]), np.array([0, -5, -10.0]), 0, 0.0, 0.0, 4.0) == 0.0           # east is 90 clockwise from up; up the picture is 0
+
+    def test_a_shorter_look_follows_a_bend_the_longer_one_cuts(self):
+        u = np.array([0, 0, 0, 0, 10, 20, 30.0]); v = np.array([0, -10, -20, -30, -30, -30, -30.0])           # north for 30 then east
+        near = LY.route_bearing(u, v, 0, 0.0, 0.0, 8.0); far = LY.route_bearing(u, v, 0, 0.0, 0.0, 40.0); assert near == 0.0 and 20 < far < 60
+
+    def test_at_the_end_the_last_bearing_stays(self):
+        u = np.array([0, 0.0]); v = np.array([0, 0.0]); assert LY.route_bearing(u, v, 2, 0.0, 0.0, 5.0, previous=135.0) == 135.0
