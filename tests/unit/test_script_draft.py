@@ -132,7 +132,7 @@ def test_notes_say_when_an_anchor_cannot_be_met_but_say_nothing_about_narration_
 def test_the_request_carries_the_music_and_the_gap_choices_and_the_prompt_explains_gap_items_and_anchors():
     msgs, text = SD.build_messages(DPACK, 245, 150); sys_, user = msgs[0]['content'], msgs[1]['content']
     assert 'THE MUSIC (times are FILM seconds' in user and 'Sung (en): 30-60 s' in user and '=== CLIP G01' in user and 'NO FOOTAGE: a gap of 1.0 h' in user and '"type": "gap"' in user and '"anchor"' in user
-    assert '"gap": a generated clip' in sys_ and 'do NOT choose how it is drawn' in sys_ and '"kind": "map"' not in sys_ and 'must approve' not in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 12 and 'paraphrase freely' in sys_
+    assert '"gap": a generated clip' in sys_ and 'do NOT choose how it is drawn' in sys_ and '"kind": "map"' not in sys_ and 'must approve' not in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 13 and 'paraphrase freely' in sys_
 
 
 def test_with_the_tempo_known_every_item_counts_in_whole_beats_so_the_writers_total_matches_the_plan():
@@ -175,7 +175,7 @@ def test_a_view_is_only_for_clip_and_broll_items_of_a_clip_that_has_it():
 
 
 def test_the_prompt_explains_the_views_of_you():
-    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 12
+    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 13
 
 
 def test_a_reply_with_raw_newlines_inside_strings_is_still_read():
@@ -195,3 +195,10 @@ def test_a_drafts_basis_is_always_a_list_of_strings():
     d = SD.tidy(dict(items=[dict(type='vo', basis='one string'), dict(type='vo', basis=None), dict(type='vo', basis=['a', 2]), dict(type='broll')]))
     assert [it.get('basis') for it in d['items']] == [['one string'], [], ['a', '2'], None]
     assert SD.parse('{"items": [{"type": "vo", "basis": "x"}]}')['items'][0]['basis'] == ['x']
+
+
+def test_the_writer_is_asked_whether_the_length_suits_and_the_answer_is_kept_when_it_makes_sense():
+    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"length_note"' in sys_ and 'too_long' in sys_ and 'ideal_s' in sys_ and 'THE LENGTH.' in sys_ and 'roughly that moment of the film' in sys_
+    assert SD.length_note(dict(length_note=dict(verdict='too_long', ideal_s='210', why=' padding in the middle '))) == dict(verdict='too_long', ideal_s=210.0, why='padding in the middle')
+    assert SD.length_note(dict(length_note=dict(verdict='fits'))) == dict(verdict='fits', ideal_s=None, why='') and SD.length_note(dict(length_note=dict(verdict='huge'))) is None and SD.length_note({}) is None and SD.length_note(dict(length_note='fine')) is None
+    assert SD.length_note(dict(length_note=dict(verdict='too_short', ideal_s='soon'))) == dict(verdict='too_short', ideal_s=None, why='')

@@ -69,7 +69,7 @@ def render_constraints(pins, pack, target_s, wpm):
     if vp:
         L.append('- Narration the user has written (MUST INCLUDE, word for word, each as its own "vo" item or inside one; you may add your own narration around them):')
         for p in vp:
-            how = {'clip': f"inside the run of clip {p.get('clip')}", 'ordered': 'anywhere, but keep the order of the numbered pins (v1 before v2 ...) relative to the other ordered or clip-anchored pins', 'anywhere': 'anywhere you think best, no order'}[p.get('mode', 'anywhere')]
+            how = {'clip': f"at about the moment of clip {p.get('clip')}: inside it, or in the item just before or after it if there is not room", 'ordered': 'anywhere, but keep the order of the numbered pins (v1 before v2 ...) relative to the other ordered or clip-anchored pins', 'anywhere': 'anywhere you think best, no order'}[p.get('mode', 'anywhere')]
             L.append(f"    [{p['id']}] ({how}) \"{p['text'].strip()}\"")
     for ph in (pins or {}).get('vo_never') or []: L.append(f'- The narration must never say: "{ph}" (nor a close rewording).')
     cs, vs = seconds_summary(pins, pack, wpm)
@@ -95,7 +95,9 @@ def check(script, pack, pins):
                 if any(got[k:k + len(want)] == want for k in range(len(got) - len(want) + 1)): hit = n; clip_of[p['id']] = norm_label(it.get('clip', '')); break
         if hit is None: probs.append(f"user narration [{p['id']}] is missing or reworded (it must appear word for word)"); continue
         vpos[p['id']] = hit
-        if p.get('mode') == 'clip' and clip_of[p['id']] != norm_label(p.get('clip', '')): probs.append(f"user narration [{p['id']}] must be in clip {p.get('clip')} but is in clip {clip_of[p['id']]}")
+        if p.get('mode') == 'clip':                                                 # the moment of the clip, not its exact run: the item before or after may carry it when there is not time inside
+            want_c = norm_label(p.get('clip', '')); homes = [k for k, x in enumerate(items) if norm_label(x.get('clip', '')) == want_c]
+            if homes and min(abs(hit - k) for k in homes) > 1: probs.append(f"user narration [{p['id']}] belongs at the moment of clip {p.get('clip')} (inside it or in the item just before or after it) but is in clip {clip_of[p['id']]}, further away")
     for ph in (pins or {}).get('vo_never') or []:
         w = norm(ph)
         for n, it in enumerate(items, 1):
@@ -108,7 +110,7 @@ def check(script, pack, pins):
 
 
 def notes_pins(notes, pack):
-    """The narration pins written in the notes' "voice-over MUST INCLUDE" fields (pipeline/notes.py): one per line. A clip's lines are anchored inside that clip; the folder's lines are in the order written
+    """The narration pins written in the notes' "voice-over MUST INCLUDE" fields (pipeline/notes.py): one per line. A clip's lines are anchored at about that clip's moment in the film (in its item or the one next to it); the folder's lines are in the order written
     (mode 'ordered') or anywhere, as its switch says."""
     vo = (notes or {}).get('vo_must') or {}; labels = {c['clip']: c['label'] for c in pack['clips']}; out = []
     def lines(t): return [x.strip() for x in (t or '').splitlines() if x.strip()]

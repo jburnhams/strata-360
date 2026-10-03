@@ -27,7 +27,7 @@ def test_the_pack_text_tags_the_fixed_lines():
 def test_the_prompt_section_lists_every_kind_of_pin_and_the_time_they_take():
     pins = dict(include=['0001.00..0001.01'], exclude=['0002.00'], vo=[dict(id='v1', text='one two three four five six', mode='clip', clip='0001'), dict(id='v2', text='ordered text', mode='ordered'), dict(id='v3', text='free text', mode='anywhere')])
     s = PN.render_constraints(pins, PACK, 100, 120)
-    assert 'MUST INCLUDE' in s and 'DO NOT USE' in s and '[v1] (inside the run of clip 0001)' in s and 'keep the order' in s and 'no order' in s and 'of the 100 s target' in s
+    assert 'MUST INCLUDE' in s and 'DO NOT USE' in s and '[v1] (at about the moment of clip 0001: inside it, or in the item just before or after it if there is not room)' in s and 'keep the order' in s and 'no order' in s and 'of the 100 s target' in s
     assert PN.render_constraints({}, PACK, 100, 120) == '' and PN.render_constraints(dict(include=[]), PACK, 100, 120) == ''
     cs, vs = PN.seconds_summary(pins, PACK, 120); assert abs(cs - (6 - 1 + 0.18)) < 0.05 and vs > 0            # lines 00 and 01 are one run: 1.0 to 6.0 s plus the pad
 
@@ -42,10 +42,18 @@ def test_every_way_of_breaking_a_pin_is_reported():
     pins = dict(include=['0001.00', '0002.00'], exclude=['0001.02'], vo=[dict(id='v1', text='anchored text', mode='clip', clip='0001'), dict(id='v2', text='first piece', mode='ordered'), dict(id='v3', text='later piece', mode='ordered'), dict(id='v4', text='gone', mode='anywhere')])
     bad = script(vo('0002', 'anchored text'), vo('0002', 'later piece'), vo('0002', 'first piece'), clip('0001', '0001.01', '0001.02'))
     p = ' | '.join(PN.check(bad, PACK, pins))
-    assert 'MUST INCLUDE line 0001.00' in p and 'MUST INCLUDE line 0002.00' in p and 'DO NOT USE line 0001.02' in p and 'must be in clip 0001 but is in clip 0002' in p
+    assert 'MUST INCLUDE line 0001.00' in p and 'MUST INCLUDE line 0002.00' in p and 'DO NOT USE line 0001.02' in p and 'belongs at the moment of clip 0001' in p and 'further away' in p
     assert '[v2] must come before [v3]' in p and '[v4] is missing' in p                           # v3 is spoken before v2, and v4 never appears
 
 
 def test_reworded_narration_does_not_count():
     pins = dict(vo=[dict(id='v1', text='I had put the spare watch on the other wrist', mode='anywhere')])
     assert PN.check(script(vo('0001', 'I put the spare watch on my other wrist')), PACK, pins) and PN.check(script(vo('0001', 'Then, I had put the spare watch on the other wrist, and it was worse')), PACK, pins) == []
+
+
+def test_narration_pinned_to_a_clip_may_spill_into_the_item_before_or_after_it():
+    pins = dict(vo=[dict(id='v1', text='anchored text', mode='clip', clip='0001')])
+    assert PN.check(script(clip('0001', '0001.01', '0001.02'), vo('0002', 'anchored text')), PACK, pins) == []                    # in the next item
+    assert PN.check(script(vo('0002', 'anchored text'), clip('0001', '0001.01', '0001.02')), PACK, pins) == []                    # in the one before
+    assert PN.check(script(clip('0001', '0001.01', '0001.02'), vo('0001', 'anchored text')), PACK, pins) == []                    # inside it
+    far = ' | '.join(PN.check(script(vo('0002', 'anchored text'), vo('0002', 'x y'), vo('0002', 'x z'), clip('0001', '0001.01', '0001.02')), PACK, pins)); assert 'further away' in far

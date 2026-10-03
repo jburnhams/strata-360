@@ -94,7 +94,7 @@ export interface Meta {
 }
 export interface ScriptItem { type: 'vo' | 'clip' | 'broll' | 'gap'; kind?: GapKind | string; anchor?: { film_s: number; why?: string }; view?: 'mid' | 'close' | 'far'; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
 export interface ScriptDraft {
-  title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
+  title: string | null; story: string | null; length_note?: { verdict: 'fits' | 'too_long' | 'too_short'; ideal_s: number | null; why: string } | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
   problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null
 }
 export interface PlanInfo { source: 'script' | 'beats'; script: string | null; windows: number; length_s: number | null; warnings: string[]; generated_at: string | null }
