@@ -20,7 +20,7 @@ export interface TrackOverview {
 export interface TrackSeries { points: number; start_utc: string; end_utc: string; duration_s: number; distance_km: number | null; t: number[]; km: (number | null)[]; alt: (number | null)[]; alt_lo: (number | null)[]; alt_hi: (number | null)[]; pace: (number | null)[]; moving: number[]; hr: (number | null)[] }
 export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
 export type TrackKind = 'run' | 'route'
-export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number; order?: number | null; whole?: boolean; reversed?: boolean; km_start?: number; km_end?: number }
+export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number; order?: number | null; reversed?: boolean; km_start?: number; km_end?: number }
 export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string; n?: number }
 export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
 export interface TracksListing { divergences?: Divergence[]; tracks: TrackEntry[]; merged: { runs: string[]; samples: number; start_utc: string; end_utc: string; distance_km: number } | null; pois: Poi[]; runs: number }

@@ -127,7 +127,7 @@ function TracksList({ folder, listing, onChange }: { folder: string; listing?: T
       <ul className="space-y-1">
         {rows.map(x => (
           <li key={x.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {x.kind === 'route' && <span className="w-6 text-center text-xs font-semibold text-blue-700 dark:text-blue-400" title={x.whole ? 'the whole course' : x.order ? `section ${x.order} of the race` : undefined}>{x.whole ? 'all' : x.order ?? ''}</span>}
+            {x.kind === 'route' && <span className="w-6 text-center text-xs font-semibold text-blue-700 dark:text-blue-400" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
             <span className="min-w-0 flex-1 truncate" title={x.name}>{x.name}</span>
             {x.error ? <span className="text-red-600">{x.error}</span> : <span className="text-xs text-stone-500">{x.distance_km} km · {x.start_utc ? x.start_utc.slice(0, 10) : 'no times'}{x.pois ? ` · ${x.pois} POI` : ''}{x.kind === 'route' && x.order ? ` · km ${x.km_start}–${x.km_end} of the run${x.reversed ? ' (run the other way)' : ''}` : ''}</span>}
             <select aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">

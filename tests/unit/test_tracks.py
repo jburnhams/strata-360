@@ -105,11 +105,18 @@ def test_routes_are_put_in_race_order_with_a_numbered_checkpoint_where_they_join
     rd = str(tmp_path); north = lambda a, b, lon=5.0: [(50.0 + i * 1e-4, lon) for i in range(a, b)]                    # 11 m per point; the run goes north for 900 points
     TK.add(rd, 'run.gpx', gpx(north(0, 900)))
     TK.add(rd, 'c.gpx', gpx(north(600, 900), route=True, timed=False)); TK.add(rd, 'a.gpx', gpx(north(0, 300), route=True, timed=False))             # uploaded out of order
-    TK.add(rd, 'b.gpx', gpx(north(300, 600, 5.0002)[::-1], route=True, timed=False))                                    # the middle one runs the other way and ends ~14 m to the side
-    TK.add(rd, 'all.gpx', gpx(north(0, 900), route=True, timed=False))                                                  # the whole course
+    TK.add(rd, 'b.gpx', gpx(north(300, 600, 5.0002)[::-1], route=True, timed=False))                                    # the middle one is drawn the other way and ends ~14 m to the side
     ls = TK.listing(rd); routes = [t for t in ls['tracks'] if t['kind'] == 'route']
-    assert [(t['name'], t.get('order')) for t in routes] == [('a.gpx', 1), ('b.gpx', 2), ('c.gpx', 3), ('all.gpx', None)] and routes[1]['reversed'] and routes[3]['whole']
+    assert [(t['name'], t.get('order')) for t in routes] == [('a.gpx', 1), ('b.gpx', 2), ('c.gpx', 3)] and routes[1]['reversed'] and not routes[0]['reversed']
     assert routes[0]['km_start'] < 0.1 and 3.2 < routes[0]['km_end'] < 3.5
     cps = [p for p in ls['pois'] if p['sym'] == 'checkpoint']; assert [(p['name'], p['n']) for p in cps] == [('Checkpoint 1', 1), ('Checkpoint 2', 2)]                 # none at the start of a.gpx or the end of c.gpx
     assert abs(cps[0]['lat'] - 50.03) < 5e-4 and 'a.gpx → b.gpx' in cps[0]['desc'] and abs(cps[0]['lon'] - 5.0001) < 5e-5                                    # halfway between the ends that do not meet
     assert TK.route_order(str(tmp_path / 'none')) == ([], [])
+
+
+def test_a_race_that_passes_the_same_place_twice_still_puts_the_routes_in_order(tmp_path):
+    rd = str(tmp_path); out = [(50.0 + i * 1e-4, 5.0) for i in range(300)]; back = [(50.0 + i * 1e-4, 5.0006) for i in range(300, 0, -1)]            # out and back, start and finish together
+    TK.add(rd, 'run.gpx', gpx(out + [(50.03, 5.0003)] + back))
+    TK.add(rd, 'second.gpx', gpx(back, route=True, timed=False)); TK.add(rd, 'first.gpx', gpx(out, route=True, timed=False))
+    routes = [t for t in TK.listing(rd)['tracks'] if t['kind'] == 'route']
+    assert [(t['name'], t['order']) for t in routes] == [('first.gpx', 1), ('second.gpx', 2)] and not routes[1]['reversed'] and routes[1]['km_start'] > 3
