@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
-import type { StreetView, SvChoice, SvProvider, SvSection, SvSectionInfo, SvStretch, TileStatus } from '../api'
+import type { StreetView, SvChoice, SvProvider, SvSection, SvSectionInfo, SvStretch, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
@@ -10,6 +10,14 @@ const NAME: Record<SvProvider, string> = { mapillary: 'Mapillary', panoramax: 'P
 const LETTER: Record<SvProvider, string> = { mapillary: 'M', panoramax: 'P', google: 'G' }
 const PROVIDERS: SvProvider[] = ['mapillary', 'panoramax', 'google']
 const DIRECTIONS = ['forward', 'right', 'back', 'left']
+/** Colours for a duration on a log scale between the shortest and the longest, light yellow (short) through green and blue to dark purple (long), the same for the clips and the street view sections so they can be compared. */
+const RAMP = ['#fde725', '#7ad151', '#22a884', '#2a788e', '#414487', '#440154']
+export function rampColour(d: number, lo: number, hi: number) {
+  const t = hi > lo ? Math.min(1, Math.max(0, (Math.log(Math.max(d, lo)) - Math.log(lo)) / (Math.log(hi) - Math.log(lo)))) : 0.5, x = t * (RAMP.length - 1), i = Math.min(RAMP.length - 2, Math.floor(x)), f = x - i
+  const c = (h: string) => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)), a = c(RAMP[i]), b = c(RAMP[i + 1])
+  return '#' + a.map((v, k) => Math.round(v + (b[k] - v) * f).toString(16).padStart(2, '0')).join('')
+}
+export const dur = (sec: number) => (sec < 90 ? `${Math.round(sec)} s` : sec < 5400 ? `${Math.round(sec / 60)} min` : `${(sec / 3600).toFixed(1)} h`)
 const km = (v: number) => v.toFixed(2).replace(/\.?0+$/, '')
 const span = (s: { km0: number; km1: number }) => `km ${km(s.km0)} to ${km(s.km1)}`
 const metres = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`)
@@ -32,13 +40,15 @@ export default function StreetViewPage({ folder }: { folder: string }) {
   const data = usePoll(() => api.streetview(folder), 5000, [folder, tick])
   const [tiles, setTiles] = useState<TileStatus>()
   const [sel, setSel] = useState<{ kind: 'section' | 'stretch'; id: string }>()
-  const [shown, setShown] = useState<Record<string, boolean>>({ mapillary: true, panoramax: true, google: true, '360': true, '2d': true })
-  const [err, setErr] = useState<string>()
+  const [shown, setShown] = useState<Record<string, boolean>>({ mapillary: true, panoramax: true, google: true, '360': true, '2d': true, clips: true })
+  const [err, setErr] = useState<string>(), [clips, setClips] = useState<TrackClip[]>([])
+  useEffect(() => { api.trackClips(folder).then(r => setClips(r.clips.filter(c => c.covered && c.stretch?.length))).catch(() => setClips([])) }, [folder])
   useEffect(() => { api.tilesStatus().then(setTiles).catch(() => setTiles({ ok: false, style: 'tf-landscape', error: 'no map background' })) }, [])
   useEffect(() => { setSel(undefined) }, [folder])
   const roads = useMemo(() => data?.roads, [data?.roads?.id])                                // (a new copy comes with every poll: the map is only rebuilt when the road parts really change)
   const sections = useMemo(() => data?.sections ?? [], [data])
   const visible = sections.filter(s => shown[s.provider] && shown[s.kind])
+  const scale = useMemo(() => { const d = [...clips.map(c => c.duration_s), ...sections.map(x => x.max_s)].filter(v => v > 0); return d.length ? { lo: Math.min(...d), hi: Math.max(...d) } : { lo: 1, hi: 60 } }, [clips, sections])
   const stretch = (id: string) => roads?.stretches.find(s => s.id === id)
   const run = async (stages?: string[], force = false) => {
     setErr(undefined)
@@ -57,7 +67,8 @@ export default function StreetViewPage({ folder }: { folder: string }) {
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
           <Filters shown={shown} setShown={setShown} data={data} />
-          <SvMap roads={roads.stretches} run={roads.run} sections={visible} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
+          <SvMap roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
+          <Legend scale={scale} hasClips={clips.length > 0} />
           <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-stone-600 dark:text-stone-400">
             <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f59e0b' }} />road part of the run (click one)</span>
             {PROVIDERS.map(p => <span key={p}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}</span>)}
@@ -110,10 +121,10 @@ function Filters({ shown, setShown, data }: { shown: Record<string, boolean>; se
   const box = (k: string, label: string, colour?: string) => (
     <label key={k} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={shown[k]} onChange={e => setShown({ ...shown, [k]: e.target.checked })} />{colour && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colour }} />}{label}</label>
   )
-  return <div className="mb-2 flex flex-wrap gap-4">{PROVIDERS.map(p => box(p, `${NAME[p]}${data.providers[p] ? ` (${data.sections.filter(s => s.provider === p).length})` : ''}`, COLOUR[p]))}{box('360', '360° cameras')}{box('2d', '2D cameras')}</div>
+  return <div className="mb-2 flex flex-wrap gap-4">{PROVIDERS.map(p => box(p, `${NAME[p]}${data.providers[p] ? ` (${data.sections.filter(s => s.provider === p).length})` : ''}`, COLOUR[p]))}{box('360', '360° cameras')}{box('2d', '2D cameras')}{box('clips', 'Camera clips')}</div>
 }
 
-function SvMap({ roads, run, sections, sel, onSel, background }: { roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
+function SvMap({ roads, run, sections, clips, scale, sel, onSel, background }: { roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
   const el = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), layers = useRef<L.LayerGroup | null>(null), onSelRef = useRef(onSel); onSelRef.current = onSel
   useEffect(() => {
     if (!el.current) return
@@ -131,18 +142,23 @@ function SvMap({ roads, run, sections, sel, onSel, background }: { roads: SvStre
   useEffect(() => {                                                                              // redrawn when the data, the filters or the selection change
     const g = layers.current; if (!g) return
     g.clearLayers(); L.polyline(run, { color: '#78716c', weight: 2, opacity: 0.7, interactive: false }).addTo(g)
+    for (const c of clips) {                                                                      // the stretch of the run each camera clip covers, coloured by how long the clip is, with a marker numbered like the clip
+      const col = rampColour(c.duration_s, scale.lo, scale.hi)
+      L.polyline(c.stretch!, { color: '#fff', weight: 9, opacity: 0.9, interactive: false }).addTo(g); L.polyline(c.stretch!, { color: col, weight: 6, opacity: 1, interactive: false }).addTo(g)
+      if (c.lat != null && c.lon != null) L.marker([c.lat, c.lon], { title: `Clip ${c.label} · ${dur(c.duration_s)}`, keyboard: false, icon: L.divIcon({ className: '', iconSize: [30, 16], html: `<div data-clip-marker style="background:${col};color:#fff;text-shadow:0 0 2px #000;font:600 10px/16px sans-serif;border-radius:8px;text-align:center;border:1.5px solid #fff">${c.label}</div>` }) }).addTo(g)
+    }
     for (const r of roads) {
       const on = sel?.kind === 'stretch' && sel.id === r.id
       L.polyline(r.line, { color: '#f59e0b', weight: on ? 9 : 6, opacity: on ? 1 : 0.8 }).bindTooltip(`${r.names.join(', ') || r.highways.join(', ')} · ${span(r)} · ${metres(r.length_m)}`).on('click', () => onSelRef.current({ kind: 'stretch', id: r.id })).addTo(g)
     }
     for (const s of sections) {
       const on = sel?.kind === 'section' && sel.id === s.id, pts = s.items.map(i => [i.lat, i.lon] as [number, number])
-      L.polyline(pts, { color: COLOUR[s.provider], weight: on ? 6 : 3, opacity: 0.95, dashArray: s.kind === '2d' ? undefined : '2 6', interactive: false }).addTo(g)
+      L.polyline(pts, { color: '#fff', weight: on ? 10 : 8, opacity: 0.9, interactive: false }).addTo(g); L.polyline(pts, { color: rampColour(s.max_s, scale.lo, scale.hi), weight: on ? 7 : 5, opacity: 1, dashArray: s.kind === '2d' ? undefined : '3 5', interactive: false }).addTo(g)
       const mid = s.items[Math.floor(s.items.length / 2)]
       const icon = L.divIcon({ className: '', iconSize: [34, 20], html: `<div style="background:${COLOUR[s.provider]};color:#fff;font:600 11px/20px sans-serif;border-radius:10px;text-align:center;border:${on ? '2px solid #000' : s.choice ? '2px solid #f59e0b' : '1.5px solid #fff'}">${LETTER[s.provider]} ${kindLabel(s)}</div>` })
       L.marker([mid.lat, mid.lon], { icon, title: `${NAME[s.provider]} ${kindLabel(s)} ${span(s)}`, keyboard: true, zIndexOffset: on ? 1000 : 0 }).on('click', () => onSelRef.current({ kind: 'section', id: s.id })).addTo(g)
     }
-  }, [roads, run, sections, sel])
+  }, [roads, run, sections, clips, scale, sel])
   useEffect(() => {                                                                              // the map moves to what was chosen
     const m = map.current; if (!m || !sel) return
     const pts = sel.kind === 'stretch' ? roads.find(r => r.id === sel.id)?.line : sections.find(s => s.id === sel.id)?.items.map(i => [i.lat, i.lon] as [number, number])
@@ -246,4 +262,15 @@ function Quality({ q }: { q: SvSectionInfo['quality'] }) {
   if (!q) return <span className="text-xs text-stone-500">quality not checked yet</span>
   if (q.score == null || !q.grade) return <span className="text-xs text-stone-500" title={q.error}>quality could not be measured</span>
   return <span className={`rounded px-1.5 text-xs ${GRADE[q.grade]}`} title={`in-between pictures ${q.psnr} dB · unsteadiness ${q.jerk}° · turning ${q.roll}°`}>quality: {q.grade} ({q.score})</span>
+}
+
+
+/** The key to the colours: the clips' stretches and the street view sections are coloured by duration, on one scale. */
+function Legend({ scale, hasClips }: { scale: { lo: number; hi: number }; hasClips: boolean }) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-600 dark:text-stone-400" aria-label="Duration colours">
+      <span>Colour = duration:</span><span>{dur(scale.lo)}</span><span className="h-2.5 w-40 rounded" style={{ background: `linear-gradient(to right, ${RAMP.join(',')})` }} /><span>{dur(scale.hi)}</span>
+      <span>· {hasClips ? 'numbered stretches are the camera clips (their length); ' : ''}the coloured lines with a letter badge are street view sections (the longest clip each can make)</span>
+    </div>
+  )
 }

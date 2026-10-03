@@ -30,9 +30,12 @@ def fetch(rd, section, token=None, get=None, download=None, log=print, preview=F
     """Download the full-size pictures of a section (`preview`: the smaller 2048 wide ones, enough to judge a section), and for Mapillary the reconstruction data (rotation and position of each). Kept: a picture already there is not
     fetched again. `get(url, params) -> json`, `download(url) -> bytes`."""
     from strata360 import streetview as SV
-    get = get or SV._get; download = download or SV._bytes; os.makedirs(src_dir(rd, section), exist_ok=True); meta = {}
+    get = get or SV._get; download = download or SV._bytes; os.makedirs(src_dir(rd, section), exist_ok=True)
+    try: meta = json.load(open(meta_path(rd, section)))                                                                         # what an earlier fetch learnt (a picture already here needs no question to Mapillary)
+    except (OSError, ValueError): meta = {}
     for it in section['items']:
         f = src_path(rd, section, it['id'], preview)
+        if os.path.exists(f) and it['id'] in meta: continue
         if section['provider'] == 'mapillary':
             m = get(f"https://graph.mapillary.com/{it['id']}", dict(access_token=token, fields='thumb_original_url,thumb_2048_url,computed_rotation,computed_geometry,computed_compass_angle,compass_angle'))
             meta[it['id']] = {k: m.get(k) for k in ('computed_rotation', 'computed_geometry', 'computed_compass_angle', 'compass_angle')}; url = m.get('thumb_2048_url' if preview else 'thumb_original_url')

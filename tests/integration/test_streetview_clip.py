@@ -52,10 +52,12 @@ def test_a_missing_picture_and_a_panoramax_section_without_a_road_are_explained(
 
 def test_fetch_downloads_each_picture_once_and_keeps_the_reconstruction_data(tmp_path):
     rd = str(tmp_path); sec = dict(id='M1', provider='mapillary', seq='s', km0=1.0, items=[dict(id='a'), dict(id='b')]); calls = []
-    def get(url, params): calls.append(url); return dict(thumb_original_url='https://cdn/' + url.rsplit('/', 1)[1], computed_rotation=[0, 0, 1], computed_geometry=dict(coordinates=[5, 50]), compass_angle=10.0)
+    def get(url, params): calls.append(url); return dict(thumb_original_url='https://cdn/' + url.rsplit('/', 1)[1], thumb_2048_url='https://cdn/2048/' + url.rsplit('/', 1)[1], computed_rotation=[0, 0, 1], computed_geometry=dict(coordinates=[5, 50]), compass_angle=10.0)
     def download(url): calls.append(url); return b'jpeg'
-    CAM.fetch(rd, sec, 'tok', get=get, download=download, log=lambda *_: None); n = len(calls); CAM.fetch(rd, sec, 'tok', get=get, download=download, log=lambda *_: None)
-    assert open(CAM.src_path(rd, sec, 'a'), 'rb').read() == b'jpeg' and json.load(open(CAM.meta_path(rd, sec)))['b']['computed_rotation'] == [0, 0, 1] and len(calls) == n + 2           # (the second fetch asks again for the data, not for the pictures)
+    CAM.fetch(rd, sec, 'tok', get=get, download=download, log=lambda *_: None); n = len(calls)
+    CAM.fetch(rd, sec, 'tok', get=get, download=download, log=lambda *_: None)
+    assert open(CAM.src_path(rd, sec, 'a'), 'rb').read() == b'jpeg' and json.load(open(CAM.meta_path(rd, sec)))['b']['computed_rotation'] == [0, 0, 1] and len(calls) == n          # the second fetch asks for nothing
+    CAM.fetch(rd, sec, 'tok', get=get, download=download, log=lambda *_: None, preview=True); assert len(calls) == n + 4 and os.path.exists(CAM.src_path(rd, sec, 'a', True))          # the small copies are a different file: asked for once
     px = dict(id='P1', provider='panoramax', seq='c', km0=2.0, items=[dict(id='z', u='https://p/sd.jpg', h='https://p/full.jpg', c=33.0), dict(id='y', u='https://p/y/sd.jpg', c=44.0)]); got = []
     CAM.fetch(rd, px, None, get=get, download=lambda url: got.append(url) or b'x', log=lambda *_: None); assert got == ['https://p/full.jpg', 'https://p/y/sd.jpg'] and json.load(open(CAM.meta_path(rd, px)))['z']['compass_angle'] == 33.0
     with pytest.raises(RuntimeError, match='no picture to fetch'): CAM.fetch(rd, dict(px, items=[dict(id='q')]), None, get=get, download=download, log=lambda *_: None)

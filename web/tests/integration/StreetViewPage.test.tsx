@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { fireEvent } from '@testing-library/react'
 import { screen, setup, waitFor, within } from '../utils/render'
-import StreetViewPage from '../../src/components/StreetViewPage'
+import StreetViewPage, { dur, rampColour } from '../../src/components/StreetViewPage'
 import Workspace from '../../src/components/Workspace'
-import { makeStreetView, makeSvSection } from '../utils/factories'
+import { makeStreetView, makeSvSection, makeTrackClip } from '../utils/factories'
 import { recordRequests } from '../utils/api'
 import { server } from '../utils/server'
 
@@ -160,6 +160,25 @@ describe('the sections that could be used in the film', () => {
   it('says so when no section has enough pictures', async () => {
     const sv = makeStreetView(); sv.sections.forEach(s => { s.plausible = false }); serve(sv); setup(<StreetViewPage folder="/data" />)
     expect(await screen.findByText('None of the sections found has enough pictures yet.')).toBeInTheDocument()
+  })
+})
+
+describe('duration colours and the camera clips on the map', () => {
+  it('colours a duration on a log scale from light yellow (short) to dark purple (long)', () => {
+    expect(rampColour(1, 1, 100)).toBe('#fde725'); expect(rampColour(100, 1, 100)).toBe('#440154'); expect(rampColour(0.1, 1, 100)).toBe('#fde725'); expect(rampColour(1000, 1, 100)).toBe('#440154')
+    expect(rampColour(10, 1, 100)).not.toBe(rampColour(30, 1, 100)); expect(rampColour(5, 5, 5)).toMatch(/^#[0-9a-f]{6}$/); expect(dur(45)).toBe('45 s'); expect(dur(215)).toBe('4 min'); expect(dur(7200)).toBe('2.0 h')
+  })
+
+  it('draws a numbered marker and a coloured stretch for each camera clip, and the sections coloured by the longest clip they can make', async () => {
+    const sv = makeStreetView(); sv.sections[0].max_s = 60; serve(sv)
+    server.use(http.get('/api/track/clips', () => HttpResponse.json({ clips: [makeTrackClip({ label: '0023', duration_s: 5 }), makeTrackClip({ id: 'b', label: '0024', duration_s: 300, stretch: [[50.1, 5.1], [50.11, 5.11]], lat: 50.105, lon: 5.105 }), makeTrackClip({ id: 'c', label: '0025', covered: false })], has_draft: false })))
+    setup(<StreetViewPage folder="/data" />); const a = await screen.findByTitle('Clip 0023 · 5 s'); expect(a).toBeInTheDocument(); expect(screen.getByTitle('Clip 0024 · 5 min')).toBeInTheDocument(); expect(screen.queryByTitle(/Clip 0025/)).toBeNull()
+    const markers = [...document.querySelectorAll('[data-clip-marker]')] as HTMLElement[]; expect(markers.map(m => m.textContent)).toEqual(['0023', '0024']); expect(markers[0].getAttribute('style')).toContain(`background:${rampColour(5, 1, 300)}`); expect(markers[1].getAttribute('style')).toContain(`background:${rampColour(300, 1, 300)}`)
+    const legend = screen.getByLabelText('Duration colours'); expect(legend).toHaveTextContent('1 s'); expect(legend).toHaveTextContent('5 min'); expect(legend).toHaveTextContent('numbered stretches are the camera clips')
+  })
+
+  it('hides the camera clips when their box is cleared', async () => {
+    serve(); const { user } = setup(<StreetViewPage folder="/data" />); await screen.findByTitle(/Clip 0023/); await user.click(screen.getByLabelText('Camera clips')); expect(screen.queryByTitle(/Clip 0023/)).toBeNull()
   })
 })
 
