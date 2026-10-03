@@ -244,7 +244,7 @@ def run(folder, stages=None, only=None, force=False, log=print, detect=run_detec
                     im = img(r); ov = O.for_project(folder, (im.shape[1], im.shape[0]))
                     if ov is None: stamp(stage, r, dict(made=False, note='the overlay is off or there is no race track')); continue
                     rgb = np.ascontiguousarray(im[:, :, ::-1]); ov.apply(rgb, r['taken_utc']); out = os.path.join(adir(rd), f"{r['id']}-overlay.jpg"); os.makedirs(adir(rd), exist_ok=True)
-                    cv2.imwrite(out, rgb[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90]); stamp(stage, r, dict(made=True, file=os.path.relpath(out, rd)))
+                    cv2.imwrite(out, rgb[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90]); stamp(stage, r, dict(made=True, file=os.path.relpath(out, rd).replace(os.sep, '/')))
             log(f'{stage}: {len(rs)} photo(s)')
         except Exception as e:
             problems.append(f'{stage}: {type(e).__name__}: {e}'); log(f'{stage}: FAILED: {type(e).__name__}: {e}')

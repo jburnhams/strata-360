@@ -111,7 +111,7 @@ def add(rd, filename, data, tz='Europe/Brussels'):
     except ValueError:
         os.replace(dest, dest + '.bad'); raise
     ow, oh = oriented_size(work)
-    entry = dict(id=pid, name=os.path.basename(filename), file=os.path.relpath(work, rd), original=os.path.relpath(dest, rd), taken_utc=round(t, 3), time_source=how, width=ow, height=oh, camera=(info['make'] + ' ' + info['model']).strip(),
+    entry = dict(id=pid, name=os.path.basename(filename), file=os.path.relpath(work, rd).replace(os.sep, '/'), original=os.path.relpath(dest, rd).replace(os.sep, '/'), taken_utc=round(t, 3), time_source=how, width=ow, height=oh, camera=(info['make'] + ' ' + info['model']).strip(),
                  gps=dict(lat=round(info['lat'], 6), lon=round(info['lon'], 6)) if info['lat'] is not None else None, added=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))
     doc['photos'].append(entry); doc['next'] += 1; _save(rd, doc); return entry
 
