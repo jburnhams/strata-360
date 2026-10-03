@@ -265,7 +265,7 @@ def main():
     from strata360 import oslib; oslib.lower_priority(10)                                                                          # started by the user and waited for: a little above the background processing, well below the desktop
     edit = PJ.load(a.folder); plan = edit.get('plan')
     if not plan: sys.exit('no plan yet')
-    fr = {k: v for k, v in FR.resolve(a.folder, plan).items()}
+    fr = {k: v for k, v in FR.resolve(a.folder, plan, head=True).items()}
     key = plan_key(a.folder, plan); root = os.path.dirname(film_dir(a.folder, key))
     for n in os.listdir(root) if os.path.isdir(root) else []:                                   # only the newest build is kept
         if n.startswith('film-') and n != f'film-{key}': shutil.rmtree(os.path.join(root, n), ignore_errors=True)

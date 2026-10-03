@@ -142,7 +142,7 @@ def main():
     from strata360 import oslib; oslib.lower_priority(19)
     plan = PJ.load(a.folder).get('plan')
     if not plan: sys.exit('no plan yet')
-    W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan)
+    W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan, head=True)
     print(render_final(a.folder, plan, fr, (W, H), a.fps, a.bitrate, a.pieces, a.out, progress=lambda i, n: print(f'\r{i}/{n} frames', end='', flush=True)))
 
 

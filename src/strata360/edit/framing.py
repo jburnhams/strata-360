@@ -46,6 +46,30 @@ def _track(samples, t0, t1):
     return np.array([x['t'] for x in s]), np.unwrap(np.radians([x['yaw'] for x in s])), np.radians([x['pitch'] for x in s]), np.array(h, float), hd
 
 
+HEAD_FAST_W = {'selfie_hold': 0.7, 'selfie_far': 0.5}          # how much of the head's fast motion the mid and far views follow (the close view aims at the head itself)
+
+
+def _head_provider(d, samples, compute):
+    """head(t0, t1) -> (t, yaw, pitch) of the head found at every proxy frame of the stretch (analysis/head_track.py: YOLO pose on stabilised crops), or None. Kept in `<clip>/youhead/`; `compute` says whether a stretch that is not kept yet may be worked out (about 20 s per 6 s of film, in .venv-vision): the render entry points say yes, planning only reads what is kept."""
+    info = _proxy_info(d); samples = sorted(samples or [], key=lambda x: x['t'])
+    if info is None or not samples or os.environ.get('STRATA_YOU_HEAD') == '0': return None
+    import hashlib
+    st = os.stat(info[0]); folder = os.path.join(d, 'youhead')
+    def head(t0, t1):
+        near = [x for x in samples if t0 - 3.0 <= x['t'] <= t1 + 3.0]
+        if not near: return None
+        key = hashlib.sha1(json.dumps([st.st_mtime_ns, st.st_size, round(t0, 2), round(t1, 2), [[x['t'], round(x['yaw'], 1), round(x['pitch'], 1)] for x in near]]).encode()).hexdigest()[:16]; path = os.path.join(folder, key + '.npz')
+        if os.path.exists(path):
+            with np.load(path) as z: return z['t'], z['yaw'], z['pitch']
+        if not compute: return None
+        from strata360.analysis import head_track as HT
+        nt = np.array([x['t'] for x in near]); ny = np.degrees(np.unwrap(np.radians([x['yaw'] for x in near]))); npi = np.array([x['pitch'] for x in near])
+        r = HT.head_positions(info[0], info[1], t0, t1, lambda t: (float(np.interp(t, nt, ny)) % 360.0, float(np.interp(t, nt, npi))))
+        if r is None: return None
+        os.makedirs(folder, exist_ok=True); np.savez(path + '.tmp.npz', t=r[0], yaw=r[1], pitch=r[2]); os.replace(path + '.tmp.npz', path); return r[0], r[1], r[2]
+    return head
+
+
 def _proxy_info(d):
     """(proxy path, its frame list, a folder for cached tracks) of a clip, or None without a proxy."""
     p = os.path.join(d, 'proxy.mp4'); j = os.path.join(d, 'proxy.json')
@@ -105,12 +129,12 @@ def _speaker(segs, t0, t1):
     k = max(w, key=w.get); return k if w[k] >= 0.3 * (t1 - t0) else None
 
 
-def clip_data(folder, clip):
+def clip_data(folder, clip, head=False):
     from strata360.analysis import views
     d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = cj['source_files']['osv']
     sp = os.path.join(d, 'speakers.json')
     from strata360.analysis.exposure import load_quality
-    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv), proxy=_proxy_info(d) if os.environ.get('STRATA_YOU_KLT') == '1' else None)          # the frame-by-frame tracker (analysis/subject_track.py) is opt-in: on 0021 it did not predict a held-out detection better than a straight line (the detections' box and face centres are themselves inexact)
+    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv), proxy=_proxy_info(d) if os.environ.get('STRATA_YOU_KLT') == '1' else None, head=_head_provider(d, views.focus_samples(d, osv), head))          # the frame-by-frame tracker (analysis/subject_track.py) is opt-in: on 0021 it did not predict a held-out detection better than a straight line (the detections' box and face centres are themselves inexact)
 
 
 def choose_subject(g, tech, data):
@@ -205,7 +229,18 @@ def resolve_segment(g, lib, data):
         if trk is not None and np.isfinite(trk[0]).any():                                                      # tracked: you stay put in the frame while the camera swings; the head-room (or the face centre) is added as the slow offset it is
             yd, pd = trk; okt = np.isfinite(yd); yd = np.where(okt, yd, np.interp(times, times[okt], np.unwrap(yd[okt]))); pd = np.where(okt, pd, np.interp(times, times[okt], pd[okt]))
             fy = np.degrees(np.unwrap(yd)) + (np.degrees(y) - np.degrees(y_plain)); fp = np.degrees(pd) + (tp - np.degrees(p))
-            fy, fp = gaussian_filter1d(fy, 0.12 / TRACK_STEP_S, mode='nearest'), gaussian_filter1d(fp, 0.12 / TRACK_STEP_S, mode='nearest'); tracked = True            # a little: the detections' own noise
+            fy, fp = gaussian_filter1d(fy, 0.12 / TRACK_STEP_S, mode='nearest'), gaussian_filter1d(fp, 0.12 / TRACK_STEP_S, mode='nearest'); tracked = True
+            hd = data['head'](t0 - 0.5, t0 + T + 0.5) if data.get('head') else None                                    # the head found directly at the frame rate: a close view aims at it (eyes and nose in the middle); the others follow its FAST motion only (the calm aim above stays)
+            if hd is not None:
+                from strata360.analysis import head_track as HT
+                hy, hp = HT.fill(hd[0], hd[1], hd[2]); okh = np.isfinite(hy) & np.isfinite(hp)
+                if okh.sum() >= 10:
+                    uy = np.degrees(np.unwrap(np.radians(hy[okh]))); iy = np.interp(abs_t, hd[0][okh], uy); ip = np.interp(abs_t, hd[0][okh], hp[okh]); cov = (abs_t >= hd[0][okh][0]) & (abs_t <= hd[0][okh][-1])
+                    iy = iy + 360.0 * np.round((fy - iy) / 360.0)                                                      # onto the same turn as the calm aim
+                    if tech.id == 'selfie_close': ny, npi = gaussian_filter1d(iy, 0.05 / TRACK_STEP_S, mode='nearest'), gaussian_filter1d(ip, 0.05 / TRACK_STEP_S, mode='nearest')          # 0.05 s: the head's own bobbing at running cadence (about 3 Hz) is followed
+                    else:
+                        w = HEAD_FAST_W.get(tech.id, 0.5); ny = fy + w * (iy - gaussian_filter1d(iy, 0.6 / TRACK_STEP_S, mode='nearest')); npi = fp + w * (ip - gaussian_filter1d(ip, 0.6 / TRACK_STEP_S, mode='nearest'))
+                    fy = np.where(cov, ny, fy); fp = np.where(cov, npi, fp)            # a little: the detections' own noise
         else:
             fy, fp = AIM.follow(times, ty, tp, scale=min(1.0, float(np.mean(ev['fov'])) / 85.0))                                # a narrower view has a narrower dead band
             fy = np.degrees(np.unwrap(np.radians(fy)))
@@ -217,11 +252,11 @@ def resolve_segment(g, lib, data):
     return path
 
 
-def resolve(folder, plan, lib=None):
+def resolve(folder, plan, lib=None, head=False):
     """Framing for every segment of a saved plan: {segment id: dict(subject, why, path)}."""
     lib = lib or TQ.load(); cache = {}; out = {}
     for g in plan['segments']:
         if g.get('synthetic'): continue                                                                 # a generated clip has no camera to frame
-        if g['clip'] not in cache: cache[g['clip']] = clip_data(folder, g['clip'])
+        if g['clip'] not in cache: cache[g['clip']] = clip_data(folder, g['clip'], head)
         out[g['id']] = resolve_segment(g, lib, cache[g['clip']])
     return out

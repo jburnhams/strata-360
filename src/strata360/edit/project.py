@@ -51,6 +51,9 @@ def load_clips(folder):
         cd = json.load(open(cp)); clips.append(dict(id=cj['clip_id'], start_utc=cj['time']['start_utc'], duration_s=cj['video']['source_frames'] / cj['video']['nominal_fps'], candidates=cd['candidates'], unusable=cd.get('unusable') or []))
         try: clips[-1]['alignment'] = json.load(open(d + 'alignment.json')).get('segments') or []         # exact speech spans for the rough plan (edit/blocks.py)
         except (OSError, ValueError): pass
+        try:
+            fv = json.load(open(d + 'face_view.json')); clips[-1]['face_view'] = [(s['t'], s['score']) for s in fv.get('samples') or []]; clips[-1]['face_clear'] = float(fv.get('clear', 0.5))      # how clearly the wearer's face is seen, once a second (analysis/face_view.py)
+        except (OSError, ValueError, KeyError): pass
     return clips, missing
 
 

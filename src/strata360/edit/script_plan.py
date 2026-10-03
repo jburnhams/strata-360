@@ -168,7 +168,7 @@ def usable_s(cands):
 class Footage:
     """The usable footage of one clip: `reserved` is the dialogue the script plays (narration keeps off it), `occ` what earlier windows have taken."""
     def __init__(self, clip, cands):
-        self.id = clip['id']; self.duration = float(clip['duration_s']); self.cands = cands; self.occ = []; self.reserved = []; self.speech = [(c.start_s, c.end_s) for c in cands if getattr(c, 'kind', '') == 'speech']
+        self.id = clip['id']; self.duration = float(clip['duration_s']); self.cands = cands; self.face = clip.get('face_view'); self.face_clear = float(clip.get('face_clear', 0.5)); self.occ = []; self.reserved = []; self.speech = [(c.start_s, c.end_s) for c in cands if getattr(c, 'kind', '') == 'speech']
 
     def candidate_at(self, a, b):
         """The candidate to attach to a dialogue window [a, b]: the one that overlaps it most, a speech stretch winning a tie; None when nothing overlaps."""
@@ -179,6 +179,12 @@ class Footage:
             score = ov + (0.5 if getattr(c, 'kind', '') == 'speech' else 0.0) + 0.01 * c.quality
             if score > bs: best, bs = c, score
         return best
+
+    def face_share(self, a, b):
+        """The share of the seconds in [a, b] with a clear view of the wearer's face (analysis/face_view.py), or None when the clip has not been analysed (then nothing is held against the close view)."""
+        if not self.face: return None
+        s = [sc for t, sc in self.face if a - 0.5 <= t <= b + 0.5]
+        return None if not s else sum(1 for sc in s if sc >= self.face_clear) / len(s)
 
     def views_ok(self, a, b):
         """Whether the footage under [a, b] has a close or a far view of you (K6): there is something to cut between."""
@@ -370,7 +376,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     for k, p in enumerate(ps):
         if p['kind'] == 'synthetic': continue                                                       # placed after the footage windows are planned (below)
         fp = foot[p['clip']]
-        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=snap_cuts(split_points(p['start'], p['seconds'], p.get('pauses') or []), p.get('pause_spans') or [], p['start'], beat_s, end=p['start'] + p['seconds']) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
+        wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=snap_cuts(split_points(p['start'], p['seconds'], p.get('pauses') or [], target=SPLIT_TARGET_S * (0.5 + 0.5 * CH.calm((getattr(fp.candidate_at(p['start'], p['start'] + p['seconds']), 'features', None) or {}).get('steady')))), p.get('pause_spans') or [], p['start'], beat_s, end=p['start'] + p['seconds']) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
         if p['kind'] == 'vo' and wins:                                                                  # the narration must have picture for as long as it is spoken
             short = p['seconds'] - sum(w[2] for w in wins)
             if short > 1e-6:
@@ -379,7 +385,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
         for c, start, length in wins:
             speech = p['kind'] == 'clip'; beats = max(1, int(math.ceil(length / beat_s - 1e-9))) if p['kind'] != 'broll' else max(1, int(round(length / beat_s)))
             dur = beats * beat_s; start = max(min(start, fp.duration - dur), 0.0)
-            w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.view = p.get('view'); w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
+            w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.view = p.get('view'); w.face = fp.face_share(start, start + dur); w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
             windows.append(w); roles.append(p['kind']); first_window.setdefault(k, len(windows) - 1)
     if not windows and not any(p['kind'] == 'synthetic' for p in ps): raise O.Infeasible('the script has no windows: no item could be matched to footage')
     B = sum(w.beats for w in windows); music = O.Music(bpm=music.bpm, beats=B, bar_beats=music.bar_beats, sections=music.sections)

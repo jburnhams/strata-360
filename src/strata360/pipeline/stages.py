@@ -204,6 +204,13 @@ def identity(ctx):
     ctx.write('identity.json', ctx.stamped(I.analyse_clip(ctx.read('people.json'), np.load(ctx.path('faces.npy')), I.load_profile(path))))
 
 
+@stage('face_view', 1, outputs=('face_view.json',), deps=('identity', 'proxy'), default=False,
+       note='how clearly the wearer\'s face is seen once a second (YOLO pose: nose and both eyes on a stabilised crop of the proxy), so the close view of you is kept for clear faces; needs .venv-vision and models/')
+def face_view(ctx):
+    from strata360.analysis import face_view as FV
+    ctx.write('face_view.json', ctx.stamped(FV.analyse(str(ctx.dir), ctx.clip.osv, ctx.log)))
+
+
 @stage('scenes', 3, keys=('scenes_every_s',), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy',), default=False,
        note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags; and a scenery-only score with clarity that ignores people) from a local VLM on front and rear views every few seconds (slow: minutes per clip)')
 def scenes(ctx):

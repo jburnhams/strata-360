@@ -251,6 +251,16 @@ def plan(clips, lib, music, st=None):
     return assign_techniques(windows, clips, lib, music, st, rng, warnings)
 
 # --------------------------------------------------------------------------------------------------------------------------------------------- 3. techniques
+STEADY_LOW, STEADY_HIGH = 0.15, 0.60        # the camera's steadiness (0 shaking .. 1 still) that counts as full motion / calm: a running clip is 0.1 to 0.3, a walk or a stop 0.5 and more
+CLOSE_MAX_CALM, CLOSE_MAX_BUSY = 8.0, 3.0   # how long a close view of you may last in calm footage / in the busiest
+
+
+def calm(steady):
+    """0 (the busiest running) .. 1 (calm) from a candidate's `steady` feature; 1 when it is unknown."""
+    return 1.0 if steady is None else float(min(max((float(steady) - STEADY_LOW) / (STEADY_HIGH - STEADY_LOW), 0.0), 1.0))
+
+
+FACE_MIN_SHARE = 0.6           # the close view needs a clear face in at least this share of its seconds (when the clip has been analysed)
 VIEW_TECH = {'mid': 'selfie_hold', 'close': 'selfie_close', 'far': 'selfie_far'}      # the views of you a window can ask for (K6)
 
 
@@ -270,6 +280,8 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             if w.speech and not t.dialogue_ok: continue
             if t.id == 'dialogue_hold' and not w.speech: continue
             if t.id == 'selfie_close' and not w.speech and st.tech_force.get(wids[k]) != 'selfie_close' and getattr(w, 'view', None) != 'close': continue            # the close view of you is for the best of the dialogue (or when asked for)
+            if t.id == 'selfie_close' and st.tech_force.get(wids[k]) != 'selfie_close' and d > CLOSE_MAX_BUSY + (CLOSE_MAX_CALM - CLOSE_MAX_BUSY) * calm((getattr(c, 'features', None) or {}).get('steady')) + 1e-9: continue         # the busier the footage the shorter a close view may last: quick cuts, glided between
+            if t.id == 'selfie_close' and getattr(w, 'face', None) is not None and w.face < FACE_MIN_SHARE and st.tech_force.get(wids[k]) != 'selfie_close': continue         # ... and only where the face is clear (not the top of the head): analysis/face_view.py
             if not (t.dmin - 1e-9 <= d <= t.dmax + 1e-9): continue
             if t.beats == 'bar' and w.beats % music.bar_beats: continue
             f = O.fit(c, t)
@@ -284,7 +296,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
         view = getattr(w, 'view', None)
         if not want and view in VIEW_TECH:                                                                  # the script asked for a view of you (mid, close, far): used when the footage allows it
             if any(o[0] == VIEW_TECH[view] for o in opts): want = VIEW_TECH[view]
-            else: warnings.append(f"{wids[k]}: the {view} view of you was asked for but this window does not allow it (you are not found, or too near or too far); the planner chose its own shot")
+            else: warnings.append(f"{wids[k]}: the {view} view of you was asked for but this window does not allow it here ({'you are not found, or too near or too far' if view != 'close' else 'you are not found or too near; or your face is not clear; or the footage is too busy for a close view this long; or there is no mid view of you next to it to glide with'}); the planner chose its own shot")
         if want:
             if any(o[0] == want for o in opts): opts = [o for o in opts if o[0] == want]
             elif w.fixed: opts = [(want, 0.0)]                                                               # a locked window keeps its technique even if the rules would no longer allow it
@@ -295,6 +307,9 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
           for b in beams:
               for tid, base in opts:
                   t = lib[tid]; seq = b['seq']; forced_now = bool(want)
+                  if not relaxed:                                                                                   # (also for a view the script asked for)
+                      if tid == 'selfie_close' and not ((joined[k] and seq and seq[-1] == 'selfie_hold') or (k + 1 < len(windows) and joined[k + 1])): continue                  # a close view of you glides in from a mid view just before it, or out to one just after it (edit/pans.py)
+                      if seq and seq[-1] == 'selfie_close' and joined[k] and tid != 'selfie_hold' and not (len(seq) >= 2 and joined[k - 1] and seq[-2] == 'selfie_hold'): continue      # (so the one after a close view that had no mid before it is a mid view)
                   if not forced_now and not relaxed:
                       if t.cooldown and tid in seq[-t.cooldown:] and t.hero: continue
                       if t.cooldown and not t.hero and seq and seq[-1] == tid and sum(1 for x in seq[-t.max_consecutive:] if x == tid) >= t.max_consecutive: continue
