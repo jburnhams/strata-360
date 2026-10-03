@@ -8,11 +8,10 @@ Mapillary and Panoramax images are CC BY-SA (credit them); Google's terms do not
 Each provider stage records the id of the roads it was made from, and is redone when that changes.
   quality.json     stage `quality`: for each plausible Mapillary / Panoramax section, a score from 0 to 100 for how good a clip of it will look (edit/streetview_cam.py `quality`: how well the pictures between two real ones can be made, and how
                    steady the view is at 25 m/s), measured on the smaller copies of its pictures; {sections: {key: {score, grade, psnr, jerk, roll, frames}}}."""
-import collections, datetime as dt, hashlib, json, math, os, time
+import collections, datetime as dt, hashlib, json, math, os, time, urllib.error, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-import requests
 
 from strata360.gps import osm, roads
 
@@ -122,13 +121,22 @@ def _key(name):
     return LR.secret(name)
 
 
+def _open(url, params=None, timeout=60):
+    """(status, body bytes) of a GET with the identifying User-Agent; an error status is returned, not raised (None, b'' when the server cannot be reached)."""
+    if params: url = url + ('&' if '?' in url else '?') + urllib.parse.urlencode(params)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': UA}), timeout=timeout) as r: return r.status, r.read()
+    except urllib.error.HTTPError as e: return e.code, e.read()
+    except (urllib.error.URLError, OSError, ValueError): return None, b''
+
+
 def _get(url, params, tries=3):
     for k in range(tries):
-        try:
-            r = requests.get(url, params=params, headers={'User-Agent': UA}, timeout=60)
-            if r.status_code == 200: return r.json()
-            if r.status_code in (400, 401, 403): raise RuntimeError(f'{url.split("/")[2]} refused the request ({r.status_code}): {r.text[:160]}')
-        except requests.RequestException: pass
+        status, body = _open(url, params)
+        if status == 200:
+            try: return json.loads(body.decode())
+            except ValueError: pass
+        elif status in (400, 401, 403): raise RuntimeError(f'{url.split("/")[2]} refused the request ({status}): {body.decode(errors="replace")[:160]}')
         time.sleep(2 + 3 * k)
     raise RuntimeError(f'{url.split("/")[2]} did not answer')
 
@@ -263,9 +271,9 @@ def find_item(doc, item_id):
 
 
 def _bytes(url, params=None):
-    r = requests.get(url, params=params, headers={'User-Agent': UA}, timeout=60)
-    if r.status_code != 200: raise RuntimeError(f'{url.split("/")[2]} answered {r.status_code}')
-    return r.content
+    status, body = _open(url, params)
+    if status != 200: raise RuntimeError(f'{url.split("/")[2]} answered {status}')
+    return body
 
 
 def image(rd, provider, doc, item_id, w=640, fetch=_bytes, get=_get):

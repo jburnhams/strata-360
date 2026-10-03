@@ -131,3 +131,40 @@ def test_pictures_are_kept_for_mapillary_and_panoramax_but_never_for_google(tmp_
     assert fetched[-1][1] == dict(size='640x400', pano='g1', heading=45, fov=90, pitch=0, key='KEY') and len(fetched) == 4 and not list((tmp_path / 'streetview' / 'img').glob('g-*'))
     with pytest.raises(KeyError): SV.image(rd, 'mapillary', doc, 'other', 640, fetch, get)
     with pytest.raises(RuntimeError, match='no picture address'): SV.image(rd, 'panoramax', sec_doc(dict(id='x', b=0)), 'x', 640, fetch, get)
+
+
+class TestWeb:
+    """The two ways the stages talk to a provider, with urlopen replaced."""
+    def reply(self, monkeypatch, *answers):
+        import io, urllib.error
+        calls = []
+        class R(io.BytesIO):
+            def __init__(self, b, status): super().__init__(b); self.status = status
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        def urlopen(req, timeout=0):
+            calls.append(req.full_url); a = answers[min(len(calls) - 1, len(answers) - 1)]
+            if isinstance(a, int): raise urllib.error.HTTPError(req.full_url, a, 'x', {}, io.BytesIO(b'no'))
+            if isinstance(a, Exception): raise a
+            return R(a, 200)
+        monkeypatch.setattr(SV.urllib.request, 'urlopen', urlopen); monkeypatch.setattr(SV.time, 'sleep', lambda s: None); return calls
+
+    def test_get_sends_the_params_and_returns_the_json(self, monkeypatch):
+        calls = self.reply(monkeypatch, b'{"a": 1}'); assert SV._get('https://x.example/api', dict(q='1 2', k='v')) == {'a': 1} and calls == ['https://x.example/api?q=1+2&k=v']
+
+    def test_get_tries_again_after_a_failure_and_then_gives_up(self, monkeypatch):
+        calls = self.reply(monkeypatch, 500, b'not json', OSError('down'), b'{"ok": true}'); assert SV._get('https://x.example/api', {}, tries=4) == {'ok': True} and len(calls) == 4
+        self.reply(monkeypatch, 503)
+        with pytest.raises(RuntimeError, match='x.example did not answer'): SV._get('https://x.example/api', {}, tries=2)
+
+    def test_get_does_not_retry_a_refusal(self, monkeypatch):
+        calls = self.reply(monkeypatch, 403)
+        with pytest.raises(RuntimeError, match=r'refused the request \(403\): no'): SV._get('https://x.example/api', {}, tries=3)
+        assert len(calls) == 1
+
+    def test_bytes_returns_the_body_or_says_what_went_wrong(self, monkeypatch):
+        self.reply(monkeypatch, b'jpeg'); assert SV._bytes('https://x.example/a.jpg') == b'jpeg'
+        self.reply(monkeypatch, 404)
+        with pytest.raises(RuntimeError, match='x.example answered 404'): SV._bytes('https://x.example/a.jpg')
+        self.reply(monkeypatch, OSError('down'))
+        with pytest.raises(RuntimeError, match='answered None'): SV._bytes('https://x.example/a.jpg')
