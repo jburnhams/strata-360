@@ -22,20 +22,21 @@ FLAT_CROP = 0.86                                                             # t
 
 # ---- sources -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 def src_dir(rd, section): return os.path.join(rd, 'streetview', 'src', section['provider'])
-def src_path(rd, section, item_id): return os.path.join(src_dir(rd, section), item_id + '.jpg')
+def src_path(rd, section, item_id, preview=False): return os.path.join(src_dir(rd, section), item_id + ('.preview' if preview else '') + '.jpg')           # (the preview copy is the smaller picture the quality check uses)
 def meta_path(rd, section): return os.path.join(src_dir(rd, section), section['seq'].replace('/', '_') + f"-{section['km0']:.2f}.json")
 
 
-def fetch(rd, section, token=None, get=None, download=None, log=print):
-    """Download the full-size pictures of a section, and for Mapillary the reconstruction data (rotation and position of each). Kept: a picture already there is not fetched again. `get(url, params) -> json`, `download(url) -> bytes`."""
+def fetch(rd, section, token=None, get=None, download=None, log=print, preview=False):
+    """Download the full-size pictures of a section (`preview`: the smaller 2048 wide ones, enough to judge a section), and for Mapillary the reconstruction data (rotation and position of each). Kept: a picture already there is not
+    fetched again. `get(url, params) -> json`, `download(url) -> bytes`."""
     from strata360 import streetview as SV
     get = get or SV._get; download = download or SV._bytes; os.makedirs(src_dir(rd, section), exist_ok=True); meta = {}
     for it in section['items']:
-        f = src_path(rd, section, it['id'])
+        f = src_path(rd, section, it['id'], preview)
         if section['provider'] == 'mapillary':
-            m = get(f"https://graph.mapillary.com/{it['id']}", dict(access_token=token, fields='thumb_original_url,computed_rotation,computed_geometry,computed_compass_angle,compass_angle'))
-            meta[it['id']] = {k: m.get(k) for k in ('computed_rotation', 'computed_geometry', 'computed_compass_angle', 'compass_angle')}; url = m.get('thumb_original_url')
-        else: url = it.get('h') or it.get('u'); meta[it['id']] = {'compass_angle': it.get('c')}                              # (the full-size picture, else the 2048 wide one)
+            m = get(f"https://graph.mapillary.com/{it['id']}", dict(access_token=token, fields='thumb_original_url,thumb_2048_url,computed_rotation,computed_geometry,computed_compass_angle,compass_angle'))
+            meta[it['id']] = {k: m.get(k) for k in ('computed_rotation', 'computed_geometry', 'computed_compass_angle', 'compass_angle')}; url = m.get('thumb_2048_url' if preview else 'thumb_original_url')
+        else: url = (it.get('u') if preview else it.get('h')) or it.get('u'); meta[it['id']] = {'compass_angle': it.get('c')}                              # (the full-size picture, else the 2048 wide one)
         if not os.path.exists(f):
             if not url: raise RuntimeError(f"{section['provider']} has no picture to fetch for {it['id']}")
             tmp = f + '.part'; open(tmp, 'wb').write(download(url)); os.replace(tmp, f)
@@ -178,7 +179,7 @@ class Rig:
     def __init__(self, items, prog, hs, view): self.items, self.prog, self.hs, self.view, self.n = items, prog, hs, view, len(items)
 
 
-def build(rd, section, road=None, size=OUT):
+def build(rd, section, road=None, size=OUT, preview=False):
     """The camera rig for a section (see Rig); the maths depends on the kind of picture (module notes). Raises ValueError when there are too few pictures, RuntimeError when one has not been fetched."""
     its = forward_items(section)
     if len(its) < 8: raise ValueError(f"{section['id']}: only {len(its)} pictures face the way the runner went")
@@ -186,7 +187,7 @@ def build(rd, section, road=None, size=OUT):
     def img(i):
         if i not in imgs:
             if len(imgs) > 4: imgs.clear()
-            im = cv2.imread(src_path(rd, section, its[i]['id']))
+            im = cv2.imread(src_path(rd, section, its[i]['id'], preview))
             if im is None: raise RuntimeError(f"{section['id']}: picture {its[i]['id']} has not been fetched")
             imgs[i] = im
         return imgs[i]
@@ -199,7 +200,7 @@ def build(rd, section, road=None, size=OUT):
     elif section['kind'] == '360':
         if not road: raise ValueError('a Panoramax 360 section needs the road (its line and where it starts) to aim along')
         meta = json.load(open(meta_path(rd, section))); rp, rxy = road_xy(road['line']); rp = rp + road['km0'] * 1000.0; prog = km
-        ups = cached_ups(rd, section, [img(i) for i in range(n)], n); ups = gaussian_filter1d(ups, SIGMA_UP, axis=0, mode='nearest'); ups /= np.linalg.norm(ups, axis=1, keepdims=True)
+        ups = cached_ups(rd, section, [img(i) for i in range(n)], n, preview); ups = gaussian_filter1d(ups, SIGMA_UP, axis=0, mode='nearest'); ups /= np.linalg.norm(ups, axis=1, keepdims=True)
         hs = smooth_heading([heading_along(rp, rxy, p, LOOK_M) for p in prog], SIGMA_HEADING['panoramax']); comp = [meta[it['id']]['compass_angle'] or 0.0 for it in its]; view = lambda i, yaw: reproject(img(i), view_in_picture(ups[i], comp[i], yaw), FOV, size)
     else:
         prog = km; shifts = steady_flat([img(i) for i in range(n)]); view = lambda i, yaw: flat_view(img(i), shifts[i], size)
@@ -207,12 +208,12 @@ def build(rd, section, road=None, size=OUT):
     return Rig(its, prog, hs, view)
 
 
-def ups_path(rd, section): return meta_path(rd, section) + '.ups.npy'
+def ups_path(rd, section, preview=False): return meta_path(rd, section) + ('.preview' if preview else '') + '.ups.npy'
 
 
-def cached_ups(rd, section, imgs, n):
+def cached_ups(rd, section, imgs, n, preview=False):
     """The estimated 'up' of each Panoramax picture, kept beside the pictures (the search takes seconds a picture)."""
-    f = ups_path(rd, section)
+    f = ups_path(rd, section, preview)
     if os.path.exists(f) and len(np.load(f)) == n: return np.load(f)
     u = np.array([estimate_up(im) for im in (imgs if imgs is not None else [])]); np.save(f, u); return u
 
@@ -232,3 +233,51 @@ def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=N
     except BrokenPipeError: p.wait()
     if p.returncode: raise RuntimeError('ffmpeg failed to write the street view clip')
     os.replace(out + '.part.mp4', out); log(f"{section['id']}: {N} frames, {n} pictures over {L:.0f} m in {seconds:g} s ({n / seconds:.1f} pictures a second)"); return dict(frames=N, pictures=n, metres=round(L), per_s=round(n / seconds, 1))
+
+
+# ---- how good a clip will be -------------------------------------------------------------------------------------------------------------------------------------------------------------------
+PROBE_MS, PROBE_S, PROBE_FPS = 25.0, 4.0, 30      # the test clip moves along the road at 25 m/s (about 90 km/h, what a fast-forward insert looks like) for about 4 s, whatever the spacing of the pictures
+
+
+def quality(rd, section, road=None, size=(640, 360), samples=16, preview=True):
+    """Measure how good the clip of a section will look, without making the whole of it: {psnr, jerk, roll, pictures, spacing_m, score}.
+      psnr   how well the picture between two real ones can be made: for sample pictures, the picture is rebuilt from its two neighbours by the flow blend and compared with the real one (dB, higher is better; it falls as the pictures
+             get further apart, the camera is badly levelled, or things near the road move too much between pictures);
+      jerk   how unsteady the view is: a short test clip is played at 25 m/s along the road and the far field (hills, sky line) is followed from frame to frame; the jerk is how much its movement changes between frames (degrees,
+             95th percentile; a steady camera has a smooth drift, a shaking one jumps);
+      roll   how far the view turns about its axis between frames (degrees, 95th percentile).
+    `score` is 0 to 100 from them (see `score`); `grade` calls it poor, fair or good."""
+    rig = build(rd, section, road, size, preview); n = rig.n
+    if n < 5: raise ValueError(f"{section['id']}: only {n} usable pictures")
+    idx = sorted({int(round(v)) for v in np.linspace(1, n - 2, min(samples, n - 2))}); ps = []
+    h0, w0 = size[1], size[0]; crop = (slice(int(h0 * 0.1), int(h0 * 0.9)), slice(int(w0 * 0.1), int(w0 * 0.9)))
+    for i in idx:
+        yaw = rig.hs[i]; A, R, B = rig.view(i - 1, yaw), rig.view(i, yaw), rig.view(i + 1, yaw); span = rig.prog[i + 1] - rig.prog[i - 1]; a = float(np.clip((rig.prog[i] - rig.prog[i - 1]) / max(span, 1e-6), 0.05, 0.95))
+        ps.append(cv2.PSNR(flow_blend(A, B, a)[crop], R[crop]))
+    f = (size[0] / 2) / math.tan(math.radians(FOV) / 2); L = rig.prog[-1] - rig.prog[0]; v = PROBE_MS; N = int(min(PROBE_S, L / v) * PROBE_FPS); start = max(0.0, (L - v * N / PROBE_FPS) / 2)       # (the middle of the section)
+    prev = None; yaw_shift = []; roll = []
+    for k in range(N):
+        pos = rig.prog[0] + start + v * k / PROBE_FPS; i = max(0, min(int(np.searchsorted(rig.prog, pos, side='right') - 1), n - 2)); a = float(np.clip((pos - rig.prog[i]) / max(rig.prog[i + 1] - rig.prog[i], 1e-6), 0, 1))
+        yaw = (rig.hs[i] + ((rig.hs[i + 1] - rig.hs[i] + 180) % 360 - 180) * a) % 360; fr = flow_blend(rig.view(i, yaw), rig.view(i + 1, yaw), a)
+        if prev is not None:
+            s = far_shift(prev, fr)
+            if s is not None: yaw_shift.append(math.degrees(math.atan2(s[0], f))); roll.append(abs(s[2]))
+        prev = fr
+    jerk = np.abs(np.diff(yaw_shift)) if len(yaw_shift) > 3 else None
+    out = dict(psnr=round(float(np.median(ps)), 1), jerk=None if jerk is None else round(float(np.percentile(jerk, 95)), 2), roll=round(float(np.percentile(roll, 95)), 2) if roll else None, pictures=n, spacing_m=round(float(np.median(np.diff(rig.prog))), 1))
+    out['score'] = score(out); return out
+
+
+SCORE_PSNR = (12.0, 20.0)         # dB that count as 0 and as full marks for how well in-between pictures can be made
+SCORE_JERK = (0.2, 3.0)           # degrees of jerk: full marks and none
+SCORE_ROLL = (0.5, 6.0)           # degrees of turning between frames
+
+
+def score(m):
+    """0 to 100 from the measurements of `quality`: the in-between pictures count half, the steadiness (jerk) a third and the turning the rest. A measurement that could not be made counts as the worst."""
+    def lin(v, lo, hi): return 0.0 if v is None else float(np.clip((v - lo) / (hi - lo), 0, 1))
+    p = lin(m.get('psnr'), *SCORE_PSNR); k = 1.0 - lin(m.get('jerk') if m.get('jerk') is not None else SCORE_JERK[1], *SCORE_JERK); r = 1.0 - lin(m.get('roll') if m.get('roll') is not None else SCORE_ROLL[1], *SCORE_ROLL)
+    return round(100.0 * (0.5 * p + 0.33 * k + 0.17 * r))
+
+
+def grade(sc): return 'good' if sc >= 65 else 'fair' if sc >= 40 else 'poor'

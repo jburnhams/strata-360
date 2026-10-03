@@ -14,7 +14,7 @@ describe('StreetViewPage', () => {
   it('shows each stage with what it found, and a button for what is not done', async () => {
     serve(); setup(<StreetViewPage folder="/data" />)
     expect(await screen.findByText('2 road parts, 1.1 km')).toBeInTheDocument(); expect(screen.getByText('2 sections, 9 pictures, 0.5 km')).toBeInTheDocument()
-    expect(screen.getAllByText('not run yet')).toHaveLength(2); expect(screen.getByRole('button', { name: 'Redo Mapillary' })).toBeEnabled(); expect(screen.getByRole('button', { name: 'Run Panoramax' })).toBeEnabled()
+    expect(screen.getAllByText('not run yet')).toHaveLength(3); expect(screen.getByRole('button', { name: 'Run quality check' })).toBeEnabled(); expect(screen.getByRole('button', { name: 'Redo Mapillary' })).toBeEnabled(); expect(screen.getByRole('button', { name: 'Run Panoramax' })).toBeEnabled()
     expect(screen.getByText(/never saved/)).toBeInTheDocument()
   })
 
@@ -131,6 +131,17 @@ describe('the sections that could be used in the film', () => {
   it('shows no light warning when the light fits', async () => {
     const sv = makeStreetView(); sv.sections[0].light = { captured: 'day', race: 'day', warning: null }; serve(sv); setup(<StreetViewPage folder="/data" />)
     await screen.findByLabelText('Sections that could be used'); expect(document.querySelector('[data-light]')).toBeNull()
+  })
+
+  it('shows how good a clip of each section will look, with the measurements, and when it has not been checked or could not be', async () => {
+    const sv = makeStreetView(); sv.sections[0].quality = { score: 78, grade: 'good', psnr: 16.4, jerk: 0.19, roll: 0.18 }; sv.sections.push(makeSvSection({ id: 'M3', key: 'mapillary:s3:3.00', km0: 3.0, km1: 3.3, quality: { score: 9, grade: 'poor', psnr: 12.9, jerk: 2.9, roll: 5.3 } }),
+      makeSvSection({ id: 'M4', key: 'mapillary:s4:4.00', km0: 4.0, km1: 4.3, quality: { score: null, grade: null, error: 'RuntimeError: x' } })); serve(sv); setup(<StreetViewPage folder="/data" />)
+    const good = await screen.findByText('quality: good (78)'); expect(good).toHaveAttribute('title', 'in-between pictures 16.4 dB · unsteadiness 0.19° · turning 0.18°'); expect(screen.getByText('quality: poor (9)')).toBeInTheDocument()
+    expect(screen.getByText('quality could not be measured')).toHaveAttribute('title', 'RuntimeError: x'); sv.sections[0].quality = null
+  })
+
+  it('says the quality has not been checked yet', async () => {
+    serve(); setup(<StreetViewPage folder="/data" />); expect(await screen.findByText('quality not checked yet')).toBeInTheDocument()
   })
 
   it('reports a failure to save the choice', async () => {

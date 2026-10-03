@@ -74,11 +74,11 @@ export const makeLyricPhrase = (o: Partial<LyricPhrase> = {}): LyricPhrase => ({
 export const makeLyrics = (o: Partial<Lyrics> = {}): Lyrics => ({ has_track: true, exists: false, stale: false, instrumental: false, phrases: 0, sung_s: null, duration_s: null, made_at: null, language: null, building: false, error: '', log: '', phrases_list: [], vocal_spans: [], ...o })
 
 export const makeSvSection = (o: Partial<import('../../src/api').SvSectionInfo> = {}): import('../../src/api').SvSectionInfo => ({
-  id: 'M1', key: 'mapillary:s1:1.20', plausible: true, why_not: '', play_s: 2.7, min_s: 2, max_s: 1, speed_ms: 100, label: null, overlaps: [], choice: null, light: null, steadied: 'by matching only',
+  id: 'M1', key: 'mapillary:s1:1.20', plausible: true, why_not: '', play_s: 2.7, min_s: 2, max_s: 1, speed_ms: 100, label: null, overlaps: [], choice: null, quality: null, light: null, steadied: 'by matching only',
   provider: 'mapillary', stretch: 'R1', kind: '2d', km0: 1.2, km1: 1.5, length_m: 300, frames: 4, spacing_m: 100, years: [2024], camera: 'GoPro HERO7 Black', size: [4000, 3000], seq: 's1', angles: { forward: 3, back: 1 },
   items: [{ id: 'm1', km: 1.2, lat: 50.001, lon: 5.001, a: 0, b: 90 }, { id: 'm2', km: 1.3, lat: 50.001, lon: 5.002, a: 10, b: 90 }, { id: 'm3', km: 1.4, lat: 50.001, lon: 5.003, a: -20, b: 90 }, { id: 'm4', km: 1.5, lat: 50.001, lon: 5.004, a: 170, b: 90 }], ...o })
 export const makeStreetView = (o: Partial<import('../../src/api').StreetView> = {}): import('../../src/api').StreetView => ({
-  status: { roads: { done: true, stretches: 2, km: 1.1 }, mapillary: { done: true, stale: false, sections: 2, frames: 9, km: 0.5 }, panoramax: { done: false, km: 0 }, google: { done: false, km: 0 } },
+  status: { roads: { done: true, stretches: 2, km: 1.1 }, mapillary: { done: true, stale: false, sections: 2, frames: 9, km: 0.5 }, panoramax: { done: false, km: 0 }, google: { done: false, km: 0 }, quality: { done: false, km: 0 } },
   roads: { id: 'r1', total_km: 3, run: [[50.0, 5.0], [50.001, 5.005]], stretches: [{ id: 'R1', km0: 1.0, km1: 1.6, length_m: 600, highways: ['residential'], names: ['Rue A'], line: [[50.001, 5.0], [50.001, 5.005]] }, { id: 'R2', km0: 2.0, km1: 2.5, length_m: 500, highways: ['secondary'], names: [], line: [[50.002, 5.0], [50.002, 5.004]] }] },
   providers: { mapillary: { frames: 9, km: 0.5 }, panoramax: null, google: null },
   sections: [makeSvSection(), makeSvSection({ id: 'M2', key: 'mapillary:s2:2.10', kind: '360', angles: null, km0: 2.1, km1: 2.3, length_m: 200, frames: 5, spacing_m: 8, size: [5760, 2880], camera: 'GoPro Max', stretch: 'R2', plausible: false, why_not: 'only 5 pictures (needs 30)',

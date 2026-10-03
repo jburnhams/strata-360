@@ -108,3 +108,18 @@ def test_the_credits_name_the_street_level_source(folder, monkeypatch):
     chosen_section(folder); monkeypatch.setattr(SVC, 'render', fake_render([])); monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.5 for l in lines})
     SD.save_draft(folder.folder, draft([dict(type='broll', clip='0001', seconds=4.0), dict(type='streetview', clip='V1', seconds=6.0), dict(type='broll', clip='0002', seconds=4.0)])); PJ.plan_from_script(folder.folder)
     assert any('Mapillary contributors (CC BY-SA 4.0)' in t and 'V1' in w for w, t in credits.needed(folder.folder)) and not any('2D map V1' in w for w, t in credits.needed(folder.folder))
+
+
+def test_the_quality_of_a_section_is_measured_and_a_wobbly_one_scores_lower(tmp_path, monkeypatch):
+    monkeypatch.setattr(CAM, 'estimate_up', lambda img: np.array([0.0, 1.0, 0.0]))
+    rd, sec = section(tmp_path / 'a', '360', 'mapillary', n=14); good = CAM.quality(rd, sec, size=(160, 90), samples=6, preview=False)
+    assert set(good) >= {'psnr', 'jerk', 'roll', 'pictures', 'spacing_m', 'score'} and good['pictures'] == 14 and good['spacing_m'] == pytest.approx(6.0, abs=0.1) and 0 <= good['score'] <= 100 and good['psnr'] > 10
+    rd2, sec2 = section(tmp_path / 'b', '360', 'mapillary', n=14); meta = json.load(open(CAM.meta_path(rd2, sec2)))
+    for i, it in enumerate(sec2['items']):                                                                                          # the same pictures with a camera that was rolled about by up to 40 degrees
+        meta[it['id']]['computed_rotation'] = cv2.Rodrigues(cv2.Rodrigues(np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], float))[0] * 0 + cv2.Rodrigues(np.array([0.0, 0.0, 0.7 * (-1) ** i]))[0] @ np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], float))[0].ravel().tolist()
+    json.dump(meta, open(CAM.meta_path(rd2, sec2), 'w')); bad = CAM.quality(rd2, sec2, size=(160, 90), samples=6, preview=False); assert bad['score'] < good['score']
+
+
+def test_the_score_rewards_good_interpolation_and_steadiness_and_grades_it():
+    best = dict(psnr=24.0, jerk=0.0, roll=0.0); worst = dict(psnr=8.0, jerk=9.0, roll=9.0); assert CAM.score(best) == 100 and CAM.score(worst) == 0 and CAM.score(dict(psnr=None, jerk=None, roll=None)) < 20
+    assert CAM.score(dict(psnr=16.4, jerk=0.19, roll=0.18)) > CAM.score(dict(psnr=14.1, jerk=0.16, roll=0.13)) > CAM.score(dict(psnr=12.9, jerk=2.9, roll=5.3)) and [CAM.grade(x) for x in (78, 63, 9)] == ['good', 'fair', 'poor']

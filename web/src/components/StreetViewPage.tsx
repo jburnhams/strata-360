@@ -73,24 +73,24 @@ export default function StreetViewPage({ folder }: { folder: string }) {
 
 function Stages({ data, onRun, err }: { data: StreetView; onRun: (stages?: string[], force?: boolean) => void; err?: string }) {
   const st = data.status, busy = data.job.running
-  const line = (k: 'roads' | SvProvider) => {
+  const line = (k: 'roads' | SvProvider | 'quality') => {
     const s = st[k]
     if (!s.done) return 'not run yet'
-    return (k === 'roads' ? `${s.stretches} road parts, ${s.km} km` : `${s.sections} sections, ${s.frames} pictures, ${s.km} km`) + (s.stale ? ' · out of date: the road parts changed' : '')
+    return (k === 'roads' ? `${s.stretches} road parts, ${s.km} km` : k === 'quality' ? `${s.scored} sections scored` : `${s.sections} sections, ${s.frames} pictures, ${s.km} km`) + (s.stale ? ' · out of date: the road parts changed' : '')
   }
   const need = (k: SvProvider) => (k === 'mapillary' && !data.keys.mapillary ? 'needs MAPILLARY_TOKEN in secrets.env' : k === 'google' && !data.keys.google ? 'needs GOOGLE_MAPS_API_KEY in secrets.env' : '')
   return (
     <div>
-      <ul className="grid gap-2 md:grid-cols-4">
-        {(['roads', ...PROVIDERS] as ('roads' | SvProvider)[]).map(k => {
-          const s = st[k], why = k === 'roads' ? '' : need(k), blocked = busy || !!why || (k !== 'roads' && !st.roads.done)
+      <ul className="grid gap-2 md:grid-cols-5">
+        {(['roads', ...PROVIDERS, 'quality'] as ('roads' | SvProvider | 'quality')[]).map(k => {
+          const s = st[k], why = k === 'roads' || k === 'quality' ? '' : need(k), blocked = busy || !!why || (k !== 'roads' && !st.roads.done)
           return (
             <li key={k} className="rounded-lg border border-stone-200 p-2 text-sm dark:border-stone-700">
-              <div className="font-medium">{k === 'roads' ? 'Road parts of the run' : NAME[k]}</div>
+              <div className="font-medium">{k === 'roads' ? 'Road parts of the run' : k === 'quality' ? 'Quality check' : NAME[k]}</div>
               <div className="text-xs text-stone-600 dark:text-stone-400">{line(k)}</div>
               {why && <div className="text-xs text-amber-700 dark:text-amber-400">{why}</div>}
               {k === 'google' && <div className="text-xs text-stone-500">Google's terms do not allow keeping or re-using its pictures: shown here for looking only, never saved.</div>}
-              <button disabled={blocked} onClick={() => onRun([k], s.done)} aria-label={`${s.done && !s.stale ? 'Redo' : 'Run'} ${k === 'roads' ? 'road parts' : NAME[k]}`}
+              <button disabled={blocked} onClick={() => onRun([k], s.done)} aria-label={`${s.done && !s.stale ? 'Redo' : 'Run'} ${k === 'roads' ? 'road parts' : k === 'quality' ? 'quality check' : NAME[k]}`}
                 className="mt-1 rounded bg-emerald-700 px-2 py-0.5 text-xs text-white disabled:opacity-40">{s.done && !s.stale ? 'Redo' : 'Run'}</button>
             </li>
           )
@@ -217,6 +217,7 @@ function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string
               <span>{span(s)} · {metres(s.length_m)} of road that matches the run · {s.frames} pictures, one every {s.spacing_m} m{s.years.length ? ` · ${s.years.join(', ')}` : ''}{s.size ? ` · ${s.size[0]}×${s.size[1]}` : ''}</span>
               <span className="text-stone-600 dark:text-stone-400">clip of {s.min_s} to {s.max_s} s (the longest is {SLOWEST} pictures a second blended up to 30 frames a second; a shorter one is the same road played faster){s.kind === '2d' ? ` · faces ${facing(s)}` : ''}</span>
               <span className={s.steadied === 'by matching only' ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}>steadied: {s.steadied}{s.steadied === 'by matching only' ? ' (may still wobble)' : ''}</span>
+              <Quality q={s.quality} />
               {s.label && <span className="rounded bg-emerald-700 px-1.5 text-xs text-white">called {s.label} in the script</span>}
             </div>
             {s.light?.warning && <p className="text-xs font-medium text-red-700 dark:text-red-400" role="note" data-light>⚠ {s.light.warning}</p>}
@@ -233,4 +234,13 @@ function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string
       {sections.length > ok.length && <p className="mt-2 text-xs text-stone-500">{sections.length - ok.length} more sections are too short or too sparse to use; they are in the list below.</p>}
     </div>
   )
+}
+
+const GRADE = { good: 'bg-emerald-700 text-white', fair: 'bg-amber-500 text-black', poor: 'bg-red-700 text-white' }
+
+/** How good a clip of the section will look (0 to 100, from the quality check): good, fair or poor, with the measurements on hover. */
+function Quality({ q }: { q: SvSectionInfo['quality'] }) {
+  if (!q) return <span className="text-xs text-stone-500">quality not checked yet</span>
+  if (q.score == null || !q.grade) return <span className="text-xs text-stone-500" title={q.error}>quality could not be measured</span>
+  return <span className={`rounded px-1.5 text-xs ${GRADE[q.grade]}`} title={`in-between pictures ${q.psnr} dB · unsteadiness ${q.jerk}° · turning ${q.roll}°`}>quality: {q.grade} ({q.score})</span>
 }

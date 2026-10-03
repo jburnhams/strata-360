@@ -88,3 +88,41 @@ class TestLight:
     def test_annotate_adds_the_light_when_it_has_the_track(self, tmp_path):
         docs = {'mapillary': doc(self.section())}; assert SV.annotate(str(tmp_path), docs)[0]['light'] is None
         assert SV.annotate(str(tmp_path), docs, self.track(utc(2024, 9, 15, 22)))[0]['light']['warning']
+
+
+class TestQualityStage:
+    def setup_docs(self, rd):
+        a = sec('M1', km0=1.0, km1=1.3, frames=60, seq='a'); b = sec('P1', provider='panoramax', km0=2.0, km1=2.3, frames=60, seq='b'); c = sec('M2', km0=3.0, km1=3.3, frames=10, seq='c'); g = sec('G1', provider='google', km0=4.0, km1=4.3, frames=60, seq='g')
+        roads = dict(schema=1, id='r', stretches=[dict(id='R1', km0=0.5, km1=5.0, length_m=4500, highways=[], names=[], line=[[1, 1], [1, 2]])], run=[], total_km=6)
+        SV._save(rd, 'roads', roads); SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [a, c], roads)); SV._save(rd, 'panoramax', SV.provider_doc('panoramax', [b], roads)); SV._save(rd, 'google', SV.provider_doc('google', [g], roads)); return roads
+
+    def test_only_plausible_open_sections_are_scored_each_once_and_what_is_found_is_kept(self, tmp_path, monkeypatch):
+        rd = str(tmp_path); roads = self.setup_docs(rd); monkeypatch.setattr(SV, '_key', lambda n: 'tok'); fetched = []; measured = []; log = []
+        def fetch(rd_, sec_, token=None, log=print, preview=False): fetched.append((sec_['id'], preview, token))
+        def measure(rd_, sec_, road=None): measured.append((sec_['id'], road['km0'])); return dict(psnr=15.0, jerk=0.3, roll=0.2, score=70 if sec_['id'] == 'M1' else 20)
+        assert SV.run(rd, {}, ['quality'], measure=measure, fetch=fetch, log=log.append) == ['quality']
+        assert fetched == [('M1', True, 'tok'), ('P1', True, 'tok')] and measured == [('M1', 0.5), ('P1', 0.5)] and len(log) == 2
+        q = SV.quality_of(rd); assert q['mapillary:a:1.00']['grade'] == 'good' and q['panoramax:b:2.00']['grade'] == 'poor' and q['mapillary:a:1.00']['frames'] == 60 and set(q) == {'mapillary:a:1.00', 'panoramax:b:2.00'}
+        assert SV.run(rd, {}, ['quality'], measure=measure, fetch=fetch) == [] and len(measured) == 2                                  # nothing new to score
+        assert SV.run(rd, {}, ['quality'], force=True, measure=measure, fetch=fetch) == ['quality'] and len(measured) == 4
+        out = {s['id']: s for s in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})}; assert out['M1']['quality']['score'] == 70 and out['M1']['quality']['grade'] == 'good' and out['M2']['quality'] is None and out['G1']['quality'] is None
+        assert SV.status(rd)['quality'] == dict(done=True, scored=2, km=0) and 'quality' in SV.STAGES
+
+    def test_a_section_whose_pictures_changed_is_scored_again(self, tmp_path, monkeypatch):
+        rd = str(tmp_path); roads = self.setup_docs(rd); monkeypatch.setattr(SV, '_key', lambda n: 'tok'); measure = lambda rd_, s_, road=None: dict(psnr=1, jerk=1, roll=1, score=50); fetch = lambda *a, **k: None
+        SV.run(rd, {}, ['quality'], measure=measure, fetch=fetch); a = sec('M1', km0=1.0, km1=1.3, frames=70, seq='a'); SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [a], roads))
+        out = SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}); assert out[0]['quality'] is None                                  # the old score is for other pictures
+        assert SV.run(rd, {}, ['quality'], measure=measure, fetch=fetch) == ['quality'] and SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})[0]['quality']['score'] == 50
+
+    def test_a_section_that_cannot_be_measured_is_recorded_and_the_rest_go_on(self, tmp_path, monkeypatch):
+        rd = str(tmp_path); self.setup_docs(rd); monkeypatch.setattr(SV, '_key', lambda n: 'tok')
+        def measure(rd_, s_, road=None):
+            if s_['id'] == 'M1': raise RuntimeError('picture x1 has not been fetched')
+            return dict(psnr=15.0, jerk=0.3, roll=0.2, score=60)
+        SV.run(rd, {}, ['quality'], measure=measure, fetch=lambda *a, **k: None); out = {s['id']: s for s in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})}
+        assert out['M1']['quality']['score'] is None and 'has not been fetched' in out['M1']['quality']['error'] and out['P1']['quality']['score'] == 60 and SV.status(rd)['quality']['scored'] == 1
+
+    def test_the_quality_stage_needs_the_roads_and_mapillary_needs_its_token(self, tmp_path, monkeypatch):
+        with pytest.raises(RuntimeError, match='roads stage first'): SV.run(str(tmp_path), {}, ['quality'])
+        rd = str(tmp_path / 'p'); self.setup_docs(rd); monkeypatch.setattr(SV, '_key', lambda n: None); SV.run(rd, {}, ['quality'], measure=lambda *a, **k: dict(score=50, psnr=1, jerk=1, roll=1), fetch=lambda *a, **k: None)
+        assert 'MAPILLARY_TOKEN' in SV.quality_of(rd)['mapillary:a:1.00']['error']

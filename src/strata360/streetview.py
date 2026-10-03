@@ -5,7 +5,9 @@
                    For a flat ('2d') camera `a` is the way the camera faced relative to the way the runner went (0 = the same way, 90 = to the right, 180 = back at the runner) and `angles` counts the frames facing forward / right / back / left;
                    a 360 camera sees every way. `b` is the runner's bearing at that frame (to aim a panorama).
 Mapillary and Panoramax images are CC BY-SA (credit them); Google's terms do not allow keeping or re-using its imagery, so its pictures are only fetched for display and never kept on disk (server/app.py).
-Each provider stage records the id of the roads it was made from, and is redone when that changes."""
+Each provider stage records the id of the roads it was made from, and is redone when that changes.
+  quality.json     stage `quality`: for each plausible Mapillary / Panoramax section, a score from 0 to 100 for how good a clip of it will look (edit/streetview_cam.py `quality`: how well the pictures between two real ones can be made, and how
+                   steady the view is at 25 m/s), measured on the smaller copies of its pictures; {sections: {key: {score, grade, psnr, jerk, roll, frames}}}."""
 import collections, datetime as dt, hashlib, json, math, os, time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,7 +17,7 @@ import requests
 from strata360.gps import osm, roads
 
 SCHEMA = 1
-STAGES = ('roads', 'mapillary', 'panoramax', 'google')
+STAGES = ('roads', 'mapillary', 'panoramax', 'google', 'quality')
 PROVIDERS = ('mapillary', 'panoramax', 'google')
 ON_ROAD_M = 12.0                 # a frame belongs to a stretch when it was taken this near the run's line
 SPLIT_M = 60.0                   # a gap in the frames bigger than this ends a section
@@ -194,15 +196,36 @@ def provider_doc(provider, sections, rdoc): return dict(schema=SCHEMA, provider=
                                                         km=round(sum(s['length_m'] for s in sections) / 1000, 2))
 
 
+def quality_of(rd): return (load(rd, 'quality') or {}).get('sections') or {}
+
+
+def find_quality(rd, rdoc, force=False, log=print, measure=None, fetch=None):
+    """Score the plausible Mapillary / Panoramax sections that have no score yet (or whose pictures changed): fetch the smaller copies of their pictures and measure (edit/streetview_cam.py `quality`). Saved after each section so a long run
+    keeps what it did. Returns the keys scored. A section that cannot be measured is recorded with its error."""
+    from strata360.edit import streetview_cam as CAM
+    measure = measure or CAM.quality; fetch = fetch or CAM.fetch; docs = {p: load(rd, p) for p in PROVIDERS}; done = quality_of(rd) if not force else {}; roads = {x['id']: x for x in rdoc['stretches']}; made = []
+    todo = [x for x in annotate(rd, docs) if x['plausible'] and x['provider'] != 'google' and (x['key'] not in done or done[x['key']].get('frames') != x['frames'])]
+    for n, x in enumerate(todo, 1):
+        st = roads.get(x['stretch']); road = dict(line=st['line'], km0=st['km0']) if st else None
+        try:
+            if x['provider'] == 'mapillary' and not _key('MAPILLARY_TOKEN'): raise RuntimeError('no MAPILLARY_TOKEN in secrets.env')
+            fetch(rd, x, token=_key('MAPILLARY_TOKEN'), log=lambda *_: None, preview=True); m = measure(rd, x, road=road); m['grade'] = CAM.grade(m['score']); m['frames'] = x['frames']; done[x['key']] = m
+        except Exception as e:                                                                                              # (this section only: the rest are still measured)
+            done[x['key']] = dict(error=f'{type(e).__name__}: {e}'[:200], frames=x['frames'], score=None, grade=None)
+        made.append(x['key']); _save(rd, 'quality', dict(schema=SCHEMA, generated=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), sections=done)); log(f"quality {n}/{len(todo)}: {x['provider']} {x['id']} " + (f"{done[x['key']]['score']} ({done[x['key']]['grade']})" if done[x['key']].get('score') is not None else 'could not be measured'))
+    return made
+
+
 def status(rd):
     """What exists: for each stage whether it is done, out of date (its roads changed) or not done, with counts."""
     r = load(rd, 'roads'); out = dict(roads=dict(done=bool(r), stretches=len(r['stretches']) if r else 0, km=round(sum(s['length_m'] for s in r['stretches']) / 1000, 1) if r else 0))
+    q = (load(rd, 'quality') or {}).get('sections') or {}; out['quality'] = dict(done=bool(q), scored=sum(1 for v in q.values() if v.get('score') is not None), km=0)
     for p in PROVIDERS:
         d = load(rd, p); out[p] = dict(done=bool(d), stale=bool(d and r and d.get('roads') != r.get('id')), sections=len(d['sections']) if d else 0, frames=d['frames'] if d else 0, km=d['km'] if d else 0)
     return out
 
 
-def run(rd, track, stages=None, force=False, log=print, svc=None, get=_get):
+def run(rd, track, stages=None, force=False, log=print, svc=None, get=_get, measure=None, fetch=None):
     """Make the stages (all by default) that are missing or out of date; a provider stage needs the roads."""
     stages = [s for s in (stages or STAGES)]
     bad = [s for s in stages if s not in STAGES]
@@ -225,6 +248,9 @@ def run(rd, track, stages=None, force=False, log=print, svc=None, get=_get):
             if not key: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env (a Google Maps Platform key with the Street View Static API enabled)')
             secs = find_google(rdoc, key, get, log)
         _save(rd, p, provider_doc(p, secs, rdoc)); done.append(p)
+    if 'quality' in stages:
+        if rdoc is None: raise RuntimeError('street view: run the roads stage first')
+        if find_quality(rd, rdoc, force, log, measure, fetch): done.append('quality')
     return done
 
 
@@ -341,10 +367,10 @@ def light(sec, tr):
 
 def annotate(rd, docs, tr=None):
     """Every section of the provider docs {provider: doc or None} (and, with the race track `tr`, the light they were filmed in against the race's there) with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
-    out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']
+    out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']; qs = quality_of(rd)
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['steadied'] = steadying(s); s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
+        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
 
 
