@@ -62,11 +62,26 @@ def test_narration_and_b_roll_keep_off_the_dialogue_the_script_plays():
         if role != 'clip' and s.cand.clip[-6:-2] == '0001': assert s.clip_start_s + s.dur_s <= dlg[0] + 0.5 or s.clip_start_s >= dlg[1] - 0.5
 
 
-def test_a_clip_with_too_little_footage_is_still_planned_with_a_warning():
+def test_a_clip_with_too_little_footage_gets_a_shorter_window_never_footage_shown_twice():
     small = clip(1, 12.0, [cand('X', 0, 0, 12)]); pack = dict(race={}, clips=[pc(small), pc(C2)])
     draft = dict(wpm=150, items=[item('broll', 1, seconds=8.0), item('broll', 1, seconds=8.0), item('broll', 2, seconds=3.0)])
-    r = SPL.build(draft, pack, [small, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1))
-    assert sum(1 for role in r['roles'] if role == 'broll') >= 3 and any('not enough free footage' in w for w in r['warnings'])
+    r = SPL.build(draft, pack, [small, C2], LIB, MUSIC, {}, st=CH.Settings(seed=1)); beat_s = MUSIC.beat_s
+    assert any('shortened' in w and 'unused footage' in w for w in r['warnings']) and not any('shown again' in w for w in r['warnings'])
+    spans = sorted((sg.clip_start_s, sg.clip_start_s + sg.beats * beat_s) for sg in r['segs'] if sg.clip_index == 0)
+    assert len(spans) >= 2 and all(b[0] >= a[1] - 0.6 for a, b in zip(spans, spans[1:]))                       # the windows of the one clip do not overlap (a whole-beat window may run on a beat into the next stretch)
+
+
+def test_b_roll_is_asked_for_no_more_than_the_clip_has_unused_and_left_out_when_nothing_is_left():
+    small = clip(1, 12.0, [cand('X', 0, 0, 12)]); fp = SPL.Footage(small, CH.clip_candidates(small)); foot = {small['id']: fp}; warn = []
+    ps = [dict(kind='broll', clip=small['id'], label='0001', seconds=8.0, duration_s=12.0), dict(kind='broll', clip=small['id'], label='0001', seconds=8.0, duration_s=12.0), dict(kind='broll', clip=small['id'], label='0001', seconds=3.0, duration_s=12.0)]
+    SPL.cap_broll(ps, foot, warn); assert [p['seconds'] for p in ps][:1] == [8.0] and len(ps) == 2 and ps[1]['seconds'] == pytest.approx(3.99, abs=0.02) and ps[1]['duration_s'] == pytest.approx(4.0, abs=0.01)          # the first takes 8 s, the second the 4 s left, the third nothing
+    assert sum('left out' in w for w in warn) == 1 and any('shortened' in w for w in warn)
+
+
+def test_the_time_a_short_clip_cannot_fill_is_made_up_with_b_roll_from_clips_the_script_does_not_use():
+    used = clip(1, 12.0, [cand('X', 0, 0, 12)]); spare = clip(2, 30.0, [cand('Y', 0, 0, 30)]); pack = dict(race={}, clips=[dict(pc(used), start_utc='2026-02-22T10:00:00Z'), dict(pc(spare), start_utc='2026-02-22T11:00:00Z')]); foot = {c['id']: SPL.Footage(c, CH.clip_candidates(c)) for c in (used, spare)}
+    ps = [dict(n=0, kind='broll', clip=used['id'], label=pack['clips'][0]['label'], seconds=8.0, duration_s=12.0)]; warn = []
+    added = SPL.auto_broll(ps, pack, foot, MUSIC, 60.0, warn); assert added == [pack['clips'][1]['label']] and ps[-1]['auto'] and ps[-1]['kind'] == 'broll' and 3.0 <= ps[-1]['seconds'] <= 6.0 and any('unused footage only' in w for w in warn)
 
 
 def test_long_dialogue_is_split_into_contiguous_windows_of_at_most_twenty_seconds():

@@ -112,6 +112,51 @@ def pieces(draft, pack, voice_s, wpm):
     return out, warn
 
 
+def free_seconds(fp):
+    """How many seconds of the clip nobody has taken and the script does not play (overlapping parts counted once)."""
+    total = 0.0; end = -1e9
+    for a, b in sorted((x, y) for _, x, y in fp.free(True)):
+        a = max(a, end); total += max(b - a, 0.0); end = max(end, b)
+    return total
+
+
+def cap_broll(ps, foot, warn):
+    """Before the film is fitted to the music: each b-roll is asked for no more than its clip has UNUSED (after the dialogue the script plays and the pieces before it), shortened to that, and left out when under the shortest window, so footage is never shown twice (its sound would be heard twice).
+    `duration_s` is set to what is left, which `flex` then uses as the longest the piece may be stretched to. `ps` is changed; the time lost is made up by the fit and by `auto_gaps` / `auto_broll`."""
+    used = {}; keep = []
+    for p in ps:
+        if p['kind'] in ('broll', 'vo') and p['clip'] in foot:
+            avail = max(free_seconds(foot[p['clip']]) - used.get(p['clip'], 0.0), 0.0)
+            if p['kind'] == 'broll':
+                if avail < CH.MIN_SEG_S - 1e-6: warn.append(f"clip {p['label']}: no unused footage left for b-roll; left out"); continue
+                if p['seconds'] > avail + 0.04: warn.append(f"clip {p['label']}: only {avail:.1f} s of unused footage for {p['seconds']:.1f} s of b-roll; shortened"); p['seconds'] = round(avail - 0.01, 2)
+                p['duration_s'] = min(float(p.get('duration_s') or 1e9), avail)
+            used[p['clip']] = used.get(p['clip'], 0.0) + min(p['seconds'], avail)
+        keep.append(p)
+    ps[:] = keep
+
+
+def auto_broll(ps, pack, foot, music, target_s, warn, per_clip_s=(3.0, 6.0)):
+    """When the film is still shorter than the music by more than a bar, fill the difference with b-roll from clips the script does not use, best footage first, each in its place in the race, one short piece per clip, until the music is filled (to within half a bar). Only unused footage is taken. Returns the labels added;
+    `ps` is changed (pieces without an item number: they are not in the script)."""
+    beat_s = music.beat_s; band = music.bar_beats; total = sum(est_beats(p, beat_s) for p in ps); target = int(round(target_s / beat_s))
+    if target - total <= band: return []
+    used = {p['label'] for p in ps}; start = {c['label']: c['start_utc'] for c in pack['clips']}; short_s = (target - total) * beat_s; added = []
+    cand = []
+    for c in pack['clips']:
+        if c.get('synthetic') or c['label'] in used or c['clip'] not in foot: continue
+        fp = foot[c['clip']]; avail = free_seconds(fp)
+        if avail >= per_clip_s[0]: cand.append((max((x.quality for x in fp.cands), default=0.0), c, avail))
+    for q, c, avail in sorted(cand, key=lambda x: -x[0]):
+        left = target - total
+        if left <= band // 2: break
+        sec = round(min(per_clip_s[1], avail - 0.01, max(left * beat_s, per_clip_s[0])), 2)
+        piece = dict(n=None, clip=c['clip'], label=c['label'], duration_s=avail, kind='broll', view=None, seconds=sec, auto=True)
+        at = next((j for j, p in enumerate(ps) if start.get(p['label'], '') > c['start_utc']), len(ps)); ps.insert(at, piece); total += est_beats(piece, beat_s); added.append(c['label'])
+    if added: warn.append(f"the film is {short_s:.0f} s short of the music: added b-roll from clips the script does not use ({', '.join(added)}), unused footage only")
+    return added
+
+
 def usable_s(cands):
     """How many seconds of the clip the candidates cover together (overlaps counted once)."""
     total = 0.0; end = -1e9
@@ -157,23 +202,24 @@ def _sizes(seconds, cap, floor):
 
 
 def take(fp, seconds, warn, label, cap=MAX_PICTURE_S):
-    """Windows [(cand, start, length)] for `seconds` of picture from a clip's footage: the best free parts first, then speech stretches, then reused footage (with a warning)."""
+    """Windows [(cand, start, length)] for `seconds` of picture from a clip's footage: the best free parts first, then speech stretches. Footage is NEVER shown twice (its sound would be heard twice): when there is not enough unused footage the window is shorter, and when there is none at all it is left out (warnings say so;
+    the time is made up elsewhere, see `cap_broll` and `auto_broll`)."""
     wins = []; prev_end = None
     for size in _sizes(seconds, cap, CH.MIN_SEG_S):
         picked = None
-        for speech_ok, tag in ((False, 'free'), (True, 'speech'), (None, 'reused')):
-            parts = fp.free(speech_ok) if speech_ok is not None else [(c, c.start_s, c.end_s) for c in fp.cands]
+        for speech_ok, tag in ((False, 'free'), (True, 'speech')):
+            parts = fp.free(speech_ok)
             ok = [p for p in parts if p[2] - p[1] >= size - 1e-6]
             if ok:
                 touch = [p for p in ok if prev_end is not None and p[1] - 1e-6 <= prev_end < p[2] - size + 1e-6]
                 c, x, y = touch[0] if touch else ok[0]; start = prev_end if touch else x + (y - x - size) / 2
                 picked = (c, start, size, tag); break
-        if picked is None:                                                                      # nothing as long as asked: the longest stretch there is, shortened
-            parts = fp.free(True) or [(c, c.start_s, c.end_s) for c in fp.cands]
-            if not parts: warn.append(f'clip {label}: no footage at all for {size:.1f} s of picture'); continue
+        if picked is None:                                                                      # nothing as long as asked: the longest unused stretch there is, shortened (never footage that is used already)
+            parts = [p for p in fp.free(True) if p[2] - p[1] >= CH.MIN_SEG_S - 1e-6]
+            if not parts: warn.append(f'clip {label}: no unused footage left for {size:.1f} s of picture; left out'); continue
             c, x, y = max(parts, key=lambda p: p[2] - p[1]); picked = (c, x, min(size, y - x), 'short')
         c, start, length, tag = picked
-        if tag in ('reused', 'short'): warn.append(f'clip {label}: not enough free footage for {size:.1f} s of picture ({tag}); footage is shown again or shortened')
+        if tag == 'short': warn.append(f'clip {label}: only {length:.1f} s of unused footage for {size:.1f} s of picture; shortened')
         fp.occ.append((start, start + length)); wins.append((c, start, length)); prev_end = start + length
     return wins
 
@@ -312,13 +358,13 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     clips = sorted(clips, key=lambda c: c['start_utc']); index = {c['id']: i for i, c in enumerate(clips)}
     foot = {c['id']: Footage(c, CH.clip_candidates(c)) for c in clips}
     ps, w0 = pieces(draft, pack, voice_s, wpm); warn += w0; ps = [p for p in ps if p['clip'] in foot or p['kind'] == 'synthetic']
-    for p in ps:                                                                                    # b-roll is never stretched past the clip's usable footage (flex() reads `duration_s`)
-        if p['kind'] == 'broll' and p['clip'] in foot: p['duration_s'] = min(float(p.get('duration_s') or 1e9), usable_s(foot[p['clip']].cands))
+    for p in ps:                                                                                    # the dialogue the script plays is not footage for narration or b-roll
+        if p['kind'] == 'clip' and p['clip'] in foot: foot[p['clip']].reserved.append((p['start'], p['start'] + p['seconds']))
+    cap_broll(ps, foot, warn)                                                                       # b-roll is asked for no more than the clip has unused (flex() then never stretches it past that either)
     fit, anchors = fit_and_anchor(ps, draft, music, target_s, warn)
     auto = auto_gaps(ps, pack, music, target_s, warn) if target_s else []
-    if auto: fit['after_s'] = round(sum(est_beats(p, beat_s) for p in ps) * beat_s, 2); anchors = anchor_pass(ps, draft, music, [])           # (the gaps added ahead of an anchored item shift it: placed again)
-    for p in ps:                                                                                    # the dialogue the script plays is not footage for narration
-        if p['kind'] == 'clip': foot[p['clip']].reserved.append((p['start'], p['start'] + p['seconds']))
+    more = auto_broll(ps, pack, foot, music, target_s, warn) if target_s else []
+    if auto or more: fit['after_s'] = round(sum(est_beats(p, beat_s) for p in ps) * beat_s, 2); anchors = anchor_pass(ps, draft, music, [])           # (the gaps added ahead of an anchored item shift it: placed again)
     cap_p = int(MAX_PICTURE_S / beat_s + 1e-9) * beat_s; cap_d = int(MAX_DIALOGUE_S / beat_s + 1e-9) * beat_s          # the longest window in WHOLE beats: rounding a window up to beats must never take it past what a technique allows
     windows = []; roles = []; first_window = {}
     for k, p in enumerate(ps):
