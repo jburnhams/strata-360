@@ -168,3 +168,36 @@ class TestTimesAndVideo:
         out = SV.make_video(rd, a); assert os.path.exists(out) and calls == [('fetch', 'M1', 'tok', True), ('render', SV.default_seconds(a), dict(line=[[1, 1], [1, 2]], km0=0.5), (960, 540), True)]
         assert SV.make_video(rd, a) == out and len(calls) == 2                                                                         # kept: not made again
         with pytest.raises(RuntimeError, match='terms'): SV.make_video(rd, dict(a, provider='google'))
+
+
+class TestNearestClips:
+    T0 = 1_726_401_600.0
+
+    def track(self):
+        import numpy as np
+        n = 4000; d = 3.0 * np.arange(n); return dict(t=self.T0 + np.arange(n), lat=50.13 + d / 111195.0, lon=np.full(n, 5.79), dist=d)
+
+    def near(self, km0, km1, clips, gaps=None):
+        s = dict(sec('M1', km0=km0, km1=km1), passed=[self.T0 + km0 * 1000 / 3.0, self.T0 + km1 * 1000 / 3.0]); return SV.nearest_clips(s, clips, self.track(), gaps)
+
+    def clip(self, label, km0, km1): return dict(label=label, t0=self.T0 + km0 * 1000 / 3.0, t1=self.T0 + km1 * 1000 / 3.0)
+
+    def test_the_nearest_clip_each_way_with_the_time_and_the_distance_along_the_run_between(self):
+        out = self.near(5.0, 5.3, [self.clip('0001', 1.0, 2.0), self.clip('0002', 3.0, 4.2), self.clip('0003', 6.0, 7.0), self.clip('0004', 9.0, 9.5)])
+        assert out['before'] == dict(label='0002', seconds=round(800 / 3.0), km=0.8) and out['after'] == dict(label='0003', seconds=round(700 / 3.0), km=0.7) and out['overlaps'] == [] and out['in_gap'] is None
+
+    def test_a_section_that_overlaps_footage_says_which_and_the_ends_are_empty_when_there_is_no_clip(self):
+        out = self.near(3.5, 4.5, [self.clip('0002', 3.0, 4.0)]); assert out['overlaps'] == ['0002'] and out['before'] is None and out['after'] is None
+        assert self.near(1.0, 1.2, [])['overlaps'] == [] and self.near(1.0, 1.2, [])['before'] is None and SV.nearest_clips(sec('M1'), [], self.track()) is None and SV.nearest_clips(dict(sec('M1'), passed=[1, 2]), None, self.track()) is None
+
+    def test_a_clip_that_touches_the_section_is_zero_away_and_not_an_overlap(self):
+        out = self.near(5.0, 5.3, [self.clip('0002', 4.0, 5.0), self.clip('0003', 5.3, 6.0)]); assert out['before'] == dict(label='0002', seconds=0, km=0.0) and out['after'] == dict(label='0003', seconds=0, km=0.0) and out['overlaps'] == []
+
+    def test_the_gap_in_the_footage_that_holds_the_whole_section(self):
+        gaps = [dict(id='G01', t0=self.T0 + 2000 / 3.0, t1=self.T0 + 4800 / 3.0), dict(id='G02', t0=self.T0 + 6000 / 3.0, t1=self.T0 + 9000 / 3.0)]
+        assert self.near(3.0, 3.5, [], gaps)['in_gap'] == 'G01' and self.near(4.5, 5.0, [], gaps)['in_gap'] is None and self.near(7.0, 7.5, [], gaps)['in_gap'] == 'G02'                  # (the middle one sticks out of the first gap)
+
+    def test_annotate_adds_it_when_it_has_the_track_the_clips_and_the_gaps(self, tmp_path):
+        s = sec('M1', km0=5.0, km1=5.3, items=[dict(id='a', km=5.0, lat=50.2, lon=5.79, t=1), dict(id='b', km=5.3, lat=50.2, lon=5.79, t=2)])
+        out = SV.annotate(str(tmp_path), {'mapillary': doc(s)}, self.track(), [self.clip('0003', 6.0, 7.0)], [])[0]['near']; assert out['after']['label'] == '0003' and out['before'] is None
+        assert SV.annotate(str(tmp_path), {'mapillary': doc(s)})[0]['near'] is None

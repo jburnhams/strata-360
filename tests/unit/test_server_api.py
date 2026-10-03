@@ -676,3 +676,13 @@ class TestStreetViewVideoApi(TestStreetViewApi):
         with pytest.raises(SystemExit, match='no section nope'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key='nope'))
         monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print: (_ for _ in ()).throw(RuntimeError('boom')))
         with pytest.raises(SystemExit, match='streetview-video: boom'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key))
+
+
+class TestStreetViewNearClips(TestStreetViewApi):
+    def test_each_section_says_how_far_the_nearest_clips_are_along_the_run(self, client, project):
+        import datetime as dt
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir
+        sec = SV.load(rd, 'mapillary')['sections'][0]; sec['items'] = [dict(i, t=1_700_000_000) for i in sec['items']]; SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [sec], SV.load(rd, 'roads')))
+        j = client.get('/api/streetview', params=dict(folder=project.folder)).json()['sections'][0]
+        assert 'near' in j and (j['near'] is None or set(j['near']) == {'before', 'after', 'overlaps', 'in_gap'})                                  # (None without a race track in this project)

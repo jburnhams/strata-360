@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { fireEvent } from '@testing-library/react'
 import { screen, setup, waitFor, within } from '../utils/render'
-import StreetViewPage, { DEFAULT_FILTERS, dur, passes, rampColour, when } from '../../src/components/StreetViewPage'
+import StreetViewPage, { DEFAULT_FILTERS, dur, nearText, passes, rampColour, when } from '../../src/components/StreetViewPage'
 import Workspace from '../../src/components/Workspace'
 import { makeStreetView, makeSvSection, makeTrackClip } from '../utils/factories'
 import { recordRequests } from '../utils/api'
@@ -236,6 +236,34 @@ describe('when each section was filmed and when the runner passed it', () => {
     expect(card).toHaveTextContent('Filmed Thu 7 Mar 2024 12:00 · you pass it Sun 22 Feb 2026 10:01')
     const row = screen.getAllByRole('row')[1]; expect(row).toHaveTextContent('Thu 7 Mar 2024 12:00'); expect(row).toHaveTextContent('Sun 22 Feb 2026 10:01'); expect(screen.getByText('You passed')).toBeInTheDocument(); expect(screen.getByText('Filmed')).toBeInTheDocument()
     await user.click(row); const detail = document.querySelectorAll('[data-times]'); expect([...detail].some(d => d.textContent?.includes('you pass it Sun 22 Feb 2026 10:01 to 10:05'))).toBe(true)
+  })
+})
+
+describe('how far a section is from the existing footage', () => {
+  const near = (o: Partial<NonNullable<ReturnType<typeof makeSvSection>['near']>> = {}) => ({ before: { label: '0021', seconds: 240, km: 3.2 }, after: { label: '0023', seconds: 120, km: 1.1 }, overlaps: [], in_gap: 'G12', ...o })
+
+  it('writes the nearest clip each way with the distance along the run and the time, or the clips it overlaps', () => {
+    expect(nearText(near())).toBe('0021 3.2 km / 4 min before · 0023 1.1 km / 2 min after'); expect(nearText(near({ before: null }))).toBe('0023 1.1 km / 2 min after'); expect(nearText(near({ before: null, after: null }))).toBe('no footage near')
+    expect(nearText(near({ overlaps: ['0022', '0023'] }))).toBe('Overlaps clip 0022, 0023'); expect(nearText(null)).toBe('')
+  })
+
+  it('shows it on the candidate, with the gap it fills, and as a column of the table', async () => {
+    const sv = makeStreetView(); sv.sections[0].near = near(); serve(sv); setup(<StreetViewPage folder="/data" />)
+    const card = (await screen.findByLabelText('Sections that could be used')).querySelector('[data-section="M1"] [data-near]')!; expect(card).toHaveTextContent('Fills gap G12. Nearest footage: 0021 3.2 km / 4 min before · 0023 1.1 km / 2 min after')
+    expect(screen.getByText('Nearest footage')).toBeInTheDocument(); expect(screen.getAllByRole('row')[1]).toHaveTextContent('G12: 0021 3.2 km / 4 min before · 0023 1.1 km / 2 min after')
+  })
+
+  it('says so, in amber, when a section overlaps footage', async () => {
+    const sv = makeStreetView(); sv.sections[0].near = near({ overlaps: ['0022'], in_gap: null }); serve(sv); setup(<StreetViewPage folder="/data" />)
+    const card = (await screen.findByLabelText('Sections that could be used')).querySelector('[data-section="M1"] [data-near]')!; expect(card).toHaveTextContent('Nearest footage: Overlaps clip 0022'); expect(card.className).toContain('amber'); expect(card).not.toHaveTextContent('Fills gap')
+  })
+
+  it('filters the sections that overlap a clip away, so only those filling a gap remain', async () => {
+    const sv = makeStreetView(); sv.sections = [makeSvSection({ id: 'M1', key: 'a', km0: 1, near: near() }), makeSvSection({ id: 'M2', key: 'b', km0: 2, near: near({ overlaps: ['0022'], in_gap: null }) }), makeSvSection({ id: 'M3', key: 'c', km0: 3, near: null })]; serve(sv)
+    const { user } = setup(<StreetViewPage folder="/data" />); await screen.findAllByRole('row'); const ids = () => [...document.querySelectorAll('tbody tr')].map(r => r.querySelector('td button')?.textContent?.replace('Mapillary ', ''))
+    await user.click(screen.getByRole('button', { name: /Filters/ })); await user.click(screen.getByLabelText('Overlaps a camera clip')); expect(ids()).toEqual(['M1', 'M3'])
+    await user.click(screen.getByLabelText('Overlaps a camera clip')); await user.click(screen.getByLabelText('In a gap (fills a gap in the footage)')); expect(ids()).toEqual(['M2'])
+    expect(passes(makeSvSection({ near: near({ overlaps: ['1'] }) }), { ...DEFAULT_FILTERS, 'p:clip': false })).toBe(false)
   })
 })
 

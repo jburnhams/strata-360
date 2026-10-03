@@ -38,9 +38,12 @@ export interface SvSection { id: string; provider: SvProvider; stretch: string; 
 export interface SvStretch { id: string; km0: number; km1: number; length_m: number; highways: string[]; names: string[]; line: [number, number][] }
 export interface SvRoads { id: string; total_km: number; stretches: SvStretch[]; run: [number, number][] }
 export interface SvStageStatus { done: boolean; stale?: boolean; stretches?: number; sections?: number; scored?: number; frames?: number; km: number }
+export interface SvNearClip { label: string; seconds: number; km: number }
+/** Where a section sits among the camera clips along the run: the nearest clip each way (time and distance between), the clips it overlaps, and the gap in the footage that holds it. */
+export interface SvNear { before: SvNearClip | null; after: SvNearClip | null; overlaps: string[]; in_gap: string | null }
 export type SvChoice = 'possible' | 'must'
 /** A section with what the page needs: a key that survives the stage being run again, whether it could make a clip (and why not), how long it plays at 15 pictures a second and how fast that looks, the sections over the same road, and your choice. */
-export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; filmed: [number, number] | null; passed: [number, number] | null; has_video: boolean; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
+export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; near: SvNear | null; filmed: [number, number] | null; passed: [number, number] | null; has_video: boolean; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
 export interface SvVideo { exists: boolean; running: boolean; log: string[]; error: string; seconds: number }
 export interface StreetView {
   status: Record<'roads' | SvProvider | 'quality', SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { frames: number; km: number } | null>; sections: SvSectionInfo[]

@@ -1002,6 +1002,19 @@ def create_app(roots, token=None):
         fail = next((l for l in reversed(lines) if l.startswith('streetview:')), '')
         return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
 
+    def sv_footage(f):
+        """(clips, gaps) for placing a street view section among the footage: [{label, t0, t1}] of the camera clips and [{id, t0, t1}] of the gaps in them (empty lists when there is no track yet)."""
+        import datetime as dt
+        rd = config.race_dir(f); clips = []
+        for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
+            c = _j(d, 'clip.json')
+            if not c: continue
+            t0 = dt.datetime.fromisoformat(c['time']['start_utc'].replace('Z', '+00:00')).timestamp(); m = re.search(r'_(\d{4})_D$', c['clip_id'])
+            clips.append(dict(label=m.group(1) if m else c['clip_id'], t0=t0, t1=t0 + c['video']['source_frames'] / c['video']['nominal_fps']))
+        try: gaps = [dict(id=g['id'], t0=g['t0'], t1=g['t1']) for g in gap_rows(f)]
+        except HTTPException: gaps = []
+        return clips, gaps
+
     def sv_track(f):
         """The race track for working out the light at a section, or None when there is none."""
         try: return loaded_raw_track(f)
@@ -1012,7 +1025,7 @@ def create_app(roots, token=None):
         from strata360 import streetview as SV
         from strata360.edit import llm_remote as LR
         f = folder_of(folder); rd = config.race_dir(f); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}
-        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs, sv_track(f)), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
+        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs, sv_track(f), *sv_footage(f)), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
 
     @api.post('/api/streetview/run', dependencies=[Depends(auth)])
     def post_streetview_run(body: dict):                                                 # {folder, stages?: [..], force?}: make the stages in the background at the lowest priority

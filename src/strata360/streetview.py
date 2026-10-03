@@ -383,12 +383,24 @@ def passed(s, tr):
     d, t = track_dist(tr); return [float(np.interp(s['km0'] * 1000, d, t)), float(np.interp(s['km1'] * 1000, d, t))]
 
 
-def annotate(rd, docs, tr=None):
+def nearest_clips(s, clips, tr, gaps=None):
+    """Where a section sits among the camera clips along the run: {before, after, overlaps, in_gap}. `before` and `after` are the nearest clip ending before the section starts and the nearest one starting after it ends, as {label, seconds, km} (the time and the distance
+    along the run between them and the section: 0 would mean touching); `overlaps` are the labels of the clips that cover any of the section's time; `in_gap` is the id of the gap in the footage that holds all of it. `clips` are [{label, t0, t1}] (epoch seconds), `gaps` [{id, t0, t1}]; None without the section's pass time."""
+    if s.get('passed') is None or clips is None: return None
+    p0, p1 = s['passed']; d, t = track_dist(tr); at = lambda x: float(np.interp(x, t, d)); before = after = None
+    for c in clips:
+        if c['t1'] <= p0 and (before is None or c['t1'] > before['t']): before = dict(label=c['label'], t=c['t1'], seconds=round(p0 - c['t1']), km=round((at(p0) - at(c['t1'])) / 1000.0, 2))
+        if c['t0'] >= p1 and (after is None or c['t0'] < after['t']): after = dict(label=c['label'], t=c['t0'], seconds=round(c['t0'] - p1), km=round((at(c['t0']) - at(p1)) / 1000.0, 2))
+    strip = lambda x: None if x is None else {k: v for k, v in x.items() if k != 't'}
+    return dict(before=strip(before), after=strip(after), overlaps=[c['label'] for c in clips if c['t0'] < p1 and c['t1'] > p0], in_gap=next((g['id'] for g in gaps or [] if g['t0'] <= p0 and p1 <= g['t1']), None))
+
+
+def annotate(rd, docs, tr=None, clips=None, gaps=None):
     """Every section of the provider docs {provider: doc or None} (and, with the race track `tr`, the light they were filmed in against the race's there) with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
     out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']; qs = quality_of(rd)
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
+        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['near'] = nearest_clips(s, clips, tr, gaps) if tr is not None else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
 
 

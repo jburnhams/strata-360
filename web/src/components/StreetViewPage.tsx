@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
-import type { StreetView, SvChoice, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
+import type { StreetView, SvChoice, SvNearClip, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
@@ -29,11 +29,15 @@ export const FILTERS: { title: string; items: [string, string][] }[] = [
   { title: 'Quality of the clip', items: [['q:good', 'Good'], ['q:fair', 'Fair'], ['q:poor', 'Poor'], ['q:none', 'Not checked']] },
   { title: 'How steady the camera is kept', items: [['s:exact', 'Exact (360°, true rotation)'], ['s:estimated', 'Estimated (360°, levelled from the picture)'], ['s:by matching only', 'By matching only (flat camera)']] },
   { title: 'Light', items: [['l:fits', 'Light fits the race'], ['l:warn', 'Daytime view for a night stretch (or the reverse)']] },
+  { title: 'Position among the footage', items: [['p:gap', 'In a gap (fills a gap in the footage)'], ['p:clip', 'Overlaps a camera clip']] },
   { title: 'Usable', items: [['plausible', 'Only sections with enough pictures to make a clip']] },
 ]
 export const DEFAULT_FILTERS: Record<string, boolean> = Object.fromEntries(FILTERS.flatMap(g => g.items.map(([k]) => [k, k !== 'plausible'])))
 export const passes = (s: SvSectionInfo, f: Record<string, boolean>) =>
-  !!f[`q:${s.quality?.grade ?? 'none'}`] && !!f[`s:${s.steadied}`] && !!f[`l:${s.light?.warning ? 'warn' : 'fits'}`] && !(f.plausible && !s.plausible)
+  !!f[`q:${s.quality?.grade ?? 'none'}`] && !!f[`s:${s.steadied}`] && !!f[`l:${s.light?.warning ? 'warn' : 'fits'}`] && !!f[s.near?.overlaps.length ? 'p:clip' : 'p:gap'] && !(f.plausible && !s.plausible)
+const away = (c: SvNearClip) => `${c.km} km / ${dur(c.seconds)}`
+/** How far the nearest footage is each way along the run, as "0021 3.2 km / 4 min before · 0023 1.1 km / 2 min after"; or where the section overlaps footage. */
+export const nearText = (n: SvSectionInfo['near']) => !n ? '' : n.overlaps.length ? `Overlaps clip ${n.overlaps.join(', ')}` : [n.before && `${n.before.label} ${away(n.before)} before`, n.after && `${n.after.label} ${away(n.after)} after`].filter(Boolean).join(' · ') || 'no footage near'
 const km = (v: number) => v.toFixed(2).replace(/\.?0+$/, '')
 const span = (s: { km0: number; km1: number }) => `km ${km(s.km0)} to ${km(s.km1)}`
 const metres = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`)
@@ -234,12 +238,12 @@ function List({ title, tz, sections, sel, onSel, none }: { title: string; tz: st
     <div className="overflow-x-auto rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
       <h3 className="mb-1 text-sm font-semibold">{title}</h3>
       <table className="w-full text-left text-sm">
-        <thead className="text-xs text-stone-500"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th className="pr-3">Quality</th><th className="pr-3">Filmed</th><th className="pr-3">You passed</th><th>Overlaps</th></tr></thead>
+        <thead className="text-xs text-stone-500"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th className="pr-3">Quality</th><th className="pr-3">Nearest footage</th><th className="pr-3">Filmed</th><th className="pr-3">You passed</th><th>Overlaps</th></tr></thead>
         <tbody>
           {sections.map(s => (
             <tr key={s.id} onClick={() => onSel({ kind: 'section', id: s.id })} className={`cursor-pointer border-t border-stone-200 dark:border-stone-700 ${sel?.kind === 'section' && sel.id === s.id ? 'bg-emerald-100 dark:bg-emerald-950' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
               <td className="pr-3"><button className="underline" onClick={e => { e.stopPropagation(); onSel({ kind: 'section', id: s.id }) }}>{NAME[s.provider]} {s.id}</button></td><td className="pr-3">{kindLabel(s)}</td><td className="pr-3">{span(s)} <span className="text-stone-500">({s.stretch})</span></td>
-              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td className="pr-3">{when(s.filmed?.[0], tz)}</td><td className="pr-3">{when(s.passed?.[0], tz)}</td><td>{s.overlaps.length ? <span className="text-amber-700 dark:text-amber-400">{s.overlaps.join(', ')}</span> : '–'}</td>
+              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td className="pr-3">{s.near ? `${s.near.in_gap ? s.near.in_gap + ': ' : ''}${nearText(s.near)}` : '–'}</td><td className="pr-3">{when(s.filmed?.[0], tz)}</td><td className="pr-3">{when(s.passed?.[0], tz)}</td><td>{s.overlaps.length ? <span className="text-amber-700 dark:text-amber-400">{s.overlaps.join(', ')}</span> : '–'}</td>
             </tr>
           ))}
         </tbody>
@@ -276,6 +280,7 @@ function Candidates({ folder, tz, sections, all, sel, onSel, onChoose }: { folde
             </div>
             {s.light?.warning && <p className="text-xs font-medium text-red-700 dark:text-red-400" role="note" data-light>⚠ {s.light.warning}</p>}
             <p className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(s.filmed?.[0], tz)} · you pass it {when(s.passed?.[0], tz)}{s.has_video && <span className="ml-2 rounded bg-sky-700 px-1.5 text-white">preview video ready</span>}</p>
+            {s.near && <p className={`text-xs ${s.near.overlaps.length ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}`} data-near>{s.near.in_gap ? `Fills gap ${s.near.in_gap}. ` : ''}Nearest footage: {nearText(s.near)}</p>}
             {s.overlaps.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}
             <div className="mt-1 flex flex-wrap items-center gap-3">
               <ul className="flex gap-1">{previews(s).filter((_, i, a) => a.length <= 3 || i % Math.ceil(a.length / 3) === 0).slice(0, 3).map(({ it, label }) => <li key={it.id}><img loading="lazy" src={api.streetviewImage(folder, s.provider, it.id, 256)} alt={`${NAME[s.provider]} ${s.id} ${label}`} className="h-16 w-24 rounded object-cover" /></li>)}</ul>
