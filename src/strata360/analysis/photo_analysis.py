@@ -20,7 +20,7 @@ import datetime as dt, hashlib, json, os, shutil, subprocess, tempfile
 import numpy as np
 
 SCHEMA = 1
-VERSIONS = dict(exposure=1, quality=1, places=1, people=1, objects=1, identity=1, face_view=1, scenes=1, thumb_overlay=1)
+VERSIONS = dict(exposure=1, quality=1, places=1, people=1, objects=1, identity=1, face_view=1, scenes=1, thumb_overlay=2)
 ORDER = tuple(VERSIONS)
 MODEL_STAGES = ('people', 'objects', 'scenes')                      # need `.venv-vision` and the models
 NOT_APPLICABLE = ('ingest', 'audio_extract', 'audio_clean', 'audio_background', 'audio_events', 'audio', 'transcribe', 'align', 'transcript_check', 'speakers', 'motion', 'proxy', 'thumb', 'thumb_best', 'candidates')

@@ -360,18 +360,18 @@ class TestStageProgress:
     def test_a_run_that_followed_the_route_shows_only_the_distance_run_over_the_distance_run_in_the_stage(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)       # the track runs 3 m/s: 900 m of a 2000 m route, and the route says the same
-        assert ('0.9/', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['2.1 km'] and ('00:11:40', (255, 255, 255)) in seen          # (nothing red but the length of a stage the run did not finish; with no cut-off its total time is shown, white)
+        assert ('0.9/', (255, 255, 255)) in seen and [x for x, f in seen if f == LY.RED] == ['2.1 km'] and ('00:11:40', (255, 255, 255)) in seen          # (nothing red but the length of a stage the run did not finish; with no cut-off its total time is shown, white)
 
     def test_a_run_that_strayed_shows_the_routes_progress_first_and_the_distance_run_in_red(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=np.minimum((ts - ts[0]) * 3.0, 300.0))}); ov.patches(T0 + 400)       # on the route for 100 s, then off it: the route says 300 m, 900 m were run
-        assert ('0.3/', (255, 255, 255)) in seen and ('  ran 0.9 km', (235, 40, 40)) in seen and ('2.0 km', (235, 40, 40)) in seen           # (the stage was the last and not finished: its length is red too)
+        assert ('0.3/', (255, 255, 255)) in seen and ('  ran 0.9 km', LY.RED) in seen and ('2.0 km', LY.RED) in seen           # (the stage was the last and not finished: its length is red too)
 
     def test_a_finished_stage_shows_its_total_time_in_white_and_nothing_red(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'Checkpoint 1'), (T0 + 900, 'After Race')]
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress={'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)
-        assert ('00:05:00', (255, 255, 255)) in seen and ('2.1 km', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)] and ('00:11:40', (255, 255, 255)) in seen
+        assert ('00:05:00', (255, 255, 255)) in seen and ('2.1 km', (255, 255, 255)) in seen and not [1 for s, f in seen if f == LY.RED] and ('00:11:40', (255, 255, 255)) in seen
 
 
 class TestRouteElapsed:
@@ -415,14 +415,14 @@ class TestCutoffsOnTheOverlay:
         monkeypatch.setattr(D, 'text', spy); return seen
 
     def test_the_cut_off_of_the_whole_race_is_always_shown_in_red_on_its_own_line(self, series, tiles, monkeypatch):
-        seen = self.spy(monkeypatch); RED = (235, 40, 40)
+        seen = self.spy(monkeypatch); RED = LY.RED
         for dt_ in (-30, 50, 200, 550, 650, 900):                                      # whatever the stage: the finish's cut-off
             seen.clear(); ov = self.ov(series, tiles, ['clock'], self.cut); ov.patches(T0 + dt_); assert ('CUT-OFF 1:00:00', RED) in seen, (dt_, seen)
         seen.clear(); self.ov(series, tiles, ['clock'], dict(self.cut, finish=None)).patches(T0 + 200); assert not [x for x, _ in seen if x.startswith('CUT-OFF')]       # no finish cut-off: nothing
         seen.clear(); self.ov(series, tiles, ['clock']).patches(T0 + 200); assert not [x for x, _ in seen if x.startswith('CUT-OFF')]
 
     def test_a_stage_shows_the_time_so_far_over_its_cut_off_in_red_or_its_total_time_in_white_when_there_is_none(self, series, tiles, monkeypatch):
-        seen = self.spy(monkeypatch); RED = (235, 40, 40)
+        seen = self.spy(monkeypatch); RED = LY.RED
         self.ov(series, tiles, ['stage'], self.cut).patches(T0 + 400)                       # 300 s into stage 1, which started at T0 + 100; its cut-off is 1200 s after the start of the run: 1100 s for the stage
         assert ('00:05:00', (255, 255, 255)) in seen and ('00:18:20', RED) in seen and '00:06:40' not in [x for x, _ in seen]
         seen.clear(); self.ov(series, tiles, ['stage']).patches(T0 + 400); assert ('00:05:00', (255, 255, 255)) in seen and ('00:06:40', (255, 255, 255)) in seen and not [1 for _, f in seen if f == RED]            # no cut-off: the stage's total time, white

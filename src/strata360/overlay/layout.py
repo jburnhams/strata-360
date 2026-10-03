@@ -23,6 +23,7 @@ from strata360.overlay import draw as D
 from strata360.overlay.tiles import Tiles, STYLES, world
 
 REF_W, REF_H = 1920, 1080
+RED = (255, 84, 84)                       # the red of the cut-offs and of what fell short: light enough to read on a dark picture (a darker red looked soft)
 ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the element keeps its distance from
     'profile': dict(kind='profile', height=120),
     'clock': dict(kind='clock', x=16, y=24),
@@ -132,7 +133,7 @@ class Clock:
         k = c.cutoff_row                                                                                                  # with cut-offs set, a line of its own between the elapsed time and the day
         out = [c.text(e, x, y, elapsed_text(t - start), 52), c.text(e, x, y + 62 + k, f'DAY {race_day(start, t, c.tz)}', 32), c.text(e, x, y + 104 + k, lt.strftime('%Y/%m/%d  %H:%M:%S'), 22)]
         cut = c.race_cutoff()
-        if cut is not None: out += c.runs(e, x, y + 58, [(f'CUT-OFF {elapsed_text(cut)}', (235, 40, 40))], 24)                      # the cut-off of the whole race, as a total time since the start, in red
+        if cut is not None: out += c.runs(e, x, y + 58, [(f'CUT-OFF {elapsed_text(cut)}', RED)], 24)                      # the cut-off of the whole race, as a total time since the start, in red
         return out
 
 
@@ -160,7 +161,7 @@ class Stage:
             a, b = self.times[i], self.times[i + 1]                                                                # a stage runs to the next checkpoint's arrival, a checkpoint to the departure
             pr = self.c.progress.get(name) if name.startswith('Stage') else None
             if pr is not None:                                                                                # the distance run so far over the distance run in the whole stage; where the run went off the route (over 10% out), the route's own progress comes first and what was actually run follows in red
-                run = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; L = pr['route_m'] / 1000; p = float(np.interp(t, pr['t'], pr['prog'])) / 1000; RED, WHITE = (235, 40, 40), (255, 255, 255)
+                run = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; L = pr['route_m'] / 1000; p = float(np.interp(t, pr['t'], pr['prog'])) / 1000; WHITE = (255, 255, 255)
                 final = self.names[i + 1] == 'After Race' and 'At Finish' not in self.names                    # the run stopped in this stage: its length is shown in red, since it never got to the end of it
                 cut = self.c.cutoffs.get('stage', {}).get(name)                                                  # the stage's cut-off, in red, from leaving the previous checkpoint; with none set, the stage's total time (white)
                 end = RED if final else WHITE                                                                  # the stage's length is red too when the run did not get to the end of it
