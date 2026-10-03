@@ -686,3 +686,17 @@ class TestStreetViewNearClips(TestStreetViewApi):
         sec = SV.load(rd, 'mapillary')['sections'][0]; sec['items'] = [dict(i, t=1_700_000_000) for i in sec['items']]; SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [sec], SV.load(rd, 'roads')))
         j = client.get('/api/streetview', params=dict(folder=project.folder)).json()['sections'][0]
         assert 'near' in j and (j['near'] is None or set(j['near']) == {'before', 'after', 'overlaps', 'in_gap'})                                  # (None without a race track in this project)
+
+
+class TestStreetViewNearApi(TestStreetViewApi):
+    def test_a_click_returns_what_is_nearest_from_each_provider_and_only_those_pictures_can_be_fetched(self, client, project, monkeypatch):
+        from strata360 import streetview as SV
+        self.make_docs(project); seen = {}
+        def fake(rd, lat, lon, n, tr, clips, gaps, **kw): seen.update(lat=lat, lon=lon, n=n, kw=kw, clips=clips); return dict(lat=lat, lon=lon, n=n, providers=dict(mapillary=dict(items=[dict(id='m1', url=None, compass=10)], radius_m=100.0), panoramax=dict(items=[dict(id='p1', url='https://pmx/1.jpg', compass=0)], radius_m=100.0), google=dict(items=[], radius_m=110.0, error='no key')))
+        monkeypatch.setattr(SV, 'near_point', fake); q = dict(folder=project.folder)
+        j = client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2, n=4)).json(); assert j['providers']['mapillary']['items'][0]['id'] == 'm1' and seen['lat'] == 50.1 and seen['n'] == 4 and seen['kw'].keys() >= {'token', 'gkey'}
+        assert client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2, n=99)).status_code == 200 and seen['n'] == 12
+        monkeypatch.setattr(SV, 'image_near', lambda rd, provider, item, w, **k: b'\xff\xd8' + provider.encode() + item['id'].encode())
+        r = client.get('/api/streetview/near/image', params=dict(q, provider='panoramax', id='p1')); assert r.status_code == 200 and r.content == b'\xff\xd8panoramaxp1' and r.headers['content-type'] == 'image/jpeg'
+        assert client.get('/api/streetview/near/image', params=dict(q, provider='mapillary', id='other')).status_code == 404 and client.get('/api/streetview/near/image', params=dict(q, provider='bing', id='m1')).status_code == 404
+        monkeypatch.setattr(SV, 'image_near', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('mapillary answered 500'))); assert client.get('/api/streetview/near/image', params=dict(q, provider='mapillary', id='m1')).status_code == 502

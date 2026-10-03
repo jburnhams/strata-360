@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
-import type { StreetView, SvChoice, SvNearClip, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
+import type { StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
@@ -38,6 +38,7 @@ export const passes = (s: SvSectionInfo, f: Record<string, boolean>) =>
 const away = (c: SvNearClip) => `${c.km} km / ${dur(c.seconds)}`
 /** How far the nearest footage is each way along the run, as "0021 3.2 km / 4 min before · 0023 1.1 km / 2 min after"; or where the section overlaps footage. */
 export const nearText = (n: SvSectionInfo['near']) => !n ? '' : n.overlaps.length ? `Overlaps clip ${n.overlaps.join(', ')}` : [n.before && `${n.before.label} ${away(n.before)} before`, n.after && `${n.after.label} ${away(n.after)} after`].filter(Boolean).join(' · ') || 'no footage near'
+const kindLabel2 = (it: { kind: '360' | '2d' }) => (it.kind === '360' ? '360°' : '2D')
 const km = (v: number) => v.toFixed(2).replace(/\.?0+$/, '')
 const span = (s: { km0: number; km1: number }) => `km ${km(s.km0)} to ${km(s.km1)}`
 const metres = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`)
@@ -61,6 +62,11 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { fol
   const [tiles, setTiles] = useState<TileStatus>()
   const [sel, setSel] = useState<{ kind: 'section' | 'stretch'; id: string }>()
   const [shown, setShown] = useState<Record<string, boolean>>({ mapillary: true, panoramax: true, google: true, '360': true, '2d': true, clips: true })
+  const [probe, setProbe] = useState<{ lat: number; lon: number }>(), [near, setNear] = useState<SvNearResult>(), [nearBusy, setNearBusy] = useState(false), [nearErr, setNearErr] = useState<string>()
+  const pick = async (lat: number, lon: number) => {
+    setProbe({ lat, lon }); setNear(undefined); setNearErr(undefined); setNearBusy(true)
+    try { setNear(await api.svNear(folder, lat, lon, 5)) } catch (e) { setNearErr((e as Error).message) } finally { setNearBusy(false) }
+  }
   const [err, setErr] = useState<string>(), [clips, setClips] = useState<TrackClip[]>([]), [filters, setFilters] = useState<Record<string, boolean>>(DEFAULT_FILTERS)
   useEffect(() => { api.trackClips(folder).then(r => setClips(r.clips.filter(c => c.covered && c.stretch?.length))).catch(() => setClips([])) }, [folder])
   useEffect(() => { api.tilesStatus().then(setTiles).catch(() => setTiles({ ok: false, style: 'tf-landscape', error: 'no map background' })) }, [])
@@ -83,13 +89,15 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { fol
         <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">Where the run was on a road, and the street-level pictures there are of those roads: a gap in the film could be shown as the view along the road.</p>
         {!data ? <p className="text-sm text-stone-500">Loading…</p> : <Stages data={data} onRun={run} err={err} />}
       </div>
+      {probe && <NearPanel folder={folder} tz={tz} probe={probe} result={near} busy={nearBusy} error={nearErr} onClose={() => { setProbe(undefined); setNear(undefined); setNearErr(undefined) }} />}
       {data && roads && sections.length > 0 && <Candidates folder={folder} tz={tz} sections={visible} all={sections} sel={sel} onSel={setSel} onChoose={async (key, c) => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }} />}
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
           <Filters shown={shown} setShown={setShown} data={data} filters={filters} setFilters={setFilters} total={sections.length} showing={visible.length} />
-          <SvMap roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
+          <SvMap probe={probe && { ...probe, items: near ? PROVIDERS.flatMap(p => near.providers[p].items) : [] }} onPick={pick} roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
           <Legend scale={scale} hasClips={clips.length > 0} />
           <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-stone-600 dark:text-stone-400">
+            <span>click anywhere on the map to see the nearest street view there</span>
             <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f59e0b' }} />road part of the run (click one)</span>
             {PROVIDERS.map(p => <span key={p}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}</span>)}
             <span>360° = sees every way · 2D = faces one way</span>{tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}
@@ -161,12 +169,12 @@ function Filters({ shown, setShown, data, filters, setFilters, total, showing }:
   )
 }
 
-function SvMap({ roads, run, sections, clips, scale, sel, onSel, background }: { roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
-  const el = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), layers = useRef<L.LayerGroup | null>(null), onSelRef = useRef(onSel); onSelRef.current = onSel
+function SvMap({ probe, onPick, roads, run, sections, clips, scale, sel, onSel, background }: { probe?: { lat: number; lon: number; items: SvNearItem[] }; onPick: (lat: number, lon: number) => void; roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
+  const el = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), layers = useRef<L.LayerGroup | null>(null), onSelRef = useRef(onSel), onPickRef = useRef(onPick); onSelRef.current = onSel; onPickRef.current = onPick
   useEffect(() => {
     if (!el.current) return
     const m = L.map(el.current, { renderer: L.svg(), attributionControl: false, zoomSnap: 0.5, scrollWheelZoom: false }); map.current = m               // (svg: a few hundred short lines, and no canvas to redraw after the page is left)
-    m.on('click', () => m.scrollWheelZoom.enable()); m.getContainer().addEventListener('mouseleave', () => m.scrollWheelZoom.disable())
+    m.on('click', (e: L.LeafletMouseEvent) => { m.scrollWheelZoom.enable(); onPickRef.current(e.latlng.lat, e.latlng.lng) }); m.getContainer().addEventListener('mouseleave', () => m.scrollWheelZoom.disable())
     const all = L.polyline(run); if (run.length) m.fitBounds(all.getBounds(), { padding: [20, 20] }); else m.setView([50, 5], 8)
     layers.current = L.layerGroup().addTo(m)
     return () => { m.remove(); map.current = null; layers.current = null }
@@ -186,16 +194,20 @@ function SvMap({ roads, run, sections, clips, scale, sel, onSel, background }: {
     }
     for (const r of roads) {
       const on = sel?.kind === 'stretch' && sel.id === r.id
-      L.polyline(r.line, { color: '#f59e0b', weight: on ? 9 : 6, opacity: on ? 1 : 0.8 }).bindTooltip(`${r.names.join(', ') || r.highways.join(', ')} · ${span(r)} · ${metres(r.length_m)}`).on('click', () => onSelRef.current({ kind: 'stretch', id: r.id })).addTo(g)
+      L.polyline(r.line, { color: '#f59e0b', weight: on ? 9 : 6, opacity: on ? 1 : 0.8, bubblingMouseEvents: false }).bindTooltip(`${r.names.join(', ') || r.highways.join(', ')} · ${span(r)} · ${metres(r.length_m)}`).on('click', () => onSelRef.current({ kind: 'stretch', id: r.id })).addTo(g)
     }
     for (const s of sections) {
       const on = sel?.kind === 'section' && sel.id === s.id, pts = s.items.map(i => [i.lat, i.lon] as [number, number])
       L.polyline(pts, { color: '#fff', weight: on ? 10 : 8, opacity: 0.9, interactive: false }).addTo(g); L.polyline(pts, { color: rampColour(s.max_s, scale.lo, scale.hi), weight: on ? 7 : 5, opacity: 1, dashArray: s.kind === '2d' ? undefined : '3 5', interactive: false }).addTo(g)
       const mid = s.items[Math.floor(s.items.length / 2)]
       const icon = L.divIcon({ className: '', iconSize: [34, 20], html: `<div style="background:${COLOUR[s.provider]};color:#fff;font:600 11px/20px sans-serif;border-radius:10px;text-align:center;border:${on ? '2px solid #000' : s.choice ? '2px solid #f59e0b' : '1.5px solid #fff'}">${LETTER[s.provider]} ${kindLabel(s)}</div>` })
-      L.marker([mid.lat, mid.lon], { icon, title: `${NAME[s.provider]} ${kindLabel(s)} ${span(s)}`, keyboard: true, zIndexOffset: on ? 1000 : 0 }).on('click', () => onSelRef.current({ kind: 'section', id: s.id })).addTo(g)
+      L.marker([mid.lat, mid.lon], { icon, title: `${NAME[s.provider]} ${kindLabel(s)} ${span(s)}`, keyboard: true, zIndexOffset: on ? 1000 : 0, bubblingMouseEvents: false }).on('click', () => onSelRef.current({ kind: 'section', id: s.id })).addTo(g)
     }
-  }, [roads, run, sections, clips, scale, sel])
+    if (probe) {                                                                                  // the clicked point and the nearest street view found there
+      L.circleMarker([probe.lat, probe.lon], { radius: 7, color: '#000', weight: 2, fillColor: '#fff', fillOpacity: 1, interactive: false }).addTo(g)
+      for (const it of probe.items) L.circleMarker([it.lat, it.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: COLOUR[it.provider], fillOpacity: 1, bubblingMouseEvents: false }).bindTooltip(`${NAME[it.provider]} ${kindLabel2(it)} · ${it.distance_m} m away`).addTo(g)
+    }
+  }, [roads, run, sections, clips, scale, sel, probe])
   useEffect(() => {                                                                              // the map moves to what was chosen
     const m = map.current; if (!m || !sel) return
     const pts = sel.kind === 'stretch' ? roads.find(r => r.id === sel.id)?.line : sections.find(s => s.id === sel.id)?.items.map(i => [i.lat, i.lon] as [number, number])
@@ -333,6 +345,48 @@ function SectionVideo({ folder, section }: { folder: string; section: SvSectionI
       {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept</span>}
       {running && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Making the video… {st?.log.slice(-1)[0] ?? ''}</p>}
       {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}
+    </div>
+  )
+}
+
+const RULE_ICON = { true: '✓', false: '✗', null: '?' } as const
+
+/** The nearest street view to a clicked point, from each provider, with every rule that would rule each one out (no filters): the nearest capture runs first. */
+function NearPanel({ folder, tz, probe, result, busy, error, onClose }: { folder: string; tz: string; probe: { lat: number; lon: number }; result?: SvNearResult; busy: boolean; error?: string; onClose: () => void }) {
+  return (
+    <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Nearest street view to the clicked point">
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Nearest street view to {probe.lat.toFixed(5)}, {probe.lon.toFixed(5)}</h3><button onClick={onClose} className="text-xs underline">Close</button></div>
+      <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">As the crow flies, whatever the run did there. Each shows what would rule it out of the film: how far it is from the run, whether the run was on a road, which way it faces, how many pictures, the light and the footage.</p>
+      {busy && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Asking Mapillary, Panoramax and Google…</p>}
+      {error && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p>}
+      {result && (
+        <div className="grid gap-3 lg:grid-cols-3">
+          {PROVIDERS.map(p => {
+            const b = result.providers[p]
+            return (
+              <section key={p} aria-label={`${NAME[p]} near the point`} className="min-w-0">
+                <h4 className="text-sm font-medium"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}{b.radius_m ? <span className="font-normal text-stone-500"> · searched {b.radius_m} m round</span> : ''}</h4>
+                {b.error && <p className="text-xs text-amber-700 dark:text-amber-400">{b.error}</p>}
+                {!b.error && b.items.length === 0 && <p className="text-xs text-stone-500">Nothing within {b.radius_m} m.</p>}
+                <ul className="space-y-2">
+                  {b.items.map(it => (
+                    <li key={it.id} data-near-item={it.id} className="rounded border border-stone-200 p-2 text-xs dark:border-stone-700">
+                      <div className="flex gap-2">
+                        <img loading="lazy" src={api.svNearImage(folder, p, it.id, 256)} alt={`${NAME[p]} ${it.id}`} className="h-16 w-24 shrink-0 rounded object-cover" />
+                        <div className="min-w-0"><div className="font-medium">{it.distance_m} m away · {kindLabel2(it)}{it.section ? ` · section ${it.section}` : ''}</div>
+                          <div className="text-stone-600 dark:text-stone-400">{[it.camera, it.size && `${it.size[0]}×${it.size[1]}`].filter(Boolean).join(' · ') || 'camera not known'}</div>
+                          <div className="text-stone-600 dark:text-stone-400">Filmed {when(it.captured, tz)}{it.passed ? ` · you passed ${when(it.passed, tz)}` : ''}</div></div>
+                      </div>
+                      <div className={`mt-1 font-medium ${it.usable ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}>{it.usable ? 'Nothing rules it out' : `Ruled out: ${it.ruled_out.length} reason${it.ruled_out.length === 1 ? '' : 's'}`}</div>
+                      <ul className="mt-0.5 space-y-0.5">{it.rules.map(r => <li key={r.key} data-rule={r.key} className={r.ok === false ? 'text-red-700 dark:text-red-400' : r.ok === null ? 'text-stone-500' : ''}><span aria-label={r.ok === false ? 'rules it out' : r.ok === null ? 'not known' : 'fine'} className="mr-1 inline-block w-3">{RULE_ICON[String(r.ok) as 'true' | 'false' | 'null']}</span>{r.text}</li>)}</ul>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

@@ -51,6 +51,7 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+STREETVIEW_NEAR = {}          # (folder, provider, picture id) -> what the near-point search found (so the thumbnails can be fetched, and nothing else)
 STREETVIEW_VIDEO_JOBS = {}    # (folder, section key) -> Popen of a running `strata360 streetview-video`
 STREETVIEW_JOBS = {}          # folder -> Popen of a running `strata360 streetview`
 PHOTO_JOBS = {}               # folder -> Popen of a running `strata360 photos-analyse`
@@ -1083,6 +1084,25 @@ def create_app(roots, token=None):
         auth(request); rd, s = sv_section(folder_of(folder), key); p = SV.video_path(rd, s)
         if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
+
+    @api.get('/api/streetview/near', dependencies=[Depends(auth)])
+    def get_streetview_near(folder: str, lat: float, lon: float, n: int = 5):               # the street view nearest (as the crow flies) to a point clicked on the map, from each provider, each with the rules that would rule it out; no filters
+        from strata360 import streetview as SV
+        from strata360.edit import llm_remote as LR
+        f = folder_of(folder); rd = config.race_dir(f); n = max(1, min(int(n), 12)); clips, gaps = sv_footage(f)
+        res = SV.near_point(rd, lat, lon, n, sv_track(f), clips, gaps, token=LR.secret('MAPILLARY_TOKEN'), gkey=LR.secret('GOOGLE_MAPS_API_KEY'))
+        for prov, block in res['providers'].items():
+            for it in block['items']: STREETVIEW_NEAR[(f, prov, it['id'])] = dict(id=it['id'], url=it.get('url'), compass=it.get('compass'))        # only pictures found here can be asked for (the page's thumbnails)
+        return res
+
+    @api.get('/api/streetview/near/image')
+    def get_streetview_near_image(request: Request, folder: str, provider: str, id: str, w: int = 256):   # the picture of one of those (an <img> cannot send headers: the cookie / query token authenticates)
+        from strata360 import streetview as SV
+        auth(request); f = folder_of(folder); item = STREETVIEW_NEAR.get((f, provider, id))
+        if item is None: raise HTTPException(404, 'no such picture: click the map again')
+        try: data = SV.image_near(config.race_dir(f), provider, item, w)
+        except RuntimeError as ex: raise HTTPException(502, str(ex))
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store' if provider == 'google' else 'max-age=86400'})
 
     @api.get('/api/streetview/image')
     def get_streetview_image(request: Request, folder: str, provider: str, id: str, w: int = 640):   # one frame as a JPEG (an <img> cannot send headers: the cookie / query token authenticates); only frames the stage found can be asked for

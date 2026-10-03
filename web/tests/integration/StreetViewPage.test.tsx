@@ -4,7 +4,7 @@ import { fireEvent } from '@testing-library/react'
 import { screen, setup, waitFor, within } from '../utils/render'
 import StreetViewPage, { DEFAULT_FILTERS, dur, nearText, passes, rampColour, when } from '../../src/components/StreetViewPage'
 import Workspace from '../../src/components/Workspace'
-import { makeStreetView, makeSvSection, makeTrackClip } from '../utils/factories'
+import { makeNearItem, makeNearResult, makeStreetView, makeSvSection, makeTrackClip } from '../utils/factories'
 import { recordRequests } from '../utils/api'
 import { server } from '../utils/server'
 
@@ -236,6 +236,30 @@ describe('when each section was filmed and when the runner passed it', () => {
     expect(card).toHaveTextContent('Filmed Thu 7 Mar 2024 12:00 · you pass it Sun 22 Feb 2026 10:01')
     const row = screen.getAllByRole('row')[1]; expect(row).toHaveTextContent('Thu 7 Mar 2024 12:00'); expect(row).toHaveTextContent('Sun 22 Feb 2026 10:01'); expect(screen.getByText('You passed')).toBeInTheDocument(); expect(screen.getByText('Filmed')).toBeInTheDocument()
     await user.click(row); const detail = document.querySelectorAll('[data-times]'); expect([...detail].some(d => d.textContent?.includes('you pass it Sun 22 Feb 2026 10:01 to 10:05'))).toBe(true)
+  })
+})
+
+describe('clicking the map for the nearest street view', () => {
+  const click = async () => { serve(); const r = setup(<StreetViewPage folder="/data" />); await screen.findAllByRole('row'); fireEvent.click(await screen.findByRole('application'), { clientX: 40, clientY: 30 }); return r }
+
+  it('asks for the nearest street view at the clicked place and lists what each provider has, with the rules that rule each out', async () => {
+    const seen = recordRequests('/api/streetview/near'); server.use(http.get('/api/streetview/near', () => HttpResponse.json(makeNearResult())))
+    await click(); const panel = await screen.findByLabelText('Nearest street view to the clicked point'); await waitFor(() => expect(seen.filter(r => r.method === 'GET')).toHaveLength(1))
+    const u = seen[0].url.searchParams; expect(u.get('folder')).toBe('/data'); expect(Number.isFinite(Number(u.get('lat')))).toBe(true); expect(u.get('n')).toBe('5')
+    const m = within(await screen.findByRole('region', { name: 'Mapillary near the point' })); const item = m.getByText(/12.5 m away · 360°/).closest('[data-near-item]') as HTMLElement
+    expect(item).toHaveTextContent('GoPro Max · 5760×2880'); expect(item).toHaveTextContent('Ruled out: 1 reason'); expect(item.querySelector('img')!.getAttribute('src')).toBe('/api/streetview/near/image?folder=%2Fdata&provider=mapillary&id=m9&w=256')
+    const rules = [...item.querySelectorAll('[data-rule]')]; expect(rules.map(r => r.getAttribute('data-rule'))).toEqual(['near_run', 'light', 'direction']); expect(rules[1].className).toContain('red'); expect(rules[1]).toHaveTextContent('below the horizon (dark)'); expect(within(rules[1] as HTMLElement).getByLabelText('rules it out')).toBeInTheDocument(); expect(within(rules[0] as HTMLElement).getByLabelText('fine')).toBeInTheDocument(); expect(within(rules[2] as HTMLElement).getByLabelText('not known')).toBeInTheDocument()
+    expect(within(await screen.findByRole('region', { name: 'Panoramax near the point' })).getByText('Nothing within 500 m.')).toBeInTheDocument(); expect(within(screen.getByRole('region', { name: 'Google near the point' })).getByText('no GOOGLE_MAPS_API_KEY in secrets.env')).toBeInTheDocument(); expect(panel).toHaveTextContent('Filmed Thu 7 Mar 2024')
+  })
+
+  it('says when nothing rules a picture out, shows that it is busy, and can be closed', async () => {
+    server.use(http.get('/api/streetview/near', () => HttpResponse.json(makeNearResult({ providers: { mapillary: { items: [makeNearItem({ usable: true, ruled_out: [], section: 'M31' })], radius_m: 100 }, panoramax: { items: [], radius_m: 100 }, google: { items: [], radius_m: 110 } } }))))
+    const { user } = await click(); expect(await screen.findByText('Nothing rules it out')).toBeInTheDocument(); expect(screen.getByText(/section M31/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close' })); expect(screen.queryByLabelText('Nearest street view to the clicked point')).toBeNull()
+  })
+
+  it('shows the failure to ask', async () => {
+    server.use(http.get('/api/streetview/near', () => HttpResponse.json({ detail: 'boom' }, { status: 500 }))); await click(); expect(await screen.findByRole('alert')).toHaveTextContent(/500|boom/)
   })
 })
 

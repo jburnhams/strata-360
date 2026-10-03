@@ -368,14 +368,19 @@ def sun_phrase(e):
     return f'the sun {abs(e):.0f}° {"above" if e >= 0 else "below"} the horizon ({"daylight" if e > 6 else "golden-hour light" if e >= 0 else "dusk or dawn" if e >= DARK_BELOW else "dark"})'
 
 
+def light_between(lat, lon, cap_t, race_t):
+    """The light of a picture taken at `cap_t` against the light the runner had at `race_t` at the same place (epoch seconds; cap_t may be None): {captured, race, captured_sun, race_sun, warning}; see `light`."""
+    from strata360.gps import context as X, clock as CK
+    sun = lambda tt: float(CK.sun_elevation_deg(lat, lon, tt)) if tt else None; ce, re = sun(cap_t), sun(race_t); warn = None
+    if ce is not None and ((ce >= LIT and re < DARK_BELOW) or (ce < DARK_BELOW and re >= LIT)): warn = f'Filmed with {sun_phrase(ce)}, but the runner passes here with {sun_phrase(re)}: it would look wrong in the film.'
+    return dict(captured=None if ce is None else X.daylight(ce), race=X.daylight(re), captured_sun=None if ce is None else round(ce, 1), race_sun=round(re, 1), warning=warn)
+
+
 def light(sec, tr):
     """The light a section was filmed in against the light the runner had there, from the sun's height at the real date, time and place of each (so the time of year counts: 19:00 in February is dark, in July broad daylight): {captured, race, captured_sun, race_sun, warning}.
     The warning says so when a view lit by the sun would be shown for a stretch run in the dark (past civil twilight), or the other way round, and gives both heights; None when they fit (dusk and dawn fit either) or are unknown. `tr` is the race track."""
-    from strata360.gps import context as X, clock as CK
     d, t = track_dist(tr); mid = sec['items'][len(sec['items']) // 2]; caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap_t = caps[len(caps) // 2] if caps else None
-    race_t = float(np.interp((sec['km0'] + sec['km1']) / 2 * 1000, d, t)); sun = lambda tt: float(CK.sun_elevation_deg(mid['lat'], mid['lon'], tt)) if tt else None; ce, re = sun(cap_t), sun(race_t); warn = None
-    if ce is not None and ((ce >= LIT and re < DARK_BELOW) or (ce < DARK_BELOW and re >= LIT)): warn = f'Filmed with {sun_phrase(ce)}, but the runner passes here with {sun_phrase(re)}: it would look wrong in the film.'
-    return dict(captured=None if ce is None else X.daylight(ce), race=X.daylight(re), captured_sun=None if ce is None else round(ce, 1), race_sun=round(re, 1), warning=warn)
+    return light_between(mid['lat'], mid['lon'], cap_t, float(np.interp((sec['km0'] + sec['km1']) / 2 * 1000, d, t)))
 
 
 def passed(s, tr):
@@ -441,3 +446,129 @@ def track_dist(tr):
     ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); t = np.asarray(tr['t'])[ok]; d = np.asarray(tr['dist'], float)[ok] if 'dist' in tr else np.full(int(ok.sum()), np.nan)
     if not np.isfinite(d).all(): d = TKS._dist(np.asarray(tr['lat'])[ok], np.asarray(tr['lon'])[ok])
     return d, t
+
+
+# --- what is nearest to a point you click on the map ----------------------------------------------------------------------------------------------------------------------------------------
+NEAR_RADII = (100.0, 250.0, 500.0)          # metres: the search widens until enough capture runs are found
+GOOGLE_RING_M = (20.0, 45.0, 80.0)
+
+
+def _box(lat, lon, r):
+    dl = r / 111320.0; dn = r / (111320.0 * math.cos(math.radians(lat))); return lon - dn, lat - dl, lon + dn, lat + dl
+
+
+def _frames_mapillary(lat, lon, r, token, get):
+    w, s, e, n = _box(lat, lon, r); out = []
+    for x in get(GRAPH, dict(access_token=token, bbox=f'{w},{s},{e},{n}', fields=FIELDS, limit=2000)).get('data', []):
+        g = (x.get('computed_geometry') or x.get('geometry') or {}).get('coordinates')
+        if g: out.append(dict(seq=x.get('sequence') or x['id'], id=x['id'], lat=g[1], lon=g[0], compass=x.get('compass_angle'), pano=bool(x.get('is_pano')), t=(x.get('captured_at') or 0) / 1000 or None,
+                              camera=' '.join(v for v in (x.get('make'), x.get('model')) if v and v != 'none') or None, size=[x['width'], x['height']] if x.get('width') else None, url=None))
+    return out
+
+
+def _frames_panoramax(lat, lon, r, token, get):
+    w, s, e, n = _box(lat, lon, r); out = []
+    for f in get(PANORAMAX, dict(bbox=f'{w},{s},{e},{n}', limit=1000)).get('features', []):
+        g = f['geometry']['coordinates']; p = f.get('properties', {}); cam = p.get('pers:interior_orientation') or {}; size = cam.get('sensor_array_dimensions') or []; t = None
+        try: t = dt.datetime.fromisoformat(p['datetime'].replace('Z', '+00:00')).timestamp()
+        except (KeyError, ValueError): pass
+        out.append(dict(seq=f.get('collection') or f['id'], id=f['id'], lat=g[1], lon=g[0], compass=p.get('view:azimuth'), pano=cam.get('field_of_view') == 360 or (len(size) == 2 and size[0] >= 1.9 * size[1]), t=t,
+                        camera=' '.join(v for v in (cam.get('camera_manufacturer'), cam.get('camera_model')) if v) or None, size=list(size) if len(size) == 2 else None, url=((f.get('assets') or {}).get('sd') or {}).get('href')))
+    return out
+
+
+def _groups(frames, lat, lon, n):
+    """The capture runs (sequences) among `frames`, nearest first: [{frames: [...], nearest: frame, count, spacing_m}], each frame with its distance in metres from the point; at most n."""
+    by = collections.defaultdict(list)
+    for f in frames: f['distance_m'] = round(_metres((lat, lon), (f['lat'], f['lon'])), 1); by[f['seq']].append(f)
+    out = []
+    for seq, fs in by.items():
+        pts = np.array([[f['lat'], f['lon']] for f in fs]); gaps = []
+        if len(fs) > 1:
+            for i in range(len(fs)): gaps.append(min(_metres((pts[i][0], pts[i][1]), (pts[j][0], pts[j][1])) for j in range(len(fs)) if j != i))
+        out.append(dict(seq=seq, nearest=min(fs, key=lambda f: f['distance_m']), count=len(fs), spacing_m=round(float(np.median(gaps)), 1) if gaps else None))
+    return sorted(out, key=lambda g: g['nearest']['distance_m'])[:n]
+
+
+def _google_near(lat, lon, n, key, get):
+    """The panoramas nearest the point: Google only answers with the single nearest to a spot, so ask at the point and on rings round it."""
+    spots = [(lat, lon)] + [(lat + r * math.cos(math.radians(a)) / 111320.0, lon + r * math.sin(math.radians(a)) / (111320.0 * math.cos(math.radians(lat)))) for r in GOOGLE_RING_M for a in range(0, 360, 45)]
+    found = {}
+    for la, lo in spots:
+        m = get(GOOGLE_META, dict(location=f'{la:.6f},{lo:.6f}', radius=30, source='outdoor', key=key))
+        if m.get('status') not in ('OK', 'ZERO_RESULTS'): raise RuntimeError(f'Google refused the Street View lookup: {m.get("status")} {m.get("error_message", "")[:120]}')
+        if m.get('status') == 'OK' and m['pano_id'] not in found:
+            try: t = dt.datetime.strptime(m.get('date', ''), '%Y-%m').replace(tzinfo=dt.timezone.utc).timestamp()
+            except ValueError: t = None
+            found[m['pano_id']] = dict(seq='g', id=m['pano_id'], lat=m['location']['lat'], lon=m['location']['lng'], compass=None, pano=True, t=t, camera='Google Street View car', size=None, url=None)
+    gs = [dict(seq=f['id'], nearest=dict(f, distance_m=round(_metres((lat, lon), (f['lat'], f['lon'])), 1)), count=1, spacing_m=None) for f in found.values()]
+    return sorted(gs, key=lambda g: g['nearest']['distance_m'])[:n]
+
+
+def _rule(key, ok, text): return dict(key=key, ok=ok, text=text)
+
+
+def describe_near(prov, g, radius, secs, ctx):
+    """One capture run near the point as the page shows it, with the rules that would rule it out (as for the sections found along the run): each {key, ok (True / False / None unknown), text}. `ctx`: tr (the race track or None), roads (the roads doc or None), clips, gaps."""
+    f = g['nearest']; tr = ctx.get('tr'); rules = []; run_d = run_km = run_t = bearing = None
+    if tr is not None:
+        d, t = track_dist(tr); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); la, lo = np.asarray(tr['lat'])[ok], np.asarray(tr['lon'])[ok]
+        k = math.cos(math.radians(f['lat'])); dd = np.hypot((la - f['lat']) * 111320.0, (lo - f['lon']) * 111320.0 * k); i = int(np.argmin(dd)); run_d, run_km, run_t = float(dd[i]), float(d[i]) / 1000.0, float(t[i])
+        j0, j1 = max(0, i - 25), min(len(la) - 1, i + 25); bearing = _bearing((la[j0], lo[j0]), (la[j1], lo[j1])) if j1 > j0 else None
+    kind = '360' if f['pano'] else '2d'; sec = next((s for s in secs if s['provider'] == prov and s['seq'] == g['seq'] and run_km is not None and s['km0'] - 0.03 <= run_km <= s['km1'] + 0.03), None)
+    rules.append(_rule('near_run', None if run_d is None else run_d <= ON_ROAD_M, 'there is no race track yet' if run_d is None else f"{run_d:.0f} m from the run's track (pictures count within {ON_ROAD_M:g} m)"))
+    stretches = (ctx.get('roads') or {}).get('stretches')
+    rules.append(_rule('on_road', None if stretches is None or run_km is None else any(s['km0'] <= run_km <= s['km1'] for s in stretches),
+                       'the road parts have not been found yet' if stretches is None else 'no race track yet' if run_km is None else (f"the run was on a road there (km {run_km:.2f})" if any(s['km0'] <= run_km <= s['km1'] for s in stretches) else f"the run was not on a road part there (km {run_km:.2f}): a trail, a path or off the roads")))
+    if f['pano']: rules.append(_rule('direction', True, 'a 360 camera sees every way'))
+    elif f.get('compass') is None or bearing is None: rules.append(_rule('direction', None, 'the way the camera faced or the way the runner went is not known'))
+    else:
+        rel = _rel(f['compass'], bearing); rules.append(_rule('direction', abs(rel) <= 45, f"the flat camera faced {direction(rel)} of the way the runner went ({abs(rel):.0f}° off)" ))
+    if sec is not None: rules.append(_rule('pictures', sec['plausible'], f"part of section {sec['id']}: " + (sec['why_not'] if not sec['plausible'] else f"{sec['frames']} pictures, {sec['spacing_m']} m apart, enough for a clip")))
+    elif prov != 'google':                                                                                    # (a Google panorama is one point on the road, not a run of pictures)
+        enough = g['count'] >= MIN_FRAMES and g['spacing_m'] is not None and g['spacing_m'] <= MAX_SPACING_M
+        rules.append(_rule('pictures', enough, f"{g['count']} picture{'s' if g['count'] != 1 else ''} of this capture run within {radius:.0f} m" + (f", {g['spacing_m']:.0f} m apart" if g['spacing_m'] is not None else '') + f" (a clip needs {MIN_FRAMES} or more, {MAX_SPACING_M:g} m apart or less, along {MIN_LENGTH_M} m of the run)"))
+    if run_t is not None and f.get('t') and prov != 'google': lt = light_between(f['lat'], f['lon'], f['t'], run_t); rules.append(_rule('light', lt['warning'] is None, lt['warning'] or f"the light fits: {sun_phrase(lt['captured_sun'])} when filmed, {sun_phrase(lt['race_sun'])} when you passed"))
+    else: rules.append(_rule('light', None, 'Google gives only the month it was taken' if prov == 'google' else 'the time it was filmed or the time you passed is not known'))
+    if run_t is not None and ctx.get('clips') is not None:
+        nc = nearest_clips(dict(passed=[run_t - 5, run_t + 5]), ctx['clips'], tr, ctx.get('gaps')); rules.append(_rule('footage', not nc['overlaps'], f"overlaps camera clip {', '.join(nc['overlaps'])}" if nc['overlaps'] else (f"fills gap {nc['in_gap']}" if nc['in_gap'] else 'between camera clips')))
+    if prov == 'google': rules.append(_rule('terms', False, "Google's terms do not allow its pictures in a film (they can be looked at only)"))
+    if sec is not None and sec.get('quality') and sec['quality'].get('grade'): rules.append(_rule('quality', sec['quality']['grade'] != 'poor', f"clip quality {sec['quality']['grade']} ({sec['quality']['score']})"))
+    return dict(provider=prov, id=f['id'], sequence=g['seq'], lat=round(f['lat'], 6), lon=round(f['lon'], 6), distance_m=f['distance_m'], kind=kind, camera=f.get('camera'), size=f.get('size'), captured=f.get('t'), compass=f.get('compass'), pictures=g['count'], spacing_m=g['spacing_m'],
+                section=sec['id'] if sec else None, run_distance_m=None if run_d is None else round(run_d, 1), run_km=None if run_km is None else round(run_km, 3), passed=run_t, url=f.get('url'), rules=rules, usable=all(r['ok'] is not False for r in rules), ruled_out=[r['text'] for r in rules if r['ok'] is False])
+
+
+def near_point(rd, lat, lon, n=5, tr=None, clips=None, gaps=None, get=_get, token=None, gkey=None):
+    """The street view nearest (as the crow flies) to a point, from each provider, whatever the run did there: the `n` nearest capture runs of Mapillary and Panoramax (the search widens from NEAR_RADII until there are enough) and the nearest panoramas of Google,
+    each with the rules that would rule it out. No filters. {lat, lon, n, providers: {name: {items, radius_m, error?}}}."""
+    docs = {p: load(rd, p) for p in PROVIDERS}; secs = annotate(rd, docs, tr, clips, gaps); ctx = dict(tr=tr, roads=load(rd, 'roads'), clips=clips, gaps=gaps); out = {}
+    for prov, fetch, key in (('mapillary', _frames_mapillary, token), ('panoramax', _frames_panoramax, True), ('google', None, gkey)):
+        if not key: out[prov] = dict(items=[], radius_m=None, error=('no MAPILLARY_TOKEN in secrets.env' if prov == 'mapillary' else 'no GOOGLE_MAPS_API_KEY in secrets.env')); continue
+        try:
+            if prov == 'google': groups, radius = _google_near(lat, lon, n, gkey, get), GOOGLE_RING_M[-1] + 30
+            else:
+                for radius in NEAR_RADII:
+                    groups = _groups(fetch(lat, lon, radius, token, get), lat, lon, n)
+                    if len(groups) >= n: break
+        except RuntimeError as e: out[prov] = dict(items=[], radius_m=None, error=str(e)); continue
+        out[prov] = dict(items=[describe_near(prov, g, radius, secs, ctx) for g in groups], radius_m=radius)
+    return dict(lat=lat, lon=lon, n=n, providers=out)
+
+
+def image_near(rd, provider, item, w=256, fetch=_bytes, get=_get):
+    """JPEG bytes of a picture found by `near_point` (`item` has id, url for Panoramax, compass for Google): Mapillary and Panoramax kept in streetview/img/, Google fetched each time and not kept."""
+    if provider == 'google':
+        key = _key('GOOGLE_MAPS_API_KEY')
+        if not key: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
+        return fetch('https://maps.googleapis.com/maps/api/streetview', dict(size='640x400', pano=item['id'], heading=item.get('compass') or 0, fov=90, pitch=0, key=key))
+    w = 256 if w <= 256 else 1024 if w <= 1024 else 2048; f = os.path.join(adir(rd), 'img', f"{provider[0]}-{item['id']}-{w}.jpg")
+    if os.path.exists(f): return open(f, 'rb').read()
+    if provider == 'mapillary':
+        tok = _key('MAPILLARY_TOKEN')
+        if not tok: raise RuntimeError('mapillary: no MAPILLARY_TOKEN in secrets.env')
+        url = get(f"https://graph.mapillary.com/{item['id']}", dict(access_token=tok, fields=f'thumb_{w}_url')).get(f'thumb_{w}_url')
+        if not url: raise RuntimeError('mapillary has no picture for this frame')
+    else:
+        url = item.get('url')
+        if not url: raise RuntimeError('panoramax gave no picture address for this frame')
+    data = fetch(url); os.makedirs(os.path.dirname(f), exist_ok=True); tmp = f'{f}.{os.getpid()}.tmp'; open(tmp, 'wb').write(data); os.replace(tmp, f); return data
