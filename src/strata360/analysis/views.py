@@ -208,6 +208,21 @@ def _speaker_at(segs, t):
     return None
 
 
+_STAB = {}
+
+
+def stab_fn(osv):
+    """clip time (seconds from the first frame) -> the 3x3 matrix that turns a direction of the upright world frame into the camera's body frame at that frame (`d_body = M d_E`, as StabViews uses), from the camera's orientation of every frame (50 Hz). Cached per file; None when the file cannot be read."""
+    if osv in _STAB: return _STAB[osv]
+    try:
+        from strata360.osv.calib import quat_to_R, imu_offsets
+        from strata360.osv.telemetry import read_frames, video_pts
+        P, B = imu_offsets(); T = read_frames(osv); Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); pts = np.asarray(video_pts(osv, 0), float); pts = pts - pts[0]
+        def M(t): return Ms[int(np.clip(np.searchsorted(pts, float(t) - 1e-4), 0, min(len(Ms), len(pts)) - 1))]
+    except Exception: M = None
+    _STAB[osv] = M; return M
+
+
 def face_offsets(me):
     """(pitch above the person's box centre, yaw beside it), in degrees, of the CENTRE OF THE FACE (the middle of the detected head, between the eyes and the nose) for one identity sample; (None, None) when the face box or the person box is missing. The person box [x0, y0, x1, y1] is `height_deg` tall, which
     gives the degrees per pixel of the detector's view; the face box sits inside it."""

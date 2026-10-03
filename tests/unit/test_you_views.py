@@ -133,3 +133,17 @@ def test_the_close_view_centres_the_face_where_the_detector_found_it_and_is_a_li
 def test_the_close_view_is_for_dialogue_and_used_at_most_three_times_while_the_mid_view_has_a_bias():
     from strata360.edit import chrono as CH
     assert LIB['selfie_close'].max_uses == 3 and LIB['selfie_close'].max_share <= 0.06 and CH.Settings().tech_bias['selfie_hold'] > 0 and 'selfie_close' not in CH.Settings().tech_bias
+
+
+def test_you_are_tracked_at_the_frame_rate_through_the_cameras_own_motion_and_the_window_shortens_where_you_move_about():
+    from strata360.edit import framing as FR
+    # a camera that swings about its vertical axis by up to 40 degrees while you stay 2 m in front of it (fixed in the body frame): the detections (1 Hz) are where you are IN THE WORLD
+    swing = lambda t: np.radians(40.0) * np.sin(2 * np.pi * 0.7 * t)
+    def stab(t):
+        a = swing(t); return np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])           # d_body = M d_world
+    world_yaw = lambda t: float(np.degrees(np.arctan2(*(stab(t).T @ np.array([0.0, 1.0, 0.0]))[:2])))              # you are straight ahead in the body frame
+    samples = [dict(t=float(t), yaw=world_yaw(t), pitch=0.0) for t in range(0, 12)]
+    abs_t = np.arange(2.0, 8.0, 0.04); yaw, pitch = FR.you_track(samples, stab, abs_t); truth = np.array([np.radians(world_yaw(t)) for t in abs_t])
+    err = np.degrees(np.abs(((yaw - truth + np.pi) % (2 * np.pi)) - np.pi)); assert err.max() < 1.0 and np.abs(pitch).max() < 1e-6                     # frame-rate truth although the detections are a second apart
+    assert FR.you_track(samples[:1], stab, abs_t) is None and FR.you_track(samples, None, abs_t) is None
+    far = FR.you_track(samples, stab, np.array([40.0])); assert np.isnan(far[0][0])                              # no detection within 2.5 s: nothing

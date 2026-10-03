@@ -23,6 +23,7 @@ NO_SUBJECT = {'follow_runner', 'planet_fill', 'planet_globe', 'planet_fill_zoom_
 TIGHT = {'push_in', 'dialogue_hold'}
 YOU_VIEWS = {'selfie_hold', 'selfie_close', 'selfie_far'}      # the three views of you (mid, close, far)
 STEP_S = 0.1
+TRACK_STEP_S = 0.04          # the You views are tracked at this step (25 Hz)
 
 
 def _coverage(samples, t0, t1):
@@ -43,6 +44,25 @@ def _track(samples, t0, t1):
     if np.isnan(hd).all(): hd = None
     else: hd = np.where(np.isnan(hd), np.nan, hd)
     return np.array([x['t'] for x in s]), np.unwrap(np.radians([x['yaw'] for x in s])), np.radians([x['pitch'] for x in s]), np.array(h, float), hd
+
+
+def you_track(samples, stab, abs_t, base_s=3.0, floor_s=0.6, dev_deg=4.0):
+    """Where you are, at every time of `abs_t`, as (yaw, pitch) in radians in the world frame, or None. The detections come about once a second, far too seldom to follow a runner, but the camera is on a stick in your hand, so you are nearly FIXED in the camera's own (body) frame while the camera
+    swings: each detection is turned into the body frame (with the camera's orientation of that moment, `stab`: 50 Hz), those are smoothed in time, and the smoothed body direction is turned back into the world with the orientation of every frame. The smoothing follows the motion: where you move about in the
+    body frame (the detections around a sample disagree by `dev_deg` or more) the window shortens, down to `floor_s`; where you are steady it is `base_s` long. NaN where no detection is within 2.5 s."""
+    from strata360.render.camera import direction
+    s = sorted((x for x in samples), key=lambda x: x['t'])
+    if len(s) < 2 or stab is None: return None
+    ts = np.array([x['t'] for x in s]); vb = np.array([stab(x['t']) @ direction(np.radians(x['yaw']), np.radians(x['pitch'])) for x in s]); n = len(s)
+    ang = lambda a, b: np.degrees(np.arccos(np.clip(np.sum(a * b, axis=-1), -1.0, 1.0)))
+    dev = np.zeros(n); dev[1:-1] = ang(vb[:-2], vb[2:]) if n > 2 else 0.0
+    if n > 2: dev[0], dev[-1] = dev[1], dev[-2]
+    sig = np.clip(base_s / (1.0 + dev / dev_deg), floor_s, base_s); abs_t = np.asarray(abs_t, float)
+    w = np.exp(-0.5 * ((abs_t[:, None] - ts[None, :]) / sig[None, :]) ** 2) / sig[None, :]; near = np.min(np.abs(abs_t[:, None] - ts[None, :]), axis=1) <= 2.5
+    v = w @ vb; norm = np.linalg.norm(v, axis=1); ok = near & (norm > 1e-9); yaw = np.full(len(abs_t), np.nan); pitch = np.full(len(abs_t), np.nan)
+    for i in np.flatnonzero(ok):
+        d = stab(abs_t[i]).T @ (v[i] / norm[i]); yaw[i] = np.arctan2(d[0], d[1]); pitch[i] = np.arcsin(np.clip(d[2], -1.0, 1.0))
+    return yaw, pitch
 
 
 def _face(samples, key, abs_t):
@@ -72,7 +92,7 @@ def clip_data(folder, clip):
     d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = cj['source_files']['osv']
     sp = os.path.join(d, 'speakers.json')
     from strata360.analysis.exposure import load_quality
-    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv))
+    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv))
 
 
 def choose_subject(g, tech, data):
@@ -140,10 +160,12 @@ def resolve_segment(g, lib, data):
         why = 'there is no quality grid for this clip yet (the quality stage): looking straight ahead'; subject = 'heading'
     if subject in ('person', 'you'):
         ts, yw, pt, hh, hd = _track(data[subject], t0, t0 + T)
-        times = np.arange(0.0, T + 1e-9, STEP_S); abs_t = t0 + times
+        tracking = subject == 'you' and tech.id in YOU_VIEWS and data.get('stab') is not None and len(ts) >= 2 and os.environ.get('STRATA_YOU_TRACK') != '0'          # follow you at the frame rate through the camera's own motion (you_track)
+        times = np.arange(0.0, T + 1e-9, TRACK_STEP_S if tracking else STEP_S); abs_t = t0 + times
         if len(ts) >= 2: y = np.interp(abs_t, ts, yw); p = np.interp(abs_t, ts, pt); h = np.interp(abs_t, ts, hh); hdd = _head(abs_t, ts, hd)
         elif len(ts) == 1: y = np.full(len(times), yw[0]); p = np.full(len(times), pt[0]); h = np.full(len(times), hh[0]); hdd = _head(abs_t, ts, hd)
         else: subject = 'heading'
+        y_plain = y.copy() if subject != 'heading' else None
         if subject == 'you' and tech.id == 'selfie_close':                                                  # sideways too: the centre of the face, not the middle of the body
             fdy = _face(data[subject], 'face_dyaw', abs_t); y = y + np.radians(np.where(np.isfinite(fdy), fdy, 0.0))
     if subject not in ('person', 'you'):
@@ -161,9 +183,15 @@ def resolve_segment(g, lib, data):
         tp = np.array([aimer(float(np.degrees(p[i])), float(h[i]), AIM.vfov_deg(float(ev['fov'][i])), None if np.isnan(hdd[i]) else float(hdd[i])) for i in range(len(times))])
         if tech.id == 'selfie_close':                                                                    # the close view puts the CENTRE OF THE FACE (between the eyes and the nose) in the middle of the frame, where the detector found it; the head-top estimate is only the fallback
             fp = _face(data[subject], 'face', abs_t); tp = np.where(np.isfinite(fp), fp, tp)
-        fy, fp = AIM.follow(times, ty, tp, scale=min(1.0, float(np.mean(ev['fov'])) / 85.0))                                # a narrower view has a narrower dead band
-        fy = np.degrees(np.unwrap(np.radians(fy)))
-        kf = [dict(t=round(float(tt), 3), yaw=round(float(np.degrees(ev['yaw'][i]) + fy[i] - fy[0]), 2), pitch=round(float(np.clip(fp[i], -60, 60)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')
+        trk = you_track(data[subject], data.get('stab'), abs_t) if tracking else None; tracked = False
+        if trk is not None and np.isfinite(trk[0]).any():                                                      # tracked: you stay put in the frame while the camera swings; the head-room (or the face centre) is added as the slow offset it is
+            yd, pd = trk; okt = np.isfinite(yd); yd = np.where(okt, yd, np.interp(times, times[okt], np.unwrap(yd[okt]))); pd = np.where(okt, pd, np.interp(times, times[okt], pd[okt]))
+            fy = np.degrees(np.unwrap(yd)) + (np.degrees(y) - np.degrees(y_plain)); fp = np.degrees(pd) + (tp - np.degrees(p))
+            fy, fp = gaussian_filter1d(fy, 0.12 / TRACK_STEP_S, mode='nearest'), gaussian_filter1d(fp, 0.12 / TRACK_STEP_S, mode='nearest'); tracked = True            # a little: the detections' own noise
+        else:
+            fy, fp = AIM.follow(times, ty, tp, scale=min(1.0, float(np.mean(ev['fov'])) / 85.0))                                # a narrower view has a narrower dead band
+            fy = np.degrees(np.unwrap(np.radians(fy)))
+        kf = [dict(t=round(float(tt), 3), yaw=round(float(fy[i] if tracked else np.degrees(ev['yaw'][i]) + fy[i] - fy[0]), 2), pitch=round(float(np.clip(fp[i], -60, 60)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')
               for i, tt in enumerate(times)]
         path = dict(ref='world', keyframes=kf)
     path['subject'] = subject; path['why'] = why
