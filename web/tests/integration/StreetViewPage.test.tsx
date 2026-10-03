@@ -105,7 +105,7 @@ describe('the sections that could be used in the film', () => {
   it('lists only the plausible sections, with details, previews and a count of the rest', async () => {
     serve(); setup(<StreetViewPage folder="/data" />)
     const card = await screen.findByLabelText('Sections that could be used'); expect(within(card).getAllByRole('listitem').filter(l => l.hasAttribute('data-section'))).toHaveLength(1)
-    const m1 = card.querySelector('[data-section="M1"]')!; expect(m1).toHaveTextContent('Mapillary M1 · 2D'); expect(m1).toHaveTextContent('km 1.2 to 1.5'); expect(m1).toHaveTextContent('300 m of road that matches the run'); expect(m1).toHaveTextContent('4 pictures, one every 100 m'); expect(m1).toHaveTextContent('clip of 2 to 1 s (longest = 4 pictures a second blended up to 30 frames a second; shortest = 24 a second)'); expect(m1).toHaveTextContent('faces forward 3 · back 1')
+    const m1 = card.querySelector('[data-section="M1"]')!; expect(m1).toHaveTextContent('Mapillary M1 · 2D'); expect(m1).toHaveTextContent('km 1.2 to 1.5'); expect(m1).toHaveTextContent('300 m of road that matches the run'); expect(m1).toHaveTextContent('steadied: by matching only (may still wobble)'); expect(m1).toHaveTextContent('4 pictures, one every 100 m'); expect(m1).toHaveTextContent('clip of 2 to 1 s (the longest is 4 pictures a second blended up to 30 frames a second; a shorter one is the same road played faster)'); expect(m1).toHaveTextContent('faces forward 3 · back 1')
     expect(within(m1 as HTMLElement).getAllByRole('img').length).toBeGreaterThanOrEqual(2); expect(card).toHaveTextContent('1 of 2 sections have enough pictures'); expect(card).toHaveTextContent('1 more sections are too short or too sparse')
   })
 

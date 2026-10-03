@@ -197,7 +197,7 @@ function List({ title, sections, sel, onSel, none }: { title: string; sections: 
   )
 }
 
-const SLOWEST = 4, FASTEST = 24
+const SLOWEST = 4
 const CHOICES: { v: SvChoice | 'none'; label: string }[] = [{ v: 'none', label: 'Not used' }, { v: 'possible', label: 'Possible' }, { v: 'must', label: 'Must include' }]
 
 /** The sections that could make a clip, each with its pictures and a choice for the film: not used, possible (the writer may use it) or must include. Sections over the same road say so. */
@@ -215,7 +215,8 @@ function Candidates({ folder, sections, sel, onSel, onChoose }: { folder: string
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               <button className="font-medium underline" onClick={() => onSel({ kind: 'section', id: s.id })}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[s.provider] }} />{NAME[s.provider]} {s.id} · {kindLabel(s)}</button>
               <span>{span(s)} · {metres(s.length_m)} of road that matches the run · {s.frames} pictures, one every {s.spacing_m} m{s.years.length ? ` · ${s.years.join(', ')}` : ''}{s.size ? ` · ${s.size[0]}×${s.size[1]}` : ''}</span>
-              <span className="text-stone-600 dark:text-stone-400">clip of {s.min_s} to {s.max_s} s (longest = {SLOWEST} pictures a second blended up to 30 frames a second; shortest = {FASTEST} a second){s.kind === '2d' ? ` · faces ${facing(s)}` : ''}</span>
+              <span className="text-stone-600 dark:text-stone-400">clip of {s.min_s} to {s.max_s} s (the longest is {SLOWEST} pictures a second blended up to 30 frames a second; a shorter one is the same road played faster){s.kind === '2d' ? ` · faces ${facing(s)}` : ''}</span>
+              <span className={s.steadied === 'by matching only' ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}>steadied: {s.steadied}{s.steadied === 'by matching only' ? ' (may still wobble)' : ''}</span>
               {s.label && <span className="rounded bg-emerald-700 px-1.5 text-xs text-white">called {s.label} in the script</span>}
             </div>
             {s.overlaps.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}

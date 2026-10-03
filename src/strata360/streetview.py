@@ -1,7 +1,7 @@
 """Street view for the race: which parts of the run were on a road, and what street-level imagery exists along them, from three providers. Stored in `<race_dir>/streetview/`:
   roads.json       stage `roads`: the stretches of the run track on a drivable road (gps/roads.py, OpenStreetMap through the cached mirror pool), each with its line, plus the whole run thinned for the map.
   <provider>.json  one stage per provider (`mapillary`, `panoramax`, `google`): the SECTIONS of imagery on those stretches. A section is one capture run (a Mapillary / Panoramax sequence, or a run of Google panoramas) along one stretch:
-                   {id, provider, stretch, kind '360' | '2d', km0, km1, length_m, frames, spacing_m, year, camera, size, angles, items: [{id, km, lat, lon, a, b, t, u}]}.
+                   {id, provider, stretch, kind '360' | '2d', km0, km1, length_m, frames, spacing_m, year, camera, size, angles, items: [{id, km, lat, lon, a, b, c, t, u, h}]}.
                    For a flat ('2d') camera `a` is the way the camera faced relative to the way the runner went (0 = the same way, 90 = to the right, 180 = back at the runner) and `angles` counts the frames facing forward / right / back / left;
                    a 360 camera sees every way. `b` is the runner's bearing at that frame (to aim a panorama).
 Mapillary and Panoramax images are CC BY-SA (credit them); Google's terms do not allow keeping or re-using its imagery, so its pictures are only fetched for display and never kept on disk (server/app.py).
@@ -104,7 +104,7 @@ def sections_of(provider, stretch, frames):
             sec = dict(provider=provider, stretch=stretch['id'], kind='360' if pano else '2d', km0=round(r[0]['km'], 3), km1=round(r[-1]['km'], 3), length_m=int(round((r[-1]['km'] - r[0]['km']) * 1000)), frames=len(r),
                        spacing_m=round(float(np.median(gaps)), 1) if gaps else None, years=years, camera=camera[0][0] if camera else None, size=list(size[0][0]) if size else None, seq=seq,
                        angles=None if pano else dict(collections.Counter(direction(f['a']) for f in r if f['a'] is not None)),
-                       items=[{k: v for k, v in dict(id=f['id'], km=round(f['km'], 3), lat=round(f['lat'], 6), lon=round(f['lon'], 6), a=None if f['a'] is None else round(f['a']), b=round(f['b']), t=f['t'], u=f.get('u')).items() if v is not None} for f in r])
+                       items=[{k: v for k, v in dict(id=f['id'], km=round(f['km'], 3), lat=round(f['lat'], 6), lon=round(f['lon'], 6), a=None if f['a'] is None else round(f['a']), b=round(f['b']), t=f['t'], u=f.get('u'), h=f.get('h'), c=None if f.get('c') is None else round(f['c'], 1)).items() if v is not None} for f in r])
             out.append(sec)
     return out
 
@@ -141,7 +141,7 @@ def find_mapillary(rdoc, token, get=_get, log=print):
             km, dist, b = line.locate((g[1], g[0]))
             if dist > ON_ROAD_M: continue
             pano = bool(x.get('is_pano')); ang = x.get('compass_angle')
-            frames.append(dict(seq=x.get('sequence') or x['id'], km=km, lat=g[1], lon=g[0], a=None if pano or ang is None else _rel(ang, b), b=b, t=(x.get('captured_at') or 0) / 1000 or None, id=x['id'], pano=pano,
+            frames.append(dict(seq=x.get('sequence') or x['id'], km=km, lat=g[1], lon=g[0], a=None if pano or ang is None else _rel(ang, b), b=b, c=ang, t=(x.get('captured_at') or 0) / 1000 or None, id=x['id'], pano=pano,
                                camera=' '.join(v for v in (x.get('make'), x.get('model')) if v and v != 'none') or None, size=[x['width'], x['height']] if x.get('width') else None))
         out += sections_of('mapillary', st, frames)
     log(f'mapillary: {len(out)} sections'); return _number(out)
@@ -158,8 +158,8 @@ def find_panoramax(rdoc, get=_get, log=print):
             t = None
             try: t = dt.datetime.fromisoformat(p['datetime'].replace('Z', '+00:00')).timestamp()
             except (KeyError, ValueError): pass
-            az = p.get('view:azimuth'); a = (f.get('assets') or {}).get('sd') or (f.get('assets') or {}).get('hd') or {}
-            frames.append(dict(seq=f.get('collection') or f['id'], km=km, lat=g[1], lon=g[0], a=None if pano or az is None else _rel(az, b), b=b, t=t, id=f['id'], u=a.get('href'), pano=pano,
+            az = p.get('view:azimuth'); assets = f.get('assets') or {}; a = assets.get('sd') or assets.get('hd') or {}
+            frames.append(dict(seq=f.get('collection') or f['id'], km=km, lat=g[1], lon=g[0], a=None if pano or az is None else _rel(az, b), b=b, c=az, t=t, id=f['id'], u=a.get('href'), h=(assets.get('hd') or {}).get('href'), pano=pano,
                                camera=' '.join(v for v in (cam.get('camera_manufacturer'), cam.get('camera_model')) if v) or None, size=list(size) if len(size) == 2 else None))
         out += sections_of('panoramax', st, frames)
     log(f'panoramax: {len(out)} sections'); return _number(out)
@@ -269,13 +269,19 @@ def image(rd, provider, doc, item_id, w=640, fetch=_bytes, get=_get):
 # --- which sections are worth showing, which overlap, and what you chose ----------------------------------------------------------------------------------------------------------
 MIN_FRAMES, MIN_LENGTH_M, MAX_SPACING_M = 30, 150, 10.0       # a section is plausible when it has this many pictures (2 s of film at 15 a second), is this long and has pictures no further apart than this
 PLAY_FPS = 15                                                    # how many source pictures a second the film shows
-FASTEST, SLOWEST = 24.0, 4.0                                      # pictures a second: the fastest a section can be played (a picture for each frame of the film) and the slowest that still blends smoothly (the rest made by blending neighbours)
+SLOWEST = 4.0                                                    # pictures a second: the slowest a section can be played and still blend smoothly (the film's frames in between are made by blending neighbours). There is no fastest: pictures are just skipped
 CHOICES = ('possible', 'must')
 
 
 def clip_range(s):
-    """(shortest, longest) clip in seconds the section can make: its pictures all play, as fast as FASTEST a second (never under 2 s) or as slowly as SLOWEST a second blended up to the film's frame rate. Only the part that matches the run's GPS is counted (the pictures are within ON_ROAD_M of it)."""
-    return round(max(2.0, s['frames'] / FASTEST), 1), round(s['frames'] / SLOWEST, 1)
+    """(shortest, longest) clip in seconds the section can make: as short as any clip may be (2 s: played faster, with pictures skipped) up to the slowest it can go, SLOWEST pictures a second blended up to the film's frame rate. Only the part that
+    matches the run's GPS is counted (the pictures are within ON_ROAD_M of it)."""
+    return 2.0, round(s['frames'] / SLOWEST, 1)
+
+
+def steadying(s):
+    """How well the clip's camera can be kept steady: 'exact' (a 360 camera whose true rotation Mapillary reconstructed), 'estimated' (a 360 camera levelled from the picture itself) or 'by matching only' (a flat camera: the far field of neighbouring pictures is matched, and it may still wobble)."""
+    return 'by matching only' if s['kind'] != '360' else 'exact' if s['provider'] == 'mapillary' else 'estimated'
 
 
 def section_key(s): return f"{s['provider']}:{s['seq']}:{s['km0']:.2f}"                  # stays the same when the stage is run again (the numbers M1.. may move)
@@ -325,10 +331,18 @@ def annotate(rd, docs):
     out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
+        s['steadied'] = steadying(s); s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
 
 
 def chosen(rd, docs):
     """The sections chosen for the film (and plausible), in km order, each with its label V1..."""
     return [s for s in annotate(rd, docs) if s['choice'] and s['plausible'] and s['label']]
+
+
+def track_dist(tr):
+    """(dist, t) arrays of the race track, over the fixes that have a position and a time: the distance along the run in metres (the track's own, or worked out from the positions when a GPX has none)."""
+    from strata360.gps import tracks as TKS
+    ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); t = np.asarray(tr['t'])[ok]; d = np.asarray(tr['dist'], float)[ok] if 'dist' in tr else np.full(int(ok.sum()), np.nan)
+    if not np.isfinite(d).all(): d = TKS._dist(np.asarray(tr['lat'])[ok], np.asarray(tr['lon'])[ok])
+    return d, t

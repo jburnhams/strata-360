@@ -30,6 +30,7 @@ THE KINDS OF ITEM, played one after another in the order you write them (never a
 - "broll": picture of that clip with no speech (music only), for a number of seconds you choose.
 - "gap": a generated clip for a gap in the footage (a clip marked NO FOOTAGE): "clip" is its name (G01, G02 ...), and "seconds" is how long it plays (2 to 45); you do NOT choose how it is drawn (the film's planner picks a 2D map or a 3D terrain flyover for each gap, for variety and for where the land is the story): the gap is shown very fast, the clock, distance, pace and altitude on screen. You may put "vo" over a gap clip. The race is one continuous story, so the passage of time and distance matters: fill MOST gaps of an hour or more with a gap clip (5 to 12 s is enough for most, longer for a long or dramatic gap, 3 to 4 s for a short hop). Leave a gap out only when the clips either side already tell what happened in it. A gap clip needs no narration, but narration over one carries time and distance well. A gap is never a "clip" item.
 - "photo": a photo the runner took (a clip marked PHOTO: P1, P2 ...): "clip" is its name and "seconds" is how long it is shown (2 to 3: a plain picture needs less time than a busy one); the editor pans and zooms on it, aimed at the face, the people or the detail. Photos are optional extras: use the ones that add to the story or the sense of the place (a view, an aid station, a moment you could not film), at the point in the film where they were taken (they are in the clip list in time order), and leave the rest; one the runner marked MUST INCLUDE you must use. You may put "vo" over a photo.
+- "streetview": a steady view along the road, made from street-level pictures (a clip marked STREET VIEW: V1, V2 ...): "clip" is its name and "seconds" is how long it plays, between the two lengths given for it (the whole stretch of road always plays through, so a shorter item is faster). It shows the road the runner was on, with the clock, distance, pace and altitude on screen, so it can stand in for the footage of a stretch that has none. Use one where seeing the road helps: a long road section, a town, a turning point; the runner marked some MUST INCLUDE and you must use those. Check its light: a view filmed in the day looks wrong in the dark. Two sections that cover the same road are alternatives (use at most one). You may put "vo" over one.
 A "clip" or "broll" item may carry "view": "mid" (the usual view of the runner), "close" (a face zoom: for an emotional or intimate line) or "far" (ultra wide: the whole body and the surroundings, for the sense of place, effort or loneliness). A clip lists which views it has ("views of you") and for how much of its time; ask only for a view it has. Without a "view" the editor chooses, and cuts a long talking stretch between the views itself, so ask for one only where it matters.
 Any item may carry "anchor": {"film_s": number, "why": "reason"}: where in the film (in seconds) it should start, when it matters (the start of a sung chorus, the music's biggest section, the last line before the end). An anchor is a wish with a reason, not an exact time; the editor snaps items to the music's bars afterwards and keeps what it can.
 
@@ -56,6 +57,7 @@ SCHEMA = '''Return ONE JSON object and nothing else:
     {"type": "clip",  "clip": "0008", "from": "0008.01", "to": "0008.03", "why": "why these lines belong", "t": 31.0, "view": "close" (optional: mid | close | far)},
     {"type": "broll", "clip": "0009", "seconds": 3.5, "why": "what the picture shows / why it is worth a moment", "t": 34.5},
     {"type": "photo", "clip": "P2", "seconds": 5, "why": "what the photo shows and why it is in the film", "t": 41.5},
+    {"type": "streetview", "clip": "V1", "seconds": 6, "why": "what the road shows and why it is in the film", "t": 44.0},
     {"type": "gap",   "clip": "G03", "seconds": 12, "why": "what the gap holds and why it is shown", "t": 46.5, "anchor": {"film_s": 100, "why": "optional: the chorus starts here"}}
   ],
   "skipped": [{"clip": "0001", "why": "reason"}],
@@ -130,7 +132,7 @@ def check(script, pack, target_s, wpm):
     """(report, problems): durations are recomputed from the pack (the model's arithmetic is not used); `problems` are structural and drive a retry."""
     beat_s = 60.0 / pack['music']['bpm'] if (pack.get('music') or {}).get('bpm') else None
     clips = {c['label']: c for c in pack['clips']}; order = {c['label']: i for i, c in enumerate(pack['clips'])}; by = {l['id']: l for c in pack['clips'] for l in c['lines']}; pos = PN.index(pack)
-    rows = []; anchors = []; items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0, photo=0.0); words_total = 0; last_line = {}
+    rows = []; anchors = []; items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0, photo=0.0, streetview=0.0); words_total = 0; last_line = {}
     for n, it in enumerate(items, 1):
         t = it.get('type'); cl = norm_label(it.get('clip', '')); total_before = total
         if cl not in clips: probs.append(f'item {n}: no such clip {cl}'); continue
@@ -144,7 +146,7 @@ def check(script, pack, target_s, wpm):
             if w > 45: probs.append(f'item {n}: vo of {w} words is too long (limit about 40)')
             if clips[cl].get('synthetic'): d = max(d, clips[cl]['duration_s'])                             # narration over a generated clip plays for the whole clip
         elif t == 'clip':
-            if clips[cl].get('synthetic'): probs.append(f"item {n}: {cl} is a {'photo' if clips[cl].get('photo') else 'gap'} with no words: use a {'photo' if clips[cl].get('photo') else 'gap'} item"); continue
+            if clips[cl].get('synthetic'): kind_ = 'photo' if clips[cl].get('photo') else 'streetview' if clips[cl].get('streetview') else 'gap'; probs.append(f"item {n}: {cl} is a {kind_} with no words: use a {kind_} item"); continue
             sp = span(it, pack)
             if not sp: probs.append(f"item {n}: unknown line id {it.get('from')} or {it.get('to')}"); continue
             a, b = by[sp[0]], by[sp[1]]
@@ -153,9 +155,15 @@ def check(script, pack, target_s, wpm):
             if last_line.get(cl, -1) >= pos[sp[0]]: probs.append(f'item {n}: lines of clip {cl} out of order or overlapping')
             last_line[cl] = pos[sp[1]]; d = b['t1'] - a['t0'] + PAD_S
         elif t == 'broll': d = float(it.get('seconds') or 0)
+        elif t == 'streetview':
+            d = float(it.get('seconds') or 0); c = clips[cl]
+            if not c.get('streetview'): probs.append(f'item {n}: {cl} is not a street view section: a streetview item names one such as V1'); continue
+            lo, hi = c['sv_facts']['min_s'], c['sv_facts']['max_s']
+            if not lo - 1e-6 <= d <= hi + 1e-6: probs.append(f'item {n}: {cl} plays for {lo:g} to {hi:g} seconds, not {d:g}')
         elif t == 'gap':
             d = float(it.get('seconds') or 0); c = clips[cl]
             if not c.get('synthetic'): probs.append(f'item {n}: {cl} is a camera clip, not a gap: a gap item names a gap such as G03'); continue
+            if c.get('photo') or c.get('streetview'): probs.append(f"item {n}: {cl} is not a gap: a gap item names a gap such as G03"); continue
             if not MIN_GAP_S <= d <= MAX_GAP_S: probs.append(f'item {n}: a gap plays for {MIN_GAP_S:g} to {MAX_GAP_S:g} seconds, not {d:g}')
         elif t == 'photo':
             d = float(it.get('seconds') or 0); c = clips[cl]
@@ -176,10 +184,14 @@ def check(script, pack, target_s, wpm):
     for lab, c in clips.items():
         if lab not in per and lab not in skipped and not c.get('synthetic'): probs.append(f'clip {lab} is neither used nor listed under skipped')
         if c.get('photo') and (c.get('settings') or {}).get('must') and lab not in per: probs.append(f'photo {lab} is marked MUST INCLUDE but no item uses it: add a photo item for it')
+        if c.get('streetview') and (c.get('settings') or {}).get('must') and lab not in per: probs.append(f'street view {lab} is marked MUST INCLUDE but no item uses it: add a streetview item for it')
+        if c.get('streetview') and lab in per:
+            for o in (c.get('sv_facts') or {}).get('same_road') or []:
+                if o in per and lab < o: probs.append(f'street view {lab} and {o} cover the same road: use only one of them')
         if lab in per and per[lab] > c['usable_s'] + 0.5: probs.append(f"clip {lab} gets {per[lab]:.1f} s of picture but only {c['usable_s']} s is usable")
         if lab in per and per[lab] < 2.5: probs.append(f'clip {lab} gets only {per[lab]:.1f} s')
     if abs(total - target_s) > TOLERANCE * target_s: probs.append(f'the film is {total:.0f} s by the real durations but the target is {target_s:.0f} s (allowed {(1 - TOLERANCE) * target_s:.0f} to {(1 + TOLERANCE) * target_s:.0f}): ' + ('add' if total < target_s else 'remove') + f' about {abs(target_s - total):.0f} s')
-    rep = dict(total_s=round(total, 1), target_s=round(target_s, 1), vo_s=round(kinds['vo'], 1), clip_s=round(kinds['clip'], 1), broll_s=round(kinds['broll'], 1), gap_s=round(kinds['gap'], 1), photo_s=round(kinds['photo'], 1), vo_words=words_total, claimed_total=(script or {}).get('total_s'),
+    rep = dict(total_s=round(total, 1), target_s=round(target_s, 1), vo_s=round(kinds['vo'], 1), clip_s=round(kinds['clip'], 1), broll_s=round(kinds['broll'], 1), gap_s=round(kinds['gap'], 1), photo_s=round(kinds['photo'], 1), streetview_s=round(kinds['streetview'], 1), vo_words=words_total, claimed_total=(script or {}).get('total_s'),
                clips_used=len(per), clips_skipped=len(skipped), per_clip={k: round(v, 1) for k, v in sorted(per.items())}, rows=[(n, t, cl, round(d, 1), round(tot, 1)) for n, t, cl, d, tot in rows])
     return rep, probs
 
@@ -189,7 +201,7 @@ def resolve(script, pack, wpm):
     by = {l['id']: l for c in pack['clips'] for l in c['lines']}; ids = list(PN.index(pack)); clip_of = {c['label']: c['clip'] for c in pack['clips']}; by_label = {c['label']: c for c in pack['clips']}
     for it in (script or {}).get('items') or []:
         if it.get('type') == 'vo': it['seconds'] = round(max(SP.words(it.get('text', '')) * 60.0 / wpm + VO_PAUSE_S, (by_label.get(norm_label(it.get('clip', ''))) or {}).get('duration_s', 0.0) if (by_label.get(norm_label(it.get('clip', ''))) or {}).get('synthetic') else 0.0), 1)
-        elif it.get('type') in ('broll', 'gap', 'photo'): it['seconds'] = round(float(it.get('seconds') or 0), 1)
+        elif it.get('type') in ('broll', 'gap', 'photo', 'streetview'): it['seconds'] = round(float(it.get('seconds') or 0), 1)
         elif it.get('type') == 'clip':
             sp = span(it, pack)
             if sp:

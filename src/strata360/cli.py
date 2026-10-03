@@ -330,7 +330,8 @@ def cmd_streetview(a):
     from strata360.gps import track
     oslib.lower_priority(); cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
     if not tp: sys.exit('streetview: no race track: add the .fit or .gpx first')
-    try: done = SV.run(config.race_dir(a.name), track.load(tp), [s.strip() for s in a.stages.split(',')] if a.stages else None, a.force)
+    tr = track.load(tp); d, _ = SV.track_dist(tr); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); tr = dict(lat=tr['lat'][ok], lon=tr['lon'][ok], dist=d, t=tr['t'][ok])
+    try: done = SV.run(config.race_dir(a.name), tr, [s.strip() for s in a.stages.split(',')] if a.stages else None, a.force)
     except (ValueError, RuntimeError) as e: sys.exit(f'streetview: {e}')
     print('done: ' + (', '.join(done) or 'nothing to do'))
 

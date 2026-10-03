@@ -126,3 +126,16 @@ def make_photo(entry, seconds, motion, fps=30.0):
     if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
     c = dict(id=pid, kind='photo', photo=entry['id'], gap=None, t0=iso, t1=iso, duration_s=0.0, seconds=round(float(seconds), 2), speedup=1.0, fps=float(fps), style=dict(style=motion['style'], seed=int(motion['seed'])), status='planned', size=PHOTO_SIZE, approved=True, by='planner')
     c['key'] = hashlib.sha1(json.dumps([c['kind'], entry['id'], entry.get('file'), round(c['seconds'], 2), c['fps'], c['style'], PHOTO_SIZE, 1], sort_keys=True).encode()).hexdigest()[:12]; return c
+
+
+STREETVIEW_SIZE = '3840x2160'    # a street view clip is made at 4K (the film scales it down for the preview)
+STREETVIEW_VERSION = 1           # bumped when the camera changes so the clips are made again
+
+
+def make_streetview(sec, seconds, t0, t1, fps=30.0):
+    """The clip for a chosen street view section `sec` (an entry of streetview.annotate, with its label V1..) shown for `seconds`: kind `streetview`, covering [t0, t1] (epoch seconds) of the race, the time the runner took over the section, so the
+    film's overlay runs through those minutes as the view moves along the road."""
+    if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
+    a, b = float(t0), float(t1); c = dict(id=sec['label'], kind='streetview', photo=None, gap=None, t0=_iso(a), t1=_iso(b), duration_s=round(b - a, 1), seconds=round(float(seconds), 2), speedup=round((b - a) / float(seconds), 1), fps=float(fps),
+                                      style=dict(section=sec['key'], provider=sec['provider'], pictures=sec['frames'], camera=sec['kind']), status='planned', size=STREETVIEW_SIZE, approved=True, by='planner')
+    c['key'] = hashlib.sha1(json.dumps([c['kind'], sec['key'], sec['frames'], round(c['seconds'], 2), c['fps'], STREETVIEW_SIZE, STREETVIEW_VERSION, round(a), round(b)], sort_keys=True).encode()).hexdigest()[:12]; return c

@@ -148,6 +148,31 @@ def photo_clips(folder, tr, tz):
     return out
 
 
+def streetview_clips(folder, tr, tz):
+    """Every street view section you chose (streetview.py, the Street view page) as a pack clip `V1`...: no footage and no words, a steady view along the road the writer may show for a few seconds (a `streetview` item), with when and where it
+    is on the course, how the pictures were taken (a 360 or a flat camera, when, in daylight or not against the race passing there) and which other chosen sections cover the same road."""
+    import datetime as dt
+    import numpy as np
+    from strata360 import streetview as SV
+    from strata360.gps import context as X, clock as CK
+    from strata360.pipeline import config
+    rd = config.race_dir(folder); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; ch = SV.chosen(rd, docs)
+    if not ch or tr is None: return []
+    dist, ts = SV.track_dist(tr); by_id = {c['id']: c for c in ch}; out = []
+    for sec in ch:
+        t0 = float(np.interp(sec['km0'] * 1000, dist, ts)); t1 = float(np.interp(sec['km1'] * 1000, dist, ts)); tm = (t0 + t1) / 2; mid = sec['items'][len(sec['items']) // 2]; dur = round(min(max(sec['frames'] / SV.PLAY_FPS, sec['min_s']), sec['max_s']), 1)
+        caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap = caps[len(caps) // 2] if caps else None
+        def day(t): return X.daylight(CK.sun_elevation_deg(mid['lat'], mid['lon'], t)) if t else None
+        f = dict(source=sec['provider'], camera='a 360 camera' if sec['kind'] == '360' else 'a flat camera facing ' + ', '.join(k for k, v in (sec.get('angles') or {}).items() if v), km0=sec['km0'], km1=sec['km1'], length_m=sec['length_m'], pictures=sec['frames'], spacing_m=sec['spacing_m'],
+                 min_s=sec['min_s'], max_s=sec['max_s'], years=sec['years'], captured=X._local(cap, tz).strftime('%a %d %b %Y %H:%M') if cap else None, captured_light=day(cap), race_light=day(tm), same_road=[c['label'] for c in ch if c['id'] in sec['overlaps'] and c['id'] in by_id])
+        d = dict(label=sec['label'], clip=sec['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=sec['max_s'], usable=[(sec['min_s'], sec['max_s'])], synthetic=True, streetview=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
+                 settings=dict(kind=None, mode=None, seconds=None, must=sec['choice'] == 'must'), planned=None, sv_facts=f)
+        ctx = X.context_at(tr, t0, t1, tz); d['track'] = X.describe(ctx)
+        if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
+        out.append(d)
+    return out
+
+
 def music_facts(folder):
     """What the writer is told about the music, in FILM time (the film starts at the track's first downbeat): its length, tempo, the sections with their energy, and the lyrics (lyrics.py): where it is sung and the words heard
     (rough: the times are right, the words are often wrong). None when there is no track."""
@@ -184,7 +209,7 @@ def build(folder, tz=None):
             if pj.get('covered') and pj.get('summary'): d['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '')
         d['look'] = look_of(cdir, scale); d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
         d['speech_s'] = round(sum(l['t1'] - l['t0'] for l in d['lines']), 1); d['speech_words'] = sum(l['words'] for l in d['lines']); out.append(d)
-    out = sorted(out + gap_clips(folder, tr, tz) + photo_clips(folder, tr, tz), key=lambda c: c['start_utc'])
+    out = sorted(out + gap_clips(folder, tr, tz) + photo_clips(folder, tr, tz) + streetview_clips(folder, tr, tz), key=lambda c: c['start_utc'])
     story = None
     try:
         from strata360.gps import tracks as TKS
@@ -220,13 +245,19 @@ def render(pack, with_usable=False, marks=None):
             L += [f"  [{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') for p in ly['phrases'][:45]]
     L += ['', f"CLIPS (all {len(pack['clips'])}, in shooting order; the film follows this order)"]
     for c in pack['clips']:
-        L.append(f"\n=== {'PHOTO' if c.get('photo') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
+        L.append(f"\n=== {'PHOTO' if c.get('photo') else 'STREET VIEW' if c.get('streetview') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
         if c.get('photo'):
             f = c.get('photo_facts') or {}; L.append(f"A PHOTO the runner took (a still: no footage and no words); show it with a photo item of {MIN_PHOTO_S:g} to {MAX_PHOTO_S:g} s (the editor pans and zooms on it), or put a vo item over it. Use the ones that add to the story; leave the rest." + (' THE RUNNER WANTS THIS PHOTO IN THE FILM (MUST INCLUDE): give it a photo item.' if (c.get('settings') or {}).get('must') else ''))
             bits = [f.get('description'), ('place: ' + f['place']) if f.get('place') else '', ('setting: ' + f['setting'] + (', ' + f['weather'] if f.get('weather') and f['weather'] != 'unknown' else '')) if f.get('setting') else '', ('scenery ' + format(f['scenery'], 'g') + '/10') if f.get('scenery') is not None else '',
                     ('people in it: ' + str(f['people']) + (', the runner among them' + (' (face clear)' if f.get('face_clear') else ' (face not clear)' if f.get('face_clear') is False else '') if f.get('me') else '')) if f.get('people') is not None else '',
                     ('objects: ' + ', '.join((str(o['n']) + ' ' if o['n'] > 1 else '') + o['label'] for o in f['objects'])) if f.get('objects') else '', ('tags: ' + ', '.join(f['tags'])) if f.get('tags') else '', ('picture looks ' + f['exposure']) if f.get('exposure') not in (None, 'ok') else '', ('picture is ' + f['quality']) if f.get('quality') not in (None, 'ok') else '']
             L.append('the photo: ' + '; '.join(b for b in bits if b) if any(bits) else 'the photo has not been analysed (no description yet).')
+        elif c.get('streetview'):
+            f = c.get('sv_facts') or {}; same = f.get('same_road') or []
+            L.append(f"NO FOOTAGE: a steady view along the road, made from street-level pictures ({f.get('source')}, {f.get('camera')}, taken {f.get('captured') or 'at an unknown time'}). It covers km {f.get('km0')} to {f.get('km1')} ({f.get('length_m')} m, {f.get('pictures')} pictures, one every {f.get('spacing_m')} m): the runner's {c['race_s'] / 60:.0f} minutes there are shown in a few seconds, with the clock running on screen. "
+                     f"Show it with a streetview item of {f.get('min_s'):g} to {f.get('max_s'):g} s (the whole stretch always plays through; a shorter item is faster), or put a vo item over it. It has no sound and no words. It was filmed in {f.get('captured_light') or 'unknown light'}; the runner passes it in {f.get('race_light') or 'unknown light'}"
+                     + (': USE IT ONLY IF THAT FITS THE STORY, a daytime view would look wrong in the dark.' if f.get('captured_light') in ('day', 'golden hour') and f.get('race_light') in ('twilight', 'night') else '.')
+                     + (f" It covers the same road as {', '.join(same)}: use at most one of them." if same else '') + (' THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE): give it a streetview item.' if (c.get('settings') or {}).get('must') else ''))
         elif c.get('synthetic'):
             g = c.get('gap') or {}; pl = c.get('planned')
             L.append(f"NO FOOTAGE: a gap of {c['race_s'] / 3600:.1f} h between clips ({g.get('local_start')} to {g.get('local_end')}, km {g.get('km_start')} to {g.get('km_end')}, +{g.get('ascent_m')} m{', ' + g['daylight'] if g.get('daylight') else ''}); {int(round(100 * (g.get('moving_share') or 0)))}% of it spent moving. "
@@ -246,5 +277,5 @@ def render(pack, with_usable=False, marks=None):
         if c['lines']:
             L.append(f"the runner says ({c['speech_s']} s of speech, {c['speech_words']} words):")
             for l in c['lines']: L.append(f"  [{l['id']}] {l['t0']:.1f}-{l['t1']:.1f} s ({l['t1'] - l['t0']:.1f} s): {l['text']}" + ('' if l['lang'] == 'en' else f" (translated from {l['lang']})") + {'must': '   <<< MUST INCLUDE', 'never': '   <<< DO NOT USE'}.get(marks.get(l['id']), ''))
-        elif not c.get('photo'): L.append('the runner says nothing in this clip.')
+        elif not c.get('photo') and not c.get('streetview'): L.append('the runner says nothing in this clip.')
     return '\n'.join(L)
