@@ -37,4 +37,4 @@ def test_it_is_still_used_when_it_is_the_only_shot_that_can_carry_the_speech():
 
 
 def test_the_settings_for_the_mix_are_there():
-    s = CH.Settings(); assert s.w_establish > 0 and s.pen_talk > 0 and LIB['dialogue_hold'].max_consecutive == 1 and s.share_caps['dialogue_hold'] <= 0.15
+    s = CH.Settings(); assert s.w_establish > 0 and s.pen_talk > 0 and s.share_caps['dialogue_hold'] <= 0.15

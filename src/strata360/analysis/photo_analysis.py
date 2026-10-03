@@ -182,7 +182,9 @@ def run(folder, stages=None, only=None, force=False, log=print, detect=run_detec
         src = os.path.join(rd, r['file']); base = [os.path.getmtime(src), os.path.getsize(src)]
         if stage in ('places', 'thumb_overlay'): base += [r.get('loc'), r['taken_utc'], tp and os.path.getmtime(tp)]
         if stage == 'identity': base += [os.path.exists(prof_path) and os.path.getmtime(prof_path), cfg.get('profile', 'me')]
-        if stage == 'thumb_overlay': base += [cfg.get('overlay'), tz]
+        if stage == 'thumb_overlay':
+            from strata360 import overlay
+            base += [cfg.get('overlay'), tz, overlay.inputs_signature(folder)]               # (with the cut-offs and checkpoints the overlay shows)
         return _key(stage, VERSIONS[stage], base)
     def todo(stage): return [r for r in rows if force or (docs[r['id']]['stages'].get(stage) or {}).get('key') != keys(stage, r)]
     def stamp(stage, r, result):

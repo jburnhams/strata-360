@@ -8,7 +8,17 @@ zoom.py     the close-up map's automatic zoom
 
 `for_project(folder, size)` gives the overlay of a project's final film, or None when it is off or there is no track; `build(cfg, track, size)` the overlay for given settings and
 track file."""
-import functools
+import functools, hashlib, json, os
+
+
+def inputs_signature(folder):
+    """Identity of what the overlay shows besides the track and the clip: the overlay settings, the time zone and the tracks' manifest (kinds, checkpoints, cut-offs). When it changes the thumbnails with the overlay and the film preview are out of date."""
+    from strata360.gps import tracks
+    from strata360.pipeline import config
+    cfg = config.load(folder)
+    try: man = open(os.path.join(config.race_dir(folder), tracks.MANIFEST)).read()
+    except OSError: man = ''
+    return hashlib.sha1(json.dumps([cfg.get('overlay'), cfg.get('timezone'), man], sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
 @functools.lru_cache(maxsize=4)

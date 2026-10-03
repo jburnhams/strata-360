@@ -36,7 +36,7 @@ class Settings:
     min_seg_s: float = MIN_SEG_S
     dialogue_share: float = 0.15
     bans_techs: frozenset = frozenset()
-    share_caps: dict = field(default_factory=lambda: {'dialogue_hold': 0.15})
+    share_caps: dict = field(default_factory=lambda: {'dialogue_hold': 0.12})
     tech_bias: dict = field(default_factory=lambda: {'selfie_hold': 0.25})        # a little extra score for a technique (per second of its window, as the other scores): the mid view of you is the one to reach for
     # the user's overrides (project.json): windows are identified by `wid` = "<clip>@<start seconds in the clip, 2 decimals>"
     locked: tuple = ()                                   # [{wid, clip, start_s, beats, cand_id, tech}]: kept exactly (clip window, length and technique)
@@ -336,6 +336,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
               for tid, base in opts:
                   t = lib[tid]; seq = b['seq']; forced_now = bool(want)
                   if not relaxed:                                                                                   # (also for a view the script asked for)
+                      if tid == 'dialogue_hold' and windows[k].speech and seq and seq[-1] == 'dialogue_hold': continue                      # the talking shot is not used twice in a row: the other views of you are cut in
                       if tid == 'selfie_close' and not ((joined[k] and seq and seq[-1] == 'selfie_hold') or (k + 1 < len(windows) and joined[k + 1])): continue                  # a close view of you glides in from a mid view just before it, or out to one just after it (edit/pans.py)
                       if seq and seq[-1] == 'selfie_close' and joined[k] and tid != 'selfie_hold' and not (len(seq) >= 2 and joined[k - 1] and seq[-2] == 'selfie_hold'): continue      # (so the one after a close view that had no mid before it is a mid view)
                   if not forced_now and not relaxed:

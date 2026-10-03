@@ -594,3 +594,38 @@ class TestStreetViewApi(TestGapClipsApi):
         assert client.get('/api/streetview/image', params=dict(q, provider='google')).status_code == 200
         monkeypatch.setattr(SV, 'image', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('mapillary answered 500')))
         assert client.get('/api/streetview/image', params=q).status_code == 502
+
+
+class TestOverlaysAreMadeAgain(TestTracksCollection):
+    """Whatever the overlay shows changes (a cut-off, a track): the thumbnails with the overlay are forgotten and made again."""
+
+    def with_overlay_files(self, project):
+        p = os.path.join(project.race_dir, 'race.json'); cfg = json.load(open(p)); cfg['library'] = project.folder; json.dump(cfg, open(p, 'w'))               # (a project with a library of footage: the thumbnails are made by a worker)
+        d = os.path.join(project.race_dir, 'clips', 'CAM_X'); os.makedirs(d, exist_ok=True); files = [os.path.join(d, 'thumb_overlay.jpg'), os.path.join(d, 'thumb_overlay.json')]
+        for f in files: open(f, 'wb').write(b'x')
+        return files
+
+    def test_a_cutoff_forgets_the_overlay_thumbnails_and_starts_making_them_again(self, client, project, fake_popen):
+        q = dict(folder=project.folder); up = lambda name, data, **kw: client.post('/api/tracks', params=dict(q, filename=name, **kw), content=data)
+        up('a.gpx', self.gpx()); up('route.gpx', self.gpx(route=True), kind='route'); files = self.with_overlay_files(project); n = len(fake_popen.instances); files = self.with_overlay_files(project)      # (adding the tracks did it once already)
+        r = client.post('/api/tracks/cutoff', json=dict(q, key='finish', text='1h')); assert r.status_code == 200
+        assert not any(os.path.exists(f) for f in files)
+        cmds = [i.cmd for i in fake_popen.instances[n:]]; assert any('run' in c and 'thumb_overlay' in c for c in cmds), cmds
+
+    def test_adding_changing_and_removing_a_track_do_the_same(self, client, project, fake_popen):
+        q = dict(folder=project.folder); up = lambda name, data, **kw: client.post('/api/tracks', params=dict(q, filename=name, **kw), content=data)
+        files = self.with_overlay_files(project); a = up('a.gpx', self.gpx()).json(); assert not any(os.path.exists(f) for f in files)
+        files = self.with_overlay_files(project); b = up('b.gpx', self.gpx(lat0=50.01, t0=1_770_001_000)).json(); assert not any(os.path.exists(f) for f in files)
+        files = self.with_overlay_files(project); client.post('/api/tracks/kind', json=dict(q, id=b['id'], kind='run')); assert not any(os.path.exists(f) for f in files)
+        files = self.with_overlay_files(project); client.delete('/api/tracks', params=dict(q, id=b['id'])); assert not any(os.path.exists(f) for f in files)
+        assert any('thumb_overlay' in i.cmd for i in fake_popen.instances)
+
+    def test_photo_overlays_are_forgotten_too_and_made_again(self, client, project, fake_popen):
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        import io
+        from PIL import Image
+        ex = Image.Exif(); ex.get_ifd(0x8769)[0x9003] = '2026:02:22 10:01:30'; ex.get_ifd(0x8769)[0x9011] = '+00:00'; b = io.BytesIO(); Image.new('RGB', (80, 60), (5, 90, 200)).save(b, 'JPEG', exif=ex); PH.add(project.race_dir, 'a.jpg', b.getvalue() + b'\0' * 200, 'UTC')
+        os.makedirs(PA.adir(project.race_dir), exist_ok=True); o = os.path.join(PA.adir(project.race_dir), 'p1-overlay.jpg'); open(o, 'wb').write(b'x'); q = dict(folder=project.folder)
+        client.post('/api/tracks', params=dict(q, filename='a.gpx'), content=self.gpx()); assert not os.path.exists(o)
+        assert any('photos-analyse' in i.cmd and 'thumb_overlay' in i.cmd for i in fake_popen.instances)

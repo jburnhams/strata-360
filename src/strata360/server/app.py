@@ -802,8 +802,9 @@ def create_app(roots, token=None):
     async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
         from strata360.gps import tracks as TKS
         f = folder_of(folder); data = await request.body(); rd = config.race_dir(f)
-        try: return TKS.add(rd, filename, data, kind or None)
+        try: out = TKS.add(rd, filename, data, kind or None)
         except ValueError as e: raise HTTPException(400, str(e))
+        overlays_changed(f); return out                                                  # (the maps on the overlay show the tracks)
 
     @api.post('/api/tracks/kind', dependencies=[Depends(auth)])
     def post_tracks_kind(body: dict):                                        # mark a track run or route (the merged race track follows)
@@ -812,6 +813,7 @@ def create_app(roots, token=None):
         try: TKS.set_kind(rd, str(body.get('id')), str(body.get('kind')))
         except KeyError: raise HTTPException(404, 'no such track')
         except ValueError as e: raise HTTPException(400, str(e))
+        overlays_changed(folder_of(body.get('folder')))
         return TKS.listing(rd, tz_of(folder_of(body.get('folder'))))
 
     @api.post('/api/tracks/cutoff', dependencies=[Depends(auth)])
@@ -821,6 +823,7 @@ def create_app(roots, token=None):
         try: TKS.set_cutoff(rd, str(body.get('key')), str(body.get('text') or ''), tz_of(f))
         except KeyError: raise HTTPException(404, 'no such checkpoint')
         except ValueError as e: raise HTTPException(400, str(e))
+        overlays_changed(f)                                                              # the overlay shows cut-offs: the thumbnails are made again
         return TKS.listing(rd, tz_of(f))
 
     @api.delete('/api/tracks', dependencies=[Depends(auth)])
@@ -829,6 +832,7 @@ def create_app(roots, token=None):
         rd = config.race_dir(folder_of(folder))
         try: TKS.remove(rd, id)
         except KeyError: raise HTTPException(404, 'no such track')
+        overlays_changed(folder_of(folder))
         return TKS.listing(rd, tz_of(folder_of(folder)))
 
     @api.get('/api/tracks/line', dependencies=[Depends(auth)])
@@ -1033,6 +1037,29 @@ def create_app(roots, token=None):
         except RuntimeError as ex: raise HTTPException(502, str(ex))
         return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store' if provider == 'google' else 'max-age=86400'})
 
+    def start_photo_job(f, stages=(), photo=(), force=False):
+        """Start `photos-analyse` in the background (one at a time per project); {started, reason?}."""
+        from strata360.analysis import photo_analysis as PA
+        job = PHOTO_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='the photos are already being analysed')
+        cmd = [*oslib.cli_command(), 'photos-analyse', f] + (['--stages', ','.join(stages)] if stages else []) + [x for p in photo for x in ('--photo', p)] + (['--force'] if force else [])
+        d = PA.adir(config.race_dir(f)); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'run.log'), 'wb')
+        PHOTO_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    def overlays_changed(f):
+        """What the overlay shows has changed (a cut-off, a track, a checkpoint): forget the thumbnails with the overlay (clips and photos, so no old one is shown) and start making them again. The film preview is out of date by its own key; it is not remade
+        until asked (it is big)."""
+        from strata360 import photos as PH
+        from strata360.analysis import photo_analysis as PA
+        from strata360.pipeline import runner
+        rd = config.race_dir(f); library = config.load(f).get('library') if os.path.exists(os.path.join(rd, 'race.json')) else None
+        if library: runner.clear(f, 'thumb_overlay')
+        for pth in glob.glob(os.path.join(rd, 'clips', '*', 'thumb_overlay.*')) + glob.glob(os.path.join(PA.adir(rd), '*-overlay.jpg')):
+            try: os.remove(pth)
+            except OSError: pass
+        if library: start_job(f, ('run', '--stages', 'thumb_overlay'))
+        if PH.load(rd)['photos']: start_photo_job(f, ['thumb_overlay'])
+
     @api.get('/api/photos', dependencies=[Depends(auth)])
     def get_photos(folder: str):                                                         # the photos with their time, place (own GPS first, else the run's position at that time), whether those disagree, and the clip or gap they fall in
         f = folder_of(folder); return dict(photos=photo_rows(f), job=photo_job(f), tz=(config.load(f) if os.path.exists(os.path.join(config.race_dir(f), 'race.json')) else {}).get('timezone') or 'Europe/Brussels')
@@ -1098,11 +1125,7 @@ def create_app(roots, token=None):
         from strata360.analysis import photo_analysis as PA
         f = folder_of(body.get('folder')); stages = [str(s) for s in body.get('stages') or []]; bad = [s for s in stages if s not in PA.VERSIONS]
         if bad: raise HTTPException(400, f'unknown photo stage(s) {", ".join(bad)}: one of {", ".join(PA.ORDER)}')
-        job = PHOTO_JOBS.get(f)
-        if job and job.poll() is None: return dict(started=False, reason='the photos are already being analysed')
-        cmd = [*oslib.cli_command(), 'photos-analyse', f] + (['--stages', ','.join(stages)] if stages else []) + [x for p in body.get('photo') or [] for x in ('--photo', str(p))] + (['--force'] if body.get('force') else [])
-        d = PA.adir(config.race_dir(f)); os.makedirs(d, exist_ok=True); log = open(os.path.join(d, 'run.log'), 'wb')
-        PHOTO_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+        return start_photo_job(f, stages, [str(p) for p in body.get('photo') or []], bool(body.get('force')))
 
     @api.delete('/api/photos', dependencies=[Depends(auth)])
     def delete_photo(folder: str, id: str):                                              # take a photo out (its files are kept under photos/removed)

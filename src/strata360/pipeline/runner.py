@@ -230,6 +230,9 @@ def _cached(race, st, c, cfg, state, ctx_dir, active=None):
     if st.needs_track:
         extra = track_signature(race, cfg)
         if extra is None: bad = bad + ['race_track']                                               # paused until a track is set
+        elif st.name == 'thumb_overlay':
+            from strata360 import overlay
+            extra = _sha([extra, overlay.inputs_signature(race)])                                    # the cut-offs, checkpoints and overlay settings are on the thumbnail too
     if bad: return False, None, bad
     key = stage_key(st, c, cfg, {d: v.get('key') for d, v in deps.items()}, extra); cur = state.get(st.name, {}); clock_sig = _sha(cfg.get('camera_clock'))
     if st.name == 'ingest' and cur.get('key') and cur.get('version') == st.version and cur.get('fp', c.fingerprint) == c.fingerprint: key = cur['key']    # frozen identity: a clock change re-times, it does not invalidate clip-relative stages
