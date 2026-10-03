@@ -566,7 +566,7 @@ class TestStreetViewApi(TestGapClipsApi):
         good = dict(base, id='M2', seq='s2', km0=1.1, km1=1.3, length_m=200, frames=40, spacing_m=5.0); other = dict(base, id='P1', provider='panoramax', seq='c', km0=1.15, km1=1.25, length_m=100, frames=12, spacing_m=8.0)
         SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [base, good], roads)); SV._save(rd, 'panoramax', SV.provider_doc('panoramax', [other], roads)); q = dict(folder=project.folder)
         by = {x['id']: x for x in client.get('/api/streetview', params=q).json()['sections']}
-        assert by['M1']['plausible'] is False and 'only 2 pictures' in by['M1']['why_not'] and by['M2']['plausible'] is True and by['M2']['play_s'] == 2.7 and by['M2']['speed_ms'] == 75.0
+        assert by['M1']['plausible'] is False and 'only 2 pictures' in by['M1']['why_not'] and by['M2']['plausible'] is True and by['M2']['play_s'] == 2.7 and by['M2']['speed_ms'] == 75.0 and (by['M2']['min_s'], by['M2']['max_s']) == (2.0, 10.0) and (by['M1']['min_s'], by['M1']['max_s']) == (2.0, 0.5)
         assert by['M2']['overlaps'] == ['M1', 'P1'] and by['P1']['overlaps'] == ['M1', 'M2'] and by['M1']['overlaps'] == ['M2', 'P1'] and by['M2']['choice'] is None and by['M2']['key'] == 'mapillary:s2:1.10'
         assert client.post('/api/streetview/choice', json=dict(folder=project.folder, key='mapillary:s2:1.10', choice='must')).json() == dict(key='mapillary:s2:1.10', choice='must')
         assert {x['id']: x['choice'] for x in client.get('/api/streetview', params=q).json()['sections']}['M2'] == 'must'

@@ -74,7 +74,7 @@ export const makeLyricPhrase = (o: Partial<LyricPhrase> = {}): LyricPhrase => ({
 export const makeLyrics = (o: Partial<Lyrics> = {}): Lyrics => ({ has_track: true, exists: false, stale: false, instrumental: false, phrases: 0, sung_s: null, duration_s: null, made_at: null, language: null, building: false, error: '', log: '', phrases_list: [], vocal_spans: [], ...o })
 
 export const makeSvSection = (o: Partial<import('../../src/api').SvSectionInfo> = {}): import('../../src/api').SvSectionInfo => ({
-  id: 'M1', key: 'mapillary:s1:1.20', plausible: true, why_not: '', play_s: 2.7, speed_ms: 100, overlaps: [], choice: null,
+  id: 'M1', key: 'mapillary:s1:1.20', plausible: true, why_not: '', play_s: 2.7, min_s: 2, max_s: 1, speed_ms: 100, label: null, overlaps: [], choice: null,
   provider: 'mapillary', stretch: 'R1', kind: '2d', km0: 1.2, km1: 1.5, length_m: 300, frames: 4, spacing_m: 100, years: [2024], camera: 'GoPro HERO7 Black', size: [4000, 3000], seq: 's1', angles: { forward: 3, back: 1 },
   items: [{ id: 'm1', km: 1.2, lat: 50.001, lon: 5.001, a: 0, b: 90 }, { id: 'm2', km: 1.3, lat: 50.001, lon: 5.002, a: 10, b: 90 }, { id: 'm3', km: 1.4, lat: 50.001, lon: 5.003, a: -20, b: 90 }, { id: 'm4', km: 1.5, lat: 50.001, lon: 5.004, a: 170, b: 90 }], ...o })
 export const makeStreetView = (o: Partial<import('../../src/api').StreetView> = {}): import('../../src/api').StreetView => ({

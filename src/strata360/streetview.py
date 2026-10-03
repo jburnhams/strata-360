@@ -269,7 +269,13 @@ def image(rd, provider, doc, item_id, w=640, fetch=_bytes, get=_get):
 # --- which sections are worth showing, which overlap, and what you chose ----------------------------------------------------------------------------------------------------------
 MIN_FRAMES, MIN_LENGTH_M, MAX_SPACING_M = 30, 150, 10.0       # a section is plausible when it has this many pictures (2 s of film at 15 a second), is this long and has pictures no further apart than this
 PLAY_FPS = 15                                                    # how many source pictures a second the film shows
+FASTEST, SLOWEST = 24.0, 4.0                                      # pictures a second: the fastest a section can be played (a picture for each frame of the film) and the slowest that still blends smoothly (the rest made by blending neighbours)
 CHOICES = ('possible', 'must')
+
+
+def clip_range(s):
+    """(shortest, longest) clip in seconds the section can make: its pictures all play, as fast as FASTEST a second (never under 2 s) or as slowly as SLOWEST a second blended up to the film's frame rate. Only the part that matches the run's GPS is counted (the pictures are within ON_ROAD_M of it)."""
+    return round(max(2.0, s['frames'] / FASTEST), 1), round(s['frames'] / SLOWEST, 1)
 
 
 def section_key(s): return f"{s['provider']}:{s['seq']}:{s['km0']:.2f}"                  # stays the same when the stage is run again (the numbers M1.. may move)
@@ -294,24 +300,35 @@ def overlaps(sections, share=0.3):
     return out
 
 
-def choices(rd):
-    try: return {k: v for k, v in json.load(open(os.path.join(adir(rd), 'choices.json'))).items() if v in CHOICES}
-    except (OSError, ValueError): return {}
+def _state(rd):
+    try: d = json.load(open(os.path.join(adir(rd), 'choices.json')))
+    except (OSError, ValueError): d = {}
+    return dict(choices={k: v for k, v in (d.get('choices') or {}).items() if v in CHOICES}, labels=d.get('labels') or {}, next=int(d.get('next') or 1))
+
+
+def choices(rd): return _state(rd)['choices']
 
 
 def set_choice(rd, key, choice):
-    """Mark a section (by its key) as `possible` or `must` for the film, or clear it with 'none'. Returns the choice."""
+    """Mark a section (by its key) as `possible` or `must` for the film, or clear it with 'none'. A section that is chosen gets a label V1, V2 ... for good (the script and the plan refer to it by that name). Returns the choice."""
     if choice not in (*CHOICES, 'none'): raise ValueError(f'choice is one of {", ".join(CHOICES)} or none')
-    c = choices(rd)
-    if choice == 'none': c.pop(key, None)
-    else: c[key] = choice
-    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(c, open(tmp, 'w'), indent=1); os.replace(tmp, p); return choice
+    st = _state(rd)
+    if choice == 'none': st['choices'].pop(key, None)
+    else:
+        st['choices'][key] = choice
+        if key not in st['labels']: st['labels'][key] = st['next']; st['next'] += 1
+    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(st, open(tmp, 'w'), indent=1); os.replace(tmp, p); return choice
 
 
 def annotate(rd, docs):
     """Every section of the provider docs {provider: doc or None} with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
-    out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); ch = choices(rd)
+    out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']
     for s in out:
-        s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key'])
+        s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
+        s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
+
+
+def chosen(rd, docs):
+    """The sections chosen for the film (and plausible), in km order, each with its label V1..."""
+    return [s for s in annotate(rd, docs) if s['choice'] and s['plausible'] and s['label']]
