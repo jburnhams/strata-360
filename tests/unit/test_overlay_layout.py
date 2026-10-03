@@ -360,18 +360,18 @@ class TestStageProgress:
     def test_a_run_that_followed_the_route_shows_only_the_distance_run_over_the_route(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)       # the track runs 3 m/s: 900 m of a 2000 m route, and the route says the same
-        assert ('0.9/2.0 km', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['11m']          # (nothing red but the time of a stage the run did not finish)
+        assert ('0.9/', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['2.0 km', '11m']          # (nothing red but the length and the time of a stage the run did not finish)
 
     def test_a_run_that_strayed_shows_the_routes_progress_first_and_the_distance_run_in_red(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=np.minimum((ts - ts[0]) * 3.0, 300.0))}); ov.patches(T0 + 400)       # on the route for 100 s, then off it: the route says 300 m, 900 m were run
-        assert ('0.3/2.0 km', (255, 255, 255)) in seen and ('  ran 0.9 km', (235, 40, 40)) in seen and ('11m', (235, 40, 40)) in seen           # (the stage was the last and not finished: its time is red too)
+        assert ('0.3/', (255, 255, 255)) in seen and ('  ran 0.9 km', (235, 40, 40)) in seen and ('2.0 km', (235, 40, 40)) in seen and ('11m', (235, 40, 40)) in seen           # (the stage was the last and not finished: its length and time are red too)
 
     def test_a_finished_stage_total_time_is_white(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'Checkpoint 1'), (T0 + 900, 'After Race')]
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress={'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)
-        assert ('11m', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)]
+        assert ('11m', (255, 255, 255)) in seen and ('2.0 km', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)]
 
 
 class TestRouteElapsed:
