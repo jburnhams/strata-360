@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import Workspace from '../../src/components/Workspace'
 import { screen, setup, waitFor } from '../utils/render'
-import { makeMeta, makeClipInfo, makeGap, makeGapClip } from '../utils/factories'
+import { makeMeta, makeClipInfo, makeGap, makeGapClip, makePhoto } from '../utils/factories'
 import { mockGet, mockError } from '../utils/api'
 
 // Mock the many child panels that are tested in their own files
@@ -140,11 +140,11 @@ describe('Workspace', () => {
     expect(onChange).toHaveBeenCalled()
   })
 
-  it('lists the gaps under the clips and opens a gap page when one is clicked', async () => {
+  it('lists the gaps among the clips in time order and opens a gap page when one is clicked', async () => {
     mockGet('/api/meta', makeMeta()); mockGet('/api/clips', { clips: [makeClipInfo()] })
     mockGet('/api/gaps', { gaps: [makeGap({ settings: { kind: null, mode: null, seconds: null, must: true }, clips: [makeGapClip({ exists: true, kind: 'flyover', seconds: 12 })] }), makeGap({ id: 'G02', local_start: 'Fri 20 Feb 06:00' })] })
     const { user } = setup(<Workspace folder="/data" onChange={() => {}} />)
-    expect(await screen.findByText('Gaps in the footage')).toBeInTheDocument(); expect(screen.getByText(/3D · 12 s · must use/)).toBeInTheDocument(); expect(screen.getByText(/no clip/)).toBeInTheDocument()
+    expect(await screen.findByText('G02')).toBeInTheDocument(); expect(screen.getByText(/3D · 12 s · must use/)).toBeInTheDocument(); expect(screen.getByText(/no clip/)).toBeInTheDocument()
     await user.click(screen.getByText('G02')); expect(await screen.findByTestId('GapView')).toHaveTextContent('G02'); expect(screen.queryByTestId('FilmDetails')).not.toBeInTheDocument()
   })
 })
@@ -163,5 +163,21 @@ describe('the clip and gap list highlights', () => {
     await user.click(clipB); expect(clipB).toHaveAttribute('data-selected'); expect(clipB.className).toContain('bg-yellow-100'); expect(clipB.className).not.toContain('emerald'); expect(clipA).not.toHaveAttribute('data-selected')
     await user.click(clipA); expect(clipA.className).toContain('bg-yellow-100'); expect(clipA.className).toContain('border-emerald-600')                       // used in the film and selected: both show
     await user.click(gapB); expect(gapB).toHaveAttribute('data-selected'); expect(gapB.className).toContain('bg-yellow-100'); expect(gapB.className).not.toContain('bg-emerald-100'); expect(clipA).not.toHaveAttribute('data-selected')
+  })
+})
+
+describe('one list of everything the film can use, in time order', () => {
+  it('puts the gaps, the photos and the street view ticked for the film among the clips by time', async () => {
+    const t = (iso: string) => Date.parse(iso) / 1000
+    mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_1_0001_D', start_utc: '2026-02-20T10:00:00Z' }), makeClipInfo({ id: 'CAM_2_0002_D', start_utc: '2026-02-20T16:00:00Z' })] })
+    mockGet('/api/gaps', { gaps: [makeGap({ id: 'G01', t0: t('2026-02-20T11:00:00Z'), t1: t('2026-02-20T15:00:00Z') })] })
+    mockGet('/api/photos', { photos: [makePhoto({ id: 'p1', must: true, taken_utc: t('2026-02-20T12:00:00Z') }), makePhoto({ id: 'p2', taken_utc: t('2026-02-20T12:30:00Z') })], tz: 'UTC' })
+    mockGet('/api/streetview/chosen', { sections: [{ key: 'mapillary:s:3.00', label: 'V1', id: 'M3', provider: 'mapillary', kind: '360', choice: 'must', t0: t('2026-02-20T13:00:00Z'), t1: t('2026-02-20T13:05:00Z'), length_m: 800, quality: 'good' }] })
+    setup(<Workspace folder="/data" onChange={() => {}} />)
+    await screen.findByText('V1')
+    const order = Array.from(document.querySelectorAll('aside li')).map(li => li.textContent ?? '')
+    expect(order.findIndex(x => x.includes('0001'))).toBeLessThan(order.findIndex(x => x.includes('G01'))); expect(order.findIndex(x => x.includes('G01'))).toBeLessThan(order.findIndex(x => x.includes('Photo P1')))
+    expect(order.findIndex(x => x.includes('Photo P1'))).toBeLessThan(order.findIndex(x => x.includes('V1'))); expect(order.findIndex(x => x.includes('V1'))).toBeLessThan(order.findIndex(x => x.includes('0002')))
+    expect(order.some(x => x.includes('Photo P2'))).toBe(false)
   })
 })

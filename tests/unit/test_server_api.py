@@ -715,3 +715,8 @@ class TestStreetViewPromote:
         monkeypatch.setattr(SV, 'unpromote', lambda rd, key: key == 'k')
         assert client.post('/api/streetview/unpromote', json=dict(folder=project.folder, key='k')).json() == dict(removed=True)
         assert client.post('/api/streetview/unpromote', json=dict(folder=project.folder, key='x')).status_code == 404
+
+
+class TestStreetViewChosen:
+    def test_the_chosen_sections_come_with_when_the_runner_passed_them(self, client, project):
+        r = client.get('/api/streetview/chosen', params=dict(folder=project.folder)); assert r.status_code == 200 and isinstance(r.json()['sections'], list)

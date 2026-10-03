@@ -47,6 +47,16 @@ def test_the_spans_of_a_project_come_from_the_clips_files(project):
     s = G.load_spans(project.folder); assert [x['id'][-6:-2] for x in s][-2:] == ['0002', '0001'] and s[-1]['t1'] - s[-1]['t0'] == pytest.approx(100.0) and [x['t0'] for x in s] == sorted(x['t0'] for x in s)
 
 
+def test_photos_ticked_for_the_film_count_as_footage_so_no_gap_is_made_within_twenty_minutes_of_one(project, monkeypatch):
+    from strata360 import photos as PH
+    project.add_clip('CAM_20260221190000_0001_D', start_utc='2026-02-21T19:00:00+00:00', source_frames=3000, fps=30.0); rd = project.race_dir
+    doc = PH.load(rd); doc['photos'] = [dict(id='p1', taken_utc=T0 + 1800.0, must=True), dict(id='p2', taken_utc=T0 + 9000.0)]; PH._save(rd, doc)
+    s = G.load_spans(project.folder); assert 'P1' in [x['id'] for x in s] and 'P2' not in [x['id'] for x in s] and [x for x in s if x['id'] == 'P1'][0]['t0'] == T0 + 1800.0
+    assert 'P1' not in [x['id'] for x in G.load_spans(project.folder, used=False)]
+    assert [(x['before'], x['after']) for x in G.find_gaps([span('A', 0, 100), span('B', 6000, 6100)], track(12))] == [('A', 'B')]
+    assert G.find_gaps([span('A', 0, 100), span('P1', 1000, 1000), span('B', 2000, 2100)], track(12)) == []                                          # photo 900 s from each side: no gap
+
+
 GAP = dict(id='G01', t0=T0, t1=T0 + 7200)
 
 

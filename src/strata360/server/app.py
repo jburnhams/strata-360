@@ -1012,7 +1012,9 @@ def create_app(roots, token=None):
             if not c: continue
             t0 = dt.datetime.fromisoformat(c['time']['start_utc'].replace('Z', '+00:00')).timestamp(); m = re.search(r'_(\d{4})_D$', c['clip_id'])
             clips.append(dict(label=m.group(1) if m else c['clip_id'], t0=t0, t1=t0 + c['video']['source_frames'] / c['video']['nominal_fps']))
-        try: gaps = [dict(id=g['id'], t0=g['t0'], t1=g['t1']) for g in gap_rows(f)]
+        try:
+            from strata360.gps import gaps as GP
+            cfg = config.load(f); gaps = [dict(id=g['id'], t0=g['t0'], t1=g['t1']) for g in GP.find_gaps(GP.load_spans(f, used=False), loaded_raw_track(f), GP.MIN_GAP_S, cfg.get('timezone', 'Europe/Brussels'))]          # between the camera clips alone: a section chosen for the film must still show the gap it fills
         except HTTPException: gaps = []
         return clips, gaps
 
@@ -1048,6 +1050,15 @@ def create_app(roots, token=None):
         try: SV.set_choice(rd, key, choice)
         except ValueError as ex: raise HTTPException(400, str(ex))
         return dict(key=key, choice=None if choice == 'none' else choice)
+
+    @api.get('/api/streetview/chosen', dependencies=[Depends(auth)])
+    def get_streetview_chosen(folder: str):                                              # the street view sections chosen for the film (possible or must), each with when the runner passed it: they sit among the clips in the sidebar
+        from strata360 import streetview as SV
+        f = folder_of(folder); rd = config.race_dir(f); tr = sv_track(f); out = []
+        if tr is None: return dict(sections=out)
+        for s in SV.chosen(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}):
+            a, b = SV.passed(s, tr); out.append(dict(key=s['key'], label=s['label'], id=s['id'], provider=s['provider'], kind=s['kind'], choice=s['choice'], t0=a, t1=b, length_m=s['length_m'], quality=(s.get('quality') or {}).get('grade')))
+        return dict(sections=sorted(out, key=lambda x: x['t0']))
 
     @api.post('/api/streetview/promote', dependencies=[Depends(auth)])
     def post_streetview_promote(body: dict):                                             # {folder, provider, id, sequence, lat, lon}: make a capture run found by the nearest-street-view search a section like the others
