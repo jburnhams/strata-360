@@ -357,10 +357,10 @@ class TestStageProgress:
         stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'After Race')]
         return LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress=prog)
 
-    def test_a_run_that_followed_the_route_shows_only_the_distance_run_over_the_route(self, series, tiles, monkeypatch):
+    def test_a_run_that_followed_the_route_shows_only_the_distance_run_over_the_distance_run_in_the_stage(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         ov = self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)       # the track runs 3 m/s: 900 m of a 2000 m route, and the route says the same
-        assert ('0.9/', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['2.0 km'] and ('00:11:40', (255, 255, 255)) in seen          # (nothing red but the length of a stage the run did not finish; with no cut-off its total time is shown, white)
+        assert ('0.9/', (255, 255, 255)) in seen and [x for x, f in seen if f == (235, 40, 40)] == ['2.1 km'] and ('00:11:40', (255, 255, 255)) in seen          # (nothing red but the length of a stage the run did not finish; with no cut-off its total time is shown, white)
 
     def test_a_run_that_strayed_shows_the_routes_progress_first_and_the_distance_run_in_red(self, series, tiles, monkeypatch):
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
@@ -371,7 +371,7 @@ class TestStageProgress:
         seen = self.spy(monkeypatch); ts = np.arange(T0 + 100, T0 + 801, 5.0)
         stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'Checkpoint 1'), (T0 + 900, 'After Race')]
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages, progress={'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}); ov.patches(T0 + 400)
-        assert ('00:05:00', (255, 255, 255)) in seen and ('2.0 km', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)] and ('00:11:40', (255, 255, 255)) in seen
+        assert ('00:05:00', (255, 255, 255)) in seen and ('2.1 km', (255, 255, 255)) in seen and not [1 for s, f in seen if f == (235, 40, 40)] and ('00:11:40', (255, 255, 255)) in seen
 
 
 class TestRouteElapsed:

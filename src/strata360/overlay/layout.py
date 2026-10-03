@@ -159,12 +159,12 @@ class Stage:
         if name.startswith(('Stage', 'Checkpoint')) and i + 1 < len(self.times):
             a, b = self.times[i], self.times[i + 1]                                                                # a stage runs to the next checkpoint's arrival, a checkpoint to the departure
             pr = self.c.progress.get(name) if name.startswith('Stage') else None
-            if pr is not None:                                                                                # the distance run so far over the length of the stage's route; where the run went off the route, the route's own progress comes first and what was actually run follows in red
+            if pr is not None:                                                                                # the distance run so far over the distance run in the whole stage; where the run went off the route (over 10% out), the route's own progress comes first and what was actually run follows in red
                 run = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; L = pr['route_m'] / 1000; p = float(np.interp(t, pr['t'], pr['prog'])) / 1000; RED, WHITE = (235, 40, 40), (255, 255, 255)
                 final = self.names[i + 1] == 'After Race' and 'At Finish' not in self.names                    # the run stopped in this stage: its length is shown in red, since it never got to the end of it
                 cut = self.c.cutoffs.get('stage', {}).get(name)                                                  # the stage's cut-off, in red, from leaving the previous checkpoint; with none set, the stage's total time (white)
                 end = RED if final else WHITE                                                                  # the stage's length is red too when the run did not get to the end of it
-                dist = [(f'{p:.1f}/', WHITE), (f'{L:.1f} km', end), (f'  ran {run:.1f} km', RED)] if abs(run - p) > max(0.10 * max(run, p), 0.5) else [(f'{run:.1f}/', WHITE), (f'{L:.1f} km', end)]
+                dist = [(f'{p:.1f}/', WHITE), (f'{L:.1f} km', end), (f'  ran {run:.1f} km', RED)] if abs(run - p) > max(0.10 * max(run, p), 0.5) else [(f'{run:.1f}/', WHITE), (f'{(self._dist(b) - self._dist(a)) / 1000:.1f} km', end)]
                 return out + self.c.runs(e, e['x'], e['y'] + 38, dist + [('  ·  ', WHITE), (_clock(min(t, b) - a), WHITE)] + ([('/', WHITE), (_clock(cut - (a - self.c.cutoffs['start'])), RED)] if cut is not None else [('/', WHITE), (_clock(b - a), WHITE)]), 22)
             if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
             else: km = f'{(self._dist(a) - self._dist(self.times[1] if len(self.times) > 1 else a)) / 1000:.1f} km'          # the way from the start of the run to the checkpoint
