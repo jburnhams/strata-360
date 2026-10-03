@@ -136,7 +136,7 @@ def set_must(rd, pid, must):
     _save(rd, doc); return bool(must)
 
 
-MOTION_DEFAULT = dict(style='auto', seconds=6.0, seed=0)
+MOTION_DEFAULT = dict(style='auto', seconds=None, seed=0)             # seconds None: the length follows how busy the photo is (analysis/photo_analysis.py `auto_seconds`, 2 to 3 s)
 
 
 def motion_of(entry):
@@ -154,9 +154,11 @@ def set_motion(rd, pid, **fields):
         if k not in cur: raise ValueError(f'unknown setting {k}')
         cur[k] = v
     if cur['style'] != 'auto' and cur['style'] not in PM.STYLES: raise ValueError(f'style: auto or one of {", ".join(PM.STYLES)}')
-    try: cur['seconds'] = round(float(cur['seconds']), 2); cur['seed'] = int(cur['seed'])
+    try:
+        if cur['seconds'] is not None: cur['seconds'] = round(float(cur['seconds']), 2)
+        cur['seed'] = int(cur['seed'])
     except (TypeError, ValueError): raise ValueError('seconds and seed must be numbers')
-    if not 2.0 <= cur['seconds'] <= 30.0: raise ValueError('the length: 2 to 30 seconds')
+    if cur['seconds'] is not None and not 2.0 <= cur['seconds'] <= 8.0: raise ValueError('the length: 2 to 8 seconds, or leave it to the photo (2 to 3 s by how busy it is)')
     if cur == MOTION_DEFAULT: e.pop('motion', None)
     else: e['motion'] = cur
     _save(rd, doc); return cur

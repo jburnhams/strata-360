@@ -999,9 +999,9 @@ def create_app(roots, token=None):
         from strata360.edit import photo_motion as PM
         rd = config.race_dir(f); e = next((x for x in PH.load(rd)['photos'] if x['id'] == pid), None)
         if e is None: raise HTTPException(404, 'no such photo')
-        m = PH.motion_of(e); st = style or m['style']; sec = float(seconds if seconds is not None else m['seconds']); sd = int(seed if seed is not None else m['seed'])
+        m = PH.motion_of(e); st = style or m['style']; doc = PA.load_doc(rd, pid); sec = float(seconds if seconds is not None else (m['seconds'] if m['seconds'] is not None else PA.auto_seconds(doc))); sd = int(seed if seed is not None else m['seed'])
         path = os.path.join(rd, e['file']); size = PH.oriented_size(path)
-        try: pl = PM.plan(size, sec, st, PM.focals(PA.load_doc(rd, pid), PA.read_bgr(path, 480)), sd)
+        try: pl = PM.plan(size, sec, st, PM.focals(doc, PA.read_bgr(path, 480)), sd)
         except ValueError as ex: raise HTTPException(400, str(ex))
         w, h = pl['size']; pl['windows'] = [[round(v / d, 4) for v, d in zip(PM.crop_at(pl, t), (w, h, w, h))] for t in (0.0, pl['duration_s'])]; pl['settings'] = m; return pl
 

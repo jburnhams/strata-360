@@ -102,11 +102,11 @@ class TestFiles:
 
 class TestMotionSettings:
     def test_defaults_are_not_stored_and_changes_are_checked(self, tmp_path):
-        rd = str(tmp_path); e = PH.add(rd, 'a.jpg', jpeg()); assert PH.motion_of(e) == dict(style='auto', seconds=6.0, seed=0)
-        assert PH.set_motion(rd, 'p1', style='pan', seconds=9) == dict(style='pan', seconds=9.0, seed=0) and PH.load(rd)['photos'][0]['motion'] == dict(style='pan', seconds=9.0, seed=0)
+        rd = str(tmp_path); e = PH.add(rd, 'a.jpg', jpeg()); assert PH.motion_of(e) == dict(style='auto', seconds=None, seed=0)                                                               # (no length: it follows how busy the photo is)
+        assert PH.set_motion(rd, 'p1', style='pan', seconds=7) == dict(style='pan', seconds=7.0, seed=0) and PH.load(rd)['photos'][0]['motion'] == dict(style='pan', seconds=7.0, seed=0)
         assert PH.set_motion(rd, 'p1', seed=4)['style'] == 'pan'                                                                  # only what is sent changes
-        PH.set_motion(rd, 'p1', style='auto', seconds=6, seed=0); assert 'motion' not in PH.load(rd)['photos'][0]
-        for bad in (dict(style='spin'), dict(seconds=1), dict(seconds=99), dict(seconds='x'), dict(speed=3)):
+        PH.set_motion(rd, 'p1', style='auto', seconds=None, seed=0); assert 'motion' not in PH.load(rd)['photos'][0]
+        for bad in (dict(style='spin'), dict(seconds=1), dict(seconds=99), dict(seconds=9), dict(seconds='x'), dict(speed=3)):
             with pytest.raises(ValueError): PH.set_motion(rd, 'p1', **bad)
         with pytest.raises(KeyError): PH.set_motion(rd, 'p9', style='pan')
 

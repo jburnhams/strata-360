@@ -115,3 +115,12 @@ class TestRun:
         done = PA.run(project.folder, stages=['thumb_overlay']); doc = PA.load_doc(project.race_dir, 'p1')
         assert done == {'thumb_overlay': ['p1']} and doc['thumb_overlay'] == dict(made=True, file='photos/analysis/p1-overlay.jpg') and drawn and drawn[0][1] == PH.load(project.race_dir)['photos'][0]['taken_utc']
         out = Image.open(os.path.join(project.race_dir, doc['thumb_overlay']['file'])); assert out.format == 'JPEG' and out.size == (64, 48)
+
+
+class TestBusyness:
+    def test_a_plain_picture_gets_two_seconds_and_a_busy_one_three(self):
+        plain = dict(quality=dict(fine=1.0), people=dict(people=[], faces=[]), objects=dict(objects=[]))
+        busy = dict(quality=dict(fine=9.0), people=dict(people=[dict(conf=0.9)] * 3, faces=[dict(score=0.9)] * 4), objects=dict(objects=[dict(label='bicycle')] * 3))
+        assert PA.busyness(plain) < 0.1 and PA.auto_seconds(plain) == 2.0 and PA.busyness(busy) == 1.0 and PA.auto_seconds(busy) == 3.0
+        mid = dict(quality=dict(fine=4.0), people=dict(people=[dict(conf=0.9)], faces=[]), objects=dict(objects=[dict(label='bottle')]))
+        assert 0.3 < PA.busyness(mid) < 0.6 and PA.auto_seconds(mid) in (2.5, 3.0) and PA.auto_seconds(None) == 2.5 and PA.auto_seconds({}) == 2.5                       # not analysed: in between

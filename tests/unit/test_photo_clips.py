@@ -22,28 +22,28 @@ def photo_clip(label='P1', must=False, start='2026-02-20T14:12:17Z', seconds=6.0
 class TestPack:
     def test_a_photo_is_a_pack_clip_with_what_the_analysis_found_and_whether_it_must_be_used(self, project):
         from strata360.analysis import photo_analysis as PA
-        rd = project.race_dir; PH.add(rd, 'a.jpg', jpeg()); PH.add(rd, 'b.jpg', jpeg(local='2026:02:20 15:00:00')); PH.set_must(rd, 'p2', True); PH.set_motion(rd, 'p1', seconds=4)
+        rd = project.race_dir; PH.add(rd, 'a.jpg', jpeg()); PH.add(rd, 'b.jpg', jpeg(local='2026:02:20 15:00:00')); PH.set_must(rd, 'p2', True); PH.set_motion(rd, 'p1', seconds=4)                                                          # p1 has a length of its own; p2 follows how busy it is
         doc = PA.load_doc(rd, 'p1'); doc['scenes'] = dict(ok=True, setting='trail', description='A path in the trees.', tags=['trees'], weather='cloud', scenery=7.0, clarity=4.0); doc['identity'] = dict(me=dict(face=0), n_people=2, others=1, threshold=0.45); doc['stages'] = dict(scenes={}, identity={}); PA.save_doc(rd, doc)
-        a, b = SP.photo_clips(project.folder, None, 'UTC'); assert (a['label'], b['label']) == ('P1', 'P2') and a['photo'] and a['synthetic'] and a['duration_s'] == 4.0 and a['settings']['must'] is False and b['settings']['must'] is True and a['start_utc'] == '2026-02-20T14:12:17Z'
-        assert a['photo_facts']['description'] == 'A path in the trees.' and a['photo_facts']['scenery'] == 7.0 and a['photo_facts']['people'] == 2 and a['photo_facts']['me'] is True and a['race_s'] == 0.0 and a['usable_s'] == SP.MAX_PHOTO_S
+        a, b = SP.photo_clips(project.folder, None, 'UTC'); assert (a['label'], b['label']) == ('P1', 'P2') and a['photo'] and a['synthetic'] and a['duration_s'] == 4.0 and a['settings'] == dict(kind=None, mode='set', seconds=4.0, must=False) and b['duration_s'] == 2.5 and b['settings']['mode'] is None and a['settings']['must'] is False and b['settings']['must'] is True and a['start_utc'] == '2026-02-20T14:12:17Z'
+        assert a['photo_facts']['description'] == 'A path in the trees.' and a['photo_facts']['scenery'] == 7.0 and a['photo_facts']['people'] == 2 and a['photo_facts']['me'] is True and a['race_s'] == 0.0 and a['usable_s'] == 4.0 and b['usable_s'] == SP.MAX_PHOTO_S
         assert SP.photo_clips(str(project.folder) + '-none', None, 'UTC') == []
 
     def test_the_prompt_describes_a_photo_and_says_when_it_must_be_used(self):
         text = SP.render(dict(race={}, clips=[photo_clip(description='A path in the trees.', place='Nadrin', scenery=7.0, people=1, me=True, face_clear=True, tags=['trees'], objects=[dict(label='bottle', n=2)], exposure='dark'), photo_clip('P2', must=True)], music=None))
-        assert '=== PHOTO P1: 6.0 s long' in text and 'A PHOTO the runner took' in text and 'photo item of 2.5 to 12 s' in text and 'A path in the trees.; place: Nadrin; scenery 7/10; people in it: 1, the runner among them (face clear); objects: 2 bottle; tags: trees; picture looks dark' in text
+        assert '=== PHOTO P1: 6.0 s long' in text and 'A PHOTO the runner took' in text and 'photo item of 2 to 3 s' in text and 'A path in the trees.; place: Nadrin; scenery 7/10; people in it: 1, the runner among them (face clear); objects: 2 bottle; tags: trees; picture looks dark' in text
         p1, p2 = text.split('=== PHOTO P2')[0], text.split('=== PHOTO P2')[1]; assert 'MUST INCLUDE' not in p1 and 'THE RUNNER WANTS THIS PHOTO IN THE FILM (MUST INCLUDE)' in p2 and 'has not been analysed' in p2 and 'the runner says nothing' not in text
 
 
 class TestScript:
     def pack(self, must=False):
-        return dict(PACK_BASE, clips=[PACK_BASE['clips'][0], photo_clip('P1', must=must, start='2026-02-22T10:01:30Z'), PACK_BASE['clips'][1]])
+        return dict(PACK_BASE, clips=[PACK_BASE['clips'][0], photo_clip('P1', must=must, start='2026-02-22T10:01:30Z', seconds=2.5), PACK_BASE['clips'][1]])
 
     def check(self, items, must=False, target=20.0): return SD.check(dict(items=items), self.pack(must), target, 150.0)
 
     def test_a_photo_item_is_checked_for_what_it_names_and_how_long(self):
-        rep, probs = self.check([dict(type='broll', clip='0001', seconds=8), dict(type='photo', clip='P1', seconds=5), dict(type='broll', clip='0002', seconds=7)])
-        assert not [p for p in probs if 'item' in p] and rep['photo_s'] == 5.0 and rep['per_clip']['P1'] == 5.0
-        assert any('a photo plays for 2.5 to 12 seconds, not 20' in p for p in self.check([dict(type='photo', clip='P1', seconds=20)])[1])
+        rep, probs = self.check([dict(type='broll', clip='0001', seconds=8), dict(type='photo', clip='P1', seconds=2.5), dict(type='broll', clip='0002', seconds=9.5)])
+        assert not [p for p in probs if 'item' in p] and rep['photo_s'] == 2.5 and rep['per_clip']['P1'] == 2.5
+        assert any('a photo plays for 2 to 3 seconds, not 20' in p for p in self.check([dict(type='photo', clip='P1', seconds=20)])[1])
         assert any('0001 is not a photo' in p for p in self.check([dict(type='photo', clip='0001', seconds=5)])[1])
         assert any('P1 is a photo with no words: use a photo item' in p for p in self.check([dict(type='clip', clip='P1', **{'from': 'x', 'to': 'y'})])[1])
 
@@ -69,13 +69,14 @@ class TestPlan:
     def test_a_photo_item_becomes_a_picture_only_generated_piece_no_longer_than_a_photo_may_be(self):
         pack = dict(TSP.PACK, clips=TSP.PACK['clips'] + [dict(photo_clip('P1', start='2026-02-22T10:01:30Z'), duration_s=6.0)]); draft = TSP.anchored([dict(type='broll', clip='0001', seconds=4.0), dict(type='photo', clip='P1', seconds=30.0), dict(type='broll', clip='0002', seconds=4.0)])
         ps, warn = SPL.pieces(draft, pack, {}, 150.0); p = next(x for x in ps if x['label'] == 'P1'); assert p['kind'] == 'synthetic' and p['role'] == 'broll' and p['photo'] is True and p['seconds'] == SPL.MAX_PHOTO_S
-        assert SPL.flex(p)[1] <= SPL.MAX_PHOTO_S and SPL.flex(p)[0] == SPL.GAP_MIN_S
+        assert SPL.flex(p) == (SPL.MIN_PHOTO_S, SPL.MAX_PHOTO_S) and SPL.MIN_PHOTO_S == 2.0 and SPL.MAX_PHOTO_S == 3.0                      # a photo is fitted to the music between 2 and 3 s
+        assert SPL.flex(dict(p, seconds=5.0, fixed=True)) is None or SPL.flex(dict(p, seconds=5.0))[1] == 5.0                                  # (one you set longer is not cut)
         draft2 = TSP.anchored([dict(type='photo', clip='0001', seconds=4.0), dict(type='gap', clip='P1', seconds=4.0)]); ps2, warn2 = SPL.pieces(draft2, pack, {}, 150.0); assert any('0001 is not a photo' in w for w in warn2) and any('P1 is a photo, not a gap' in w for w in warn2)
 
     def test_a_photo_marked_must_is_added_in_its_place_when_the_script_leaves_it_out(self):
         ps = [dict(kind='broll', seconds=10.0, n=0, label='0001', clip='c1', text='', seg=None), dict(kind='broll', seconds=10.0, n=1, label='0002', clip='c2', text='', seg=None)]
-        pack = dict(clips=[dict(label='0001', start_utc='2026-02-22T10:01:00Z'), photo_clip('P1', must=True, start='2026-02-22T10:30:00Z', seconds=5.0), photo_clip('P2', start='2026-02-22T10:40:00Z'), dict(label='0002', start_utc='2026-02-22T12:00:00Z')])
-        warn = []; added = SPL.force_gaps(ps, pack, warn); assert added == ['P1'] and [p['label'] for p in ps] == ['0001', 'P1', '0002'] and ps[1]['photo'] and ps[1]['seconds'] == 5.0 and SPL.flex(ps[1])[1] <= SPL.MAX_PHOTO_S and any('P1' in w for w in warn)
+        pack = dict(clips=[dict(label='0001', start_utc='2026-02-22T10:01:00Z'), photo_clip('P1', must=True, start='2026-02-22T10:30:00Z', seconds=2.5), photo_clip('P2', start='2026-02-22T10:40:00Z'), dict(label='0002', start_utc='2026-02-22T12:00:00Z')])
+        warn = []; added = SPL.force_gaps(ps, pack, warn); assert added == ['P1'] and [p['label'] for p in ps] == ['0001', 'P1', '0002'] and ps[1]['photo'] and ps[1]['seconds'] == 2.5 and SPL.flex(ps[1]) == (2.0, 3.0) and any('P1' in w for w in warn)
 
 
 class TestClip:

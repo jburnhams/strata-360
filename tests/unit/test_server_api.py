@@ -513,11 +513,11 @@ class TestPhotoMotionApi(TestPhotosApi):
         self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
         doc = PA.load_doc(project.race_dir, 'p1'); doc['people'] = dict(w=80, h=60, people=[], faces=[dict(box=[10, 10, 24, 24], score=0.9, pose=[0, 0, 0], emb=0)]); doc['identity'] = dict(me=dict(face=0, sim=0.9, box=[10, 10, 24, 24]), n_people=1, others=0, threshold=0.45); PA.save_doc(project.race_dir, doc)
         pl = client.get('/api/photos/motion', params=dict(q, id='p1', style='push_in', seconds=5)).json()
-        assert pl['style'] == 'push_in' and pl['duration_s'] == 5.0 and pl['subjects'][0]['label'] == 'you' and len(pl['windows']) == 2 and all(0 <= v <= 1 for w in pl['windows'] for v in w) and pl['settings'] == dict(style='auto', seconds=6.0, seed=0)
+        assert pl['style'] == 'push_in' and pl['duration_s'] == 5.0 and pl['subjects'][0]['label'] == 'you' and len(pl['windows']) == 2 and all(0 <= v <= 1 for w in pl['windows'] for v in w) and pl['settings'] == dict(style='auto', seconds=None, seed=0)
         saved = client.post('/api/photos/motion', json=dict(q, id='p1', style='reveal', seconds=8, seed=3)); assert saved.status_code == 200 and saved.json()['style'] == 'reveal' and saved.json()['settings'] == dict(style='reveal', seconds=8.0, seed=3)
         assert client.get('/api/photos/motion', params=dict(q, id='p1')).json()['duration_s'] == 8.0
         assert client.post('/api/photos/motion', json=dict(q, id='p1', style='spin')).status_code == 400 and client.post('/api/photos/motion', json=dict(q, id='p1', seconds=100)).status_code == 400 and client.post('/api/photos/motion', json=dict(q, id='p9')).status_code == 404
-        assert client.post('/api/photos/motion', json=dict(q, id='p1', style='auto', seconds=6, seed=0)).json()['settings'] == dict(style='auto', seconds=6.0, seed=0) and client.get('/api/photos/motion', params=dict(q, id='p9')).status_code == 404
+        assert client.post('/api/photos/motion', json=dict(q, id='p1', style='auto', seconds=None, seed=0)).json()['settings'] == dict(style='auto', seconds=None, seed=0) and client.get('/api/photos/motion', params=dict(q, id='p9')).status_code == 404
 
 
 class TestPhotoMotionVideo(TestPhotosApi):

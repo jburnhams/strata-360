@@ -98,3 +98,17 @@ class TestRender:
         img = np.zeros((900, 1600, 3), np.uint8); img[400:500, 750:850] = 255
         p = dict(duration_s=1.0, size=[1600, 900], aspect=PM.ASPECT, zmax=4.0, keys=[dict(t=0, cx=0.5, cy=0.5, z=1.0), dict(t=1, cx=0.5, cy=0.5, z=4.0)])
         f = list(PM.render(img, p, (320, 180), fps=5)); share = lambda fr: float((fr[..., 0] > 128).mean()); assert share(f[-1]) > 4 * share(f[0])
+
+
+class TestByLength:
+    subj = [dict(cx=0.3, cy=0.4, w=0.1, h=0.12, weight=1.0, label='you'), dict(cx=0.7, cy=0.6, w=0.1, h=0.1, weight=0.6, label='person')]
+
+    def test_a_short_shot_only_gets_a_gentle_style_and_a_long_one_may_have_any(self):
+        short = {PM.plan((1600, 1200), 2.5, 'auto', self.subj, seed=s)['style'] for s in range(40)}; long_ = {PM.plan((1600, 1200), 8, 'auto', self.subj, seed=s)['style'] for s in range(60)}
+        assert short <= {'push_in', 'pull_out', 'hold'} and {'drift', 'reveal'} & long_ and PM.plan((4000, 1000), 2.5, 'auto', self.subj)['style'] == 'pan'                    # (a very wide photo is still panned)
+
+    def test_the_move_is_made_in_proportion_to_the_time_it_has(self):
+        def travel(sec): a, b = PM.plan((1600, 1200), sec, 'push_in', self.subj)['keys']; return b['z'] / a['z']
+        assert travel(2.0) < travel(4.0) < travel(6.0) == travel(10.0) and travel(2.0) > 1.0
+        a, b = PM.plan((6000, 3000), 2.0, 'pan', self.subj, seed=1)['keys']; c, d = PM.plan((6000, 3000), 8.0, 'pan', self.subj, seed=1)['keys']; assert abs(b['cx'] - a['cx']) < 0.5 * abs(d['cx'] - c['cx']) + 1e-9
+        h = PM.plan((1600, 1200), 2.0, 'hold')['keys']; assert h[1]['z'] == pytest.approx(1.06)                                                                       # a hold is the same at any length

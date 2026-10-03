@@ -250,6 +250,19 @@ def run(folder, stages=None, only=None, force=False, log=print, detect=run_detec
     return done
 
 
+def busyness(doc):
+    """How much there is to take in at a glance, 0 (a plain picture) to 1 (a crowded, detailed one), from the photo's analysis: the fine detail (the `quality` stage) and how many people, faces and objects are in it. 0.5 when it has not been analysed."""
+    q = (doc or {}).get('quality'); det = (doc or {}).get('people'); obj = (doc or {}).get('objects')
+    if not q and not det and not obj: return 0.5
+    detail = min(float((q or {}).get('fine', 4.0)) / 8.0, 1.0); n = len((det or {}).get('people') or []) + len([f for f in (det or {}).get('faces') or [] if f.get('score', 0) >= 0.5]) // 2 + len((obj or {}).get('objects') or [])
+    return round(0.5 * detail + 0.5 * min(n / 6.0, 1.0), 3)
+
+
+def auto_seconds(doc):
+    """How long a photo is shown when nobody has set it: 2 s for a plain picture up to 3 s for a busy one, in half seconds (there is more to see in a busy photo)."""
+    return round((2.0 + busyness(doc)) * 2) / 2
+
+
 def summary(doc):
     """The short facts the pages show for a photo from its analysis document: {tags, setting, description, scenery, clarity, people, me, face_clear, place, exposure, quality, overlay} (only those the stages have made)."""
     s = doc.get('scenes') or {}; out = {}

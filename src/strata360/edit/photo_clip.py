@@ -27,7 +27,7 @@ def sync(folder, specs, log=print):
         if not is_photo_label(sp['clip']): continue
         e = photos.get(str(sp['clip']).lower())
         if e is None: log(f"{sp['clip']}: the photo is not in the project any more"); continue
-        mo = PH.motion_of(e); sec = round(min(max(float(sp['seconds']), SY.MIN_SECONDS), 45.0), 2); c = SY.make_photo(e, sec, mo); old = docs.get(c['id']); path = os.path.join(rd, 'synthetic', c['id'] + '.mp4'); c['file'] = os.path.join('synthetic', c['id'] + '.mp4')
+        mo = PH.motion_of(e); sec = round(min(max(float(sp['seconds']), SY.MIN_SECONDS), 8.0), 2); c = SY.make_photo(e, sec, mo); old = docs.get(c['id']); path = os.path.join(rd, 'synthetic', c['id'] + '.mp4'); c['file'] = os.path.join('synthetic', c['id'] + '.mp4')
         if old and old.get('key') == c['key'] and os.path.exists(path): out.append(old); continue
         render(folder, e, sec, mo, path, log); c['status'] = 'ready'; out.append(SY.upsert(folder, c))
     return out

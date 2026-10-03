@@ -122,8 +122,8 @@ def gap_clips(folder, tr, tz):
     return out
 
 
-MAX_PHOTO_S = 12.0                     # the longest a photo is shown in the film
-MIN_PHOTO_S = 2.5
+MAX_PHOTO_S = 3.0                      # the longest a photo is shown in the film unless you set a longer time on it
+MIN_PHOTO_S = 2.0
 
 
 def photo_clips(folder, tr, tz):
@@ -138,9 +138,9 @@ def photo_clips(folder, tr, tz):
     if not rows: return []
     out = []
     for e in rows:
-        lab = PH.label_of(e); mo = PH.motion_of(e); doc = PA.load_doc(rd, e['id']); a = PA.summary(doc); sec = round(min(max(float(mo['seconds']), MIN_PHOTO_S), MAX_PHOTO_S), 1); t = e['taken_utc']
-        d = dict(label=lab, clip=lab, start_utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=MAX_PHOTO_S, usable=[(0.0, MAX_PHOTO_S)], synthetic=True, photo=True, race_s=0.0, speedup=1.0, scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
-                 settings=dict(kind=None, mode=None, seconds=None, must=bool(e.get('must'))), planned=None, photo_facts=dict(name=e['name'], camera=e.get('camera') or '', **{k: v for k, v in a.items() if k != 'stages'}))
+        lab = PH.label_of(e); mo = PH.motion_of(e); doc = PA.load_doc(rd, e['id']); a = PA.summary(doc); explicit = mo['seconds'] is not None; sec = float(mo['seconds']) if explicit else PA.auto_seconds(doc); t = e['taken_utc']          # a length you set on the photo is kept; else 2 to 3 s by how busy it is
+        d = dict(label=lab, clip=lab, start_utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=max(sec, MAX_PHOTO_S), usable=[(0.0, max(sec, MAX_PHOTO_S))], synthetic=True, photo=True, race_s=0.0, speedup=1.0, scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
+                 settings=dict(kind=None, mode='set' if explicit else None, seconds=sec if explicit else None, must=bool(e.get('must'))), planned=None, photo_facts=dict(name=e['name'], camera=e.get('camera') or '', **{k: v for k, v in a.items() if k != 'stages'}))
         if tr is not None:
             ctx = X.context_at(tr, t, t, tz); d['track'] = X.describe(ctx)
             if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"

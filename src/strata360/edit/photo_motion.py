@@ -12,7 +12,7 @@ Where to look (`focals`): the wearer's face first, then other faces and persons 
   reveal    from a detail at high zoom, moving and widening to the next point of interest
   hold      the whole picture with a slight breath (a photo that should just be seen)
 
-`plan()` picks the style (`auto`: by the shape of the photo and what is in it, the seed breaking ties and choosing the direction) and returns the keys; `crop_at()` gives the window at a time; `render()` yields the frames; `write_video()` makes an MP4 with ffmpeg."""
+`plan()` picks the style (`auto`: by the shape of the photo and what is in it, the seed breaking ties and choosing the direction; a short shot, under 3.5 s, only gets a push in, a pull out or a hold, and every move is made in proportion to the time it has: all of it in 6 s or more, a third of it in 2 s) and returns the keys; `crop_at()` gives the window at a time; `render()` yields the frames; `write_video()` makes an MP4 with ffmpeg."""
 import math, subprocess
 
 import numpy as np
@@ -82,11 +82,12 @@ def zoom_on(f, w, h, aspect, zmax, tight=0.55):
     bw, bh = base_window(w, h, aspect); z = min(bw * tight / max(f['w'] * w, 1.0), bh * tight / max(f['h'] * h, 1.0)); return min(max(z, 1.0), zmax)
 
 
-def pick_style(w, h, subjects, rng, aspect=ASPECT):
+def pick_style(w, h, subjects, rng, aspect=ASPECT, duration_s=6.0):
     """The style `auto` chooses: a very wide or tall photo is panned; a photo with a main subject is pushed in on (or pulled out from, sometimes) or revealed; one with two points of interest drifts or reveals; one with nothing is held or drifts."""
-    ratio = w / h
+    ratio = w / h; short = duration_s < 3.5                                                               # a short shot has no time for a reveal or a long drift
     if ratio > aspect * 1.35 or ratio < 1 / aspect * 0.8: return 'pan'
     strong = [s for s in subjects if s['weight'] >= 0.5]
+    if short: return str(rng.choice(['push_in', 'push_in', 'pull_out'])) if strong else str(rng.choice(['push_in', 'hold']))
     if len(strong) >= 2: return str(rng.choice(['drift', 'reveal', 'push_in']))
     if strong: return str(rng.choice(['push_in', 'push_in', 'pull_out']))
     return str(rng.choice(['drift', 'push_in', 'hold']))
@@ -97,7 +98,7 @@ def plan(size, duration_s, style='auto', subjects=None, seed=0, aspect=ASPECT, o
     if style != 'auto' and style not in STYLES: raise ValueError(f'style: one of {", ".join(STYLES)} or auto')
     if duration_s <= 0: raise ValueError('the length must be more than zero seconds')
     w, h = size; rng = np.random.default_rng(int(seed)); zmax = max_zoom(w, h, out_w, aspect, max_upscale); subj = list(subjects or []) or [dict(cx=0.5, cy=0.5, w=0.5, h=0.5, weight=0.1, label='middle')]
-    main = subj[0]; second = next((s for s in subj[1:] if math.hypot(s['cx'] - main['cx'], s['cy'] - main['cy']) > 0.2), subj[1] if len(subj) > 1 else main); st = pick_style(w, h, subj, rng, aspect) if style == 'auto' else style
+    main = subj[0]; second = next((s for s in subj[1:] if math.hypot(s['cx'] - main['cx'], s['cy'] - main['cy']) > 0.2), subj[1] if len(subj) > 1 else main); st = pick_style(w, h, subj, rng, aspect, duration_s) if style == 'auto' else style
     zm = min(zmax, max(1.12, zoom_on(main, w, h, aspect, zmax))); mid = dict(cx=0.5, cy=0.5, z=1.0); bw, bh = base_window(w, h, aspect)
     if st == 'push_in': a, b = dict(cx=0.5 + (main['cx'] - 0.5) * 0.25, cy=0.5 + (main['cy'] - 0.5) * 0.25, z=1.0), dict(cx=main['cx'], cy=main['cy'], z=min(zm, 1.45))
     elif st == 'pull_out': a, b = dict(cx=main['cx'], cy=main['cy'], z=min(zm, 1.6)), dict(cx=0.5 + (main['cx'] - 0.5) * 0.25, cy=0.5 + (main['cy'] - 0.5) * 0.25, z=1.0)
@@ -109,6 +110,8 @@ def plan(size, duration_s, style='auto', subjects=None, seed=0, aspect=ASPECT, o
     elif st == 'drift': a, b = dict(cx=main['cx'], cy=main['cy'], z=min(1.12, zmax)), dict(cx=second['cx'], cy=second['cy'], z=min(1.3, zmax))
     elif st == 'reveal': a, b = dict(cx=main['cx'], cy=main['cy'], z=min(zm * 1.15, zmax)), dict(cx=second['cx'] if second is not main else 0.5, cy=second['cy'] if second is not main else 0.5, z=min(max(1.0, zm * 0.55), 1.2))
     else: a, b = dict(cx=0.5, cy=0.5, z=1.0), dict(cx=0.5, cy=0.5, z=min(1.06, zmax))
+    amount = min(1.0, max(0.35, duration_s / 6.0))                                                           # how much of the move is made: all of it in 6 s or more, a third of it in 2 s (travelling the whole way in 2 s would be too fast to watch)
+    if st != 'hold': b = dict(cx=a['cx'] + (b['cx'] - a['cx']) * amount, cy=a['cy'] + (b['cy'] - a['cy']) * amount, z=math.exp(math.log(a['z']) + (math.log(b['z']) - math.log(a['z'])) * amount))
     keys = [dict(t=0.0, **clamp_key(a, w, h, aspect, zmax)), dict(t=float(duration_s), **clamp_key(b, w, h, aspect, zmax))]
     return dict(style=st, duration_s=float(duration_s), aspect=aspect, zmax=round(zmax, 3), keys=keys, subjects=subj[:3], seed=int(seed), size=[int(w), int(h)])
 
