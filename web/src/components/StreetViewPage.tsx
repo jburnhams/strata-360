@@ -64,10 +64,27 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
   const [tiles, setTiles] = useState<TileStatus>()
   const [sel, setSel] = useState<{ kind: 'section' | 'stretch'; id: string }>()
   const [shown, setShown] = useState<Record<string, boolean>>({ mapillary: true, panoramax: true, google: true, '360': true, '2d': true, clips: true })
-  const [probe, setProbe] = useState<{ lat: number; lon: number }>(), [near, setNear] = useState<SvNearResult>(), [nearBusy, setNearBusy] = useState(false), [nearErr, setNearErr] = useState<string>()
+  const [probe, setProbe] = useState<{ lat: number; lon: number }>(), [near, setNear] = useState<SvNearResult>(), [nearBusy, setNearBusy] = useState(false), [nearErr, setNearErr] = useState<string>(), [nearLog, setNearLog] = useState<string[]>([])
+  const [nearGen, setNearGen] = useState(0)                                                       // changes with each click, so an old answer is not shown for a new point
+  const look = async (lat: number, lon: number, gen: number) => {
+    const r = await api.svNear(folder, lat, lon); if (gen !== nearGenRef.current) return false
+    if (r.cached && r.result) { setNear(r.result); setNearBusy(false); return true }
+    const mine = r.job && Math.abs(r.job.lat - lat) < 1e-9 && Math.abs(r.job.lon - lon) < 1e-9 ? r.job : undefined
+    if (mine) { setNearLog(mine.log); if (mine.error) { setNearErr(mine.error); setNearBusy(false); return true } }
+    return false
+  }
+  const nearGenRef = useRef(0)
   const pick = async (lat: number, lon: number) => {
-    setProbe({ lat, lon }); setNear(undefined); setNearErr(undefined); setNearBusy(true)
-    try { setNear(await api.svNear(folder, lat, lon, 5)) } catch (e) { setNearErr((e as Error).message) } finally { setNearBusy(false) }
+    const gen = ++nearGenRef.current; setNearGen(gen); setProbe({ lat, lon }); setNear(undefined); setNearErr(undefined); setNearBusy(false); setNearLog([])
+    try { await look(lat, lon, gen) } catch (e) { setNearErr((e as Error).message) }
+  }
+  const search = async () => {
+    if (!probe) return; const gen = nearGenRef.current, { lat, lon } = probe; setNearErr(undefined); setNearBusy(true); setNearLog(['starting…'])
+    try {
+      const r = await api.searchSvNear(folder, lat, lon); if (!r.started && r.reason) { setNearErr(r.reason); setNearBusy(false); return }
+      for (let i = 0; i < 400; i++) { await new Promise(res => setTimeout(res, 800)); if (gen !== nearGenRef.current) return; if (await look(lat, lon, gen)) return }
+      setNearErr('the search is taking too long'); setNearBusy(false)
+    } catch (e) { setNearErr((e as Error).message); setNearBusy(false) }
   }
   const [routes, setRoutes] = useState<{ id: string; name: string; pts: [number, number][] }[]>([])
   useEffect(() => {                                                                              // the route tracks (the planned course), drawn in blue
@@ -98,7 +115,6 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
         <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">Where the run was on a road, and the street-level pictures there are of those roads: a gap in the film could be shown as the view along the road.</p>
         {!data ? <p className="text-sm text-stone-500">Loading…</p> : <Stages data={data} onRun={run} err={err} />}
       </div>
-      {probe && <NearPanel folder={folder} tz={tz} probe={probe} result={near} busy={nearBusy} error={nearErr} onPromoted={() => setTick(t => t + 1)} onClose={() => { setProbe(undefined); setNear(undefined); setNearErr(undefined) }} />}
       {data && roads && sections.length > 0 && <Candidates folder={folder} tz={tz} sections={visible} all={sections} sel={sel} onSel={setSel} onChoose={async (key, c) => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }} />}
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
@@ -115,6 +131,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
           </p>
         </div>
       )}
+      {probe && <NearPanel key={nearGen} folder={folder} tz={tz} probe={probe} result={near} busy={nearBusy} log={nearLog} error={nearErr} onSearch={search} onPromoted={() => setTick(t => t + 1)} onClose={() => { nearGenRef.current++; setProbe(undefined); setNear(undefined); setNearErr(undefined); setNearBusy(false) }} />}
       {(section || chosenStretch) && <Detail folder={folder} tz={tz} section={section} stretch={chosenStretch} sections={sections.filter(s => s.stretch === chosenStretch?.id)} onSel={setSel} />}
       {roads && <List title="Every section found" tz={tz} sections={visible} sel={sel} onSel={setSel} none={sections.length === 0} />}
     </section>
@@ -363,15 +380,24 @@ function SectionVideo({ folder, section }: { folder: string; section: SvSectionI
 const RULE_ICON = { true: '✓', false: '✗', null: '?' } as const
 
 /** The nearest street view to a clicked point, from each provider, with every rule that would rule each one out (no filters): the nearest capture runs first. */
-function NearPanel({ folder, tz, probe, result, busy, error, onPromoted, onClose }: { folder: string; tz: string; probe: { lat: number; lon: number }; result?: SvNearResult; busy: boolean; error?: string; onPromoted: () => void; onClose: () => void }) {
-  const [made, setMade] = useState<Record<string, string>>({}), [promoErr, setPromoErr] = useState<string>()
+function NearPanel({ folder, tz, probe, result, busy, log, error, onSearch, onPromoted, onClose }: { folder: string; tz: string; probe: { lat: number; lon: number }; result?: SvNearResult; busy: boolean; log: string[]; error?: string; onSearch: () => void; onPromoted: () => void; onClose: () => void }) {
+  const [made, setMade] = useState<Record<string, string>>({}), [promoErr, setPromoErr] = useState<string>(), [big, setBig] = useState<{ provider: SvProvider; id: string }>()
+  useEffect(() => { if (!big) return; const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setBig(undefined) }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [big])
   const promote = async (it: SvNearItem) => { setPromoErr(undefined); try { const r = await api.promoteSv(folder, it, probe.lat, probe.lon); setMade(m => ({ ...m, [it.id]: r.id })); onPromoted() } catch (e) { setPromoErr((e as Error).message) } }
   return (
     <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Nearest street view to the clicked point">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Nearest street view to {probe.lat.toFixed(5)}, {probe.lon.toFixed(5)}</h3><button onClick={onClose} className="text-xs underline">Close</button></div>
       <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">As the crow flies, whatever the run did there. Each shows what would rule it out of the film: how far it is from the run, whether the run was on a road, which way it faces, how many pictures, the light and the footage.</p>
-      {busy && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Asking Mapillary, Panoramax and Google…</p>}
+      {!result && !busy && <div className="flex flex-wrap items-center gap-3 text-sm"><button type="button" onClick={onSearch} className="rounded bg-emerald-700 px-3 py-1 text-white">Search for street view here</button><span className="text-xs text-stone-500">Nothing has been searched within 100 m of this point yet: asking Mapillary, Panoramax and Google takes a little while.</span></div>}
+      {busy && <div role="status" className="text-sm text-stone-600 dark:text-stone-400"><div className="flex items-center gap-2"><span aria-hidden="true" className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-emerald-700 border-t-transparent" />Searching…</div><ul className="mt-1 space-y-0.5 font-mono text-xs text-stone-500" aria-label="Search log">{log.map((l, i) => <li key={i}>{l}</li>)}</ul></div>}
+      {result && (Math.abs(result.lat - probe.lat) > 1e-6 || Math.abs(result.lon - probe.lon) > 1e-6) && <p className="mb-1 text-xs text-stone-500">From the search made at {result.lat.toFixed(5)}, {result.lon.toFixed(5)}, less than 100 m from here; distances are from there.</p>}
       {error && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p>}
+      {big && (
+        <div role="dialog" aria-label="Larger picture" onClick={() => setBig(undefined)} className="fixed inset-0 z-[2000] flex cursor-zoom-out items-center justify-center bg-black/80 p-4">
+          <img src={api.svNearImage(folder, big.provider, big.id, 1024)} alt={`${NAME[big.provider]} ${big.id}, larger`} className="max-h-full max-w-full rounded" />
+          <button type="button" aria-label="Close the larger picture" className="absolute right-4 top-4 rounded bg-white/90 px-2 py-1 text-sm text-stone-900" onClick={() => setBig(undefined)}>Close</button>
+        </div>
+      )}
       {promoErr && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{promoErr}</p>}
       {result && (
         <div className="grid gap-3 lg:grid-cols-3">
@@ -386,7 +412,8 @@ function NearPanel({ folder, tz, probe, result, busy, error, onPromoted, onClose
                   {b.items.map(it => (
                     <li key={it.id} data-near-item={it.id} className="rounded border border-stone-200 p-2 text-xs dark:border-stone-700">
                       <div className="flex gap-2">
-                        <img loading="lazy" src={api.svNearImage(folder, p, it.id, 256)} alt={`${NAME[p]} ${it.id}`} className="h-16 w-24 shrink-0 rounded object-cover" />
+                        <button type="button" aria-label={`Show ${NAME[p]} ${it.id} larger`} title="Click to show larger" onClick={() => setBig({ provider: p, id: it.id })} className="shrink-0 cursor-zoom-in">
+                          <img loading="lazy" src={api.svNearImage(folder, p, it.id, 256)} alt={`${NAME[p]} ${it.id}`} className="h-16 w-24 rounded object-cover" /></button>
                         <div className="min-w-0"><div className="font-medium">{it.distance_m} m away · {kindLabel2(it)}{it.section ? ` · section ${it.section}` : ''}</div>
                           <div className="text-stone-600 dark:text-stone-400">{[it.camera, it.size && `${it.size[0]}×${it.size[1]}`].filter(Boolean).join(' · ') || 'camera not known'}</div>
                           <div className="text-stone-600 dark:text-stone-400">Filmed {when(it.captured, tz)}{it.passed ? ` · you passed ${when(it.passed, tz)}` : ''}</div></div>

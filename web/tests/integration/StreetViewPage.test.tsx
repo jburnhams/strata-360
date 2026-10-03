@@ -259,19 +259,40 @@ describe('clicking the map for the nearest street view', () => {
   const click = async () => { serve(); const r = setup(<StreetViewPage folder="/data" initialFilters={SHOW_ALL} />); await screen.findAllByRole('row'); fireEvent.click(await screen.findByRole('application'), { clientX: 40, clientY: 30 }); return r }
 
   it('asks for the nearest street view at the clicked place and lists what each provider has, with the rules that rule each out', async () => {
-    const seen = recordRequests('/api/streetview/near'); server.use(http.get('/api/streetview/near', () => HttpResponse.json(makeNearResult())))
+    const seen = recordRequests('/api/streetview/near'); server.use(http.get('/api/streetview/near', () => HttpResponse.json({ cached: true, result: makeNearResult(), job: null })))
     await click(); const panel = await screen.findByLabelText('Nearest street view to the clicked point'); await waitFor(() => expect(seen.filter(r => r.method === 'GET')).toHaveLength(1))
-    const u = seen[0].url.searchParams; expect(u.get('folder')).toBe('/data'); expect(Number.isFinite(Number(u.get('lat')))).toBe(true); expect(u.get('n')).toBe('5')
+    const u = seen[0].url.searchParams; expect(u.get('folder')).toBe('/data'); expect(Number.isFinite(Number(u.get('lat')))).toBe(true); expect(seen.filter(r => r.method === 'POST')).toHaveLength(0)         // a click fetches nothing
     const m = within(await screen.findByRole('region', { name: 'Mapillary near the point' })); const item = m.getByText(/12.5 m away · 360°/).closest('[data-near-item]') as HTMLElement
     expect(item).toHaveTextContent('GoPro Max · 5760×2880'); expect(item).toHaveTextContent('Ruled out: 1 reason'); expect(item.querySelector('img')!.getAttribute('src')).toBe('/api/streetview/near/image?folder=%2Fdata&provider=mapillary&id=m9&w=256')
     const rules = [...item.querySelectorAll('[data-rule]')]; expect(rules.map(r => r.getAttribute('data-rule'))).toEqual(['near_run', 'light', 'direction']); expect(rules[1].className).toContain('red'); expect(rules[1]).toHaveTextContent('below the horizon (dark)'); expect(within(rules[1] as HTMLElement).getByLabelText('rules it out')).toBeInTheDocument(); expect(within(rules[0] as HTMLElement).getByLabelText('fine')).toBeInTheDocument(); expect(within(rules[2] as HTMLElement).getByLabelText('not known')).toBeInTheDocument()
     expect(within(await screen.findByRole('region', { name: 'Panoramax near the point' })).getByText('Nothing within 500 m.')).toBeInTheDocument(); expect(within(screen.getByRole('region', { name: 'Google near the point' })).getByText('no GOOGLE_MAPS_API_KEY in secrets.env')).toBeInTheDocument(); expect(panel).toHaveTextContent('Filmed Thu 7 Mar 2024')
   })
 
-  it('says when nothing rules a picture out, shows that it is busy, and can be closed', async () => {
-    server.use(http.get('/api/streetview/near', () => HttpResponse.json(makeNearResult({ providers: { mapillary: { items: [makeNearItem({ usable: true, ruled_out: [], section: 'M31' })], radius_m: 100 }, panoramax: { items: [], radius_m: 100 }, google: { items: [], radius_m: 110 } } }))))
+  it('says when nothing rules a picture out, and can be closed', async () => {
+    server.use(http.get('/api/streetview/near', () => HttpResponse.json({ cached: true, result: makeNearResult({ providers: { mapillary: { items: [makeNearItem({ usable: true, ruled_out: [], section: 'M31' })], radius_m: 100 }, panoramax: { items: [], radius_m: 100 }, google: { items: [], radius_m: 110 } } }), job: null })))
     const { user } = await click(); expect(await screen.findByText('Nothing rules it out')).toBeInTheDocument(); expect(screen.getByText('Already a candidate: section M31')).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Make this a candidate' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Close' })); expect(screen.queryByLabelText('Nearest street view to the clicked point')).toBeNull()
+  })
+
+  it('shows a search button when nothing is cached, and the log while it searches, then the result', async () => {
+    let polls = 0; const posts = recordRequests('/api/streetview/near')
+    server.use(http.get('/api/streetview/near', ({ request }) => {
+      const u = new URL(request.url); const lat = Number(u.searchParams.get('lat')), lon = Number(u.searchParams.get('lon')); polls++
+      if (!posts.some(r => r.method === 'POST')) return HttpResponse.json({ cached: false, result: null, job: null })
+      return polls < 4 ? HttpResponse.json({ cached: false, result: null, job: { lat, lon, running: true, log: ['asking mapillary…'], error: '' } }) : HttpResponse.json({ cached: true, result: makeNearResult(), job: null })
+    }), http.post('/api/streetview/near', () => HttpResponse.json({ started: true })))
+    const { user } = await click(); expect(await screen.findByRole('button', { name: 'Search for street view here' })).toBeInTheDocument(); expect(screen.queryByRole('region', { name: 'Mapillary near the point' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Search for street view here' })); expect(await screen.findByRole('status')).toHaveTextContent('Searching…'); expect(await screen.findByText('asking mapillary…')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Mapillary near the point' }, { timeout: 5000 })).toBeInTheDocument(); expect(screen.queryByRole('status')).toBeNull()
+    expect(posts.filter(r => r.method === 'POST')[0].body).toMatchObject({ folder: '/data', n: 5 })
+  })
+
+  it('puts the nearest street view under the map and shows a picture larger when it is clicked', async () => {
+    server.use(http.get('/api/streetview/near', () => HttpResponse.json({ cached: true, result: makeNearResult(), job: null })))
+    const { user } = await click(); const panel = await screen.findByLabelText('Nearest street view to the clicked point'); const map = screen.getByRole('application')
+    expect(map.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Show Mapillary m9 larger' })); const big = screen.getByRole('dialog', { name: 'Larger picture' }); expect(within(big).getByRole('img').getAttribute('src')).toContain('id=m9&w=1024')
+    await user.keyboard('{Escape}'); expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('shows the failure to ask', async () => {
@@ -360,7 +381,7 @@ describe('what is shown to start with, and making a nearby capture a candidate',
   })
 
   it('makes a nearby capture a candidate with a button, once', async () => {
-    server.use(http.get('/api/streetview/near', () => HttpResponse.json(makeNearResult({ providers: { mapillary: { items: [makeNearItem({ section: null })], radius_m: 100 }, panoramax: { items: [], radius_m: 100 }, google: { items: [], radius_m: 110 } } }))))
+    server.use(http.get('/api/streetview/near', () => HttpResponse.json({ cached: true, result: makeNearResult({ providers: { mapillary: { items: [makeNearItem({ section: null })], radius_m: 100 }, panoramax: { items: [], radius_m: 100 }, google: { items: [], radius_m: 110 } } }), job: null })))
     const seen = recordRequests('/api/streetview/promote'); server.use(http.post('/api/streetview/promote', () => HttpResponse.json({ key: 'mapillary:s:1.00', id: 'M+1' })))
     serve(); const { user } = setup(<StreetViewPage folder="/data" initialFilters={SHOW_ALL} />); await screen.findAllByRole('row')
     fireEvent.click(await screen.findByRole('application'), { clientX: 40, clientY: 30 })

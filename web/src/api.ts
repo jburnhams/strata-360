@@ -43,6 +43,8 @@ export interface SvRule { key: string; ok: boolean | null; text: string }
 export interface SvNearItem { provider: SvProvider; id: string; sequence: string; lat: number; lon: number; distance_m: number; kind: '360' | '2d'; camera: string | null; size: number[] | null; captured: number | null; compass: number | null; pictures: number; spacing_m: number | null
   section: string | null; section_key?: string | null; run_distance_m: number | null; run_km: number | null; passed: number | null; rules: SvRule[]; usable: boolean; ruled_out: string[] }
 export interface SvChosen { key: string; label: string; id: string; provider: SvProvider; kind: '360' | '2d'; choice: SvChoice; t0: number; t1: number; length_m: number; quality: string | null }
+/** What a click on the map finds without fetching anything: an earlier search within 100 m (cached), and how a search being made now is going (its point, the end of its log, why it failed). */
+export interface SvNearLookup { cached: boolean; result: SvNearResult | null; job: { lat: number; lon: number; running: boolean; log: string[]; error: string } | null }
 export interface SvNearResult { lat: number; lon: number; n: number; providers: Record<SvProvider, { items: SvNearItem[]; radius_m: number | null; error?: string }> }
 export interface SvNearClip { label: string; seconds: number; km: number }
 /** Where a section sits among the camera clips along the run: the nearest clip each way (time and distance between), the clips it overlaps, and the gap in the footage that holds it. */
@@ -189,7 +191,8 @@ export const api = {
   streetview: (folder: string) => call<StreetView>('/api/streetview?' + q({ folder })),
   runStreetview: (folder: string, body: { stages?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/streetview/run', { folder, ...body }),
   setStreetviewChoice: (folder: string, key: string, choice: SvChoice | 'none') => call<{ key: string; choice: SvChoice | null }>('/api/streetview/choice', { folder, key, choice }),
-  svNear: (folder: string, lat: number, lon: number, n = 5) => call<SvNearResult>('/api/streetview/near?' + q({ folder, lat: String(lat), lon: String(lon), n: String(n) })),
+  svNear: (folder: string, lat: number, lon: number) => call<SvNearLookup>('/api/streetview/near?' + q({ folder, lat: String(lat), lon: String(lon) })),
+  searchSvNear: (folder: string, lat: number, lon: number, n = 5) => call<{ started: boolean; reason?: string }>('/api/streetview/near', { folder, lat, lon, n }),
   svChosen: (folder: string) => call<{ sections: SvChosen[] }>('/api/streetview/chosen?' + q({ folder })),
   promoteSv: (folder: string, it: { provider: SvProvider; id: string; sequence: string }, lat: number, lon: number) => call<{ key: string; id: string }>('/api/streetview/promote', { folder, provider: it.provider, id: it.id, sequence: it.sequence, lat, lon }),
   unpromoteSv: (folder: string, key: string) => call<{ removed: boolean }>('/api/streetview/unpromote', { folder, key }),

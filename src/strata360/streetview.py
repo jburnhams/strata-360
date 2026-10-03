@@ -611,21 +611,44 @@ def describe_near(prov, g, radius, secs, ctx):
                 section=sec['id'] if sec else None, section_key=sec['key'] if sec else None, run_distance_m=None if run_d is None else round(run_d, 1), run_km=None if run_km is None else round(run_km, 3), passed=run_t, url=f.get('url'), rules=rules, usable=all(r['ok'] is not False for r in rules), ruled_out=[r['text'] for r in rules if r['ok'] is False])
 
 
-def near_point(rd, lat, lon, n=5, tr=None, clips=None, gaps=None, get=_get, token=None, gkey=None, osm_svc=None):
+def near_point(rd, lat, lon, n=5, tr=None, clips=None, gaps=None, get=_get, token=None, gkey=None, osm_svc=None, log=None):
     """The street view nearest (as the crow flies) to a point, from each provider, whatever the run did there: the `n` nearest capture runs of Mapillary and Panoramax (the search widens from NEAR_RADII until there are enough) and the nearest panoramas of Google,
     each with the rules that would rule it out. No filters. {lat, lon, n, providers: {name: {items, radius_m, error?}}}."""
+    log = log or (lambda m: None); log('looking up the roads round the point…')
     docs = {p: load(rd, p) for p in PROVIDERS}; secs = annotate(rd, docs, tr, clips, gaps); ctx = dict(tr=tr, ways=_roads_near(rd, lat, lon, NEAR_RADII[-1] + 150.0, osm_svc) if tr is not None else None, clips=clips, gaps=gaps); out = {}
     for prov, fetch, key in (('mapillary', _frames_mapillary, token), ('panoramax', _frames_panoramax, True), ('google', None, gkey)):
         if not key: out[prov] = dict(items=[], radius_m=None, error=('no MAPILLARY_TOKEN in secrets.env' if prov == 'mapillary' else 'no GOOGLE_MAPS_API_KEY in secrets.env')); continue
+        log(f'asking {prov}…')
         try:
             if prov == 'google': groups, radius = _google_near(lat, lon, n, gkey, get), GOOGLE_RING_M[-1] + 30
             else:
                 for radius in NEAR_RADII:
-                    groups = _groups(fetch(lat, lon, radius, token, get), lat, lon, n)
+                    log(f'{prov}: pictures within {radius:g} m…'); groups = _groups(fetch(lat, lon, radius, token, get), lat, lon, n)
                     if len(groups) >= n: break
         except RuntimeError as e: out[prov] = dict(items=[], radius_m=None, error=str(e)); continue
-        out[prov] = dict(items=[describe_near(prov, g, radius, secs, ctx) for g in groups], radius_m=radius)
+        out[prov] = dict(items=[describe_near(prov, g, radius, secs, ctx) for g in groups], radius_m=radius); log(f'{prov}: {len(groups)} capture run{"" if len(groups) == 1 else "s"} found')
     return dict(lat=lat, lon=lon, n=n, providers=out)
+
+
+NEAR_CACHE_M = 100.0              # a click this near an earlier search shows that search again (nothing is fetched)
+NEAR_CACHE_KEEP = 60
+
+
+def near_cached(rd, lat, lon):
+    """The result of the nearest earlier search within NEAR_CACHE_M of this point (its own `lat`/`lon` say where it was made), or None."""
+    try: entries = json.load(open(os.path.join(adir(rd), 'near_cache.json')))['entries']
+    except (OSError, ValueError, KeyError): return None
+    best = min(((_metres((lat, lon), (e['lat'], e['lon'])), e) for e in entries), key=lambda x: x[0], default=None)
+    return best[1]['result'] if best and best[0] <= NEAR_CACHE_M else None
+
+
+def near_store(rd, result):
+    """Keep a search result for later clicks near it (the newest NEAR_CACHE_KEEP are kept)."""
+    p = os.path.join(adir(rd), 'near_cache.json')
+    try: entries = json.load(open(p))['entries']
+    except (OSError, ValueError, KeyError): entries = []
+    entries = [e for e in entries if (e['lat'], e['lon']) != (result['lat'], result['lon'])] + [dict(lat=result['lat'], lon=result['lon'], result=result)]
+    os.makedirs(adir(rd), exist_ok=True); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(dict(entries=entries[-NEAR_CACHE_KEEP:]), open(tmp, 'w'), separators=(',', ':')); os.replace(tmp, p)
 
 
 def image_near(rd, provider, item, w=256, fetch=_bytes, get=_get):

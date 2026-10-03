@@ -159,3 +159,16 @@ def test_a_capture_run_found_near_a_click_is_made_a_section_kept_and_taken_out_a
 def test_a_capture_run_far_from_the_run_cannot_be_made_a_section(tmp_path):
     rd = str(tmp_path); net = Net(mly=[mfr(i, 1000 + 8 * i, east=300.0, seq='s1', pano=True) for i in range(60)])
     with pytest.raises(ValueError, match='within'): SV.promote(rd, 'mapillary', 'm10', 's1', LAT0 + 1080 * M, LON0 + lonm(300), track(), token='t', get=net)
+
+
+def test_a_search_is_reused_for_a_click_within_100_m_and_not_beyond(tmp_path):
+    rd = str(tmp_path); res = dict(lat=LAT0, lon=LON0, n=5, providers={})
+    assert SV.near_cached(rd, LAT0, LON0) is None
+    SV.near_store(rd, res); assert SV.near_cached(rd, LAT0 + 90 * M, LON0) == res and SV.near_cached(rd, LAT0 + 130 * M, LON0) is None
+    SV.near_store(rd, dict(res, lat=LAT0 + 500 * M)); assert SV.near_cached(rd, LAT0 + 480 * M, LON0)['lat'] == LAT0 + 500 * M and SV.near_cached(rd, LAT0, LON0) == res
+
+
+def test_the_search_says_what_it_is_doing(tmp_path):
+    rd = str(tmp_path); roads_doc(rd); log = []
+    SV.near_point(rd, LAT0 + 1000 * M, LON0, 3, track(), [], [], get=Net(mly=[mfr(i, 1000 + 8 * i, pano=True) for i in range(5)]), token='t', osm_svc=Osm(), log=log.append)
+    assert log[0].startswith('looking up the roads') and any('asking mapillary' in l for l in log) and any(l.startswith('mapillary: pictures within') for l in log) and any('capture run' in l for l in log)

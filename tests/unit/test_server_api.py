@@ -686,13 +686,21 @@ class TestStreetViewNearClips(TestStreetViewApi):
 
 
 class TestStreetViewNearApi(TestStreetViewApi):
-    def test_a_click_returns_what_is_nearest_from_each_provider_and_only_those_pictures_can_be_fetched(self, client, project, monkeypatch):
+    def test_a_click_is_only_looked_up_in_the_cache_until_a_search_is_asked_for_and_its_pictures_can_then_be_fetched(self, client, project, monkeypatch):
+        import time
         from strata360 import streetview as SV
         self.make_docs(project); seen = {}
-        def fake(rd, lat, lon, n, tr, clips, gaps, **kw): seen.update(lat=lat, lon=lon, n=n, kw=kw, clips=clips); return dict(lat=lat, lon=lon, n=n, providers=dict(mapillary=dict(items=[dict(id='m1', url=None, compass=10)], radius_m=100.0), panoramax=dict(items=[dict(id='p1', url='https://pmx/1.jpg', compass=0)], radius_m=100.0), google=dict(items=[], radius_m=110.0, error='no key')))
+        def fake(rd, lat, lon, n, tr, clips, gaps, log=None, **kw): seen.update(lat=lat, lon=lon, n=n, kw=kw, clips=clips); log('asking mapillary…'); return dict(lat=lat, lon=lon, n=n, providers=dict(mapillary=dict(items=[dict(id='m1', url=None, compass=10)], radius_m=100.0), panoramax=dict(items=[dict(id='p1', url='https://x/p1.jpg', compass=None)], radius_m=100.0), google=dict(items=[], radius_m=110.0)))
         monkeypatch.setattr(SV, 'near_point', fake); q = dict(folder=project.folder)
-        j = client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2, n=4)).json(); assert j['providers']['mapillary']['items'][0]['id'] == 'm1' and seen['lat'] == 50.1 and seen['n'] == 4 and seen['kw'].keys() >= {'token', 'gkey'}
-        assert client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2, n=99)).status_code == 200 and seen['n'] == 12
+        j = client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2)).json(); assert j['cached'] is False and j['result'] is None and seen == {}                       # nothing fetched by a click
+        assert client.post('/api/streetview/near', json=dict(q, lat=50.1, lon=5.2, n=99)).json() == dict(started=True)
+        for _ in range(100):
+            j = client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2)).json()
+            if j['cached']: break
+            time.sleep(0.05)
+        assert j['cached'] and j['result']['providers']['mapillary']['items'][0]['id'] == 'm1' and seen['n'] == 12 and seen['kw'].keys() >= {'token', 'gkey'} and j['job']['log'] == ['asking mapillary…']
+        near = client.get('/api/streetview/near', params=dict(q, lat=50.1005, lon=5.2)).json(); assert near['cached'] and near['result']['lat'] == 50.1                    # 55 m away: the same search
+        assert client.get('/api/streetview/near', params=dict(q, lat=50.103, lon=5.2)).json()['cached'] is False                                                          # 330 m away: not
         monkeypatch.setattr(SV, 'image_near', lambda rd, provider, item, w, **k: b'\xff\xd8' + provider.encode() + item['id'].encode())
         r = client.get('/api/streetview/near/image', params=dict(q, provider='panoramax', id='p1')); assert r.status_code == 200 and r.content == b'\xff\xd8panoramaxp1' and r.headers['content-type'] == 'image/jpeg'
         assert client.get('/api/streetview/near/image', params=dict(q, provider='mapillary', id='other')).status_code == 404 and client.get('/api/streetview/near/image', params=dict(q, provider='bing', id='m1')).status_code == 404

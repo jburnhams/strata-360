@@ -51,6 +51,7 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+STREETVIEW_NEAR_JOBS = {}     # folder -> the nearest-street-view search being made (lat, lon, log, error, thread)
 STREETVIEW_NEAR = {}          # (folder, provider, picture id) -> what the near-point search found (so the thumbnails can be fetched, and nothing else)
 STREETVIEW_VIDEO_JOBS = {}    # (folder, section key) -> Popen of a running `strata360 streetview-video`
 STREETVIEW_JOBS = {}          # folder -> Popen of a running `strata360 streetview`
@@ -1119,15 +1120,33 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
 
-    @api.get('/api/streetview/near', dependencies=[Depends(auth)])
-    def get_streetview_near(folder: str, lat: float, lon: float, n: int = 5):               # the street view nearest (as the crow flies) to a point clicked on the map, from each provider, each with the rules that would rule it out; no filters
-        from strata360 import streetview as SV
-        from strata360.edit import llm_remote as LR
-        f = folder_of(folder); rd = config.race_dir(f); n = max(1, min(int(n), 12)); clips, gaps = sv_footage(f)
-        res = SV.near_point(rd, lat, lon, n, sv_track(f), clips, gaps, token=LR.secret('MAPILLARY_TOKEN'), gkey=LR.secret('GOOGLE_MAPS_API_KEY'))
+    def near_register(f, res):
         for prov, block in res['providers'].items():
             for it in block['items']: STREETVIEW_NEAR[(f, prov, it['id'])] = dict(id=it['id'], url=it.get('url'), compass=it.get('compass'))        # only pictures found here can be asked for (the page's thumbnails)
-        return res
+
+    @api.get('/api/streetview/near', dependencies=[Depends(auth)])
+    def get_streetview_near(folder: str, lat: float, lon: float):                          # what an earlier search within 100 m of this point found ({cached, result}), and how a search being made now is going ({job}); nothing is fetched
+        from strata360 import streetview as SV
+        f = folder_of(folder); res = SV.near_cached(config.race_dir(f), lat, lon); job = STREETVIEW_NEAR_JOBS.get(f)
+        if res is not None: near_register(f, res)
+        return dict(cached=res is not None, result=res, job=None if not job else dict(lat=job['lat'], lon=job['lon'], running=job['thread'].is_alive(), log=job['log'][-8:], error=job['error']))
+
+    @api.post('/api/streetview/near', dependencies=[Depends(auth)])
+    def post_streetview_near(body: dict):                                                 # {folder, lat, lon, n?}: search for the nearest street view in the background (one at a time per project); the log is in the GET
+        import threading
+        from strata360 import streetview as SV
+        from strata360.edit import llm_remote as LR
+        f = folder_of(body.get('folder')); rd = config.race_dir(f)
+        try: lat, lon = float(body['lat']), float(body['lon'])
+        except (KeyError, TypeError, ValueError): raise HTTPException(400, 'lat and lon are needed')
+        n = max(1, min(int(body.get('n') or 5), 12)); old = STREETVIEW_NEAR_JOBS.get(f)
+        if old and old['thread'].is_alive(): return dict(started=False, reason='a search is already running')
+        clips, gaps = sv_footage(f); tr = sv_track(f); token, gkey = LR.secret('MAPILLARY_TOKEN'), LR.secret('GOOGLE_MAPS_API_KEY'); job = dict(lat=lat, lon=lon, log=[], error='')
+        def work():
+            try:
+                res = SV.near_point(rd, lat, lon, n, tr, clips, gaps, token=token, gkey=gkey, log=job['log'].append); SV.near_store(rd, res); near_register(f, res)
+            except Exception as ex: job['error'] = f'{type(ex).__name__}: {ex}'[:300]
+        job['thread'] = threading.Thread(target=work, daemon=True); STREETVIEW_NEAR_JOBS[f] = job; job['thread'].start(); return dict(started=True)
 
     @api.get('/api/streetview/near/image')
     def get_streetview_near_image(request: Request, folder: str, provider: str, id: str, w: int = 256):   # the picture of one of those (an <img> cannot send headers: the cookie / query token authenticates)
