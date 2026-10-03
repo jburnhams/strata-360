@@ -110,3 +110,26 @@ def test_join_runs_starts_the_second_shot_where_the_first_ends_but_never_past_th
     assert pair(15.7, [(15.4, 16.2)]).clip_start_s == 16.0                       # the first runs to 16.0 (10 beats of 0.6 s): the second starts there
     assert pair(15.7, [(15.4, 15.8)]).clip_start_s == 15.8                       # only to the end of the pause
     assert pair(15.7, []).clip_start_s == 15.7                                   # no pause known: left alone
+
+
+def test_the_face_centre_comes_from_the_face_box_inside_the_person_box():
+    from strata360.analysis import views
+    me = dict(box=[100, 100, 200, 300], face_box=[130, 110, 170, 170], height_deg=40.0, pitch=0.0)              # 200 px tall = 40 degrees: 0.2 degrees a pixel; the face centre is 60 px above the box centre and level with it sideways
+    assert views.face_offsets(me) == (12.0, 0.0)
+    assert views.face_offsets(dict(me, face_box=[150, 110, 190, 170])) == (12.0, 4.0) and views.face_offsets(dict(me, face_box=None)) == (None, None) and views.face_offsets(dict(me, height_deg=None)) == (None, None)
+    assert views.face_offsets(dict(me, pitch=60.0))[1] == pytest.approx(0.0, abs=1e-6) and views.face_offsets(dict(me, face_box=[150, 110, 190, 170], pitch=60.0))[1] == pytest.approx(8.0)       # sideways offsets grow towards the pole
+
+
+def test_the_close_view_centres_the_face_where_the_detector_found_it_and_is_a_little_wider_than_before():
+    from strata360.edit import framing as FR, techniques as T2
+    assert T2.CLOSE_FOV == 58.0
+    lib = TQ.load(); you = lambda **k: [dict(t=8.0 + i, yaw=200.0, pitch=-30.0, height=45.0, head=-8.0, who='you', speaking=False, **k) for i in range(10)]
+    seg = dict(id='c@10', clip='c', clip_start_s=10.0, dur_s=4.0, technique='selfie_close', variant_seed=1); data = lambda s: dict(person=[], you=s, heading=lambda t: 30.0, speakers=[])
+    p0 = FR.resolve_segment(seg, lib, data(you())); p1 = FR.resolve_segment(seg, lib, data(you(face=-26.0, face_dyaw=2.0)))
+    assert p1['keyframes'][0]['pitch'] == pytest.approx(-26.0, abs=0.5) and p1['keyframes'][0]['yaw'] == pytest.approx(202.0, abs=0.5)            # the face centre, not an estimate from the top of the head
+    assert p0['keyframes'][0]['pitch'] == pytest.approx(-8.0 - 0.30 * 45.0, abs=1.0) and p1['keyframes'][0]['fov'] == 58.0                            # without the face box: the head-top estimate as before
+
+
+def test_the_close_view_is_for_dialogue_and_used_at_most_three_times_while_the_mid_view_has_a_bias():
+    from strata360.edit import chrono as CH
+    assert LIB['selfie_close'].max_uses == 3 and LIB['selfie_close'].max_share <= 0.06 and CH.Settings().tech_bias['selfie_hold'] > 0 and 'selfie_close' not in CH.Settings().tech_bias

@@ -36,6 +36,7 @@ class Settings:
     dialogue_share: float = 0.15
     bans_techs: frozenset = frozenset()
     share_caps: dict = field(default_factory=lambda: {'dialogue_hold': 0.15})
+    tech_bias: dict = field(default_factory=lambda: {'selfie_hold': 0.25})        # a little extra score for a technique (per second of its window, as the other scores): the mid view of you is the one to reach for
     # the user's overrides (project.json): windows are identified by `wid` = "<clip>@<start seconds in the clip, 2 decimals>"
     locked: tuple = ()                                   # [{wid, clip, start_s, beats, cand_id, tech}]: kept exactly (clip window, length and technique)
     tech_force: dict = field(default_factory=dict)       # wid -> technique id that window must use (if feasible)
@@ -268,6 +269,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             t = lib[tid]
             if w.speech and not t.dialogue_ok: continue
             if t.id == 'dialogue_hold' and not w.speech: continue
+            if t.id == 'selfie_close' and not w.speech and st.tech_force.get(wids[k]) != 'selfie_close' and getattr(w, 'view', None) != 'close': continue            # the close view of you is for the best of the dialogue (or when asked for)
             if not (t.dmin - 1e-9 <= d <= t.dmax + 1e-9): continue
             if t.beats == 'bar' and w.beats % music.bar_beats: continue
             f = O.fit(c, t)
@@ -275,7 +277,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             if f is None and w.speech and tid in ('dialogue_hold', 'selfie_hold'): f = 0.2                    # the script plays these lines: a dialogue shot is allowed whatever the footage's own features say
             if f is None: continue
             sig = max((t.dmax - t.dmin) / 3.0, 0.4); durfit = math.exp(-0.5 * ((d - t.dideal) / sig) ** 2); scale = d ** st.dur_power
-            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en))
+            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en)) + st.tech_bias.get(tid, 0.0) * scale
             opts.append((tid, base))
         options.append(sorted(opts, key=lambda x: -x[1])[:8])
         want = w.tech_id if w.fixed else st.tech_force.get(wids[k])

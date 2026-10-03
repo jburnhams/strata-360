@@ -45,6 +45,13 @@ def _track(samples, t0, t1):
     return np.array([x['t'] for x in s]), np.unwrap(np.radians([x['yaw'] for x in s])), np.radians([x['pitch'] for x in s]), np.array(h, float), hd
 
 
+def _face(samples, key, abs_t):
+    """`key` of the you samples (the pitch of the face centre, or its yaw offset) at the times, interpolated between samples that have it; NaN where there is none within 2 s."""
+    s = [(x['t'], x[key]) for x in samples if x.get(key) is not None]
+    if not s: return np.full(len(abs_t), np.nan)
+    ts = np.array([a for a, _ in s]); v = np.interp(abs_t, ts, [b for _, b in s]); far = np.array([np.min(np.abs(ts - t)) > 2.0 for t in abs_t]); v[far] = np.nan; return v
+
+
 def _head(abs_t, ts, hd):
     """The pitch of the top of the head (degrees) at the times, interpolated between the samples where it is known; NaN where there is none within 2 s."""
     if hd is None or not np.isfinite(hd).any(): return np.full(len(abs_t), np.nan)
@@ -137,6 +144,8 @@ def resolve_segment(g, lib, data):
         if len(ts) >= 2: y = np.interp(abs_t, ts, yw); p = np.interp(abs_t, ts, pt); h = np.interp(abs_t, ts, hh); hdd = _head(abs_t, ts, hd)
         elif len(ts) == 1: y = np.full(len(times), yw[0]); p = np.full(len(times), pt[0]); h = np.full(len(times), hh[0]); hdd = _head(abs_t, ts, hd)
         else: subject = 'heading'
+        if subject == 'you' and tech.id == 'selfie_close':                                                  # sideways too: the centre of the face, not the middle of the body
+            fdy = _face(data[subject], 'face_dyaw', abs_t); y = y + np.radians(np.where(np.isfinite(fdy), fdy, 0.0))
     if subject not in ('person', 'you'):
         look = heading(t0 + T / 2) if tech.id not in NO_SUBJECT else heading(t0); att = None
         if subject == 'heading' and tech.id not in NO_SUBJECT and data.get('quality') is not None:       # straight ahead, unless somewhere nearby clearly has more detail, contrast and colour (and the lens there is not the foggy one)
@@ -150,6 +159,8 @@ def resolve_segment(g, lib, data):
         ev = CameraPath(path['keyframes'], path.get('ref', 'world')).evaluate(times)
         ty = np.degrees(y); aimer = (lambda pi, hi, vf, hd: AIM.aim_face(pi, hi, hd)) if tech.id == 'selfie_close' else AIM.aim_pitch
         tp = np.array([aimer(float(np.degrees(p[i])), float(h[i]), AIM.vfov_deg(float(ev['fov'][i])), None if np.isnan(hdd[i]) else float(hdd[i])) for i in range(len(times))])
+        if tech.id == 'selfie_close':                                                                    # the close view puts the CENTRE OF THE FACE (between the eyes and the nose) in the middle of the frame, where the detector found it; the head-top estimate is only the fallback
+            fp = _face(data[subject], 'face', abs_t); tp = np.where(np.isfinite(fp), fp, tp)
         fy, fp = AIM.follow(times, ty, tp, scale=min(1.0, float(np.mean(ev['fov'])) / 85.0))                                # a narrower view has a narrower dead band
         fy = np.degrees(np.unwrap(np.radians(fy)))
         kf = [dict(t=round(float(tt), 3), yaw=round(float(np.degrees(ev['yaw'][i]) + fy[i] - fy[0]), 2), pitch=round(float(np.clip(fp[i], -60, 60)), 2), fov=round(float(ev['fov'][i]), 1), ease='linear')

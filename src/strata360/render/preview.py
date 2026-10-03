@@ -93,7 +93,7 @@ class PreviewSource:
     def _frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
         sg = self.segs[k]; m = a1 - a0
         if m <= 0: return
-        if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, FPS, self.w, self.h, 'bgr'); return           # a generated clip: its pictures as they are
+        if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, FPS, self.w, self.h, 'bgr', speed=SYN.speed(sg)); return           # a generated clip: its pictures as they are
         clip = sg['clip']; ci = self._clip(clip)
         if not ci['proxy']:
             for _ in range(m): yield card(self.w, self.h, f'{clip[-9:]}: proxy not made yet')

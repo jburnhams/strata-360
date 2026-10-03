@@ -9,11 +9,18 @@ import cv2, numpy as np
 from strata360.pipeline import guard
 
 
+def speed(sg):
+    """How fast the window plays its generated clip: the film's windows are whole beats and the clip is a little shorter, so the clip is played a little slower (never longer than 40% slower or faster) to fill the window exactly, instead of holding its last frame for up to a beat. 1 when they already match."""
+    secs, dur = sg.get('synthetic_seconds'), sg.get('dur_s')
+    if not secs or not dur: return 1.0
+    r = float(secs) / float(dur); r = min(max(r, 0.6), 1.6); return 1.0 if abs(r - 1.0) < 0.005 else r
+
+
 def race_time(sg, i, fps):
-    """The race time (UTC seconds) that frame `i` of the window `sg` shows: the clip covers [utc_start, utc_end] of the race in `synthetic_seconds` of film, the window plays it from `clip_start_s` (a window longer than the clip holds its last frame)."""
+    """The race time (UTC seconds) that frame `i` of the window `sg` shows: the clip covers [utc_start, utc_end] of the race in `synthetic_seconds` of film, the window plays it from `clip_start_s` (a window longer than the clip plays it slower, `speed`, so it ends with the window)."""
     import datetime as dt
     t0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp(); t1 = dt.datetime.fromisoformat(sg['utc_end'].replace('Z', '+00:00')).timestamp(); secs = float(sg.get('synthetic_seconds') or sg['dur_s'])
-    return t0 + min(max(float(sg['clip_start_s']) + i / fps, 0.0), secs) / secs * (t1 - t0)
+    return t0 + min(max((float(sg['clip_start_s']) + i / fps) * speed(sg), 0.0), secs) / secs * (t1 - t0)
 
 
 def card(W, H, text, order='rgb', dtype=np.uint8):
@@ -21,7 +28,8 @@ def card(W, H, text, order='rgb', dtype=np.uint8):
     return im if dtype == np.uint8 else im.astype(dtype) * 257
 
 
-def frames(path, start_s, a0, a1, fps, W, H, order='rgb', dtype=np.uint8):
+def frames(path, start_s, a0, a1, fps, W, H, order='rgb', dtype=np.uint8, speed=1.0):
+    """Frames a0 .. a1-1 of the window; `speed` < 1 plays the video slower than it was made (see `speed(sg)`)."""
     m = a1 - a0
     if m <= 0: return
     if not os.path.exists(path):                                                                      # planned by the script, not rendered yet: a card, so the film still plays
@@ -29,7 +37,7 @@ def frames(path, start_s, a0, a1, fps, W, H, order='rgb', dtype=np.uint8):
         for _ in range(m): yield c
         return
     t_from = start_s + a0 / fps; lead = int(round(max(-t_from, 0.0) * fps)); n = W * H * 3
-    dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0):.3f}', '-i', path, '-t', f'{m / fps + 0.2:.3f}', '-an', '-vf', f'scale={W}:{H}:flags=bilinear,fps={fps:g}', '-pix_fmt', f'{order}24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
+    dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0) * speed:.3f}', '-i', path, '-t', f'{(m / fps + 0.2) * speed:.3f}', '-an', '-vf', (f'setpts=PTS/{speed:.6f},' if speed != 1.0 else '') + f'scale={W}:{H}:flags=bilinear,fps={fps:g}', '-pix_fmt', f'{order}24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE)
     fr = None
     try:
         for i in range(m):

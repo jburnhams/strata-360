@@ -17,9 +17,11 @@ from strata360 import hw
 from strata360.overlay.mapclip import frame_count
 
 BASE_W, BASE_H = 1280, 720    # the picture the camera is planned for
+SHARP_MAX = 1.5               # the finest tiles that still reach the horizon (the map at 1920 wide): a larger picture is also rendered at this detail, at a pixel ratio on top (a 4K frame is 1920 wide at ratio 2), as the background where the finer tiles of the 4K render run out
 RENDER_H = 820                # rendered this tall at BASE_W, and the bottom cropped: the draft branch leaves a wedge of missing tiles along the bottom edge
 EXAGGERATION = 1.5
 BACKGROUND = '#26381f'        # what shows where a tile is missing: matches the forest
+BACKGROUND_BGR = (0x1f, 0x38, 0x26)
 CACHE = os.path.join(os.path.expanduser('~'), '.strata360', 'flyover-cache.db')
 MBGL_DEFAULT = os.path.join(os.path.expanduser('~'), 'Code', 'maplibre-native-terrain', 'build', 'bin', 'mbgl-render')
 FOV = 0.6435011               # mbgl's default vertical field of view (radians)
@@ -223,9 +225,11 @@ class FlyoverClip:
         self.series, self.fps, self.size, self.imagery, self.exag, self.sharp = series, float(fps), tuple(size), imagery, exag, sharp; self.W, self.H = self.size; self.cache = cache
         self.frames = frame_count(seconds, fps); self.t0, self.t1 = float(t0), float(t1); self.speedup = (self.t1 - self.t0) / (self.frames / self.fps); self.mbgl = mbgl
         self.scale = self.W / BASE_W; self.dz = math.log2(self.scale) if sharp else 0.0; self.render_h = self.H * RENDER_H // BASE_H
+        self.coarse = bool(sharp and self.scale > SHARP_MAX + 1e-6); self.ratio = self.scale / SHARP_MAX if self.coarse else 1.0; self.dz_c = math.log2(self.scale / self.ratio) if self.coarse else 0.0
         self.route = route_from_series(series); self.shots = plan_shots(series, self.t0, self.t1, self.frames / self.fps); self.cam = camera or plan_camera(self.route, self.shots, self.fps, self.frames, exag)
-        g, lat, lon, _ = self.route; i0, i1 = np.searchsorted(g, [self.cam['runner'].min() - 500, self.cam['runner'].max() + 3000]); sl = slice(i0, max(i1, i0 + 2))
-        self.style = make_style(imagery, exag, lon[sl], lat[sl], self.scale if sharp else 1.0, self.dz)
+        g, lat, lon, _ = self.route; keep = np.unique(np.r_[np.arange(0, len(g), 5), len(g) - 1])                                         # the WHOLE route, one colour all through (the clip is a cut of the journey, not a highlighted stretch), a point every 50 m
+        self.style = make_style(imagery, exag, lon[keep], lat[keep], self.scale if sharp else 1.0, self.dz)
+        self.style_c = make_style(imagery, exag, lon[keep], lat[keep], self.scale / self.ratio, self.dz_c) if self.coarse else None
         self.credit = IMAGERY[imagery][3] + ' · ' + TERRAIN_CREDIT                                                                                  # (the imagery's credit is not drawn: credits go with the film's distribution, strata360 credits lists them)
         self._tmp = None
 
@@ -233,24 +237,36 @@ class FlyoverClip:
 
     def times(self): return self.t0 + np.arange(self.frames) * self.speedup / self.fps
 
-    def args(self, k, style_path, png):
-        """The `mbgl-render` command line for frame k."""
+    def args(self, k, style_path, png, coarse=False):
+        """The `mbgl-render` command line for frame k (`coarse`: the same view at the detail that reaches the horizon, at a pixel ratio, for the background)."""
         c = self.cam; r = 1.0 if self.sharp else self.scale; w, h = (self.W, self.render_h) if self.sharp else (BASE_W, RENDER_H)
+        if coarse: r = self.ratio; w, h = int(round(self.W / r)), int(round(self.render_h / r))
         return [self.mbgl or find_mbgl(), f'--backend={hw.mbgl_backend()}', '-s', style_path, '-c', self.cache, '-o', png, '-x', f'{c["lon"][k]:.6f}', '-y', f'{c["lat"][k]:.6f}', '-A', f'{c["alt"][k]:.1f}',
-                '-z', f'{c["zoom"][k] + self.dz:.3f}', '-b', f'{c["bearing"][k]:.2f}', '-p', f'{c["pitch"][k]:.2f}', '-r', f'{r:g}', '-w', str(w), '-h', str(h)]
+                '-z', f'{c["zoom"][k] + (self.dz_c if coarse else self.dz):.3f}', '-b', f'{c["bearing"][k]:.2f}', '-p', f'{c["pitch"][k]:.2f}', '-r', f'{r:g}', '-w', str(w), '-h', str(h)]
 
-    def still(self, k):
-        """The terrain picture of frame k, RGB at the frame size (no overlay)."""
-        g, lat, lon, _ = self.route; c = self.cam; r, kk = float(c['runner'][k]), float(c['k'][k]); la, lo = float(np.interp(r, g, lat)), float(np.interp(r, g, lon)); brg = chord_bearing(g, lat, lon, r, 120 * kk, 120 * kk)
-        self.style['sources']['me']['data'] = {'type': 'FeatureCollection', 'features': [marker(la, lo, brg, 190 * kk * 1.25, 0), marker(la, lo, brg, 190 * kk, 1)]}
+    def _draw(self, k, style, coarse=False):
+        """One `mbgl-render` of frame k with `style` as a BGR picture of the render size (the frame size, taller by the strip that is cropped)."""
         if self._tmp is None: self._tmp = tempfile.mkdtemp(prefix='strata-flyover-'); os.makedirs(os.path.dirname(self.cache), exist_ok=True)
         sp, png = os.path.join(self._tmp, 'style.json'), os.path.join(self._tmp, 'frame.png')
-        with open(sp, 'w') as f: json.dump(self.style, f)
-        res = subprocess.run(self.args(k, sp, png), capture_output=True, text=True)
+        with open(sp, 'w') as f: json.dump(style, f)
+        res = subprocess.run(self.args(k, sp, png, coarse), capture_output=True, text=True)
         if res.returncode or not os.path.exists(png): raise FlyoverError(f'mbgl-render failed on frame {k}: {(res.stderr or res.stdout).strip()[-400:]}')
         img = cv2.imread(png, cv2.IMREAD_COLOR); os.remove(png)
         if img is None: raise FlyoverError(f'mbgl-render wrote no picture for frame {k}')
         if img.shape[0] < self.H or img.shape[1] != self.W: raise FlyoverError(f'mbgl-render drew {img.shape[1]}x{img.shape[0]}, expected {self.W}x{self.render_h}: does this build support -r / -h as used?')
+        return img
+
+    def still(self, k):
+        """The terrain picture of frame k, RGB at the frame size (no overlay). A big picture is rendered with the finest tiles; where those run out towards the horizon (the background colour shows) the same view at the coarser detail that does reach the horizon is put in, blended at the edge."""
+        g, lat, lon, _ = self.route; c = self.cam; r, kk = float(c['runner'][k]), float(c['k'][k]); la, lo = float(np.interp(r, g, lat)), float(np.interp(r, g, lon)); brg = chord_bearing(g, lat, lon, r, 120 * kk, 120 * kk)
+        feats = {'type': 'FeatureCollection', 'features': [marker(la, lo, brg, 190 * kk * 1.25, 0), marker(la, lo, brg, 190 * kk, 1)]}
+        self.style['sources']['me']['data'] = feats; img = self._draw(k, self.style)
+        if self.coarse:
+            missing = (np.abs(img.astype(np.int16) - np.array(BACKGROUND_BGR, np.int16)).max(2) <= 3)
+            if missing.mean() > 1e-4:
+                self.style_c['sources']['me']['data'] = feats; back = self._draw(k, self.style_c, coarse=True)
+                alpha = cv2.GaussianBlur(cv2.dilate(missing.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(np.float32), (0, 0), 3.0)[..., None]
+                img = (img * (1.0 - alpha) + back * alpha).astype(np.uint8)
         return np.ascontiguousarray(img[:self.H, :, ::-1])             # the bottom strip (missing tiles) cropped, BGR -> RGB
 
     def frame(self, k):

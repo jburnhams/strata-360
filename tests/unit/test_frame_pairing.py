@@ -20,3 +20,13 @@ def test_a_clip_that_dropped_frames_is_decoded_in_software_keeping_the_damaged_f
     monkeypatch.setattr(TL, 'read_frames', lambda osv: dict(ts_us=(np.arange(100) * 20000).astype(np.int64)))
     assert TL.has_dropped_frames('x') is False and flat.decode_args('x', hw=False) == ([], False)
     monkeypatch.setattr(flat.hwmod, 'hwaccel_args', lambda: ['-hwaccel', 'videotoolbox']); assert flat.decode_args('x')[0] == ['-hwaccel', 'videotoolbox']
+
+
+def test_the_proxy_gives_the_seam_the_people_near_each_frame_and_nothing_when_there_are_no_boxes(monkeypatch):
+    from strata360.render import proxy as PX
+    assert PX.seam_people(None, np.eye(3), 1.0) is None and PX.seam_people(lambda t: [], np.eye(3), 1.0) is None
+    seen = []; boxes = lambda t: (seen.append(t), [(90.0, 0.0, 40.0)])[1]                      # due east, 40 degrees tall
+    people = PX.seam_people(boxes, np.eye(3), 12.5); assert seen == [12.5] and len(people) == 1 and people[0][2] == 40.0 and abs(people[0][0]) < 1e-6
+    monkeypatch.setenv('STRATA_SEAM_PEOPLE', '0'); assert PX.clip_boxes('/x/proxy.mp4', 'x.osv') is None
+    monkeypatch.delenv('STRATA_SEAM_PEOPLE'); monkeypatch.setattr('strata360.edit.clip_views.load', lambda d, osv=None: dict(boxes='B')); assert PX.clip_boxes('/x/proxy.mp4', 'x.osv') == 'B'
+    monkeypatch.setattr('strata360.edit.clip_views.load', lambda d, osv=None: (_ for _ in ()).throw(OSError('no files'))); assert PX.clip_boxes('/x/proxy.mp4', 'x.osv') is None

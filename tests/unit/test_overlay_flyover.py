@@ -166,3 +166,24 @@ def test_bad_arguments_are_refused(series, tmp_path):
     with pytest.raises(ValueError): FO.FlyoverClip(series, T0 + 100, T0 + 100, 5, size=(1280, 720))
     with pytest.raises(ValueError): clip(series, size=(1000, 600), tmp=tmp_path)
     with pytest.raises(ValueError): clip(series, tmp=tmp_path, imagery='nope')
+
+
+def test_a_4k_frame_is_also_rendered_at_the_detail_that_reaches_the_horizon_as_the_background(series, tmp_path):
+    c = clip(series, size=(3840, 2160), tmp=tmp_path); cmd = c.args(3, 's', 'f', coarse=True); a = lambda f: cmd[cmd.index(f) + 1]
+    assert (a('-w'), a('-h'), a('-r')) == ('1920', '1230', '2') and float(a('-z')) == pytest.approx(c.cam['zoom'][3] + np.log2(1.5), abs=1e-3)       # 1920 wide at ratio 2 is the 4K size, at 1080p's tile detail
+    assert clip(series, size=(1920, 1080), tmp=tmp_path).coarse is False and clip(series, size=(3840, 2160), tmp=tmp_path, sharp=False).coarse is False
+
+
+def test_where_the_fine_render_has_no_tiles_the_coarse_one_shows_through_and_otherwise_only_one_render_is_made(series, tmp_path, monkeypatch):
+    calls = []; real = subprocess.run
+    def run(cmd, **kw):
+        if '-o' not in cmd or '-z' not in cmd: return real(cmd, **kw)
+        calls.append(cmd); arg = lambda f: cmd[cmd.index(f) + 1]; r = float(arg('-r')); w, h = int(int(arg('-w')) * r), int(int(arg('-h')) * r)
+        img = np.full((h, w, 3), (30, 90, 160), np.uint8)
+        if r == 1.0 and fine_gap[0]: img[:h // 4] = FO.BACKGROUND_BGR                                           # the fine render: nothing drawn along the top quarter
+        elif r != 1.0: img[:] = (200, 10, 10)                                                                    # the coarse one: a different colour all over
+        cv2.imwrite(arg('-o'), img); return subprocess.CompletedProcess(cmd, 0, '', '')
+    monkeypatch.setattr(FO.subprocess, 'run', run); fine_gap = [True]
+    c = clip(series, size=(3840, 2160), tmp=tmp_path); img = c.still(3)
+    assert len(calls) == 2 and img.shape == (2160, 3840, 3) and tuple(img[10, 1920]) == (10, 10, 200) and tuple(img[1500, 1920]) == (160, 90, 30)      # RGB: coarse (200,10,10) on top, fine (160,90,30) below
+    fine_gap[0] = False; calls.clear(); c.still(4); assert len(calls) == 1                                       # nothing missing: one render

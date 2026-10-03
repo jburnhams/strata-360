@@ -5,6 +5,8 @@
 
 Frame k shows the race at `t0 + k * speedup / fps`. There is NO overlay in the picture: the film puts its own overlay (clock, distance, pace, maps, the same as on every other shot) on this clip when it is played, at the race time each frame shows (render/final.py), so the overlay is the same all through the film. The camera is centred on the runner (smoothed a
 little so a noisy track does not shake the picture) at a zoom that follows how fast the runner moves across the screen: close in when slow, wide when fast, so the marker covers about the same number of
+pixels each frame whatever the speed-up (`PX_PER_FRAME`, a fraction of the frame width) within `zoom` limits. The whole route that is on the screen is drawn in ONE colour, as on the overview map, with the marker moving along it: the clip is a cut of the journey, so the stretch it covers is not marked (the before and after stay in view). The camera is centred on the runner (smoothed a
+little so a noisy track does not shake the picture) at a zoom that follows how fast the runner moves across the screen: close in when slow, wide when fast, so the marker covers about the same number of
 pixels each frame whatever the speed-up (`PX_PER_FRAME`, a fraction of the frame width) within `zoom` limits. The whole route that is on the screen is drawn thin and grey, so the clip reads as one part of the journey with its before and after in view; the stretch itself is drawn over it, in red behind the marker and in white ahead of it. Drawn by our own
 overlay code (overlay/draw.py, tiles.py), no map engine."""
 import os, subprocess
@@ -23,7 +25,7 @@ ZOOM_S = 4.0                  # and its zoom over this much
 ZOOM = (9.0, 16.0)            # the closest and widest the map goes
 
 
-CONTEXT = (175, 175, 175)     # the route outside the stretch (before and after it), thin and grey
+ROUTE = (230, 20, 20)         # the route, all of it, in one colour
 
 
 DEFAULT_STYLE = 'tf-landscape'      # plain landscape map; needs THUNDERFOREST_API_KEY (a missing key is an error, never a quiet change of map; `--style osm` chooses the key-free map on purpose)
@@ -54,13 +56,10 @@ class MapClip:
 
     def frame(self, k):
         """The picture of frame k as RGB uint8."""
-        t = self.time(k); W, H = self.W, self.H; z = float(self.z[k]); kk = 2.0 ** z; cx, cy = float(self.cam[0][k]), float(self.cam[1][k])
+        W, H = self.W, self.H; z = float(self.z[k]); kk = 2.0 ** z; cx, cy = float(self.cam[0][k]), float(self.cam[1][k])
         img = np.array(self.tiles.picture(cx, cy, kk, W, H), np.uint8); u = (self.rw[0] - cx) * kk + W / 2; v = (self.rw[1] - cy) * kk + H / 2
-        inside = (self.rt >= self.t0) & (self.rt <= self.t1); behind = inside & (self.rt <= t); ahead = inside & (self.rt > t); here = ((self.pos[0][k] - cx) * kk + W / 2, (self.pos[1][k] - cy) * kk + H / 2); w = max(1.0, 3 * self.s)
-        ub, vb = np.append(u[behind], here[0]), np.append(v[behind], here[1]); ua, va = np.insert(u[ahead], 0, here[0]), np.insert(v[ahead], 0, here[1])
-        D.route_line(img, u, v, colour=(0, 0, 0), width=w + 2 * self.s); D.route_line(img, u, v, colour=CONTEXT, width=w * 0.8)                # the whole route that is on screen, thin and grey: the clip is only a part of the journey, the before and after stay in view
-        D.route_line(img, np.where(inside, u, np.nan), np.where(inside, v, np.nan), colour=(0, 0, 0), width=w + 3 * self.s)
-        D.route_line(img, ua, va, colour=(250, 250, 250), width=w); D.route_line(img, ub, vb, colour=(230, 20, 20), width=w + self.s)
+        here = ((self.pos[0][k] - cx) * kk + W / 2, (self.pos[1][k] - cy) * kk + H / 2); w = max(1.0, 3 * self.s)
+        D.route_line(img, u, v, colour=(0, 0, 0), width=w + 3 * self.s); D.route_line(img, u, v, colour=ROUTE, width=w + self.s)                  # the whole route that is on screen in ONE colour, as on the overview map: the clip is a cut of the journey, the stretch is not marked
         dot = D.marker(11 * self.s); r = dot.shape[0] / 2; D.composite(img, [(here[0] - r, here[1] - r, dot)])
         return img
 

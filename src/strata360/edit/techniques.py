@@ -7,7 +7,7 @@ import json, os
 from dataclasses import dataclass, field
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CLOSE_FOV = 50.0              # the views of you: close (a face zoom), mid (selfie_hold, 85) and far (ultra wide)
+CLOSE_FOV = 58.0              # the views of you: close (a face zoom, pulled back a little from 50 so the face has room), mid (selfie_hold, 85) and far (ultra wide)
 FAR_FOV = 130.0
 FEATURES = {'steady', 'clear_nadir', 'open_ground', 'canopy', 'subject', 'speech', 'protagonist', 'low_obstruction', 'resolution', 'you_close', 'you_far', 'scenery_ok', 'free_ok'}
 
