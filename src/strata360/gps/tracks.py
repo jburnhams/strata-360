@@ -250,6 +250,15 @@ def _cutoff_resolved(text, ctx):
     except ValueError: return None
 
 
+def overlay_cutoffs(rd, tz='Europe/Brussels'):
+    """The cut-offs for the overlay, as time since the start of the run: {'start': UTC seconds of the start, 'stage': {'Stage N': the cut-off at the end of that stage (its checkpoint, or the finish for the last)}, 'cp': {N: cut-off of checkpoint N}, 'finish': cut-off of the finish}; only those set and understood."""
+    order, _ = route_order(rd); tm = timing(rd) if order else None
+    if not tm: return {}
+    c = {k: v['elapsed_s'] for k, v in cutoffs(rd, tz).items() if 'elapsed_s' in v}; n = len(order)
+    stage = {f'Stage {k}': c[f'cp:{k}' if k < n else 'finish'] for k in range(1, n + 1) if (f'cp:{k}' if k < n else 'finish') in c}
+    return dict(start=tm['start'], stage=stage, cp={int(k[3:]): v for k, v in c.items() if k.startswith('cp:')}, finish=c.get('finish'))
+
+
 def set_cutoff(rd, key, text, tz='Europe/Brussels'):
     """Save the cut-off typed for a checkpoint ('cp:N') or the finish ('finish'); empty text clears it. Raises ValueError (with a message to show) when the text is not understood, KeyError for an unknown key."""
     from strata360.gps import cutoffs as CU
