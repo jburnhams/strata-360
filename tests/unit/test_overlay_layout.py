@@ -293,3 +293,15 @@ class TestDistanceHolds:
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles)
         ov.patches(T0 - 100); assert '0.0' in texts
         texts.clear(); ov.c._text.clear(); ov.patches(T0 + 100000); assert any(x not in ('0.0', 'km', LY.DASH) for x in texts) and LY.DASH not in texts
+
+
+class TestClimb:
+    def test_running_totals_ignore_small_wiggles(self):
+        from strata360.overlay.series import running_climb
+        up, down = running_climb(np.array([100, 101, 99, 100, 110, 112, 105, np.nan, 105, 90.0]))
+        assert list(up) == [0, 0, 0, 0, 10, 10, 10, 10, 10, 10] and list(down) == [0, 0, 0, 0, 0, 0, 5, 5, 5, 20]          # (the reference moves only on a change of 4 m or more: 105 is 5 m under 110, 90 is 15 m under 105)
+
+    def test_the_line_shows_ascent_and_descent_so_far(self, series, tiles, texts):
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['climb']}, tz='UTC', tiles=tiles)
+        ov.patches(T0 - 50); assert 'ASCENT 0 m   DESCENT 0 m' in texts
+        texts.clear(); ov.c._text.clear(); ov.patches(T0 + 600); assert any(x.startswith('ASCENT ') and x != 'ASCENT 0 m   DESCENT 0 m' for x in texts)           # the track climbs 5 %

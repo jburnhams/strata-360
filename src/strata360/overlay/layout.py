@@ -31,6 +31,7 @@ ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the 
     'pace': dict(kind='big', x=150, y=745, v='bottom', metric='pace', label='min/km'),
     'altitude': dict(kind='stat', x=16, y=850, v='bottom', icon='mountain', metric='alt', label='ALT (m)'),
     'slope': dict(kind='stat', x=220, y=850, v='bottom', icon='slope', metric='slope', label='SLOPE (%)'),
+    'climb': dict(kind='climb', x=16, y=914, v='bottom'),
     'heart_rate': dict(kind='stat', x=1900, y=850, h='right', v='bottom', icon='heart', metric='hr', label='BPM', align='right'),
     'route_map': dict(kind='route_map', x=1644, y=24, h='right', size=256, radius=35, style='tf-landscape'),
     'local_map': dict(kind='local_map', x=1644, y=304, h='right', size=256, radius=35, outline=(255, 0, 0), style='tf-outdoors'),
@@ -151,6 +152,16 @@ class Stat:
                 self.c.text(e, tx, y + 20, fmt(e['metric'], val), 32, align=al)]
 
 
+class Climb:
+    """The total ascent and descent so far, in a small line under altitude and slope (before the run 0, after it the totals)."""
+    def __init__(self, c, el): self.c, self.el = c, el
+
+    def patches(self, t, v):
+        a, d = self.c.series.cols['ascent_m'], self.c.series.cols['descent_m']; s = self.c.series
+        up, down = (float(a[0]), float(d[0])) if t <= s.t0 else (float(a[-1]), float(d[-1])) if t >= s.t1 else (float(np.interp(t, s.grid, a)), float(np.interp(t, s.grid, d)))
+        e = self.el; return [self.c.text(e, e['x'], e['y'], f'ASCENT {up:,.0f} m   DESCENT {down:,.0f} m', 16)]
+
+
 class Profile:
     """The elevation profile of the WHOLE race along the bottom of the frame, with where the runner is: the part already run in a light fill, the part to come darker, a cursor and a dot on the line. The same on every shot, camera or generated clip.
     The bottom row of numbers sits above it (ELEMENTS)."""
@@ -245,7 +256,7 @@ class Credit:
         return [self.c.text(self.el, self.el['x'], self.el['y'] + 14 * i, line, self.el['size'], label=True, align='right') for i, line in enumerate(self.lines)]
 
 
-KINDS = dict(profile=Profile, clock=Clock, stage=Stage, big=Big, stat=Stat, route_map=RouteMap, local_map=LocalMap, credit=Credit)
+KINDS = dict(profile=Profile, clock=Clock, stage=Stage, climb=Climb, big=Big, stat=Stat, route_map=RouteMap, local_map=LocalMap, credit=Credit)
 
 
 def settings(st=None):
