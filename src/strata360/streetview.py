@@ -532,7 +532,6 @@ def describe_near(prov, g, radius, secs, ctx):
     else: rules.append(_rule('light', None, 'Google gives only the month it was taken' if prov == 'google' else 'the time it was filmed or the time you passed is not known'))
     if run_t is not None and ctx.get('clips') is not None:
         nc = nearest_clips(dict(passed=[run_t - 5, run_t + 5]), ctx['clips'], tr, ctx.get('gaps')); rules.append(_rule('footage', not nc['overlaps'], f"overlaps camera clip {', '.join(nc['overlaps'])}" if nc['overlaps'] else (f"fills gap {nc['in_gap']}" if nc['in_gap'] else 'between camera clips')))
-    if prov == 'google': rules.append(_rule('terms', False, "Google's terms do not allow its pictures in a film (they can be looked at only)"))
     if sec is not None and sec.get('quality') and sec['quality'].get('grade'): rules.append(_rule('quality', sec['quality']['grade'] != 'poor', f"clip quality {sec['quality']['grade']} ({sec['quality']['score']})"))
     return dict(provider=prov, id=f['id'], sequence=g['seq'], lat=round(f['lat'], 6), lon=round(f['lon'], 6), distance_m=f['distance_m'], kind=kind, camera=f.get('camera'), size=f.get('size'), captured=f.get('t'), compass=f.get('compass'), pictures=g['count'], spacing_m=g['spacing_m'],
                 section=sec['id'] if sec else None, run_distance_m=None if run_d is None else round(run_d, 1), run_km=None if run_km is None else round(run_km, 3), passed=run_t, url=f.get('url'), rules=rules, usable=all(r['ok'] is not False for r in rules), ruled_out=[r['text'] for r in rules if r['ok'] is False])

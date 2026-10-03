@@ -98,7 +98,7 @@ def test_panoramax_is_searched_by_collection_and_google_by_asking_at_and_round_t
     net = Net(pmx=[pfr(i, 600 + 7 * i, east=2, seq='c1') for i in range(4)] + [pfr(9, 610, east=50, seq='c2', az=90, pano=False)], google=dict(panos=[('g1', LAT0 + 604 * M, LON0), ('g2', LAT0 + 640 * M, LON0), ('g3', LAT0 + 700 * M, LON0)]))
     res = near(tmp_path, net, n=2)['providers']; assert [i['sequence'] for i in res['panoramax']['items']] == ['c1', 'c2'] and res['panoramax']['items'][0]['url'] == 'https://pmx/0.jpg' and res['panoramax']['items'][1]['kind'] == '2d'
     g = res['google']; assert g['radius_m'] == 110.0 and [i['id'] for i in g['items']] == ['g1', 'g2'] and g['items'][0]['distance_m'] < 6 and sum(1 for c in net.calls if c[0] == 'maps.googleapis.com') == 25
-    r = rules(g['items'][0]); assert r['terms']['ok'] is False and 'terms' in r['terms']['text'] and 'pictures' not in r and r['light']['ok'] is None and 'month' in r['light']['text'] and g['items'][0]['usable'] is False
+    r = rules(g['items'][0]); assert 'terms' not in r and 'pictures' not in r and r['light']['ok'] is None and 'month' in r['light']['text'] and g['items'][0]['usable'] is True and g['items'][0]['ruled_out'] == []                    # (nothing about Google's terms: that is your choice)
 
 
 def test_a_provider_that_cannot_answer_says_why_and_the_others_still_do(tmp_path):
