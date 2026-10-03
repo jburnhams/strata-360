@@ -4,7 +4,7 @@ import { fireEvent } from '@testing-library/react'
 import { screen, setup, waitFor, within } from '../utils/render'
 import StreetViewPage, { DEFAULT_FILTERS, dur, nearText, passes, rampColour, when } from '../../src/components/StreetViewPage'
 import Workspace from '../../src/components/Workspace'
-import { makeNearItem, makeNearResult, makeStreetView, makeSvSection, makeTrackClip } from '../utils/factories'
+import { makeNearItem, makeNearResult, makeStreetView, makeSvSection, makeTrackClip, makeTrackEntry, makeTracksListing } from '../utils/factories'
 import { recordRequests } from '../utils/api'
 import { server } from '../utils/server'
 
@@ -236,6 +236,23 @@ describe('when each section was filmed and when the runner passed it', () => {
     expect(card).toHaveTextContent('Filmed Thu 7 Mar 2024 12:00 · you pass it Sun 22 Feb 2026 10:01')
     const row = screen.getAllByRole('row')[1]; expect(row).toHaveTextContent('Thu 7 Mar 2024 12:00'); expect(row).toHaveTextContent('Sun 22 Feb 2026 10:01'); expect(screen.getByText('You passed')).toBeInTheDocument(); expect(screen.getByText('Filmed')).toBeInTheDocument()
     await user.click(row); const detail = document.querySelectorAll('[data-times]'); expect([...detail].some(d => d.textContent?.includes('you pass it Sun 22 Feb 2026 10:01 to 10:05'))).toBe(true)
+  })
+})
+
+describe('the run and the route tracks on the map', () => {
+  const paths = (colour: string) => [...document.querySelectorAll(`path[stroke="${colour}"]`)]
+
+  it('draws the run in red, thick, over the road parts, and the route tracks in blue under it', async () => {
+    serve(); server.use(http.get('/api/tracks', () => HttpResponse.json(makeTracksListing({ tracks: [makeTrackEntry({ id: 'main', kind: 'run' }), makeTrackEntry({ id: 'r1', name: 'course.gpx', kind: 'route' }), makeTrackEntry({ id: 'r2', kind: 'route', error: 'broken' })], runs: 1 }))))
+    const seen = recordRequests('/api/tracks/line'); setup(<StreetViewPage folder="/data" />); await waitFor(() => expect(paths('#2563eb').length).toBeGreaterThan(0))
+    expect(paths('#dc2626').some(p => p.getAttribute('stroke-width') === '4')).toBe(true); expect(paths('#2563eb')[0].getAttribute('stroke-width')).toBe('5'); expect(paths('#78716c')).toHaveLength(0)         // (the grey line is gone)
+    expect(seen.map(r => r.url.searchParams.get('id'))).toEqual(['r1'])                                                                           // only the route without an error
+    const all = [...document.querySelectorAll('path')]; const idx = (c: string) => all.findIndex(p => p.getAttribute('stroke') === c); expect(idx('#2563eb')).toBeLessThan(idx('#f59e0b')); expect(idx('#f59e0b')).toBeLessThan(idx('#dc2626'))                    // routes, then the road parts, then the run on top
+    expect(screen.getByText('the run')).toBeInTheDocument(); expect(screen.getByText('route tracks')).toBeInTheDocument()
+  })
+
+  it('has no blue and no route legend when there are no routes', async () => {
+    serve(); setup(<StreetViewPage folder="/data" />); await screen.findAllByRole('row'); await waitFor(() => expect(paths('#dc2626').length).toBeGreaterThan(0)); expect(paths('#2563eb')).toHaveLength(0); expect(screen.queryByText('route tracks')).toBeNull()
   })
 })
 

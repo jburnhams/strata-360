@@ -31,6 +31,7 @@ export const handlers = [
   http.get('/api/who', () => HttpResponse.json(makeWhoState())),
   http.post('/api/who', () => HttpResponse.json({ ok: true })),
   http.get('/api/tracks', () => HttpResponse.json(makeTracksListing())),
+  http.get('/api/tracks/line', ({ request }) => HttpResponse.json({ id: new URL(request.url).searchParams.get('id'), lat: [50.0, 50.001], lon: [5.0, 5.001] })),
   http.get('/api/track/line', () => HttpResponse.json(makeTrackLine())),
   http.get('/api/track/series', () => HttpResponse.json(makeTrackSeries())),
   http.post('/api/meta', async ({ request }) => HttpResponse.json(makeMeta(await request.json() as any))),

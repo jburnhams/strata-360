@@ -67,6 +67,13 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { fol
     setProbe({ lat, lon }); setNear(undefined); setNearErr(undefined); setNearBusy(true)
     try { setNear(await api.svNear(folder, lat, lon, 5)) } catch (e) { setNearErr((e as Error).message) } finally { setNearBusy(false) }
   }
+  const [routes, setRoutes] = useState<{ id: string; name: string; pts: [number, number][] }[]>([])
+  useEffect(() => {                                                                              // the route tracks (the planned course), drawn in blue
+    let live = true; setRoutes([])
+    api.tracks(folder).then(l => Promise.all(l.tracks.filter(t => t.kind === 'route' && !t.error).map(t => api.tracksLine(folder, t.id).then(x => ({ id: t.id, name: t.name, pts: x.lat.map((la, i) => [la, x.lon[i]] as [number, number]) })).catch(() => null))))
+      .then(r => { if (live) setRoutes(r.filter((x): x is { id: string; name: string; pts: [number, number][] } => !!x)) }).catch(() => {})
+    return () => { live = false }
+  }, [folder])
   const [err, setErr] = useState<string>(), [clips, setClips] = useState<TrackClip[]>([]), [filters, setFilters] = useState<Record<string, boolean>>(DEFAULT_FILTERS)
   useEffect(() => { api.trackClips(folder).then(r => setClips(r.clips.filter(c => c.covered && c.stretch?.length))).catch(() => setClips([])) }, [folder])
   useEffect(() => { api.tilesStatus().then(setTiles).catch(() => setTiles({ ok: false, style: 'tf-landscape', error: 'no map background' })) }, [])
@@ -94,10 +101,12 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { fol
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
           <Filters shown={shown} setShown={setShown} data={data} filters={filters} setFilters={setFilters} total={sections.length} showing={visible.length} />
-          <SvMap probe={probe && { ...probe, items: near ? PROVIDERS.flatMap(p => near.providers[p].items) : [] }} onPick={pick} roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
+          <SvMap routes={routes} probe={probe && { ...probe, items: near ? PROVIDERS.flatMap(p => near.providers[p].items) : [] }} onPick={pick} roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
           <Legend scale={scale} hasClips={clips.length > 0} />
           <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-stone-600 dark:text-stone-400">
             <span>click anywhere on the map to see the nearest street view there</span>
+            <span><span className="mr-1 inline-block h-1 w-4 align-middle" style={{ background: '#dc2626' }} />the run</span>
+            {routes.length > 0 && <span><span className="mr-1 inline-block h-1 w-4 align-middle" style={{ background: '#2563eb' }} />route tracks</span>}
             <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f59e0b' }} />road part of the run (click one)</span>
             {PROVIDERS.map(p => <span key={p}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}</span>)}
             <span>360° = sees every way · 2D = faces one way</span>{tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}
@@ -169,7 +178,7 @@ function Filters({ shown, setShown, data, filters, setFilters, total, showing }:
   )
 }
 
-function SvMap({ probe, onPick, roads, run, sections, clips, scale, sel, onSel, background }: { probe?: { lat: number; lon: number; items: SvNearItem[] }; onPick: (lat: number, lon: number) => void; roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
+function SvMap({ routes, probe, onPick, roads, run, sections, clips, scale, sel, onSel, background }: { probe?: { lat: number; lon: number; items: SvNearItem[] }; onPick: (lat: number, lon: number) => void; routes: { id: string; name: string; pts: [number, number][] }[]; roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
   const el = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), layers = useRef<L.LayerGroup | null>(null), onSelRef = useRef(onSel), onPickRef = useRef(onPick); onSelRef.current = onSel; onPickRef.current = onPick
   useEffect(() => {
     if (!el.current) return
@@ -186,7 +195,8 @@ function SvMap({ probe, onPick, roads, run, sections, clips, scale, sel, onSel, 
   }, [background?.url, background?.tilePx, run]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {                                                                              // redrawn when the data, the filters or the selection change
     const g = layers.current; if (!g) return
-    g.clearLayers(); L.polyline(run, { color: '#78716c', weight: 2, opacity: 0.7, interactive: false }).addTo(g)
+    g.clearLayers()
+    for (const r of routes) L.polyline(r.pts, { color: '#2563eb', weight: 5, opacity: 0.85, interactive: false }).addTo(g)                  // the route tracks in blue, under everything
     for (const c of clips) {                                                                      // the stretch of the run each camera clip covers, coloured by how long the clip is, with a marker numbered like the clip
       const col = rampColour(c.duration_s, scale.lo, scale.hi)
       L.polyline(c.stretch!, { color: '#fff', weight: 9, opacity: 0.9, interactive: false }).addTo(g); L.polyline(c.stretch!, { color: col, weight: 6, opacity: 1, interactive: false }).addTo(g)
@@ -196,6 +206,7 @@ function SvMap({ probe, onPick, roads, run, sections, clips, scale, sel, onSel, 
       const on = sel?.kind === 'stretch' && sel.id === r.id
       L.polyline(r.line, { color: '#f59e0b', weight: on ? 9 : 6, opacity: on ? 1 : 0.8, bubblingMouseEvents: false }).bindTooltip(`${r.names.join(', ') || r.highways.join(', ')} · ${span(r)} · ${metres(r.length_m)}`).on('click', () => onSelRef.current({ kind: 'stretch', id: r.id })).addTo(g)
     }
+    L.polyline(run, { color: '#dc2626', weight: 4, opacity: 0.95, interactive: false }).addTo(g)                                // the run in red, over the road parts (their orange shows either side)
     for (const s of sections) {
       const on = sel?.kind === 'section' && sel.id === s.id, pts = s.items.map(i => [i.lat, i.lon] as [number, number])
       L.polyline(pts, { color: '#fff', weight: on ? 10 : 8, opacity: 0.9, interactive: false }).addTo(g); L.polyline(pts, { color: rampColour(s.max_s, scale.lo, scale.hi), weight: on ? 7 : 5, opacity: 1, dashArray: s.kind === '2d' ? undefined : '3 5', interactive: false }).addTo(g)
@@ -207,7 +218,7 @@ function SvMap({ probe, onPick, roads, run, sections, clips, scale, sel, onSel, 
       L.circleMarker([probe.lat, probe.lon], { radius: 7, color: '#000', weight: 2, fillColor: '#fff', fillOpacity: 1, interactive: false }).addTo(g)
       for (const it of probe.items) L.circleMarker([it.lat, it.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: COLOUR[it.provider], fillOpacity: 1, bubblingMouseEvents: false }).bindTooltip(`${NAME[it.provider]} ${kindLabel2(it)} · ${it.distance_m} m away`).addTo(g)
     }
-  }, [roads, run, sections, clips, scale, sel, probe])
+  }, [roads, run, routes, sections, clips, scale, sel, probe])
   useEffect(() => {                                                                              // the map moves to what was chosen
     const m = map.current; if (!m || !sel) return
     const pts = sel.kind === 'stretch' ? roads.find(r => r.id === sel.id)?.line : sections.find(s => s.id === sel.id)?.items.map(i => [i.lat, i.lon] as [number, number])
