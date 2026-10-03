@@ -57,7 +57,7 @@ class FinalSource:
     def frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
         sg = self.segs[k]
         if sg.get('synthetic'):                                                                                    # a generated clip: no lens; the film's own overlay goes on it, at the race time each frame shows
-            frames = SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, self.fps, self.W, self.H, 'rgb', np.uint16, speed=SYN.speed(sg))
+            frames = SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, self.fps, self.W, self.H, 'rgb', np.uint16)
             if self.overlay is None: yield from frames; return
             for i, img in enumerate(frames): yield self.overlay.apply(img, SYN.race_time(sg, a0 + i, self.fps))
             return

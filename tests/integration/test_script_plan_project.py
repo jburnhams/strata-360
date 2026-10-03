@@ -112,3 +112,10 @@ def test_narration_over_a_gap_plans_a_clip_as_long_as_the_voice_needs_and_b_roll
     SY.upsert(gap_folder, SY.make(dict(id='G01', t0=1_771_754_000.0, t1=1_771_754_000.0 + 7200), seconds=20.0, kind='flyover', by='user'))
     PJ.plan_from_script(gap_folder); c = SY.load(gap_folder)['clips'][0]; assert c['kind'] == 'flyover' and c['seconds'] == 20.0                                                         # long enough and of another kind: left as it is
     d['items'][3] = dict(type='broll', clip='G01', seconds=12.0); SD.save_draft(gap_folder, d); PJ.plan_from_script(gap_folder); c = SY.load(gap_folder)['clips'][0]; assert c['kind'] == 'flyover' and c['seconds'] == 12.0       # b-roll: its own length, in the planned kind
+
+
+def test_a_generated_clip_is_made_as_long_as_its_whole_beat_window_so_nothing_is_held_or_slowed(gap_folder, monkeypatch):
+    from strata360.edit import synthetic as SY
+    monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.0 for l in lines}); SD.save_draft(gap_folder, gap_draft(seconds=13.3)); p = PJ.plan_from_script(gap_folder)['plan']
+    syn = [g for g in p['segments'] if g.get('synthetic')][0]; c = SY.load(gap_folder)['clips'][0]
+    assert abs(c['seconds'] - syn['dur_s']) < 0.011 and abs(syn['synthetic_seconds'] - syn['dur_s']) < 0.011 and syn['dur_s'] >= 13.3 - 1e-6        # a whole number of beats, the clip exactly that long

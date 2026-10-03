@@ -348,7 +348,7 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     for k, p in enumerate(ps):
         n_k = syn[k] if k in syn else sum(sg.beats for sg, w in zip(segs, windows) if w._piece == k)
         if k in syn:
-            synthetic.append(dict(piece=k, start_beat=place, beats=syn[k], clip=p['clip'], label=p['label'], seconds=round(p['seconds'], 3), role=p['role'], item=p['n']))
+            synthetic.append(dict(piece=k, start_beat=place, beats=syn[k], clip=p['clip'], label=p['label'], seconds=round(syn[k] * beat_s, 3), role=p['role'], item=p['n']))      # the clip is made as long as its window (whole beats): played as it is, nothing held or slowed
             if p['text']: lines.append(dict(seg=p['seg'], text=p['text'], clip=p['clip'], item=p['n'], film_start_s=round(place * beat_s, 3), seconds=round(syn[k] * beat_s, 3), speak_s=round(p['speak_s'], 3), estimated=p['estimated']))
         place += n_k
     for k, p in enumerate(ps):
