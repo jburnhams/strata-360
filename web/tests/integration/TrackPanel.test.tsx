@@ -126,6 +126,14 @@ describe('TrackPanel', () => {
       await user.click(other); await user.unhover(other); expect(other).toHaveAttribute('aria-pressed', 'false'); expect(other.closest('li')).not.toHaveAttribute('data-highlighted'); expect(row).toHaveAttribute('data-highlighted')
     })
 
+    it('shows the time on each route and at each checkpoint, adding up to the run time', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.tracks[1].time_s = 3600 + 12 * 60 + 5; l.tracks[0].time_s = undefined
+      l.timing = { total_s: 3600 + 12 * 60 + 5 + 35 * 60, start: 0, end: 1, checkpoints: { '1': 35 * 60 }, sections: { t2: 3600 + 12 * 60 + 5 }, consistent: true }
+      mockGet('/api/tracks', l); setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText('Checkpoint 1')).closest('li')!; expect(row).toHaveTextContent('0:35:00'); expect(screen.getByText('1:12:05')).toBeInTheDocument()
+      expect(document.querySelector('[data-timing]')).toHaveTextContent('Run time 1:47:05 = routes 1:12:05 + checkpoints 0:35:00')
+    })
+
     it('marks a track a run, refreshing the race track and the list', async () => {
       present(); const seen = recordRequests('/api/tracks/kind'); let marked = false
       const after = makeTracksListing({ runs: 2, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'run' })], merged: { runs: ['main', 't2'], samples: 200, start_utc: '', end_utc: '', distance_km: 90 } })

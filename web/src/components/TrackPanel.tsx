@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type ExtraLine, type TileStatus, type TrackKind, type TracksListing, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
 import { useThumbOverlay } from '../thumbOverlay'
 import { PanelSkeleton } from './Skeleton'
@@ -123,6 +123,7 @@ function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle
 }
 
 // The project's tracks: every uploaded FIT / GPX file marked a run (merged into the one race track) or a route (the course, shown on the map for planning only).
+const hms = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}`
 function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onChange: () => Promise<void> } & Pick) {
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string>(), input = useRef<HTMLInputElement>(null)
   const act = async (f: () => Promise<unknown>) => { setBusy(true); setErr(undefined); try { await f() } catch (e) { setErr((e as Error).message) } finally { try { await onChange() } finally { setBusy(false) } } }
@@ -138,19 +139,30 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: 
       <p className="mb-2 text-xs text-stone-500">Mark each file a run (the recording; several runs are merged into the race track) or a route (a planned or official course, shown on the map for planning only).</p>
       {rows.length === 0 && <p className="text-stone-500">No tracks listed.</p>}
       <ul className="space-y-1">
-        {rows.map(x => (
-          <li key={x.id} data-highlighted={hot === x.id || pinned.includes(x.id) ? '' : undefined} onMouseEnter={() => setHot(x.id)} onMouseLeave={() => setHot(null)}
+        {rows.map(x => (<Fragment key={x.id}>
+          <li data-highlighted={hot === x.id || pinned.includes(x.id) ? '' : undefined} onMouseEnter={() => setHot(x.id)} onMouseLeave={() => setHot(null)}
             className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded px-1 ${hot === x.id || pinned.includes(x.id) ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : ''}`}>
             {x.kind === 'route' && <span className="w-6 text-center text-xs font-semibold text-blue-700 dark:text-blue-400" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
             <button type="button" aria-pressed={pinned.includes(x.id)} aria-label={`Highlight ${x.name} on the map`} className="min-w-0 flex-1 cursor-pointer truncate text-left" title={`${x.name} (click to keep it highlighted on the map)`} onClick={() => toggle(x.id)}>{x.name}</button>
             {x.error ? <span className="text-red-600">{x.error}</span> : <span className="text-xs text-stone-500">{x.distance_km} km · {x.start_utc ? x.start_utc.slice(0, 10) : 'no times'}{x.pois ? ` · ${x.pois} POI` : ''}{x.kind === 'route' && x.order ? ` · km ${x.km_start}–${x.km_end} of the run${x.reversed ? ' (run the other way)' : ''}` : ''}</span>}
+            {x.time_s != null && <span className="text-sm tabular-nums" title="time on this route, from leaving the previous checkpoint to arriving at the next">{hms(x.time_s)}</span>}
             <select aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
               <option value="run">run</option><option value="route">route</option>
             </select>
             <button disabled={busy} aria-label={`Remove ${x.name}`} className="text-stone-500 hover:text-red-600 disabled:opacity-50" onClick={() => act(() => api.removeTrack(folder, x.id))}>Remove</button>
           </li>
-        ))}
+          {x.order != null && listing?.timing?.checkpoints[String(x.order)] != null && (
+            <li data-checkpoint-row="" className="flex items-center gap-x-3 rounded px-1 text-xs text-blue-800 dark:text-blue-300">
+              <span className="w-6 text-center"><span className="inline-block h-4 min-w-4 rounded-full bg-blue-700 px-1 text-center text-[10px] font-bold leading-4 text-white">{x.order}</span></span>
+              <span className="flex-1">Checkpoint {x.order}</span><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
+            </li>
+          )}
+        </Fragment>))}
       </ul>
+      {listing?.timing && (
+        <p className="mt-2 text-sm" data-timing="">Run time <b className="tabular-nums">{hms(listing.timing.total_s)}</b>
+          <span className="text-xs text-stone-500"> = routes {hms(Object.values(listing.timing.sections).reduce((a, b) => a + b, 0))} + checkpoints {hms(Object.values(listing.timing.checkpoints).reduce((a, b) => a + b, 0))}{listing.timing.consistent ? '' : ' (the checkpoints do not come in order along the run: check them)'}</span></p>
+      )}
       {listing?.merged && <p className="mt-2 text-xs text-stone-500">Race track = {listing.merged.runs.length} runs merged · {listing.merged.distance_km} km · {listing.merged.samples.toLocaleString()} points</p>}
       {err && <p role="alert" className="mt-2 text-red-600">{err}</p>}
     </div>

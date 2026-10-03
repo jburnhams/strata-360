@@ -217,7 +217,11 @@ def listing(rd):
         except (OSError, ValueError): merged = None
     try: div = divergences(rd)
     except Exception: div = []                                                     # (the map is not worth failing the list over)
-    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div)
+    try: tm = timing(rd)
+    except Exception: tm = {}
+    for x in items:
+        if x['id'] in tm.get('sections', {}): x['time_s'] = tm['sections'][x['id']]
+    return dict(tracks=items, merged=merged, pois=points, runs=len(runs(rd)), divergences=div, timing=tm or None)
 
 
 _DIV = {}
@@ -336,7 +340,7 @@ VISIT_GAP_S = 120.0            # out of the zone (with samples there) for longer
 def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
     """How long the run spent at each checkpoint: {checkpoint n: {arrived, left, stopped_s, radius_m}} (times are UTC epoch seconds; checkpoints the run did not reach are left out).
     The visit is ONE pass of the race track through the zone (radius_m round the checkpoint): the one nearest to where the routes join along the race (the race can pass the same place again later; a return after more than VISIT_GAP_S outside is another visit and is not counted). The zone is large because the stop is often not exactly at the point,
-    and time spent still moving on the way in or out is not counted: `arrived` is the first sample in the visit that is slower than STOP_MS and `left` the last one of the visit (speed over 2 x window_s round it, so a gap in the recording while the watch was paused counts as standing still), `stopped_s` the time between them, 0 when the run never slowed."""
+    and time spent still moving on the way in or out is not counted: `arrived` is the first sample in the visit that is slower than STOP_MS and `left` the last one of the visit (speed over 2 x window_s round it, so a gap in the recording while the watch was paused counts as standing still), `stopped_s` the time between them, 0 when the run never slowed (`passed` is then when it went by: the sample nearest the checkpoint)."""
     order, marks = route_order(rd); cur = current_path(rd)
     if not marks or not cur: return {}
     from scipy.spatial import cKDTree
@@ -352,5 +356,23 @@ def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
         a = np.interp(tv - window_s, t, P[:, 0]), np.interp(tv - window_s, t, P[:, 1]); b = np.interp(tv + window_s, t, P[:, 0]), np.interp(tv + window_s, t, P[:, 1])
         speed = np.hypot(b[0] - a[0], b[1] - a[1]) / (2 * window_s); slow = np.flatnonzero(speed < STOP_MS)
         arrived, left = (float(tv[slow[0]]), float(tv[slow[-1]])) if len(slow) else (None, None)
-        out[c['n']] = dict(arrived=arrived, left=left, stopped_s=round(left - arrived) if arrived is not None else 0, radius_m=round(radius_m))
+        out[c['n']] = dict(passed=float(tv[int(np.argmin(np.hypot(*(P[v] - cp).T)))]), arrived=arrived, left=left, stopped_s=round(left - arrived) if arrived is not None else 0, radius_m=round(radius_m))
     return out
+
+
+def timing(rd):
+    """The time of the run split between the checkpoints and the routes: {total_s, start, end, checkpoints: {n: seconds}, sections: {route id: seconds}, consistent}. The run, from its first sample to its last, is cut at each checkpoint's arrival and departure (a checkpoint the run never slowed at is a moment, 0 s):
+    section k is from the departure from checkpoint k - 1 (the start of the run for the first) to the arrival at checkpoint k (the end of the run for the last one reached), so the checkpoint times and the section times add up to `total_s` exactly. Routes beyond the last checkpoint the run reached have no time. `consistent` is False if the
+    checkpoints came out of order along the run (a section would be negative)."""
+    order, marks = route_order(rd); cur = current_path(rd)
+    if not order or not cur: return {}
+    stops = checkpoint_stops(rd); run = read(cur); t = run['t'][np.isfinite(run['t'])]
+    if len(t) < 2: return {}
+    t0, t1 = float(t.min()), float(t.max()); ids = [o['id'] for o in sorted(order, key=lambda o: o['order'])]; secs = {}; cps = {}; prev = t0; consistent = True
+    for k, rid in enumerate(ids, 1):
+        c = stops.get(k) if k < len(ids) else None
+        if c is None:
+            secs[rid] = t1 - prev; consistent = consistent and t1 >= prev; break                                                   # the run ended in this section (or this is the last one)
+        a = c['arrived'] if c['arrived'] is not None else c['passed']; l = c['left'] if c['left'] is not None else c['passed']
+        secs[rid] = a - prev; cps[k] = l - a; consistent = consistent and a >= prev and l >= a; prev = l
+    return dict(total_s=round(t1 - t0), start=t0, end=t1, checkpoints={k: round(v) for k, v in cps.items()}, sections={k: round(v) for k, v in secs.items()}, consistent=bool(consistent))

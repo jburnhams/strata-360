@@ -168,3 +168,19 @@ def test_a_paused_watch_at_the_stop_is_still_one_visit_and_counts_as_standing_st
     route = lambda a, b: gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(a, b)], route=True, timed=False)
     TK.add(rd, 'one.gpx', route(0, 121)); TK.add(rd, 'two.gpx', route(121, 241))
     assert 1300 <= TK.checkpoint_stops(rd)[1]['stopped_s'] <= 1400
+
+
+def test_route_times_and_checkpoint_times_add_up_to_the_run_time(tmp_path):
+    from datetime import datetime, timezone
+    rd = str(tmp_path); t0 = 1_770_000_000; pts = []; y = 0.0
+    for i in range(1200): y += 3.0; pts.append(y)                                    # 3 m/s to the first checkpoint at 3600 m, 400 s there, on, and the run ends before the end of the second route
+    pts += [y] * 400
+    for i in range(900): y += 3.0; pts.append(y)
+    body = ''.join(f'<trkpt lat="{50.0 + m / 110540.0}" lon="5.0"><time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time></trkpt>' for i, m in enumerate(pts))
+    TK.add(rd, 'run.gpx', f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode())
+    route = lambda a, b: gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(a, b)], route=True, timed=False)
+    TK.add(rd, 'one.gpx', route(0, 121)); TK.add(rd, 'two.gpx', route(121, 361)); TK.add(rd, 'three.gpx', route(361, 481))                                    # the run ends on the second; the third is not reached
+    tm = TK.timing(rd); assert tm['consistent'] and tm['total_s'] == 2499 and list(tm['checkpoints']) == [1]
+    assert sum(tm['checkpoints'].values()) + sum(tm['sections'].values()) == tm['total_s'] and 370 <= tm['checkpoints'][1] <= 400 and len(tm['sections']) == 2
+    ls = TK.listing(rd); r = {t['name']: t.get('time_s') for t in ls['tracks'] if t['kind'] == 'route'}; assert r['one.gpx'] > 1150 and r['two.gpx'] > 800 and r['three.gpx'] is None and ls['timing']['total_s'] == 2499
+    assert TK.timing(str(tmp_path / 'none')) == {}
