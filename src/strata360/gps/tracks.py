@@ -213,11 +213,24 @@ def listing(rd):
 
 
 _DIV = {}
+WRONG_DEG = 35.0               # heading differing from the route's by more than this (as lines) is heading the wrong way
+MIN_WRONG = 0.3                # a stretch off the route needs this share of it heading the wrong way, else it is only an offset alongside the route
+
+
+def _heading(p, k):
+    """Heading (degrees, 0-180 as a line) at each point of a polyline in metres, from the points k steps either side."""
+    n = len(p); a = np.clip(np.arange(n) - k, 0, n - 1); b = np.clip(np.arange(n) + k, 0, n - 1)
+    return np.degrees(np.arctan2(p[b, 0] - p[a, 0], p[b, 1] - p[a, 1])) % 180.0
+
+
+def _apart(h1, h2):
+    """Angle between two headings taken as lines, 0-90 degrees."""
+    return np.abs(((h1 - h2 + 90.0) % 180.0) - 90.0)
 
 
 def divergences(rd, threshold_m=50.0, top=10, step_m=10.0, join_m=150.0):
     """Where the race track leaves the routes by more than `threshold_m` (the distance to the nearest route of any: routes can be sections of the course). The race track is taken every `step_m` metres and each route is filled in to the same spacing, so the distance is within step_m / 2; stretches off the routes
-    less than `join_m` apart along the run are one divergence. Returns the `top` with the largest peak distance, biggest first: [{lat, lon, peak_m, length_m, km, t, line}] (lat, lon: the farthest point; km: along the race track; line: the stretch, thinned)."""
+    less than `join_m` apart along the run are one divergence. A stretch that only keeps level with a route, offset from it (less than MIN_WRONG of it heading more than WRONG_DEG away from the route's direction), is left out. Returns the `top` by score (peak distance times the share heading the wrong way), biggest first: [{lat, lon, peak_m, wrong, score, length_m, km, t, line}] (lat, lon: the farthest point; km: along the race track; line: the stretch, thinned)."""
     rts = [e for e in entries(rd) if e['kind'] == 'route']; cur = current_path(rd)
     if not rts or not cur: return []
     key = (cur, os.path.getmtime(cur), tuple((e['file'], os.path.getmtime(e['file'])) for e in rts), threshold_m, top)
@@ -230,15 +243,16 @@ def divergences(rd, threshold_m=50.0, top=10, step_m=10.0, join_m=150.0):
     def fill(p):                                                                   # points every <= step_m along a polyline
         d = np.hypot(*np.diff(p, axis=0).T); s = np.concatenate([[0], np.cumsum(d)]); n = max(2, int(s[-1] / step_m) + 1); u = np.linspace(0, s[-1], n)
         return np.column_stack([np.interp(u, s, p[:, 0]), np.interp(u, s, p[:, 1])]) if s[-1] > 0 else p[:1]
-    pts = []
+    pts = []; hdg = []
     for e in rts:
         r = read(e['file']); g = np.isfinite(r['lat']) & np.isfinite(r['lon'])
-        if g.sum() >= 2: pts.append(fill(xy(r['lat'][g], r['lon'][g])))
+        if g.sum() >= 2:
+            f = fill(xy(r['lat'][g], r['lon'][g])); pts.append(f); hdg.append(_heading(f, 2))
     if not pts: return []
-    tree = cKDTree(np.vstack(pts))
+    tree = cKDTree(np.vstack(pts)); rh = np.concatenate(hdg)
     P = xy(lat, lon); s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))]); u = np.arange(0, s[-1], step_m)           # the race track every step_m along its own length
     if len(u) < 2: return []
-    Q = np.column_stack([np.interp(u, s, P[:, 0]), np.interp(u, s, P[:, 1])]); tt = np.interp(u, s, t); d, _ = tree.query(Q); off = d > threshold_m
+    Q = np.column_stack([np.interp(u, s, P[:, 0]), np.interp(u, s, P[:, 1])]); tt = np.interp(u, s, t); d, nn = tree.query(Q); off = d > threshold_m; turn = _apart(_heading(Q, 3), rh[nn]) > WRONG_DEG       # (heading of the run against the heading of the route where it is nearest, as lines: the way along it does not matter)
     out = []; i = 0; n = len(u)
     while i < n:
         if not off[i]: i += 1; continue
@@ -248,8 +262,10 @@ def divergences(rd, threshold_m=50.0, top=10, step_m=10.0, join_m=150.0):
             while k < n and not off[k]: k += 1
             if k < n and (k - j) * step_m < join_m: j = k
             else: break
-        a, b = i, j; m = a + int(np.argmax(d[a:b + 1])); idx = np.unique(np.linspace(a, b, min(60, b - a + 1)).astype(int))
+        a, b = i, j; share = float(turn[a:b + 1][off[a:b + 1]].mean())
+        if share < MIN_WRONG: i = j + 1; continue                                  # keeps level with the route, only offset: not a wrong turn
+        m = a + int(np.argmax(d[a:b + 1])); idx = np.unique(np.linspace(a, b, min(60, b - a + 1)).astype(int))
         unxy = lambda q: (float(q[1] / ky + lat0), float(q[0] / kx + 5.0))
-        pk = unxy(Q[m]); out.append(dict(lat=round(pk[0], 6), lon=round(pk[1], 6), peak_m=round(float(d[m])), length_m=round((b - a + 1) * step_m), km=round(float(u[m]) / 1000.0, 1), t=float(tt[m]), line=[[round(unxy(Q[q])[0], 6), round(unxy(Q[q])[1], 6)] for q in idx]))
+        pk = unxy(Q[m]); out.append(dict(lat=round(pk[0], 6), lon=round(pk[1], 6), peak_m=round(float(d[m])), wrong=round(share, 2), score=round(float(d[m]) * share), length_m=round((b - a + 1) * step_m), km=round(float(u[m]) / 1000.0, 1), t=float(tt[m]), line=[[round(unxy(Q[q])[0], 6), round(unxy(Q[q])[1], 6)] for q in idx]))
         i = j + 1
-    out = sorted(out, key=lambda x: -x['peak_m'])[:top]; _DIV.clear(); _DIV[key] = out; return out
+    out = sorted(out, key=lambda x: -x['score'])[:top]; _DIV.clear(); _DIV[key] = out; return out

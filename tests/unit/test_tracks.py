@@ -83,13 +83,19 @@ def test_points_of_interest_from_waypoints_and_named_route_points(tmp_path):
     rd = str(tmp_path / 'proj'); os.makedirs(rd); TK.add(rd, 'c.gpx', p.read_bytes()); assert [q['name'] for q in TK.listing(rd)['pois']] == ['Aid station', 'Summit']
 
 
-def test_divergences_are_stretches_off_every_route_ranked_by_how_far(tmp_path):
+def test_divergences_are_wrong_turns_not_offsets_alongside_the_route(tmp_path):
     rd = str(tmp_path)
-    def pts(f): return [(50.0 + i * 1e-4, 5.0 + f(i)) for i in range(400)]                  # about 11 m per point going north
-    off = lambda i: (4.0e-3 if 100 <= i < 130 else 0) + (1.5e-3 if 250 <= i < 280 else 0)    # 0.0040 deg of lon ~ 286 m off; 0.0015 ~ 107 m off
-    TK.add(rd, 'run.gpx', gpx(pts(off))); TK.add(rd, 'course.gpx', gpx(pts(lambda i: 0.0), route=True, timed=False))
-    d = TK.divergences(rd); assert [x['peak_m'] // 10 for x in d] == [28, 10] and d[0]['length_m'] >= 300 and d[0]['km'] > 1 and len(d[0]['line']) > 1
-    assert d[0]['lat'] > 50.0 and abs(d[0]['lon'] - 5.004) < 5e-4
-    assert TK.divergences(rd, threshold_m=150) == [d[0]] or len(TK.divergences(rd, threshold_m=150)) == 1
-    assert TK.listing(rd)['divergences'][0]['peak_m'] == d[0]['peak_m']
+    # the route goes north 400 points (11 m apiece). The run: a detour east and back at 100-160 (up to ~290 m away, heading across the route), a smaller one at 250-290 (~110 m),
+    # and a stretch at 330-399 where it runs level with the route 150 m to the side (an offset, not a wrong turn)
+    def run(i):
+        if 100 <= i < 160: return 5.0 + 4.0e-3 * (1 - abs(i - 130) / 30.0), 50.0 + 100 * 1e-4 + (min(i, 130) - 100) * 1e-4
+        if 250 <= i < 290: return 5.0 + 1.5e-3 * (1 - abs(i - 270) / 20.0), 50.0 + 250 * 1e-4 + (min(i, 270) - 250) * 1e-4
+        return 5.0 + (2.1e-3 if i >= 330 else 0.0), 50.0 + i * 1e-4
+    pts = []
+    for i in range(400):
+        lon, lat = run(i); pts.append((lat, lon))
+    TK.add(rd, 'run.gpx', gpx(pts)); TK.add(rd, 'course.gpx', gpx([(50.0 + i * 1e-4, 5.0) for i in range(400)], route=True, timed=False))
+    d = TK.divergences(rd); assert len(d) >= 1 and d[0]['peak_m'] > 200 and d[0]['wrong'] > 0.6 and d[0]['length_m'] >= 300 and len(d[0]['line']) > 1 and d[0]['km'] > 1
+    assert all(abs(x['lon'] - 5.0021) > 1e-4 or x['lat'] < 50.032 for x in d)                    # nothing at the offset stretch (lat from 50.033)
+    assert [x['score'] for x in d] == sorted((x['score'] for x in d), reverse=True) and TK.listing(rd)['divergences'][0]['peak_m'] == d[0]['peak_m']
     assert TK.divergences(str(tmp_path / 'none')) == []
