@@ -135,6 +135,19 @@ describe('TrackPanel', () => {
       expect(tot).toHaveTextContent('Running pace 5:57 /km (12.1 km)'); expect(tot).toHaveTextContent('Ascent 2,400 m'); expect(tot).toHaveTextContent('Descent 2,100 m'); expect(tot.closest('li')!.previousElementSibling).toHaveTextContent('race.gpx')                  // (right after the run's row)
     })
 
+    it('highlights a checkpoint on the map while its row is pointed at, and keeps it when clicked', async () => {
+      present(); const l = two(); l.tracks[1].order = 1; l.timing = { total_s: 5000, start: 0, end: 1, checkpoints: { '1': 600 }, sections: { t2: 4400 }, consistent: true }
+      l.pois = [...l.pois, { name: 'Checkpoint 1', lat: 50.05, lon: 5.07, ele: null, sym: 'checkpoint', desc: 'a → b', track: 'checkpoint', n: 1 }]
+      mockGet('/api/tracks', l); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
+      const { user } = setup(<TrackPanel folder="/data" />)
+      const row = (await screen.findByText(/^Checkpoint 1$/)).closest('li')!; expect(document.querySelector('[data-checkpoint-hl]')).toBeNull()
+      await user.hover(row); expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).not.toBeNull())
+      await user.unhover(row); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).toBeNull())
+      await user.click(screen.getByRole('button', { name: 'Highlight checkpoint 1 on the map' })); await user.unhover(row)
+      expect(row).toHaveAttribute('data-highlighted'); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).not.toBeNull())
+      await user.click(screen.getByRole('button', { name: 'Highlight checkpoint 1 on the map' })); await user.unhover(row); await waitFor(() => expect(document.querySelector('[data-checkpoint-hl]')).toBeNull())                  // (while the pointer is on the row it is still pointed at)
+    })
+
     it('marks a track a run, refreshing the race track and the list', async () => {
       present(); const seen = recordRequests('/api/tracks/kind'); let marked = false
       const after = makeTracksListing({ runs: 2, tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'run' })], merged: { runs: ['main', 't2'], samples: 200, start_utc: '', end_utc: '', distance_km: 90 } })

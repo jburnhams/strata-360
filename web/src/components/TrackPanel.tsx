@@ -89,11 +89,13 @@ function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle
   useEffect(() => {
     for (const id of ids) {
       if (lines[id] || extras.some(e => e.id === id)) continue
+      if (id.startsWith('cp:')) continue
       const t = listing?.tracks.find(x => x.id === id); if (!t) continue
       api.tracksLine(folder, id).then(l => setLines(c => ({ ...c, [id]: { id, kind: t.kind, name: t.name, lat: l.lat, lon: l.lon } }))).catch(() => {})
     }
   }, [ids, lines, extras, listing, folder])
   const highlight = useMemo(() => ids.map(id => extras.find(e => e.id === id) ?? lines[id]).filter((x): x is ExtraLine => !!x), [ids, extras, lines])
+  const cps = useMemo(() => ids.filter(id => id.startsWith('cp:')).map(id => Number(id.slice(3))), [ids])                    // checkpoints pointed at or picked in the list: ringed in yellow on the map
   const hoverClip = (c: TrackClip | null, x = 0, y = 0) => setHover(c ? { clip: c, x, y } : undefined)
   const off = useMemo(() => clips.filter(c => !c.covered), [clips])
   if (err) return <p className="mt-3 text-sm text-amber-700">The map and charts need the track and its clips: {err}</p>
@@ -101,7 +103,7 @@ function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle
   return (
     <div className="mt-3 space-y-2">
       {tiles && !tiles.ok && <p role="alert" className="text-sm text-amber-700">The map background is off: {tiles.error}</p>}
-      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} highlight={highlight} onHoverTrack={setHot} onToggleTrack={toggle} tz={tz} ends={listing?.markers} />
+      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} highlight={highlight} onHoverTrack={setHot} onToggleTrack={toggle} tz={tz} ends={listing?.markers} highlightCheckpoints={cps} />
       <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
         <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
         {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#78716c' }} />not in the film</span>}
@@ -155,9 +157,10 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
             <button disabled={busy} aria-label={`Remove ${x.name}`} className="text-stone-500 hover:text-red-600 disabled:opacity-50" onClick={() => act(() => api.removeTrack(folder, x.id))}>Remove</button>
           </li>
           {x.order != null && listing?.timing?.checkpoints[String(x.order)] != null && (
-            <li data-checkpoint-row="" className="flex items-center gap-x-3 rounded px-1 text-xs text-blue-800 dark:text-blue-300">
+            <li data-checkpoint-row="" data-highlighted={hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? '' : undefined} onMouseEnter={() => setHot(`cp:${x.order}`)} onMouseLeave={() => setHot(null)}
+              className={`flex items-center gap-x-3 rounded px-1 text-xs ${hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : 'text-blue-800 dark:text-blue-300'}`}>
               <span className="w-6 text-center"><span className="inline-block h-4 min-w-4 rounded-full bg-blue-700 px-1 text-center text-[10px] font-bold leading-4 text-white">{x.order}</span></span>
-              <span className="flex-1">Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-stone-500" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</span><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
+              <button type="button" aria-pressed={pinned.includes(`cp:${x.order}`)} aria-label={`Highlight checkpoint ${x.order} on the map`} className="flex-1 cursor-pointer text-left" onClick={() => toggle(`cp:${x.order}`)}>Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-stone-500" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</button><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
             </li>
           )}
           {tm && x.kind === 'run' && ix === lastRun && (

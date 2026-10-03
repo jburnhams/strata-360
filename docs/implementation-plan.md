@@ -443,3 +443,5 @@ Overlay stage text (`overlay/layout.py::Stage`, schedule from `tracks.stage_sche
 Overlay climb line (`Climb`, `series.running_climb`): a small line under altitude and slope with the total ascent and descent so far (4 m wiggle filter on the smoothed altitude; 0 before the run, the totals after it). It can differ a little from the Tracks list, which uses the raw altitude.
 
 Overlay maps: the whole-route map draws the route thin and pale, with the part already run over it in the strong colour (a patch redrawn when the marker moves on, with the map's see-through-ness); the close-up map draws the route ahead paler and the route behind in the strong colour.
+
+Checkpoint rows in the Tracks list work like the track rows: pointing at one rings that checkpoint on the map in bold yellow, clicking it keeps it highlighted (click again to let go).

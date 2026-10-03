@@ -72,6 +72,14 @@ describe('TrackMap', () => {
     await user.hover(screen.getByTitle('Checkpoint 2')); expect(await screen.findByText('Did not slow down within 300 m')).toBeInTheDocument()
   })
 
+  it('rings a highlighted checkpoint in bold yellow', () => {
+    const cp = (n: number) => ({ name: `Checkpoint ${n}`, lat: 50.05 + n / 100, lon: 5.05, ele: null, sym: 'checkpoint', desc: '', track: 'checkpoint', n })
+    const { container, rerender } = setup(<TrackMap {...props()} pois={[cp(1), cp(2)]} />)
+    expect(container.querySelector('[data-checkpoint-hl]')).toBeNull()
+    rerender(<TrackMap {...props()} pois={[cp(1), cp(2)]} highlightCheckpoints={[2]} />)
+    const hl = container.querySelectorAll('[data-checkpoint-hl]'); expect(hl).toHaveLength(1); expect(hl[0]).toHaveTextContent('2'); expect(hl[0].getAttribute('style')).toContain('#facc15')
+  })
+
   it('colours a marker green when the draft plays the clip and grey when it does not', () => {
     setup(<TrackMap {...props()} />)
     expect(screen.getByTitle('Clip 0023').innerHTML).toContain('#16a34a'); expect(screen.getByTitle('Clip 0024').innerHTML).toContain('#78716c')
