@@ -23,15 +23,16 @@ from strata360.overlay import draw as D
 from strata360.overlay.tiles import Tiles, STYLES, world
 
 REF_W, REF_H = 1920, 1080
-LARGE, MEDIUM = 48, 32                    # the two sizes of text on the overlay (px on a 1080p frame): large for the numbers that matter (total time, distance, pace, altitude, slope, heart rate), medium for everything else
+LARGE, MEDIUM = 48, 28                    # the two sizes of text on the overlay (px on a 1080p frame): large for the numbers that matter (total time, distance, pace, altitude, slope, heart rate), medium for everything else
+LINE = 36                                 # the distance between two lines of medium text
 ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the element keeps its distance from
     'profile': dict(kind='profile', height=120),
     'clock': dict(kind='clock', x=16, y=24),
-    'stage': dict(kind='stage', x=16, y=176),
+    'stage': dict(kind='stage', x=16, y=186),
     'distance': dict(kind='big', x=520, y=28, metric='dist', label='km'),
     'pace': dict(kind='big', x=190, y=700, v='bottom', metric='pace', label='min/km'),
-    'altitude': dict(kind='stat', x=16, y=806, v='bottom', icon='mountain', metric='alt', label='ALT (m)'),
-    'slope': dict(kind='stat', x=290, y=806, v='bottom', icon='slope', metric='slope', label='SLOPE (%)'),
+    'altitude': dict(kind='stat', x=16, y=806, v='bottom', icon='mountain', metric='alt', label='Alt (m)'),
+    'slope': dict(kind='stat', x=290, y=806, v='bottom', icon='slope', metric='slope', label='Slope (%)'),
     'climb': dict(kind='climb', x=16, y=914, v='bottom'),
     'heart_rate': dict(kind='stat', x=1900, y=806, h='right', v='bottom', icon='heart', metric='hr', label='BPM', align='right'),
     'route_map': dict(kind='route_map', x=1644, y=24, h='right', size=256, radius=35, style='tf-landscape'),
@@ -55,7 +56,7 @@ METRIC = dict(dist='dist_m', pace='pace_s_km', alt='alt_m', slope='slope_pct', h
 class _Ctx:
     """What the widgets share: frame size and scale, fonts, the series, the tiles, the time zone and a cache of drawn text."""
     def __init__(self, series, size, st, tz, tiles, stages=(), progress=None, cutoffs=None, places=None):
-        self.places = places; self.stages = list(stages); self.progress = progress or {}; self.cutoffs = cutoffs or {}; self.cutoff_row = 40 if self.cutoffs else 0; self._rs = None; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
+        self.places = places; self.stages = list(stages); self.progress = progress or {}; self.cutoffs = cutoffs or {}; self.cutoff_row = LINE if self.cutoffs else 0; self._rs = None; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H) * float(st['scale']); self.series, self.st, self.tz = series, st, ZoneInfo(tz)
         self._tiles = tiles if callable(tiles) and not isinstance(tiles, Tiles) else (lambda style: tiles) if tiles is not None else None; self._made = {}
         self.vfont, self.lfont = st.get('font') or D.VALUE_FONT, st.get('label_font') or st.get('font') or D.LABEL_FONT; self._text = {}
 
@@ -131,9 +132,9 @@ class Clock:
     def patches(self, t, v):
         c, e = self.c, self.el; x, y = e['x'], e['y']; start = float(c.series._pt[0]); lt = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(c.tz)
         k = c.cutoff_row                                                                                                  # with cut-offs set, a line of its own between the elapsed time and the day
-        out = [c.text(e, x, y, elapsed_text(t - start), LARGE), c.text(e, x, y + 56 + k, f'DAY {race_day(start, t, c.tz)}', MEDIUM), c.text(e, x, y + 98 + k, lt.strftime('%Y/%m/%d  %H:%M:%S'), MEDIUM)]
+        out = [c.text(e, x, y, elapsed_text(t - start), LARGE), c.text(e, x, y + 54 + k, f'Day {race_day(start, t, c.tz)}', MEDIUM), c.text(e, x, y + 54 + LINE + k, lt.strftime('%Y/%m/%d  %H:%M:%S'), MEDIUM)]
         cut = c.race_cutoff()
-        if cut is not None: out.append(c.text(e, x, y + 56, f'CUT-OFF {elapsed_text(cut)}', MEDIUM))                      # the cut-off of the whole race, as a total time since the start
+        if cut is not None: out.append(c.text(e, x, y + 54, f'Cut-Off {elapsed_text(cut)}', MEDIUM))                      # the cut-off of the whole race, as a total time since the start
         return out
 
 
@@ -156,15 +157,16 @@ class Stage:
 
     def patches(self, t, v):
         if not self.times: return []
-        e = {**self.el, 'y': self.el['y'] + self.c.cutoff_row}; i = max(0, bisect.bisect_right(self.times, t) - 1); name = self.names[i]; out = [self.c.text(e, e['x'], e['y'], name.upper(), MEDIUM)]; line = lambda s: self.c.text(e, e['x'], e['y'] + 42, s, MEDIUM)
+        e = {**self.el, 'y': self.el['y'] + self.c.cutoff_row}; i = max(0, bisect.bisect_right(self.times, t) - 1); name = self.names[i]; out = [self.c.text(e, e['x'], e['y'], name, MEDIUM)]; line = lambda s, n=1: self.c.text(e, e['x'], e['y'] + LINE * n, s, MEDIUM)
         if name.startswith(('Stage', 'Checkpoint')) and i + 1 < len(self.times):
             a, b = self.times[i], self.times[i + 1]                                                                # a stage runs to the next checkpoint's arrival, a checkpoint to the departure
             pr = self.c.progress.get(name) if name.startswith('Stage') else None
             if pr is not None:                                                                                # the distance run so far over the distance run in the whole stage; where the run went off the route (over 10% out), the route's own progress comes first and what was actually run follows
                 run = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; L = pr['route_m'] / 1000; p = float(np.interp(t, pr['t'], pr['prog'])) / 1000
                 cut = self.c.cutoffs.get('stage', {}).get(name)                                                  # the stage's cut-off, from leaving the previous checkpoint; with none set, the stage's total time
-                dist = f'{p:.1f}/{L:.1f} km  ran {run:.1f} km' if abs(run - p) > max(0.10 * max(run, p), 0.5) else f'{run:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
-                return out + [line(f'{dist}  ·  {_clock(min(t, b) - a)}/' + (_clock(cut - (a - self.c.cutoffs['start'])) if cut is not None else _clock(b - a)))]
+                strayed = abs(run - p) > max(0.10 * max(run, p), 0.5)                                            # the run went off the route: what was actually run goes on a line of its own under the stage's distance
+                dist = f'{p:.1f}/{L:.1f} km' if strayed else f'{run:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
+                return out + [line(f'{dist}  ·  {_clock(min(t, b) - a)}/' + (_clock(cut - (a - self.c.cutoffs['start'])) if cut is not None else _clock(b - a)))] + ([line(f'Ran {run:.1f} km', 2)] if strayed else [])
             if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
             else: km = f'{(self._dist(a) - self._dist(self.times[1] if len(self.times) > 1 else a)) / 1000:.1f} km'          # the way from the start of the run to the checkpoint
             out.append(line(f'{km}  ·  {_hm(max(0.0, min(t, b) - a))} / {_hm(b - a)}'))
@@ -185,7 +187,7 @@ class Big:
         big = fmt(e['metric'], val); out = [self.c.text(e, e['x'], e['y'], big, LARGE, align='right')]; re_ = self.c.route_elapsed(t) if e['metric'] == 'dist' else None
         if re_ is not None:                                                                                              # with routes: instead of the small km, how far along the routes (all stages added up) of their whole length, under the start of the big figure (it carries the km)
             left = e['x'] - self.c._text[(big, LARGE, False)][2] / self.c.s
-            out.append(self.c.text(e, left, e['y'] + 56, f'route {re_[0] / 1000:.1f} / {re_[1] / 1000:.1f} km', MEDIUM, label=True))
+            out += [self.c.icon(e, 'flag', left, e['y'] + 56, MEDIUM), self.c.text(e, left + MEDIUM + 6, e['y'] + 56, f'{re_[0] / 1000:.1f} / {re_[1] / 1000:.1f} km', MEDIUM, label=True)]       # the finish flag: how far along the routes of their whole length
         else: out.append(self.c.text(e, e['x'], e['y'] + 56, e['label'], MEDIUM, label=True, align='right'))
         return out
 
@@ -197,18 +199,19 @@ class Stat:
     def patches(self, t, v):
         e = self.el; x, y = e['x'], e['y']; r = e.get('align') == 'right'; tx = x - 70 if r else x + 70; al = 'right' if r else 'left'; val = v[METRIC[e['metric']]]
         name = e['icon'] + ('_down' if e['icon'] == 'slope' and val < 0 else '')                                   # NaN compares False: uphill icon
-        return [self.c.icon(e, name, x - 64 if r else x, y + 14, 64), self.c.text(e, tx, y, e['label'], MEDIUM, label=True, align=al),
-                self.c.text(e, tx, y + 36, fmt(e['metric'], val), LARGE, align=al)]
+        return [self.c.icon(e, name, x - 64 if r else x, y + 12, 64), self.c.text(e, tx, y, e['label'], MEDIUM, label=True, align=al),
+                self.c.text(e, tx, y + 32, fmt(e['metric'], val), LARGE, align=al)]
 
 
 class Climb:
-    """The total ascent and descent so far, in a small line under altitude and slope (before the run 0, after it the totals)."""
+    """The total ascent and descent so far, in a line under altitude and slope: an arrow up and the metres climbed, an arrow down and the metres descended (before the run 0, after it the totals)."""
     def __init__(self, c, el): self.c, self.el = c, el
 
     def patches(self, t, v):
         a, d = self.c.series.cols['ascent_m'], self.c.series.cols['descent_m']; s = self.c.series
         up, down = (float(a[0]), float(d[0])) if t <= s.t0 else (float(a[-1]), float(d[-1])) if t >= s.t1 else (float(np.interp(t, s.grid, a)), float(np.interp(t, s.grid, d)))
-        e = self.el; return [self.c.text(e, e['x'], e['y'], f'ASCENT {up:,.0f} m   DESCENT {down:,.0f} m', MEDIUM)]
+        e = self.el; x, y, c = e['x'], e['y'], self.c; u, d = f'{up:,.0f} m', f'{down:,.0f} m'; first = c.text(e, x + MEDIUM + 6, y, u, MEDIUM); x2 = x + MEDIUM + 6 + c._text[(u, MEDIUM, False)][2] / c.s + 28            # an arrow up and the metres climbed, an arrow down and the metres descended
+        return [c.icon(e, 'up', x, y + 2, MEDIUM), first, c.icon(e, 'down', x2, y + 2, MEDIUM), c.text(e, x2 + MEDIUM + 6, y, d, MEDIUM)]
 
 
 class Profile:

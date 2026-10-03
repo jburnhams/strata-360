@@ -51,7 +51,7 @@ class TestSettings:
 class TestShows:
     def test_the_values_at_the_frame_time(self, series, tiles, texts):
         overlay(series, tiles).patches(T0 + 300)                             # 900 m, 5:33 /km, 5 %, 345 m, 147 bpm; 08:05:00 in Brussels
-        for s in ('2025/09/16  08:05:00', '0:05:00', 'DAY 1', '0.9', 'km', '5:33', 'min/km', '345', '5', '147', 'ALT (m)', 'SLOPE (%)', 'BPM'): assert s in texts
+        for s in ('2025/09/16  08:05:00', '0:05:00', 'Day 1', '0.9', 'km', '5:33', 'min/km', '345', '5', '147', 'Alt (m)', 'Slope (%)', 'BPM'): assert s in texts
         assert '© OpenStreetMap contributors' not in texts                                    # no credit on the picture: it goes with the film's distribution
 
     def test_time_zone(self, series, tiles, texts):
@@ -81,7 +81,7 @@ class TestPlacement:
 
     def test_anchored_to_the_right_and_bottom_edges(self, series, tiles):
         ov = overlay(series, tiles, size=(2160, 1080)); x, y, _ = self.corner(ov, 'route_map'); assert (x, y) == pytest.approx((2160 - 276, 24))
-        hx, hy, _ = self.corner(ov, 'altitude'); assert (hx, hy) == pytest.approx((16 - D.icon('mountain', 64)[1], 820 - D.icon('mountain', 64)[1]))
+        hx, hy, _ = self.corner(ov, 'altitude'); assert (hx, hy) == pytest.approx((16 - D.icon('mountain', 64)[1], 818 - D.icon('mountain', 64)[1]))
 
     def test_scale_setting(self, series, tiles):
         assert self.corner(overlay(series, tiles, scale=1.5), 'local_map')[2][:2] == (384, 384)
@@ -276,10 +276,10 @@ class TestRaceDay:
 
 
 class TestStageText:
-    def test_the_stage_follows_the_schedule_and_is_upper_case(self, series, tiles, texts):
+    def test_the_stage_follows_the_schedule_in_title_case(self, series, tiles, texts):
         stages = [(float('-inf'), 'Before Race'), (T0 + 10, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 400, 'Checkpoint 1'), (T0 + 600, 'After Race')]
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages)
-        for dt_, want, n in ((-5, 'BEFORE RACE', 2), (10, 'AT START', 1), (99, 'AT START', 1), (100, 'STAGE 1', 2), (450, 'CHECKPOINT 1', 2), (900, 'AFTER RACE', 2)):
+        for dt_, want, n in ((-5, 'Before Race', 2), (10, 'At Start', 1), (99, 'At Start', 1), (100, 'Stage 1', 2), (450, 'Checkpoint 1', 2), (900, 'After Race', 2)):
             texts.clear(); ov.c._text.clear(); assert len(ov.patches(T0 + dt_)) == n and want in texts                 # (drawn text is kept for reuse: cleared so the spy sees it)
 
     def test_nothing_is_drawn_without_a_schedule(self, series, tiles):
@@ -312,10 +312,11 @@ class TestClimb:
         up, down = running_climb(np.array([100, 101, 99, 100, 110, 112, 105, np.nan, 105, 90.0]))
         assert list(up) == [0, 0, 0, 0, 10, 10, 10, 10, 10, 10] and list(down) == [0, 0, 0, 0, 0, 0, 5, 5, 5, 20]          # (the reference moves only on a change of 4 m or more: 105 is 5 m under 110, 90 is 15 m under 105)
 
-    def test_the_line_shows_ascent_and_descent_so_far(self, series, tiles, texts):
+    def test_the_line_shows_an_arrow_up_with_the_ascent_and_an_arrow_down_with_the_descent(self, series, tiles, texts):
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['climb']}, tz='UTC', tiles=tiles)
-        ov.patches(T0 - 50); assert 'ASCENT 0 m   DESCENT 0 m' in texts
-        texts.clear(); ov.c._text.clear(); ov.patches(T0 + 600); assert any(x.startswith('ASCENT ') and x != 'ASCENT 0 m   DESCENT 0 m' for x in texts)           # the track climbs 5 %
+        patches = ov.patches(T0 - 50); assert texts == ['0 m'] and len(patches) == 4 and not any('ASCENT' in x or 'DESCENT' in x for x in texts)               # icon, metres, icon, metres
+        texts.clear(); ov.c._text.clear(); ov.patches(T0 + 600); assert len(texts) == 2 and '0 m' in texts; assert patches[2][0] > patches[1][0]          # the track climbs 5 %; the second arrow is to the right of the first figure
+        assert 'up' in D.ICONS and 'down' in D.ICONS and D.icon('up', 28)[0].shape[0] >= 28
 
 
 class TestArrow:
@@ -355,16 +356,16 @@ class TestStageProgress:
     def test_a_run_that_followed_the_route_shows_only_the_distance_run_over_the_distance_run_in_the_stage(self, series, tiles, texts):
         ts = np.arange(T0 + 100, T0 + 801, 5.0)
         self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}).patches(T0 + 400)       # the track runs 3 m/s: 900 m of a 2000 m route, and the route says the same
-        assert texts == ['STAGE 1', '0.9/2.1 km  ·  00:05:00/00:11:40']
+        assert texts == ['Stage 1', '0.9/2.1 km  ·  00:05:00/00:11:40']
 
     def test_a_run_that_strayed_shows_the_routes_progress_first_and_the_distance_run_after_it(self, series, tiles, texts):
         ts = np.arange(T0 + 100, T0 + 801, 5.0)
         self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=np.minimum((ts - ts[0]) * 3.0, 300.0))}).patches(T0 + 400)       # on the route for 100 s, then off it: the route says 300 m, 900 m were run
-        assert texts == ['STAGE 1', '0.3/2.0 km  ran 0.9 km  ·  00:05:00/00:11:40']
+        assert texts == ['Stage 1', '0.3/2.0 km  ·  00:05:00/00:11:40', 'Ran 0.9 km']                                  # what was run goes on a line of its own under the stage's distance
 
     def test_a_finished_stage_shows_its_total_time(self, series, tiles, texts):
         ts = np.arange(T0 + 100, T0 + 801, 5.0); stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 800, 'Checkpoint 1'), (T0 + 900, 'After Race')]
-        self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}, stages).patches(T0 + 400); assert texts == ['STAGE 1', '0.9/2.1 km  ·  00:05:00/00:11:40']
+        self.overlay(series, tiles, {'Stage 1': dict(route_m=2000.0, t=ts, prog=(ts - ts[0]) * 3.0)}, stages).patches(T0 + 400); assert texts == ['Stage 1', '0.9/2.1 km  ·  00:05:00/00:11:40']
 
     def test_no_text_of_the_overlay_is_red(self, series, tiles, monkeypatch):
         fills = []; real = D.text
@@ -388,15 +389,15 @@ class TestRouteElapsed:
         assert c.route_elapsed(T0 + 700) == (1200.0 + 300.0, 2600.0)             # stage 2: the route says 300 m (it strayed)
         assert c.route_elapsed(T0 + 5000) == (1200.0 + 300.0, 2600.0)            # after the run: it stays where the run left the route
 
-    def test_it_is_written_next_to_the_small_km(self, series, tiles, texts):
-        self.ov(series, tiles).patches(T0 + 200); assert 'route 0.3 / 2.6 km' in texts and 'km' not in texts                    # instead of the small km label
-        texts.clear(); LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles).patches(T0 + 200); assert 'km' in texts and not [x for x in texts if x.startswith('route')]      # without routes: as before
+    def test_it_is_written_with_a_finish_flag_instead_of_the_small_km(self, series, tiles, texts):
+        out = self.ov(series, tiles).patches(T0 + 200); assert '0.3 / 2.6 km' in texts and 'km' not in texts and not [x for x in texts if 'route' in x.lower()] and len(out) == 3             # the figure, the flag, the text
+        texts.clear(); LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles).patches(T0 + 200); assert 'km' in texts and not [x for x in texts if '/' in x]      # without routes: as before
         assert LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles).c.route_elapsed(T0) is None
+        assert 'flag' in D.ICONS and D.icon('flag', 28)[0].shape[0] >= 28
 
-
-    def test_the_route_text_starts_under_the_start_of_the_big_figure(self, series, tiles):
-        ov = self.ov(series, tiles); big, route = ov.patches(T0 + 200)
-        assert route[0] + 2 >= big[0] and route[0] - big[0] < 2 * ov.c.s * 12                              # (the patches have a little padding each: they start within a few pixels of each other)
+    def test_the_flag_starts_under_the_start_of_the_big_figure(self, series, tiles):
+        ov = self.ov(series, tiles); big, flag, text = ov.patches(T0 + 200)
+        assert flag[0] + 2 >= big[0] and flag[0] - big[0] < 2 * ov.c.s * 12 and text[0] > flag[0]                              # (the patches have a little padding each: they start within a few pixels of each other)
 
 
 class TestCutoffsOnTheOverlay:
@@ -415,14 +416,14 @@ class TestCutoffsOnTheOverlay:
 
     def test_the_cut_off_of_the_whole_race_is_always_shown_on_its_own_line(self, series, tiles, texts):
         for dt_ in (-30, 50, 200, 550, 650, 900):                                      # whatever the stage: the finish's cut-off
-            texts.clear(); ov = self.ov(series, tiles, ['clock'], self.cut); ov.patches(T0 + dt_); assert 'CUT-OFF 1:00:00' in texts, (dt_, texts)
-        texts.clear(); self.ov(series, tiles, ['clock'], dict(self.cut, finish=None)).patches(T0 + 200); assert not [x for x in texts if x.startswith('CUT-OFF')]       # no finish cut-off: nothing
-        texts.clear(); self.ov(series, tiles, ['clock']).patches(T0 + 200); assert not [x for x in texts if x.startswith('CUT-OFF')]
+            texts.clear(); ov = self.ov(series, tiles, ['clock'], self.cut); ov.patches(T0 + dt_); assert 'Cut-Off 1:00:00' in texts, (dt_, texts)
+        texts.clear(); self.ov(series, tiles, ['clock'], dict(self.cut, finish=None)).patches(T0 + 200); assert not [x for x in texts if x.startswith('Cut-Off')]       # no finish cut-off: nothing
+        texts.clear(); self.ov(series, tiles, ['clock']).patches(T0 + 200); assert not [x for x in texts if x.startswith('Cut-Off')]
 
     def test_a_stage_shows_the_time_so_far_over_its_cut_off_or_its_total_time_when_there_is_none(self, series, tiles, texts):
         self.ov(series, tiles, ['stage'], self.cut).patches(T0 + 400)                       # 300 s into stage 1, which started at T0 + 100; its cut-off is 1200 s after the start of the run: 1100 s for the stage
-        assert texts == ['STAGE 1', '0.9/1.2 km  ·  00:05:00/00:18:20']
-        texts.clear(); self.ov(series, tiles, ['stage']).patches(T0 + 400); assert texts == ['STAGE 1', '0.9/1.2 km  ·  00:05:00/00:06:40']            # no cut-off: the stage's total time
+        assert texts == ['Stage 1', '0.9/1.2 km  ·  00:05:00/00:18:20']
+        texts.clear(); self.ov(series, tiles, ['stage']).patches(T0 + 400); assert texts == ['Stage 1', '0.9/1.2 km  ·  00:05:00/00:06:40']            # no cut-off: the stage's total time
 
     def test_the_cut_off_line_sits_between_the_elapsed_time_and_the_day_and_pushes_the_rest_down(self, series, tiles):
         ys = lambda ov: [p[1] for p in ov.patches(T0 + 200)]
@@ -460,8 +461,8 @@ class TestTwoSizes:
         ts = np.arange(T0 + 100, T0 + 501, 5.0); stages = [(float('-inf'), 'Before Race'), (T0, 'At Start'), (T0 + 100, 'Stage 1'), (T0 + 500, 'Checkpoint 1'), (T0 + 600, 'After Race')]
         cuts = dict(start=T0, stage={'Stage 1': 1200}, cp={1: 1200}, finish=3600)
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm'}, tz='UTC', tiles=tiles, stages=stages, progress={'Stage 1': dict(route_m=1200.0, t=ts, prog=(ts - ts[0]) * 3.0)}, cutoffs=cuts); ov.patches(T0 + 300)
-        assert set(sizes.values()) == {LY.LARGE, LY.MEDIUM} and (LY.LARGE, LY.MEDIUM) == (48, 32)
+        assert set(sizes.values()) == {LY.LARGE, LY.MEDIUM} and (LY.LARGE, LY.MEDIUM) == (48, 28)
         big = {s for s, px in sizes.items() if px == LY.LARGE}; assert '0:05:00' in big and any(s.replace('.', '').isdigit() for s in big)                           # the elapsed time and the distance, pace, altitude ... values
         medium = {s for s, px in sizes.items() if px == LY.MEDIUM}
-        for want in ('DAY 1', 'STAGE 1', 'CUT-OFF 1:00:00', 'ALT (m)', 'SLOPE (%)', 'BPM'): assert want in medium, (want, medium)
-        assert any(s.startswith('ASCENT') for s in medium) and any(s.startswith('2025/09/16') for s in medium) and any(s.startswith('route ') for s in medium)
+        for want in ('Day 1', 'Stage 1', 'Cut-Off 1:00:00', 'Alt (m)', 'Slope (%)', 'BPM'): assert want in medium, (want, medium)
+        assert any(s.startswith('2025/09/16') for s in medium) and any(s.endswith(' m') for s in medium) and any(s.endswith(' km') and '/' in s for s in medium)

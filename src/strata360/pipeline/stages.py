@@ -247,7 +247,7 @@ def thumb_best(ctx):
     best(ctx.clip.osv, str(ctx.dir))
 
 
-@stage('thumb_overlay', 3, keys=('overlay', 'timezone'), outputs=('thumb_overlay.jpg',), deps=('thumb',), soft_deps=('thumb_best',), needs_track=True,
+@stage('thumb_overlay', 4, keys=('overlay', 'timezone'), outputs=('thumb_overlay.jpg',), deps=('thumb',), soft_deps=('thumb_best',), needs_track=True,
        note='the thumbnail with the race overlay as the film will show it (maps need the map key in secrets.env; without it the numbers only); the app shows it when its "overlay" switch is on')
 def thumb_overlay(ctx):
     from strata360.analysis.thumbs import with_overlay
