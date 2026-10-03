@@ -120,3 +120,21 @@ def test_a_race_that_passes_the_same_place_twice_still_puts_the_routes_in_order(
     TK.add(rd, 'second.gpx', gpx(back, route=True, timed=False)); TK.add(rd, 'first.gpx', gpx(out, route=True, timed=False))
     routes = [t for t in TK.listing(rd)['tracks'] if t['kind'] == 'route']
     assert [(t['name'], t['order']) for t in routes] == [('first.gpx', 1), ('second.gpx', 2)] and not routes[1]['reversed'] and routes[1]['km_start'] > 3
+
+
+def test_stops_at_a_checkpoint_count_only_the_time_standing_still(tmp_path):
+    from datetime import datetime, timezone
+    rd = str(tmp_path); t0 = 1_770_000_000
+    # the run goes north at 3 m/s for 1200 s (to 3600 m), stands still 900 s, then goes on at 3 m/s; one sample a second, 0.0000270 deg of lat ~ 3 m
+    pts = []; y = 0.0
+    for i in range(1200 + 900 + 1200):
+        if not (1200 <= i < 2100): y += 3.0
+        pts.append((50.0 + y / 110540.0, 5.0))
+    body = ''.join(f'<trkpt lat="{la}" lon="{lo}"><time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time></trkpt>' for i, (la, lo) in enumerate(pts))
+    TK.add(rd, 'run.gpx', f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>{body}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode())
+    route = lambda a, b: gpx([(50.0 + k * 30 / 110540.0, 5.0) for k in range(a, b)], route=True, timed=False)
+    TK.add(rd, 'one.gpx', route(0, 121)); TK.add(rd, 'two.gpx', route(121, 241))                                         # they join at 3600 m, where the run stood
+    s = TK.checkpoint_stops(rd); assert list(s) == [1]; c = s[1]
+    assert 880 <= c['stopped_s'] <= 900 and c['zone_s'] >= c['stopped_s'] and c['zone_s'] < 900 + 2 * 300 / 3 + 60 and c['arrived'] > c['zone_in'] and c['left'] < c['zone_out']        # the run-in and run-out at 3 m/s inside the zone are not counted
+    cp = [p for p in TK.listing(rd)['pois'] if p['sym'] == 'checkpoint'][0]; assert cp['stop']['stopped_s'] == c['stopped_s']
+    assert TK.checkpoint_stops(str(tmp_path / 'none')) == {}

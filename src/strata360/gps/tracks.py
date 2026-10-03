@@ -207,7 +207,9 @@ def listing(rd):
         points += p; o = info_of.get(e['id']); items.append(dict(id=e['id'], name=e['name'], kind=e['kind'], pois=len(p), **info, **({k: o[k] for k in ('order', 'reversed', 'km_start', 'km_end')} if o else {})))
     items.sort(key=lambda x: (x['kind'] != 'run', x.get('order') is None, x.get('order') or 0))                        # runs first, then the routes in race order
     name = {x['id']: x['name'] for x in items}
-    for c in marks: points.append(dict(name=f"Checkpoint {c['n']}", lat=c['lat'], lon=c['lon'], ele=None, sym='checkpoint', desc=f"{name.get(c['before'], '')} → {name.get(c['after'], '')}" + (f" (their ends are {c['gap_m']} m apart)" if c['gap_m'] >= 20 else ''), track='checkpoint', n=c['n']))
+    try: stops = checkpoint_stops(rd)
+    except Exception: stops = {}                                                    # (the map is not worth failing the list over)
+    for c in marks: points.append(dict(name=f"Checkpoint {c['n']}", lat=c['lat'], lon=c['lon'], ele=None, sym='checkpoint', desc=f"{name.get(c['before'], '')} → {name.get(c['after'], '')}" + (f" (their ends are {c['gap_m']} m apart)" if c['gap_m'] >= 20 else ''), track='checkpoint', n=c['n'], **({'stop': stops[c['n']]} if c['n'] in stops else {})))
     merged = None
     if len(runs(rd)) >= 2:
         current_path(rd)
@@ -324,3 +326,30 @@ def route_order(rd, step_m=10.0, reach_m=150.0):
             p = found[n - 2]['b']; la, lo_ = ll((p + f['a']) / 2)
             marks.append(dict(n=n - 1, lat=round(la, 6), lon=round(lo_, 6), gap_m=round(float(np.hypot(*(f['a'] - p)))), before=found[n - 2]['id'], after=f['id']))
     _ORDER.clear(); _ORDER[key] = (order, marks); return order, marks
+
+
+STOP_MS = 0.7                  # slower than this (m/s, over half a minute either side) is standing still
+ZONE_M = 300.0                 # a checkpoint's zone: the race track inside it is the visit
+
+
+def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
+    """How long the run stood still at each checkpoint: {checkpoint n: {zone_in, zone_out, zone_s, arrived, left, stopped_s, radius_m}} (times are UTC epoch seconds; checkpoints the run did not reach are left out).
+    The visit is the pass of the race track through the zone (radius_m round the checkpoint) nearest to where the routes join along the race; the race can pass the same place twice. The zone is large because the stop is often not exactly at the point, and time spent still moving on the way in or out is not counted:
+    `arrived` is the first sample in the visit that is slower than STOP_MS and `left` the last one (speed over 2 x window_s round it, so a gap in the recording while the watch was paused counts as standing still), `stopped_s` the time between them, 0 when the run never slowed."""
+    order, marks = route_order(rd); cur = current_path(rd)
+    if not marks or not cur: return {}
+    from scipy.spatial import cKDTree
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    if len(t) < 2: return {}
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    P = np.column_stack([(lon - 5.0) * kx, (lat - lat0) * ky]); cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))]); tree = cKDTree(P); km = {o['id']: o for o in order}; out = {}
+    for c in marks:
+        cp = np.array([(c['lon'] - 5.0) * kx, (c['lat'] - lat0) * ky]); idx = np.sort(np.array(tree.query_ball_point(cp, radius_m), int))
+        if not len(idx): continue
+        visits = np.split(idx, np.flatnonzero(np.diff(t[idx]) > 1800.0) + 1); want = (km[c['before']]['km_end'] + km[c['after']]['km_start']) * 500.0       # (half the sum of two km, as metres)
+        v = min(visits, key=lambda g: abs(float(cum[g[len(g) // 2]]) - want)); tv = t[v]
+        a = np.interp(tv - window_s, t, P[:, 0]), np.interp(tv - window_s, t, P[:, 1]); b = np.interp(tv + window_s, t, P[:, 0]), np.interp(tv + window_s, t, P[:, 1])
+        speed = np.hypot(b[0] - a[0], b[1] - a[1]) / (2 * window_s); slow = np.flatnonzero(speed < STOP_MS)
+        arrived, left = (float(tv[slow[0]]), float(tv[slow[-1]])) if len(slow) else (None, None)
+        out[c['n']] = dict(zone_in=float(tv[0]), zone_out=float(tv[-1]), zone_s=round(float(tv[-1] - tv[0])), arrived=arrived, left=left, stopped_s=round(left - arrived) if arrived is not None else 0, radius_m=round(radius_m))
+    return out
