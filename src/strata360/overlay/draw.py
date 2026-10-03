@@ -100,6 +100,34 @@ def route_line(img, u, v, colour=(230, 20, 20), width=3.0):
     return img
 
 
+def line_mask(shape, u, v, width, ss=4):
+    """Coverage (0..1, float32) of the route (picture coordinates u, v; NaN breaks it) drawn `width` pixels thick: fractions of a pixel work (it is drawn `ss` times larger and averaged down). At most a few thousand points of a long route are used."""
+    h, w = shape[:2]; m = 4 * max(w, h); keep = np.isfinite(u) & np.isfinite(v) & (u > -m) & (u < w + m) & (v > -m) & (v < h + m); idx = np.flatnonzero(keep)
+    im = Image.new('L', (w * ss, h * ss), 0); dr = ImageDraw.Draw(im); th = max(1, int(round(width * ss)))
+    for run in (np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1) if len(idx) else []):
+        if len(run) < 2: continue
+        run = run[::max(1, len(run) // 6000)] if len(run) > 6000 else run
+        dr.line([(float(u[k]) * ss, float(v[k]) * ss) for k in run], fill=255, width=th, joint='curve')
+    return np.asarray(im.reduce(ss), np.float32) / 255
+
+
+def blend_line(img, u, v, colour, width):
+    """Like route_line, but for any thickness: the route laid over an RGB uint8 image in place by its coverage."""
+    a = line_mask(img.shape, u, v, width)[..., None]; img[:] = np.round(img.astype(np.float32) * (1 - a) + np.asarray(colour, np.float32) * a).astype(np.uint8); return img
+
+
+@functools.lru_cache(maxsize=256)
+def arrow(size, angle, fill=(0, 102, 255), edge=(0, 0, 0)):
+    """RGBA arrow head `size` px (rounded up to 4) across, centred, pointing `angle` degrees clockwise from up (north): the pointing end is further from the middle than the base."""
+    s = int(math.ceil(size)) + 4; c = s / 2; r = size / 2; a = math.radians(angle)
+    def rot(x, y): return (c + (x * math.cos(a) - y * math.sin(a)) * r, c + (x * math.sin(a) + y * math.cos(a)) * r)
+    shape = [(0.0, -1.0), (0.78, 0.85), (0.0, 0.42), (-0.78, 0.85)]                                   # tip, right wing, notch, left wing
+    outer = np.asarray(_ss((s, s), lambda d, k: d.polygon([(x * k, y * k) for x, y in (rot(*p) for p in shape)], fill=255)), np.float32) / 255
+    e = max(1, int(round(r / 7))); inner = cv2.erode(outer, np.ones((e * 2 + 1,) * 2, np.uint8))                                  # (a thin dark edge)
+    rgb = np.asarray(edge, np.float32) * (1 - inner[..., None]) + np.asarray(fill, np.float32) * inner[..., None]
+    return np.dstack([rgb, outer * 255]).round().astype(np.uint8)
+
+
 def composite(frame, patches):
     """Lay RGBA patches [(x, y, rgba uint8)] onto an RGB frame (uint8 or uint16 code values) in place; parts outside the frame are cut off."""
     top = 65535.0 if frame.dtype == np.uint16 else 255.0; H, W = frame.shape[:2]

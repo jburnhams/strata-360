@@ -191,6 +191,7 @@ class Profile:
 
 
 RUN_COLOUR, TODO_COLOUR = (230, 20, 20), (242, 168, 168)                                  # the close-up map: the route already run, and the route still to come (paler)
+TODO_W, DONE_W = 1.35, 1.65                                                                 # line widths on the whole-route map (px at 1080p): the whole route, and the part already run
 DONE_DARK = (140, 0, 0)                                                                    # the whole-route map: the whole route is in RUN_COLOUR and the part already run is darker
 
 
@@ -203,25 +204,40 @@ class RouteMap:
         span = max(np.ptp(wx), np.ptp(wy), 1e-9); self.k = S * 0.86 / span; self.cx, self.cy = (wx.min() + wx.max()) / 2, (wy.min() + wy.max()) / 2; self.S = S
         pic = np.asarray(c.tiles(c.style(e)).picture(self.cx, self.cy, self.k, S, S)).copy()
         self.u, self.w = (wx - self.cx) * self.k + S / 2, (wy - self.cy) * self.k + S / 2
-        D.route_line(pic, self.u, self.w, colour=RUN_COLOUR, width=1.0 * c.s)                                  # the whole route thin in the medium red; the part already run is drawn over it darker each frame
-        self.base = D.framed(pic, e['radius'] * c.s, c.st['map_opacity'], outline=e.get('outline', (0, 0, 0)), outline_w=1.5 * c.s); self.dot = D.marker(6 * c.s)
+        D.blend_line(pic, self.u, self.w, RUN_COLOUR, TODO_W * c.s)                                  # the whole route thin in the medium red; the part already run is drawn over it darker (a little thinner) each frame
+        self.base = D.framed(pic, e['radius'] * c.s, c.st['map_opacity'], outline=e.get('outline', (0, 0, 0)), outline_w=1.5 * c.s); self.dot = D.marker(6 * c.s); self.ahead = None
         self.round = D.rounded(S, e['radius'] * c.s); self.done = None
 
     def patches(self, t, v):
         if self.base is None: self._build()
-        X, Y = self.c.at(self.el, self.el['x'], self.el['y']); wx, wy = world(*self.c.series.position(t))
-        u, w = (wx - self.cx) * self.k + self.S / 2, (wy - self.cy) * self.k + self.S / 2; r = self.dot.shape[0] / 2
-        return [(X, Y, self.base), (X, Y, self._run(t, u, w)), (X + u - r, Y + w - r, self.dot)]
+        X, Y = self.c.at(self.el, self.el['x'], self.el['y']); u, w = self._xy(t)
+        arrow = D.arrow(22 * self.c.s, self._bearing(t, u, w)); h = arrow.shape[0] / 2
+        return [(X, Y, self.base), (X, Y, self._run(t, u, w)), (X + u - h, Y + w - h, arrow)]
+
+    def _bearing(self, t, u, w, look=12.0, step=5.0):
+        """Degrees clockwise from up of the direction the route takes from the marker, looked at a little way on (`look` px of the map): where the runner is going to go rather than the way the last few seconds went. Rounded to `step` degrees."""
+        n = int(np.searchsorted(self.c.series._pt, t, 'right')); key = (n, round(u), round(w))
+        if self.ahead is None or self.ahead[0] != key:
+            L = look * self.c.s; d = np.hypot(self.u[n:] - u, self.w[n:] - w); far = np.flatnonzero(d >= L)
+            if len(far): j = n + int(far[0])
+            elif n < len(self.u): j = len(self.u) - 1
+            else: j = None
+            if j is not None and np.hypot(self.u[j] - u, self.w[j] - w) >= 0.5: ang = math.degrees(math.atan2(self.u[j] - u, -(self.w[j] - w))) % 360
+            else: ang = self.ahead[1] if self.ahead else 0.0                                                    # at the very end: keep the last direction
+            self.ahead = (key, round(ang / step) * step % 360)
+        return self.ahead[1]
+
+    def _xy(self, t):
+        wx, wy = world(*self.c.series.position(t)); return (wx - self.cx) * self.k + self.S / 2, (wy - self.cy) * self.k + self.S / 2
 
     def _run(self, t, u, w):
         """The part of the route already run (to the marker) in the darker red, as a patch the map's see-through-ness is applied to; drawn again only when the marker has moved on."""
         s = self.c.series; n = int(np.searchsorted(s._pt, t, 'right')); key = (n, round(u, 1), round(w, 1))
         if self.done is None or self.done[0] != key:
-            mask = np.zeros((self.S, self.S), np.uint8); step = max(1, n // 1500)
+            shape = (self.S, self.S); step = max(1, n // 1500); a = np.zeros(shape, np.float32)
             if n >= 1:
-                xs = np.concatenate([self.u[:n:step], [u]]); ys = np.concatenate([self.w[:n:step], [w]]); pts = np.round(np.stack([xs, ys], 1) * 16).astype(np.int32).reshape(-1, 1, 2)
-                cv2.polylines(mask, [pts], False, 255, max(1, int(round(2.0 * self.c.s))), cv2.LINE_AA, 4)
-            a = mask.astype(np.float32) / 255 * self.round * self.c.st['map_opacity']
+                xs = np.concatenate([self.u[:n:step], [u]]); ys = np.concatenate([self.w[:n:step], [w]])
+                a = D.line_mask(shape, xs, ys, DONE_W * self.c.s) * self.round * self.c.st['map_opacity']
             self.done = (key, np.dstack([np.broadcast_to(np.array(DONE_DARK, np.uint8), (self.S, self.S, 3)), (a * 255).round().astype(np.uint8)]))
         return self.done[1]
 

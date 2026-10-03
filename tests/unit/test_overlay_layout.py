@@ -316,3 +316,10 @@ class TestClimb:
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['climb']}, tz='UTC', tiles=tiles)
         ov.patches(T0 - 50); assert 'ASCENT 0 m   DESCENT 0 m' in texts
         texts.clear(); ov.c._text.clear(); ov.patches(T0 + 600); assert any(x.startswith('ASCENT ') and x != 'ASCENT 0 m   DESCENT 0 m' for x in texts)           # the track climbs 5 %
+
+
+class TestArrow:
+    def test_the_marker_on_the_route_map_points_the_way_the_route_goes_on(self, series, tiles):
+        ov = overlay(series, tiles, elements=['route_map']); ov.patches(T0); w = ov.widgets[0]
+        assert w._bearing(T0 + 300, *w._xy(T0 + 300)) in (0.0, 355.0, 5.0)                          # the test track runs due north: up the map
+        end = w._bearing(T0 + 899, *w._xy(T0 + 899)); assert end in (0.0, 355.0, 5.0)                 # at the end it keeps its direction

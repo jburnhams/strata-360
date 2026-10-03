@@ -445,3 +445,5 @@ Overlay climb line (`Climb`, `series.running_climb`): a small line under altitud
 Overlay maps: the whole-route map draws the whole route thin in the medium red, with the part already run over it in a darker red (a patch redrawn when the marker moves on, with the map's see-through-ness); the close-up map draws the route ahead paler and the route behind in the strong colour.
 
 Checkpoint rows in the Tracks list work like the track rows: pointing at one rings that checkpoint on the map in bold yellow, clicking it keeps it highlighted (click again to let go).
+
+Whole-route map lines and marker: lines are drawn at fractions of a pixel (`draw.line_mask`: supersampled), the whole route 1.35 px and the part run 1.65 px (was 1 and 2). The position marker on this map is an arrow (`draw.arrow`) that points the way the route goes on from the marker, looked at 12 map px ahead (not the way the last seconds went), in 5 degree steps; the close-up map keeps its round marker.
