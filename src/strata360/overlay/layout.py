@@ -77,14 +77,9 @@ class _Ctx:
             self._text[key] = D.text(s, px * self.s, self.lfont if label else self.vfont, tabular=not label)
         rgba, pad, w = self._text[key]; X, Y = self.at(el, x, y); return (X - pad - (w if align == 'right' else 0), Y - pad, rgba)
 
-    def cutoff_ahead(self, t):
-        """The cut-off (seconds since the start of the run) of the control the race is heading for at t: the end of the stage in hand (before the start, the first), the checkpoint while at it, the finish at and after it; None when none is set."""
-        if not self.cutoffs or not self.stages: return None
-        times = [a for a, _ in self.stages]; name = self.stages[max(0, bisect.bisect_right(times, t) - 1)][1]
-        if name in ('Before Race', 'At Start'): return self.cutoffs['stage'].get('Stage 1')
-        if name.startswith('Stage'): return self.cutoffs['stage'].get(name)
-        if name.startswith('Checkpoint'): return self.cutoffs['cp'].get(int(name.split()[1]))
-        return self.cutoffs.get('finish')
+    def race_cutoff(self):
+        """The cut-off of the finish (seconds since the start of the run): the time the whole race has, always shown under the elapsed time; None when it is not set."""
+        return self.cutoffs.get('finish') if self.cutoffs else None
 
     def route_elapsed(self, t):
         """(metres of the routes covered so far, metres of all the routes): the completed stages' routes in full and the progress along the route of the stage in hand (gps/tracks.py `stage_progress`), so a run that strayed is behind where its distance says. None without route progress."""
@@ -136,8 +131,8 @@ class Clock:
         c, e = self.c, self.el; x, y = e['x'], e['y']; start = float(c.series._pt[0]); lt = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(c.tz)
         k = c.cutoff_row                                                                                                  # with cut-offs set, a line of its own between the elapsed time and the day
         out = [c.text(e, x, y, elapsed_text(t - start), 52), c.text(e, x, y + 62 + k, f'DAY {race_day(start, t, c.tz)}', 32), c.text(e, x, y + 104 + k, lt.strftime('%Y/%m/%d  %H:%M:%S'), 22)]
-        cut = c.cutoff_ahead(t)
-        if cut is not None: out += c.runs(e, x, y + 58, [(f'CUT-OFF {elapsed_text(cut)}', (235, 40, 40))], 24)                      # the cut-off ahead, as a total time since the start, in red
+        cut = c.race_cutoff()
+        if cut is not None: out += c.runs(e, x, y + 58, [(f'CUT-OFF {elapsed_text(cut)}', (235, 40, 40))], 24)                      # the cut-off of the whole race, as a total time since the start, in red
         return out
 
 
@@ -167,10 +162,10 @@ class Stage:
             if pr is not None:                                                                                # the distance run so far over the length of the stage's route; where the run went off the route, the route's own progress comes first and what was actually run follows in red
                 run = max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000; L = pr['route_m'] / 1000; p = float(np.interp(t, pr['t'], pr['prog'])) / 1000; RED, WHITE = (235, 40, 40), (255, 255, 255)
                 final = self.names[i + 1] == 'After Race' and 'At Finish' not in self.names                    # the run stopped in this stage: its length is shown in red, since it never got to the end of it
-                cut = self.c.cutoffs.get('stage', {}).get(name)                                                  # not the stage's total time (that is only known afterwards): the cut-off for the stage, in red, from leaving the previous checkpoint
+                cut = self.c.cutoffs.get('stage', {}).get(name)                                                  # the stage's cut-off, in red, from leaving the previous checkpoint; with none set, the stage's total time (white)
                 end = RED if final else WHITE                                                                  # the stage's length is red too when the run did not get to the end of it
                 dist = [(f'{p:.1f}/', WHITE), (f'{L:.1f} km', end), (f'  ran {run:.1f} km', RED)] if abs(run - p) > max(0.10 * max(run, p), 0.5) else [(f'{run:.1f}/', WHITE), (f'{L:.1f} km', end)]
-                return out + self.c.runs(e, e['x'], e['y'] + 38, dist + [('  ·  ', WHITE), (_clock(min(t, b) - a), WHITE)] + ([('/', WHITE), (_clock(cut - (a - self.c.cutoffs['start'])), RED)] if cut is not None else []), 22)
+                return out + self.c.runs(e, e['x'], e['y'] + 38, dist + [('  ·  ', WHITE), (_clock(min(t, b) - a), WHITE)] + ([('/', WHITE), (_clock(cut - (a - self.c.cutoffs['start'])), RED)] if cut is not None else [('/', WHITE), (_clock(b - a), WHITE)]), 22)
             if name.startswith('Stage'): km = f'{max(0.0, self._dist(min(t, b)) - self._dist(a)) / 1000:.1f}/{(self._dist(b) - self._dist(a)) / 1000:.1f} km'
             else: km = f'{(self._dist(a) - self._dist(self.times[1] if len(self.times) > 1 else a)) / 1000:.1f} km'          # the way from the start of the run to the checkpoint
             out.append(self.c.text(e, e['x'], e['y'] + 38, f'{km}  ·  {_hm(max(0.0, min(t, b) - a))} / {_hm(b - a)}', 22))
