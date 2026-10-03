@@ -123,6 +123,7 @@ function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle
 }
 
 // The project's tracks: every uploaded FIT / GPX file marked a run (merged into the one race track) or a route (the course, shown on the map for planning only).
+const pace = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 const hms = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}`
 function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onChange: () => Promise<void> } & Pick) {
   const [busy, setBusy] = useState(false), [err, setErr] = useState<string>(), input = useRef<HTMLInputElement>(null)
@@ -145,7 +146,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: 
             {x.kind === 'route' && <span className="w-6 text-center text-xs font-semibold text-blue-700 dark:text-blue-400" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
             <button type="button" aria-pressed={pinned.includes(x.id)} aria-label={`Highlight ${x.name} on the map`} className="min-w-0 flex-1 cursor-pointer truncate text-left" title={`${x.name} (click to keep it highlighted on the map)`} onClick={() => toggle(x.id)}>{x.name}</button>
             {x.error ? <span className="text-red-600">{x.error}</span> : <span className="text-xs text-stone-500">{x.distance_km} km · {x.start_utc ? x.start_utc.slice(0, 10) : 'no times'}{x.pois ? ` · ${x.pois} POI` : ''}{x.kind === 'route' && x.order ? ` · km ${x.km_start}–${x.km_end} of the run${x.reversed ? ' (run the other way)' : ''}` : ''}</span>}
-            {x.time_s != null && <span className="text-sm tabular-nums" title="time on this route, from leaving the previous checkpoint to arriving at the next">{hms(x.time_s)}</span>}
+            {x.time_s != null && <span className="text-sm tabular-nums" title="time on this route, from leaving the previous checkpoint to arriving at the next (the checkpoints' own time is not in it)">{hms(x.time_s)}{x.ran_km != null ? <span className="text-xs text-stone-500"> · {x.ran_km} km run{x.pace_s_km ? ` · ${pace(x.pace_s_km)} /km` : ''}{x.ascent_m != null ? ` · ↑${x.ascent_m} m ↓${x.descent_m} m` : ''}</span> : null}</span>}
             <select aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
               <option value="run">run</option><option value="route">route</option>
             </select>
@@ -161,7 +162,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle }: 
       </ul>
       {listing?.timing && (
         <p className="mt-2 text-sm" data-timing="">Run time <b className="tabular-nums">{hms(listing.timing.total_s)}</b>
-          <span className="text-xs text-stone-500"> = routes {hms(Object.values(listing.timing.sections).reduce((a, b) => a + b, 0))} + checkpoints {hms(Object.values(listing.timing.checkpoints).reduce((a, b) => a + b, 0))}{listing.timing.consistent ? '' : ' (the checkpoints do not come in order along the run: check them)'}</span></p>
+          <span className="text-xs text-stone-500"> = routes {hms(Object.values(listing.timing.sections).reduce((a, b) => a + b, 0))} + checkpoints {hms(Object.values(listing.timing.checkpoints).reduce((a, b) => a + b, 0))}{listing.timing.ascent_m != null ? ` · climb ${listing.timing.ascent_m.toLocaleString()} m, descent ${listing.timing.descent_m?.toLocaleString()} m` : ''}{listing.timing.consistent ? '' : ' (the checkpoints do not come in order along the run: check them)'}</span></p>
       )}
       {listing?.merged && <p className="mt-2 text-xs text-stone-500">Race track = {listing.merged.runs.length} runs merged · {listing.merged.distance_km} km · {listing.merged.samples.toLocaleString()} points</p>}
       {err && <p role="alert" className="mt-2 text-red-600">{err}</p>}
