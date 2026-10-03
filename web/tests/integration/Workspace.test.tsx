@@ -180,4 +180,12 @@ describe('one list of everything the film can use, in time order', () => {
     expect(order.findIndex(x => x.includes('Photo P1'))).toBeLessThan(order.findIndex(x => x.includes('V1'))); expect(order.findIndex(x => x.includes('V1'))).toBeLessThan(order.findIndex(x => x.includes('0002')))
     expect(order.some(x => x.includes('Photo P2'))).toBe(false)
   })
+
+  it('puts a gap after the photo it starts at (the final gap starts at the last photo)', async () => {
+    const t = Date.parse('2026-02-20T12:00:00Z') / 1000
+    mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_1_0001_D', start_utc: '2026-02-20T10:00:00Z' })] })
+    mockGet('/api/gaps', { gaps: [makeGap({ id: 'G21', t0: t, t1: t + 700 })] }); mockGet('/api/photos', { photos: [makePhoto({ id: 'p2', use: true, taken_utc: t })], tz: 'UTC' })
+    setup(<Workspace folder="/data" onChange={() => {}} />); await screen.findByText('G21')
+    const order = Array.from(document.querySelectorAll('aside li')).map(li => li.textContent ?? ''); expect(order.findIndex(x => x.includes('Photo P2'))).toBeLessThan(order.findIndex(x => x.includes('G21')))
+  })
 })

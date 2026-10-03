@@ -85,7 +85,7 @@ type Entry = { kind: 'clip'; id: string; t: number; c: ClipInfo } | { kind: 'gap
 export function timeline(clips: ClipInfo[], gaps: Gap[], photos: Photo[], sv: SvChosen[]): Entry[] {
   const out: Entry[] = [...clips.map(c => ({ kind: 'clip' as const, id: c.id, t: Date.parse(c.start_utc) / 1000, c })), ...gaps.map(g => ({ kind: 'gap' as const, id: `@gap:${g.id}`, t: g.t0, g })),
     ...photos.map(p => ({ kind: 'photo' as const, id: `@photo:${p.id}`, t: p.taken_utc, p })), ...sv.map(s => ({ kind: 'sv' as const, id: `@sv:${s.key}`, t: s.t0, s }))]
-  return out.sort((a, b) => a.t - b.t)
+  return out.sort((a, b) => a.t - b.t || +(a.kind === 'gap') - +(b.kind === 'gap'))          // a gap starts where the footage before it ends (the final gap, at the time of the last photo): it comes after what ends there
 }
 
 function PhotoRow({ folder, p, active, onClick }: { folder: string; p: Photo; active: boolean; onClick: () => void }) {
