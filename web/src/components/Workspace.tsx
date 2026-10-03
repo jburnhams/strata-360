@@ -16,6 +16,7 @@ import Timeline from './Timeline'
 import FilmDetails from './FilmDetails'
 import MusicPanel from './MusicPanel'
 import GapView from './GapView'
+import PhotosPanel from './PhotosPanel'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -25,6 +26,9 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   const [focus, setFocus] = useState<number | undefined>(undefined)
   const meta = usePoll(() => api.meta(folder), 60000, [folder])
   const clips = usePoll(() => api.clips(folder).then(r => r.clips), 8000, [folder])
+  const [photoTick, setPhotoTick] = useState(0)
+  const photoData = usePoll(() => api.photos(folder), 15000, [folder, photoTick]); const photos = photoData?.photos; const tz = meta?.timezone ?? photoData?.tz ?? 'Europe/Brussels'
+  const openWhere = (w: { kind: 'clip' | 'gap'; id: string }) => { setFocus(undefined); setSel(w.kind === 'gap' ? `@gap:${w.id}` : w.id) }
   const gaps = usePoll(() => api.gaps(folder).then(r => r.gaps), 8000, [folder])
   const [overlay, setOverlay] = useThumbOverlay()
   useEffect(() => { setSel(null); setFocus(undefined) }, [folder])
@@ -49,7 +53,8 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
           <div className="space-y-4">
             <FilmDetails folder={folder} />
             <ProjectProgress folder={folder} onResults={() => setSel('@timeline')} />
-            <TrackPanel folder={folder} tz={meta?.timezone ?? 'Europe/Brussels'} onOpenClip={c => { setFocus(undefined); setSel(c) }} onOpenGap={g => { setFocus(undefined); setSel(`@gap:${g}`) }} />
+            <TrackPanel folder={folder} tz={tz} photos={photos} onOpenPhoto={p => p.where && openWhere(p.where)} onOpenClip={c => { setFocus(undefined); setSel(c) }} onOpenGap={g => { setFocus(undefined); setSel(`@gap:${g}`) }} />
+            <PhotosPanel folder={folder} photos={photos} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} onOpen={openWhere} />
             <MusicPanel folder={folder} />
             <ClockPanel folder={folder} />
             <WhoPanel folder={folder} />
@@ -60,8 +65,8 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <TranscriptPanel folder={folder} clips={clips ?? []} tz={meta?.timezone ?? 'Europe/Brussels'} onOpen={(c, t) => { setFocus(t); setSel(c) }} />
           </div>
         ) : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
-          : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} />
-          : <ClipView folder={folder} clip={sel} focus={focus} />}
+          : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} photos={photos} tz={tz} />
+          : <ClipView folder={folder} clip={sel} focus={focus} photos={photos} tz={tz} />}
       </div>
     </div>
   )

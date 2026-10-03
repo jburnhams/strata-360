@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { api, type Gap, type GapClip, type GapKind, type GapSettings } from '../api'
+import { api, type Gap, type GapClip, type GapKind, type GapSettings, type Photo } from '../api'
+import PhotoStrip from './PhotoStrip'
 import { usePoll } from '../usePoll'
 import NoteBox from './NoteBox'
 import { PanelSkeleton } from './Skeleton'
@@ -10,7 +11,7 @@ const KIND: Record<GapKind, string> = { map: '2D map', flyover: '3D flyover (4K)
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900"><h3 className="mb-2 text-sm font-semibold">{title}</h3>{children}</section>
 )
-export default function GapView({ folder, gap }: { folder: string; gap: string }) {
+export default function GapView({ folder, gap, photos, tz = 'Europe/Brussels' }: { folder: string; gap: string; photos?: Photo[]; tz?: string }) {
   const [tick, setTick] = useState(0)
   const data = usePoll(() => api.gaps(folder), 4000, [folder, gap, tick])
   const [err, setErr] = useState<string>()
@@ -72,6 +73,7 @@ export default function GapView({ folder, gap }: { folder: string; gap: string }
             <li key={it.n}><span className="mr-2 font-mono text-xs text-stone-500">item {it.n} · {it.type}{it.seconds ? ` · ${it.seconds} s` : ''}</span>{it.text || <span className="text-stone-500">picture only</span>}</li>))}</ul>}
         <p className="mt-2 text-xs text-stone-500">Narration you want spoken inside this gap goes in “Voice-over MUST INCLUDE” below.</p>
       </Card>
+      <PhotoStrip folder={folder} photos={photos} tz={tz} kind="gap" id={g.id} />
       <NoteBox folder={folder} clip={g.id} title="Notes for this gap" placeholder="What was this stretch? Where were you, how did it feel, what to mention or avoid…" />
     </div>
   )

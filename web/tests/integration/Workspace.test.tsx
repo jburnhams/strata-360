@@ -15,6 +15,7 @@ vi.mock('../../src/components/ScriptPanel', () => ({ default: ({ onOpen }: any) 
 vi.mock('../../src/components/VoiceoverPanel', () => ({ default: () => <div data-testid="VoiceoverPanel" /> }))
 vi.mock('../../src/components/TranscriptPanel', () => ({ default: ({ onOpen }: any) => <div data-testid="TranscriptPanel"><button onClick={() => onOpen('CAM_123', 0)}>Open</button></div> }))
 vi.mock('../../src/components/Timeline', () => ({ default: ({ onOpenClip }: any) => <div data-testid="Timeline"><button onClick={() => onOpenClip('CAM_123')}>Open</button></div> }))
+vi.mock('../../src/components/PhotosPanel', () => ({ default: ({ photos }: any) => <div data-testid="PhotosPanel">{(photos ?? []).length}</div> }))
 vi.mock('../../src/components/GapView', () => ({ default: ({ gap }: { gap: string }) => <div data-testid="GapView">{gap}</div> }))
 vi.mock('../../src/components/ClipView', () => ({ default: ({ clip }: { clip: string }) => <div data-testid="ClipView">{clip}</div> }))
 

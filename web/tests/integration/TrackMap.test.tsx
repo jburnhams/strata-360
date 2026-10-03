@@ -3,7 +3,7 @@ import { act, fireEvent } from '@testing-library/react'
 import L from 'leaflet'
 import TrackMap from '../../src/components/TrackMap'
 import { screen, setup } from '../utils/render'
-import { makeTrackClip, makeTrackLine } from '../utils/factories'
+import { makePhoto, makeTrackClip, makeTrackLine } from '../utils/factories'
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
 afterEach(() => { vi.useRealTimers() })
@@ -64,6 +64,14 @@ describe('TrackMap', () => {
   it('has no finish line without a route', () => {
     const { container } = setup(<TrackMap {...props()} ends={{ start: { lat: 50, lon: 5, t: 0 }, end: { lat: 50.1, lon: 5.2, t: 10, km: 1, elapsed_s: 10 }, finish: null }} />)
     expect(container.querySelector('[data-end="finish"]')).toBeNull(); expect(container.querySelector('[data-end="end"]')).not.toBeNull()
+  })
+
+  it('puts a camera icon at each photo with a position, with its picture on hover, and opens it when clicked', async () => {
+    const open = vi.fn(); const photos = [makePhoto(), makePhoto({ id: 'p2', name: 'IMG_2.jpg', loc: null }), makePhoto({ id: 'p3', name: 'IMG_3.jpg', flag: 'far apart', loc: { lat: 50.2, lon: 5.2, source: 'photo gps' } })]
+    const { container, user } = setup(<TrackMap {...props()} photos={photos} photoThumb={id => `/thumb/${id}`} onOpenPhoto={open} />)
+    expect(container.querySelectorAll('[data-photo-marker]')).toHaveLength(2)                                       // (the one with no position has no icon)
+    await user.hover(screen.getByTitle('IMG_3.jpg')); const tip = await screen.findByText('IMG_3.jpg ⚠'); expect(tip.parentElement!.querySelector('img')!.getAttribute('src')).toBe('/thumb/p3')
+    fireEvent.click(screen.getByTitle('IMG_3.jpg')); expect(open).toHaveBeenCalledWith(photos[2])
   })
 
   it('numbers the checkpoints between routes', () => {

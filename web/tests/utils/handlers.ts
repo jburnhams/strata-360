@@ -43,6 +43,7 @@ export const handlers = [
   http.get('/api/script2/mix', () => HttpResponse.json(makeRoughMix({ has_plan: false }))),
   http.get('/api/tiles/status', () => HttpResponse.json({ ok: true, style: 'tf-landscape', error: '', credit: 'Maps © Thunderforest, data © OpenStreetMap contributors', tile_px: 512 })),
   http.get('/api/lyrics', () => HttpResponse.json(makeLyrics({ has_track: false }))),
+  http.get('/api/photos', () => HttpResponse.json({ photos: [], tz: 'Europe/Brussels' })),
   http.get('/api/gaps', () => HttpResponse.json({ gaps: [] })),
   http.get('/api/track/clips', () => HttpResponse.json({ clips: [makeTrackClip()], has_draft: true })),
   http.get('/api/script2', () => HttpResponse.json(makeScript2State())),

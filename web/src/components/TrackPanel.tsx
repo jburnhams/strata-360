@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { api, type Cutoff, type ExtraLine, type TileStatus, type TrackKind, type TracksListing, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
+import { api, type Photo, type Cutoff, type ExtraLine, type TileStatus, type TrackKind, type TracksListing, type TrackClip, type TrackLine, type TrackOverview, type TrackSeries } from '../api'
 import { useThumbOverlay } from '../thumbOverlay'
 import { PanelSkeleton } from './Skeleton'
 import TrackMap from './TrackMap'
@@ -9,7 +9,7 @@ import GapsPanel from './GapsPanel'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
 // Hover a marker for the clip's card, click it to open the clip.
-export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, tz = 'Europe/Brussels' }: { folder: string; onOpenClip?: (clip: string) => void; onOpenGap?: (gap: string) => void; tz?: string }) {
+export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, tz = 'Europe/Brussels', photos = [], onOpenPhoto }: { folder: string; onOpenClip?: (clip: string) => void; onOpenGap?: (gap: string) => void; tz?: string; photos?: Photo[]; onOpenPhoto?: (p: Photo) => void }) {
   const [t, setT] = useState<TrackOverview>()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string>()
@@ -58,14 +58,14 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, t
       </div>
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
       <TracksList folder={folder} listing={listing} onChange={changed} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
-      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
+      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} photos={photos} onOpenPhoto={onOpenPhoto} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
       <GapsPanel folder={folder} onOpen={onOpenGap} />
     </div>
   )
 }
 
 type Pick = { hot: string | null; setHot: (id: string | null) => void; pinned: string[]; toggle: (id: string) => void }
-function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string } & Pick) {
+function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string; photos: Photo[]; onOpenPhoto?: (p: Photo) => void } & Pick) {
   const [overlay] = useThumbOverlay()
   const [base, setBase] = useState<TrackLine>(), [series, setSeries] = useState<TrackSeries>(), [clips, setClips] = useState<TrackClip[]>([]), [hasDraft, setHasDraft] = useState(false), [tiles, setTiles] = useState<TileStatus>(), [err, setErr] = useState<string>()
   const [xMode, setXMode] = useState<XMode>('time'), [cursor, setCursor] = useState<number | null>(null), [hover, setHover] = useState<{ clip: TrackClip; x: number; y: number }>()
@@ -103,7 +103,7 @@ function RaceView({ folder, listing, onOpenClip, tz, hot, setHot, pinned, toggle
   return (
     <div className="mt-3 space-y-2">
       {tiles && !tiles.ok && <p role="alert" className="text-sm text-amber-700">The map background is off: {tiles.error}</p>}
-      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} highlight={highlight} onHoverTrack={setHot} onToggleTrack={toggle} tz={tz} ends={listing?.markers} highlightCheckpoints={cps} ringEnds={ids.includes('finish')} />
+      <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} highlight={highlight} onHoverTrack={setHot} onToggleTrack={toggle} tz={tz} ends={listing?.markers} highlightCheckpoints={cps} ringEnds={ids.includes('finish')} photos={photos} photoThumb={id => api.photoThumb(folder, id, 240)} onOpenPhoto={onOpenPhoto} />
       <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
         <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
         {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#78716c' }} />not in the film</span>}
