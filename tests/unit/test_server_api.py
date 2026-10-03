@@ -133,12 +133,20 @@ class TestLogAndClips:
         lines = client.get('/api/log', params={'folder': project.folder}).json()['lines']
         assert len(lines) == 40 and lines[0] == 'line 60' and lines[-1] == 'line 99'
 
+    def test_a_clip_the_film_plays_is_marked_in_film(self, client, make_project):
+        from strata360.edit import project as PJ
+        p = make_project(config=True); p.add_clip(CLIP_ID, source_frames=300, fps=30.0)
+        assert client.get('/api/clips', params={'folder': p.folder}).json()['clips'][0]['in_film'] is False                                  # no plan yet
+        edit = PJ.load(p.folder); edit['plan'] = dict(segments=[dict(clip=CLIP_ID), dict(clip='G01')]); PJ.save(p.folder, edit)
+        assert client.get('/api/clips', params={'folder': p.folder}).json()['clips'][0]['in_film'] is True
+        edit['plan'] = dict(segments=[dict(clip='G01')]); PJ.save(p.folder, edit); assert client.get('/api/clips', params={'folder': p.folder}).json()['clips'][0]['in_film'] is False
+
     def test_clips_summarise_each_clip(self, client, make_project):
         p = make_project(config=True)
         p.add_clip(CLIP_ID, source_frames=300, fps=30.0, motion={'summary': {'steady': 0.8}}, candidates={'summary': {'n': 3}})
         open(os.path.join(p.clip_dir(), 'thumb.jpg'), 'wb').write(b'x')
         [c] = client.get('/api/clips', params={'folder': p.folder}).json()['clips']
-        assert c == dict(id=CLIP_ID, start_utc='2026-02-21T12:00:07+00:00', duration_s=10.0, has_note=False, thumb='best', thumb_overlay=False, audio_original=False, audio_clean=False, steady=0.8, candidates=3)
+        assert c == dict(id=CLIP_ID, start_utc='2026-02-21T12:00:07+00:00', duration_s=10.0, has_note=False, thumb='best', thumb_overlay=False, audio_original=False, audio_clean=False, in_film=False, steady=0.8, candidates=3)
 
     def test_overlay_thumbnail_when_it_matches_the_current_one(self, client, make_project):
         p = make_project(config=True); p.add_clip(CLIP_ID); d = p.clip_dir(); open(os.path.join(d, 'thumb.jpg'), 'wb').write(b'plain'); open(os.path.join(d, 'thumb_overlay.jpg'), 'wb').write(b'over')

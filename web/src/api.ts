@@ -64,7 +64,7 @@ export interface GapClip { id: string; gap: string; kind: GapKind | string; size
 export interface GapSettings { kind: GapKind | null; mode: 'set' | 'min' | null; seconds: number | null; must: boolean }
 export interface GapScriptItem { n: number; type: string; text: string; seconds: number | null; kind: string | null }
 export interface Gap {
-  settings?: GapSettings; script?: GapScriptItem[]
+  in_film?: boolean; settings?: GapSettings; script?: GapScriptItem[]
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
@@ -114,7 +114,7 @@ export interface MusicState { file: string | null; name?: string | null; analysi
 export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
 export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
-export interface ClipInfo { audio_original?: boolean; audio_clean?: boolean; id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; thumb_overlay?: boolean; steady: number | null; candidates: number | null }
+export interface ClipInfo { in_film?: boolean; audio_original?: boolean; audio_clean?: boolean; id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; thumb_overlay?: boolean; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
 export interface PlacePoint { label: string; lat: number; lon: number; address: { display_name?: string; road?: string; county?: string; country?: string } | null; nearby: Near[] | null }
 export interface Places { covered: boolean; note?: string; points: PlacePoint[]; summary?: { places: string[]; road?: string; county?: string; country?: string; text: string } }

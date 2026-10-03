@@ -222,17 +222,23 @@ def create_app(roots, token=None):
         try: return json.load(open(p)) if os.path.exists(p) else None
         except ValueError: return None
 
+    def in_film(f):
+        """The ids of the clips and gaps the film's plan plays now (empty when there is no plan)."""
+        from strata360.edit import project as PJ
+        try: return {g['clip'] for g in (PJ.load(f).get('plan') or {}).get('segments') or []}
+        except (OSError, ValueError, KeyError): return set()
+
     @api.get('/api/clips', dependencies=[Depends(auth)])
     def get_clips(folder: str):                                                          # the clip list: id, time, length, a note flag, whether a thumbnail exists and a few facts
         from strata360.pipeline import notes as N
-        f = folder_of(folder); rd = config.race_dir(f); out = []; nt = N.load(f)
+        f = folder_of(folder); rd = config.race_dir(f); out = []; nt = N.load(f); used = in_film(f)
         for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
             c = _j(d, 'clip.json')
             if not c: continue
             mo = _j(d, 'motion.json'); cd = _j(d, 'candidates.json'); thumb = 'best' if os.path.exists(d + 'thumb.jpg') else 'quick' if os.path.exists(d + 'thumb_quick.jpg') else None
             if thumb and TH.overlay_fresh(d): thumb += '+overlay'                                                     # the version also busts the browser cache when the overlay one appears
             out.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=round(c['video']['source_frames'] / c['video']['nominal_fps'], 1), has_note=bool(nt['clips'].get(c['clip_id'])),
-                            thumb=thumb and thumb.split('+')[0], thumb_overlay=bool(thumb and thumb.endswith('+overlay')), audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
+                            thumb=thumb and thumb.split('+')[0], thumb_overlay=bool(thumb and thumb.endswith('+overlay')), audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], in_film=c['clip_id'] in used, candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
     def effective(d):                                                                    # the transcript with the user's corrections and marks applied (None when there is none)
@@ -950,7 +956,8 @@ def create_app(roots, token=None):
         for n, it in enumerate(draft.get('items') or []):                                   # what the newest script draft does with each gap: the narration over it and its length
             gid = norm_label(it.get('clip', ''))
             if gid.startswith('G'): said.setdefault(gid, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
-        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]; g['settings'] = SY.gap_settings(f, g['id']); g['script'] = said.get(g['id'], [])
+        used = in_film(f)
+        for g in gaps: g['in_film'] = g['id'] in used; g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]; g['settings'] = SY.gap_settings(f, g['id']); g['script'] = said.get(g['id'], [])
         return gaps
 
     def loaded_raw_track(f):
