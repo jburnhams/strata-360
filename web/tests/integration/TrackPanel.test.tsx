@@ -111,7 +111,7 @@ describe('TrackPanel', () => {
       expect(await screen.findByLabelText('Kind of course.gpx')).toHaveValue('route'); expect(screen.getByLabelText('Kind of race.gpx')).toHaveValue('run')
       expect(screen.getByText(/80 km · no times · 2 POI/)).toBeInTheDocument()
       expect(await screen.findByText('route (planning only)')).toBeInTheDocument(); expect(screen.getByText('point of interest')).toBeInTheDocument()
-      expect(document.querySelector('[data-poi]')).not.toBeNull()
+      await waitFor(() => expect(document.querySelector('[data-poi]')).not.toBeNull())
     })
 
     it('marks a track a run, refreshing the race track and the list', async () => {
