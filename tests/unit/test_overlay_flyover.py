@@ -187,3 +187,30 @@ def test_where_the_fine_render_has_no_tiles_the_coarse_one_shows_through_and_oth
     c = clip(series, size=(3840, 2160), tmp=tmp_path); img = c.still(3)
     assert len(calls) == 2 and img.shape == (2160, 3840, 3) and tuple(img[10, 1920]) == (10, 10, 200) and tuple(img[1500, 1920]) == (160, 90, 30)      # RGB: coarse (200,10,10) on top, fine (160,90,30) below
     fine_gap[0] = False; calls.clear(); c.still(4); assert len(calls) == 1                                       # nothing missing: one render
+
+
+# ---- the start, finish and checkpoints ----
+
+def east(m, lat0=50.13, lon0=5.79): return (lat0, lon0 + m / (111195.0 * np.cos(np.radians(lat0))))
+
+
+def blue(img): return int(((np.abs(img.astype(int) - (29, 78, 216)).sum(2)) < 60).sum())                                  # the numbered badge's blue (RGB)
+
+
+def test_the_checkpoints_start_and_finish_are_drawn_on_the_flyover_as_on_the_overlay_maps(series, fake_mbgl, tmp_path):
+    places = dict(start=east(0), finish=east(5000), checkpoints=[(1, *east(1800)), (2, *east(2600))])
+    plain = clip(series, tmp=tmp_path, size=(1280, 720)); marked = clip(series, tmp=tmp_path, size=(1280, 720), places=places)
+    assert [m[0] for m in marked.marks] == ['start', 'number', 'number', 'finish'] and [m[1] for m in marked.marks] == ['', '1', '2', ''] and marked.marks[1][2] == pytest.approx(1800, abs=10) and plain.marks == []
+    k = 0; a, b = plain.frame(k), marked.frame(k); assert a.shape == b.shape == (720, 1280, 3) and blue(a) == 0 and not np.array_equal(a, b)
+    shown = marked._badges(k); assert 1 <= len(shown) <= 4 and all(0 <= x <= 1280 and 0 <= y <= 720 for x, y, _ in shown) and blue(b) > 0 and (np.abs(a.astype(int) - b.astype(int)).sum(2) > 0).mean() < 0.05
+
+
+def test_the_start_next_to_the_finish_is_left_out_and_every_badge_is_inside_the_picture(series, fake_mbgl, tmp_path):
+    loop = clip(series, tmp=tmp_path, places=dict(start=east(1500), finish=east(1510), checkpoints=[])); assert len(loop._badges(0)) <= 1                                   # (the finish alone)
+    c = clip(series, tmp=tmp_path, places=dict(start=east(0), finish=east(9000), checkpoints=[(n, *east(500 * n)) for n in range(1, 17)]))
+    for k in (0, 10, 39): assert all(12 <= x <= 1280 - 12 and 12 <= y <= 720 - 12 for x, y, _ in c._badges(k))
+
+
+def test_the_runners_arrow_stays_on_top_of_a_place_under_it(series, fake_mbgl, tmp_path):
+    here = east(float(0.9 * 1000)); c = clip(series, tmp=tmp_path, places=dict(start=here, finish=None, checkpoints=[])); r = float(c.cam['runner'][0]); c2 = clip(series, tmp=tmp_path, places=dict(start=east(r), finish=None, checkpoints=[]))
+    assert c2._badges(0) == []                                                                                                                              # a badge at the runner's own position is left out

@@ -15,7 +15,7 @@ import numpy as np, cv2
 
 from strata360 import hw
 from strata360.overlay import draw as D
-from strata360.overlay.layout import REF_W, REF_H
+from strata360.overlay.layout import REF_W, REF_H, place_badges
 from strata360.overlay.series import _smooth
 from strata360.overlay.tiles import Tiles, world
 
@@ -26,6 +26,7 @@ ZOOM = (9.0, 16.0)            # the closest and widest the map goes
 
 
 ROUTE = (230, 20, 20)         # the route, all of it, in one colour
+BADGE = 30                    # the width of the start, checkpoint and finish badges at 1080p (the overlay's own maps use 15 on a map a fifth the size)
 
 
 DEFAULT_STYLE = 'tf-landscape'      # plain landscape map; needs THUNDERFOREST_API_KEY (a missing key is an error, never a quiet change of map; `--style osm` chooses the key-free map on purpose)
@@ -35,9 +36,9 @@ def frame_count(seconds, fps): return max(1, int(round(float(seconds) * float(fp
 
 
 class MapClip:
-    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(1920, 1080), tiles=None, tz='Europe/Brussels', zoom=ZOOM):
+    def __init__(self, series, t0, t1, seconds, fps=30.0, size=(1920, 1080), tiles=None, tz='Europe/Brussels', zoom=ZOOM, places=None):
         if not t1 > t0: raise ValueError('the stretch has no length')
-        self.series, self.fps, self.size, self.zoom_limits = series, float(fps), tuple(size), zoom; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H)
+        self.places = places; self.series, self.fps, self.size, self.zoom_limits = series, float(fps), tuple(size), zoom; self.W, self.H = size; self.s = min(self.W / REF_W, self.H / REF_H)
         self.frames = frame_count(seconds, fps); self.t0, self.t1 = float(t0), float(t1); self.speedup = (self.t1 - self.t0) / (self.frames / self.fps)
         self.tiles = tiles or Tiles(DEFAULT_STYLE); self.rw = world(series.route_lat, series.route_lon); self.rt = series._pt
         ts = self.times(); lat = np.interp(ts, series._pt, series.route_lat); lon = np.interp(ts, series._pt, series.route_lon); self.pos = world(lat, lon)
@@ -60,6 +61,8 @@ class MapClip:
         img = np.array(self.tiles.picture(cx, cy, kk, W, H), np.uint8); u = (self.rw[0] - cx) * kk + W / 2; v = (self.rw[1] - cy) * kk + H / 2
         here = ((self.pos[0][k] - cx) * kk + W / 2, (self.pos[1][k] - cy) * kk + H / 2); w = max(1.0, 3 * self.s)
         D.route_line(img, u, v, colour=(0, 0, 0), width=w + 3 * self.s); D.route_line(img, u, v, colour=ROUTE, width=w + self.s)                  # the whole route that is on screen in ONE colour, as on the overview map: the clip is a cut of the journey, the stretch is not marked
+        if self.places:                                                                                               # the start (green), the numbered checkpoints and the finish (chequered), the same badges as on the overlay's maps, under the runner
+            marks = place_badges(self.places, lambda la, lo: ((lambda q: ((q[0] - cx) * kk + W / 2, (q[1] - cy) * kk + H / 2))(world(la, lo))), BADGE * self.s); D.composite(img, [(x - b.shape[1] / 2, y - b.shape[0] / 2, b) for x, y, b in marks])
         dot = D.marker(11 * self.s); r = dot.shape[0] / 2; D.composite(img, [(here[0] - r, here[1] - r, dot)])
         return img
 

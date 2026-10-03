@@ -409,11 +409,16 @@ def cmd_gap_clip(a):
         except ValueError as e: sys.exit(str(e))
         t0, t1 = when(clip['t0']), when(clip['t1'])
     w, h = (int(x) for x in (clip.get('size') or '1920x1080').split('x')); st = clip.get('style') or {}; series = Series(tr)
+    try:
+        from strata360.gps import tracks as TKS
+        places = TKS.overlay_places(config.race_dir(a.name))                                                                         # the start, finish and checkpoints, as on the overlay's maps
+    except Exception as e:                                                                                                         # (the map then has none, said loudly)
+        print(f'gap-clip: no start, finish or checkpoints on the map: {type(e).__name__}: {e}'); places = None
     if clip['kind'] == 'flyover':
         from strata360.overlay import flyover as FO
-        try: mbgl = FO.find_mbgl(); mc = FO.FlyoverClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), imagery=st.get('imagery') or FO.DEFAULT_IMAGERY, tz=tz, sharp=st.get('sharp', True), mbgl=mbgl)
+        try: mbgl = FO.find_mbgl(); mc = FO.FlyoverClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), imagery=st.get('imagery') or FO.DEFAULT_IMAGERY, tz=tz, sharp=st.get('sharp', True), mbgl=mbgl, places=places)
         except (ValueError, FO.FlyoverError) as e: sys.exit(str(e))
-    else: mc = MC.MapClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(st.get('map') or MC.DEFAULT_STYLE), tz=tz)
+    else: mc = MC.MapClip(series, t0, t1, clip['seconds'], fps=clip['fps'], size=(w, h), tiles=Tiles(st.get('map') or MC.DEFAULT_STYLE), tz=tz, places=places)
     out = os.path.join(config.race_dir(a.name), 'synthetic', clip['id'] + '.mp4'); oslib.lower_priority(); last = [0]
     def show(done, total):
         if done - last[0] >= max(1, total // 20) or done == total: last[0] = done; print(f'  {clip["id"]}: {done}/{total} frames', flush=True)
