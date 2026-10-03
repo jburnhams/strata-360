@@ -116,4 +116,10 @@ describe('GapsPanel', () => {
     await screen.findByText('G01')
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  it('opens the gap page from its id when asked to', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap()] }); const open = vi.fn()
+    const { user } = setup(<GapsPanel folder="/data" onOpen={open} />)
+    await user.click(await screen.findByRole('button', { name: 'G01' })); expect(open).toHaveBeenCalledWith('G01')
+  })
 })

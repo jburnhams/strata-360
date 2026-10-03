@@ -9,7 +9,7 @@ import GapsPanel from './GapsPanel'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
 // Hover a marker for the clip's card, click it to open the clip.
-export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe/Brussels' }: { folder: string; onOpenClip?: (clip: string) => void; tz?: string }) {
+export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, tz = 'Europe/Brussels' }: { folder: string; onOpenClip?: (clip: string) => void; onOpenGap?: (gap: string) => void; tz?: string }) {
   const [t, setT] = useState<TrackOverview>()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string>()
@@ -59,7 +59,7 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, tz = 'Europe
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
       <TracksList folder={folder} listing={listing} onChange={changed} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
       <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
-      <GapsPanel folder={folder} />
+      <GapsPanel folder={folder} onOpen={onOpenGap} />
     </div>
   )
 }

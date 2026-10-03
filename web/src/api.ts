@@ -37,7 +37,10 @@ export interface TrackClip {
 }
 export type GapKind = 'map' | 'flyover'
 export interface GapClip { id: string; gap: string; kind: GapKind | string; size?: string; t0: string; t1: string; duration_s: number; seconds: number; speedup: number; status: 'planned' | 'ready' | string; rendering: boolean; progress: string; exists: boolean; error?: string; approved?: boolean; file?: string }
+export interface GapSettings { kind: GapKind | null; mode: 'set' | 'min' | null; seconds: number | null; must: boolean }
+export interface GapScriptItem { n: number; type: string; text: string; seconds: number | null; kind: string | null }
 export interface Gap {
+  settings?: GapSettings; script?: GapScriptItem[]
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
@@ -129,6 +132,7 @@ export const api = {
   tileUrl: (style = 'tf-landscape') => `/api/tiles/${style}/{z}/{x}/{y}`,
   trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
   gaps: (folder: string) => call<{ gaps: Gap[]; flyover?: { available: boolean; note: string } }>('/api/gaps?' + q({ folder })),
+  setGapSettings: (folder: string, gap: string, fields: Partial<GapSettings>) => call<GapSettings>('/api/gaps/settings', { folder, gap, ...fields }),
   planGapClip: (folder: string, gap: string, seconds: number, kind: GapKind = 'map') => call<GapClip>('/api/gaps/clip', { folder, gap, seconds, kind }),
   renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
   deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),

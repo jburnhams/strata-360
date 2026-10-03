@@ -939,7 +939,12 @@ def create_app(roots, token=None):
         for c in docs:
             c['rendering'] = c['id'] == running; c['progress'] = prog(c['id']) if c['id'] == running else ''; c['exists'] = bool(c.get('file')) and os.path.exists(os.path.join(rd, c['file']))
             c['error'] = '' if c['rendering'] or c['exists'] else failure(c['id'])
-        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]
+        from strata360.edit import script_draft as SD
+        draft = SD.load_draft(f) or {}; said = {}
+        for n, it in enumerate(draft.get('items') or []):                                   # what the newest script draft does with each gap: the narration over it and its length
+            gid = norm_label(it.get('clip', ''))
+            if gid.startswith('G'): said.setdefault(gid, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
+        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]; g['settings'] = SY.gap_settings(f, g['id']); g['script'] = said.get(g['id'], [])
         return gaps
 
     def loaded_raw_track(f):
@@ -955,6 +960,14 @@ def create_app(roots, token=None):
         try: FO.find_mbgl(); flyover = dict(available=True, note='')
         except FO.FlyoverError as e: flyover = dict(available=False, note=str(e))
         return dict(gaps=gap_rows(f), flyover=flyover)
+
+    @api.post('/api/gaps/settings', dependencies=[Depends(auth)])
+    def post_gap_settings(body: dict):                                                   # {folder, gap, kind?: 'map' | 'flyover' | null, mode?: 'set' | 'min' | null, seconds?, must?}: what you chose for a gap (kind, a set or a minimum length, must-use); only the fields sent change
+        from strata360.edit import synthetic as SY
+        f = folder_of(body.get('folder')); gid = str(body.get('gap') or '')
+        if not any(g['id'] == gid for g in gap_rows(f)): raise HTTPException(404, 'no such gap')
+        try: return SY.set_settings(f, gid, **{k: body[k] for k in ('kind', 'mode', 'seconds', 'must') if k in body})
+        except ValueError as e: raise HTTPException(400, str(e))
 
     @api.post('/api/gaps/clip', dependencies=[Depends(auth)])
     def post_gap_clip(body: dict):                                                       # {folder, gap, kind? ('map' | 'flyover'), size?, seconds? | speedup?, from?, to?, id?}: plan a generated clip (the 2D map or the 3D flyover, 4K) for a gap (or a stretch of it); rendering is a separate step

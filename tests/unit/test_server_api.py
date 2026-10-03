@@ -448,3 +448,15 @@ class TestTracksCollection:
     def test_the_older_single_upload_still_works_and_counts_as_a_run(self, client, project):
         q = dict(folder=project.folder); assert client.post('/api/track', params=dict(q, filename='t.gpx'), content=self.gpx()).status_code == 200
         t = client.get('/api/tracks', params=q).json(); assert [(x['id'], x['kind']) for x in t['tracks']] == [('main', 'run')]
+
+
+class TestGapSettings(TestGapClipsApi):
+    def test_the_gap_page_settings_are_saved_and_checked(self, client, project):
+        from strata360.edit import synthetic as SY
+        self.with_gap(project); q = lambda **b: client.post('/api/gaps/settings', json=dict(folder=project.folder, gap='G01', **b))
+        assert client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps'][0]['settings'] == dict(kind=None, mode=None, seconds=None, must=False)
+        r = q(kind='flyover', mode='min', seconds=8, must=True); assert r.status_code == 200 and r.json() == dict(kind='flyover', mode='min', seconds=8.0, must=True)
+        assert SY.gap_settings(project.folder, 'G01')['kind'] == 'flyover' and client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps'][0]['settings']['must'] is True
+        assert q(seconds=1).status_code == 400 and q(mode='exactly').status_code == 400 and q(kind='3d').status_code == 400
+        assert client.post('/api/gaps/settings', json=dict(folder=project.folder, gap='G99', must=True)).status_code == 404
+        assert q(kind=None, mode=None, must=False).json() == dict(kind=None, mode=None, seconds=None, must=False) and SY.settings(project.folder) == {}
