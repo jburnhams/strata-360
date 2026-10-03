@@ -117,7 +117,7 @@ function GapRow({ g, active, onClick }: { g: Gap; active: boolean; onClick: () =
   return (
     <li onClick={onClick} data-in-film={g.in_film ? '' : undefined} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-lg border-2 p-1.5 ${g.in_film ? 'border-emerald-600' : 'border-transparent'} ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-200/60 dark:hover:bg-stone-800'}`}>
       <div className={`flex h-11 w-20 shrink-0 items-center justify-center rounded text-sm font-semibold ${c?.exists ? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{g.id}</div>
-      <div className="min-w-0 flex-1 text-xs"><div className="truncate">{g.local_start}</div><div className="text-stone-500">{(g.duration_s / 3600).toFixed(1)} h · {state}{s?.must ? ' · must use' : ''}</div></div>
+      <div className="min-w-0 flex-1 text-xs"><div className="truncate">{g.local_start}</div><div className="text-stone-500">{(g.duration_s / 3600).toFixed(1)} h · {g.final ? 'to the finish · ' : ''}{state}{s?.must ? ' · must use' : ''}</div></div>
     </li>
   )
 }

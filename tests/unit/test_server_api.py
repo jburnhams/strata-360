@@ -258,7 +258,7 @@ class TestGapClipsApi(TestRaceMapData):
 
     def test_the_gaps_are_listed_with_their_default_length_and_no_clips_yet(self, client, project):
         self.with_gap(project); g = client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps']
-        assert [x['id'] for x in g] == ['G01'] and 4000 < g[0]['duration_s'] < 4800 and g[0]['clips'] == [] and 6 <= g[0]['default_seconds'] <= 45
+        assert [x['id'] for x in g if not x.get('final')] == ['G01'] and 4000 < g[0]['duration_s'] < 4800 and g[0]['clips'] == [] and 6 <= g[0]['default_seconds'] <= 45
 
     def test_a_flyover_can_be_planned_in_4k_and_the_list_says_whether_it_can_be_rendered(self, client, project, monkeypatch, tmp_path):
         from strata360.overlay import flyover as FO
