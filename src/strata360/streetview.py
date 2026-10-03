@@ -442,7 +442,9 @@ def make_video(rd, s, log=print, pano=False):
     from strata360.edit import streetview_cam as CAM
     out = video_path(rd, s, pano)
     if os.path.exists(out): return out
-    CAM.fetch(rd, s, token=_key('MAPILLARY_TOKEN'), log=log, preview=True); os.makedirs(os.path.dirname(out), exist_ok=True)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    if pano and s['provider'] == 'google': CAM.fetch_google_pano(rd, s, road=road_of(rd, s), log=log)                         # (asked for only now: a grid of zoomed-in views a panorama)
+    else: CAM.fetch(rd, s, token=_key('MAPILLARY_TOKEN'), log=log, preview=True)
     if pano: CAM.render_pano(rd, s, default_seconds(s), out, road=road_of(rd, s), log=log); return out
     CAM.render(rd, s, default_seconds(s), out, road=road_of(rd, s), size=PREVIEW_SIZE, preview=True, log=log); return out
 

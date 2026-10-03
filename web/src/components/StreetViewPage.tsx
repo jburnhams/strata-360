@@ -281,7 +281,7 @@ export function SectionContent({ folder, tz, section, onChoose, showChoice = tru
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
           {showChoice && <ChoiceRadios section={section} onChoose={onChoose} />}
           <SectionVideo folder={folder} section={section} />
-          {section.kind === '360' && section.provider !== 'google' && <SectionVideo folder={folder} section={section} pano />}
+          {section.kind === '360' && <SectionVideo folder={folder} section={section} pano />}
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
               <li key={it.id}><button onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>
@@ -397,10 +397,10 @@ function SectionVideo({ folder, section, pano = false }: { folder: string; secti
   return (
     <div className="mt-2" aria-label={pano ? 'Look around' : 'Preview video'}>
       {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the 360° pictures with the camera held level along the road, which you can pan</div>}
-      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true)} label={`${NAME[section.provider]} ${section.id}`} />
+      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={section.provider === 'google' ? 24 : undefined} />
         : <video controls preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
       {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
-      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept</span>}
+      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && section.provider === 'google' ? `. Google gives flat views only, so this asks it for ${section.frames * 16} zoomed-in views (16 for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
       {running && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Making the video… {st?.log.slice(-1)[0] ?? ''}</p>}
       {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}
     </div>

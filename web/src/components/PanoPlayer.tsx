@@ -15,7 +15,7 @@ void main(){
 }`
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-export default function PanoPlayer({ src, label }: { src: string; label: string }) {
+export default function PanoPlayer({ src, label, maxPitch = 83 }: { src: string; label: string; maxPitch?: number }) {
   const cv = useRef<HTMLCanvasElement>(null), video = useRef<HTMLVideoElement>(null), st = useRef({ yaw: 0, pitch: 0, fov: 90, drag: null as null | { x: number; y: number }, raf: 0 })
   const [fov, setFov] = useState(90), [playing, setPlaying] = useState(false), [t, setT] = useState(0), [dur, setDur] = useState(0), [gl, setGl] = useState(true)
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function PanoPlayer({ src, label }: { src: string; label: string 
   const down = (e: React.PointerEvent) => { st.current.drag = { x: e.clientX, y: e.clientY }; (e.target as HTMLElement).setPointerCapture?.(e.pointerId) }
   const move = (e: React.PointerEvent) => {
     const s = st.current, d = s.drag; if (!d) return; const w = cv.current?.clientWidth || 1, k = (s.fov * Math.PI) / 180 / w          // radians a pixel turns the view
-    s.yaw -= (e.clientX - d.x) * k; s.pitch = Math.max(-1.45, Math.min(1.45, s.pitch + (e.clientY - d.y) * k)); s.drag = { x: e.clientX, y: e.clientY }
+    s.yaw -= (e.clientX - d.x) * k; const lim = (maxPitch * Math.PI) / 180; s.pitch = Math.max(-lim, Math.min(lim, s.pitch + (e.clientY - d.y) * k)); s.drag = { x: e.clientX, y: e.clientY }
   }
   const up = () => { st.current.drag = null }
   const zoom = useCallback((f: number) => { const v = Math.max(30, Math.min(140, f)); st.current.fov = v; setFov(v) }, [])

@@ -1,5 +1,5 @@
 """The maths of the street view camera: no pictures of roads, just known answers."""
-import math
+import math, os
 
 import cv2
 import numpy as np
@@ -96,3 +96,32 @@ class TestFlat:
 def test_flow_blend_moves_things_part_of_the_way():
     rng = np.random.default_rng(2); base = cv2.GaussianBlur((rng.random((180, 320)) * 255).astype(np.uint8), (0, 0), 2); A = cv2.cvtColor(base, cv2.COLOR_GRAY2BGR); B = np.roll(A, 8, axis=1)
     mid = CAM.flow_blend(A, B, 0.5); want = np.roll(A, 4, axis=1); assert np.abs(mid.astype(int) - want.astype(int))[:, 20:-20].mean() < np.abs(cv2.addWeighted(A, .5, B, .5, 0).astype(int) - want.astype(int))[:, 20:-20].mean()     # nearer the true halfway than a cross-fade
+
+
+class TestGooglePanorama:
+    def tile(self, truth, h, p, px=160):
+        return CAM.reproject(truth, CAM.PANO_TO_PIC @ CAM.level_view(h, p), CAM.PANO_FOV, (px, px))
+
+    def test_flat_views_stitch_back_into_the_sphere_they_were_taken_from(self):
+        truth = equirect(720, 360); tiles = {(h, p): self.tile(truth, h, p) for h, p in CAM.pano_tiles()}; out = CAM.stitch_pano(tiles, (360, 180))
+        band = slice(int(180 * (0.5 - 40 / 180)), int(180 * (0.5 + 40 / 180))); ref = cv2.resize(truth, (360, 180), interpolation=cv2.INTER_AREA)
+        assert np.abs(out[band].astype(int) - ref[band].astype(int)).mean() < 6 and out[0:5].max() == 0 and out[-5:].max() == 0        # the middle band matches; the poles were not asked for
+
+    def test_a_level_view_of_the_stitched_picture_looks_along_the_road(self):
+        truth = equirect(720, 360); out = CAM.stitch_pano({(h, p): self.tile(truth, h, p) for h, p in CAM.pano_tiles()}, (720, 360))
+        east = CAM.reproject(out, CAM.PANO_TO_PIC @ CAM.level_view(90.0, 0.0), 60.0, (64, 36)); want = CAM.reproject(truth, CAM.PANO_TO_PIC @ CAM.level_view(90.0, 0.0), 60.0, (64, 36))
+        assert np.abs(east.astype(int) - want.astype(int)).mean() < 6
+
+    def test_nothing_is_asked_twice_the_nearest_panorama_first_and_a_retry_asks_for_what_is_missing(self, tmp_path, monkeypatch):
+        from strata360 import streetview as SV
+        monkeypatch.setattr(SV, '_key', lambda n: 'KEY'); monkeypatch.setattr(CAM, 'stitch_pano', lambda tiles, size=None: np.zeros((8, 16, 3), np.uint8))
+        rd = str(tmp_path); items = [dict(id=f'g{i}', lat=50.0 + 0.0001 * i, lon=5.0 + (0.0003 if i == 0 else 0.0)) for i in range(3)]       # g0 is 20 m off the road, g1 and g2 are on it
+        sec = dict(provider='google', seq='g', km0=0.0, id='G1', kind='360', items=items); road = dict(line=[[50.0, 5.0], [50.001, 5.0]], km0=0.0); asked = []
+        def dl(url, params): asked.append((params['pano'], params['heading'], params['pitch'])); return cv2.imencode('.jpg', np.zeros((8, 8, 3), np.uint8))[1].tobytes()
+        assert CAM.fetch_google_pano(rd, sec, road, dl, log=lambda m: None, workers=1) == 3 * 16 and [a[0] for a in asked][0] != 'g0' and asked[-1][0] == 'g0' and len(asked) == 48
+        assert CAM.fetch_google_pano(rd, sec, road, dl, log=lambda m: None) == 0 and len(asked) == 48                                 # all kept: nothing asked
+        os.remove(CAM.pano_path(rd, sec, 'g1')); os.remove(CAM.pano_tile_path(rd, sec, 'g1', 0, -20))
+        assert CAM.fetch_google_pano(rd, sec, road, dl, log=lambda m: None) == 1 and asked[-1] == ('g1', 0, -20)                       # only the missing view
+        def bad(url, params): raise RuntimeError('maps.googleapis.com answered 500')
+        os.remove(CAM.pano_path(rd, sec, 'g2')); os.remove(CAM.pano_tile_path(rd, sec, 'g2', 45, 20))
+        with pytest.raises(RuntimeError, match='500'): CAM.fetch_google_pano(rd, sec, road, bad, log=lambda m: None)

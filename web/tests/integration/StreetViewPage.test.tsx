@@ -369,8 +369,9 @@ describe('the preview video of a section', () => {
     expect(await screen.findByLabelText(/: look around$/)).toBeInTheDocument()
   })
 
-  it('offers no look-around for Google, which only gives the view along the road', async () => {
-    const sv = makeStreetView(); sv.sections[0] = makeSvSection({ id: 'G1', key: 'google:g:1.20', provider: 'google', kind: '360', angles: null }); await pick(sv); await screen.findByRole('button', { name: 'Make a preview video' }); expect(screen.queryByRole('button', { name: 'Make a 360° video to look around in' })).toBeNull()
+  it('offers a look-around for Google too and says how many views it will ask for', async () => {
+    const sv = makeStreetView(); sv.sections[0] = makeSvSection({ id: 'G1', key: 'google:g:1.20', provider: 'google', kind: '360', angles: null, frames: 25 }); await pick(sv)
+    expect(await screen.findByRole('button', { name: 'Make a 360° video to look around in' })).toBeInTheDocument(); expect(screen.getByText(/asks it for 400 zoomed-in views \(16 for each of the 25 panoramas/)).toBeInTheDocument()
   })
 
   it('offers no 360 video for a flat camera', async () => {
