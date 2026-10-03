@@ -190,6 +190,9 @@ class Profile:
         return [p for p in out if p[2].shape[1] > 0]
 
 
+RUN_COLOUR, TODO_COLOUR = (230, 20, 20), (242, 168, 168)                                  # the route already run, and the route still to come (paler)
+
+
 class RouteMap:
     """The whole route on its map, the position marker moving along it."""
     def __init__(self, c, el): self.c, self.el = c, el; self.base = None
@@ -198,14 +201,28 @@ class RouteMap:
         c, e = self.c, self.el; S = int(round(e['size'] * c.s)); wx, wy = world(c.series.route_lat, c.series.route_lon)
         span = max(np.ptp(wx), np.ptp(wy), 1e-9); self.k = S * 0.86 / span; self.cx, self.cy = (wx.min() + wx.max()) / 2, (wy.min() + wy.max()) / 2; self.S = S
         pic = np.asarray(c.tiles(c.style(e)).picture(self.cx, self.cy, self.k, S, S)).copy()
-        D.route_line(pic, (wx - self.cx) * self.k + S / 2, (wy - self.cy) * self.k + S / 2, width=3 * c.s)
+        self.u, self.w = (wx - self.cx) * self.k + S / 2, (wy - self.cy) * self.k + S / 2
+        D.route_line(pic, self.u, self.w, colour=TODO_COLOUR, width=1.0 * c.s)                                  # the whole route thin and pale; the part already run is drawn over it each frame
         self.base = D.framed(pic, e['radius'] * c.s, c.st['map_opacity'], outline=e.get('outline', (0, 0, 0)), outline_w=1.5 * c.s); self.dot = D.marker(6 * c.s)
+        self.round = D.rounded(S, e['radius'] * c.s); self.done = None
 
     def patches(self, t, v):
         if self.base is None: self._build()
         X, Y = self.c.at(self.el, self.el['x'], self.el['y']); wx, wy = world(*self.c.series.position(t))
         u, w = (wx - self.cx) * self.k + self.S / 2, (wy - self.cy) * self.k + self.S / 2; r = self.dot.shape[0] / 2
-        return [(X, Y, self.base), (X + u - r, Y + w - r, self.dot)]
+        return [(X, Y, self.base), (X, Y, self._run(t, u, w)), (X + u - r, Y + w - r, self.dot)]
+
+    def _run(self, t, u, w):
+        """The part of the route already run (to the marker) in the strong colour, as a patch the map's see-through-ness is applied to; drawn again only when the marker has moved on."""
+        s = self.c.series; n = int(np.searchsorted(s._pt, t, 'right')); key = (n, round(u, 1), round(w, 1))
+        if self.done is None or self.done[0] != key:
+            mask = np.zeros((self.S, self.S), np.uint8); step = max(1, n // 1500)
+            if n >= 1:
+                xs = np.concatenate([self.u[:n:step], [u]]); ys = np.concatenate([self.w[:n:step], [w]]); pts = np.round(np.stack([xs, ys], 1) * 16).astype(np.int32).reshape(-1, 1, 2)
+                cv2.polylines(mask, [pts], False, 255, max(1, int(round(2.0 * self.c.s))), cv2.LINE_AA, 4)
+            a = mask.astype(np.float32) / 255 * self.round * self.c.st['map_opacity']
+            self.done = (key, np.dstack([np.broadcast_to(np.array(RUN_COLOUR, np.uint8), (self.S, self.S, 3)), (a * 255).round().astype(np.uint8)]))
+        return self.done[1]
 
 
 class LocalMap:
@@ -242,7 +259,9 @@ class LocalMap:
             zb = int(round(z)); k = 2.0 ** z * self.c.s; r = 2.0 ** (z - zb); b = self._back(wx, wy, zb, r); kb = 2.0 ** zb * self.c.s
             M = np.array([[1 / r, 0, (wx - b[0]) * kb + self.B / 2 - S / 2 / r], [0, 1 / r, (wy - b[1]) * kb + self.B / 2 - S / 2 / r]])
             pic = cv2.warpAffine(b[2], M, (S, S), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
-            D.route_line(pic, (self.rw[0] - wx) * k + S / 2, (self.rw[1] - wy) * k + S / 2, width=3 * self.c.s)
+            u, v = (self.rw[0] - wx) * k + S / 2, (self.rw[1] - wy) * k + S / 2; n = int(np.searchsorted(self.c.series._pt, t, 'right'))
+            D.route_line(pic, u, v, colour=TODO_COLOUR, width=2 * self.c.s)                                      # the route still to come, paler; the part already run over it in the strong colour
+            D.route_line(pic, np.concatenate([u[:n], [S / 2]]), np.concatenate([v[:n], [S / 2]]), colour=RUN_COLOUR, width=3 * self.c.s)
             self.last = (key, D.framed(pic, self.el['radius'] * self.c.s, self.c.st['map_opacity'], outline=self.el.get('outline'), outline_w=2 * self.c.s))
         X, Y = self.c.at(self.el, self.el['x'], self.el['y']); r = self.dot.shape[0] / 2
         return [(X, Y, self.last[1]), (X + S / 2 - r, Y + S / 2 - r, self.dot)]

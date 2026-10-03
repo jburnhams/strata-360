@@ -93,11 +93,22 @@ class TestPlacement:
 class TestMaps:
     def test_route_map_is_built_once_and_the_marker_moves(self, series, tiles):
         ov = overlay(series, tiles, elements=['route_map']); a = ov.patches(T0); n = len(tiles.fetch.urls); b = ov.patches(T0 + 600)
-        assert len(tiles.fetch.urls) == n and a[0][2] is b[0][2] and b[1][1] < a[1][1]                            # same base picture; running north moves the marker up
+        assert len(tiles.fetch.urls) == n and a[0][2] is b[0][2] and b[2][1] < a[2][1]                            # same base picture; running north moves the marker up
 
     def test_route_fills_the_route_map(self, series, tiles):
-        ov = overlay(series, tiles, elements=['route_map']); y_start = ov.patches(T0)[1][1]; y_end = ov.patches(T0 + 899)[1][1]
+        ov = overlay(series, tiles, elements=['route_map']); y_start = ov.patches(T0)[2][1]; y_end = ov.patches(T0 + 899)[2][1]
         assert abs(y_start - y_end) == pytest.approx(256 * 0.86, abs=2)
+
+    def test_the_part_already_run_is_a_strong_line_over_a_paler_whole_route(self, series, tiles):
+        ov = overlay(series, tiles, elements=['route_map']); first = ov.patches(T0 - 100)[1][2]; mid = ov.patches(T0 + 450)[1][2]; end = ov.patches(T0 + 899)[1][2]
+        covered = lambda p: int((p[..., 3] > 0).sum())
+        assert covered(first) == 0 and 0 < covered(mid) < covered(end) and tuple(mid[mid[..., 3] > 0][0][:3]) == LY.RUN_COLOUR                                   # nothing run yet; more run later
+        base = ov.patches(T0)[0][2]; assert base[..., 3].max() > 0 and ov.patches(T0 + 450)[0][2] is base                                                        # the pale whole route is in the base picture, drawn once
+
+    def test_local_map_draws_the_run_part_stronger_than_the_part_to_come(self, series, tiles):
+        ov = overlay(series, tiles, elements=['local_map']); pic = ov.patches(T0 + 450)[0][2]
+        rgb = pic[..., :3].reshape(-1, 3).astype(int); strong = (np.abs(rgb - np.array(LY.RUN_COLOUR)).sum(1) < 30).sum(); pale = (np.abs(rgb - np.array(LY.TODO_COLOUR)).sum(1) < 30).sum()
+        assert strong > 0 and pale > 0
 
     def test_local_map_keeps_the_marker_in_the_middle(self, series, tiles):
         ov = overlay(series, tiles, elements=['local_map'])
