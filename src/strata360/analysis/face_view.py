@@ -26,7 +26,9 @@ def analyse(clip_dir, osv, log=print):
     probe = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', proxy], capture_output=True, text=True).stdout.strip().split(','); W, H = int(probe[0]), int(probe[1]); tmp = tempfile.mkdtemp(prefix='s360face_')
     where = {k: j for j, k in enumerate(order)}; crops = {}
     for k in order:                                                                                      # one frame at a time by seeking (the proxy is written at a fixed 25 fps, so frame k is at k / 25 s)
-        r = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{k / 25.0:.4f}', '-i', proxy, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], capture_output=True)
+        for kk in (k, k - 1, k - 2):                                                                     # (proxy.json can list a frame or two past the last one in the video: the nearest earlier frame stands in)
+            r = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{kk / 25.0:.4f}', '-i', proxy, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], capture_output=True)
+            if len(r.stdout) >= W * H * 3: break
         if len(r.stdout) < W * H * 3: raise RuntimeError(f'face_view: could not read proxy frame {k} of {os.path.basename(clip_dir)}: {r.stderr.decode(errors="replace")[-200:]}')
         fr = np.frombuffer(r.stdout, np.uint8)[:W * H * 3].reshape(H, W, 3); x = samples[idx.index(k)]; mx, my = HT.crop_map(x['yaw'], x['pitch'], W, H)
         cv2.imwrite(os.path.join(tmp, f'c{where[k]:05d}.jpg'), cv2.remap(fr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP), [cv2.IMWRITE_JPEG_QUALITY, 92]); crops[k] = where[k]
