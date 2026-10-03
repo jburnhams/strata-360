@@ -114,7 +114,7 @@ class TestGooglePanorama:
 
     def test_nothing_is_asked_twice_the_nearest_panorama_first_and_a_retry_asks_for_what_is_missing(self, tmp_path, monkeypatch):
         from strata360 import streetview as SV
-        monkeypatch.setattr(SV, '_key', lambda n: 'KEY'); monkeypatch.setattr(CAM, 'stitch_pano', lambda tiles, size=None: np.zeros((8, 16, 3), np.uint8))
+        monkeypatch.setattr(SV, '_key', lambda n: 'KEY'); monkeypatch.setattr(CAM, 'stitch_pano', lambda tiles, size=None, grid='std': np.zeros((8, 16, 3), np.uint8))
         rd = str(tmp_path); items = [dict(id=f'g{i}', lat=50.0 + 0.0001 * i, lon=5.0 + (0.0003 if i == 0 else 0.0)) for i in range(3)]       # g0 is 20 m off the road, g1 and g2 are on it
         sec = dict(provider='google', seq='g', km0=0.0, id='G1', kind='360', items=items); road = dict(line=[[50.0, 5.0], [50.001, 5.0]], km0=0.0); asked = []
         def dl(url, params): asked.append((params['pano'], params['heading'], params['pitch'])); return cv2.imencode('.jpg', np.zeros((8, 8, 3), np.uint8))[1].tobytes()
@@ -125,3 +125,19 @@ class TestGooglePanorama:
         def bad(url, params): raise RuntimeError('maps.googleapis.com answered 500')
         os.remove(CAM.pano_path(rd, sec, 'g2')); os.remove(CAM.pano_tile_path(rd, sec, 'g2', 45, 20))
         with pytest.raises(RuntimeError, match='500'): CAM.fetch_google_pano(rd, sec, road, bad, log=lambda m: None)
+
+
+class TestGoogleHighResolution:
+    def test_the_high_grid_asks_for_views_twice_as_close_and_four_times_as_many_each_kept_under_its_own_name(self, tmp_path):
+        assert len(CAM.pano_tiles('std')) == 16 and len(CAM.pano_tiles('hi')) == 60 and CAM.PANO_GRIDS['hi']['fov'] == CAM.PANO_GRIDS['std']['fov'] / 2
+        sec = dict(provider='google', seq='g', km0=0.0, id='G1'); rd = str(tmp_path)
+        assert CAM.pano_path(rd, sec, 'x') != CAM.pano_path(rd, sec, 'x', 'hi') and CAM.pano_tile_path(rd, sec, 'x', 0, 12, 'hi') != CAM.pano_tile_path(rd, sec, 'x', 0, 12) and CAM.pano_tile_path(rd, sec, 'x', 0, -20).endswith('x-h0-p-20.jpg')      # (the standard names are what earlier runs kept)
+
+    def test_the_high_grid_covers_the_band_and_stitches_back_the_sphere(self):
+        truth = equirect(720, 360); px = 120
+        tiles = {(h, p): CAM.reproject(truth, CAM.PANO_TO_PIC @ CAM.level_view(h, p), 30.0, (px, px)) for h, p in CAM.pano_tiles('hi')}; out = CAM.stitch_pano(tiles, (360, 180), 'hi')
+        mid = slice(int(180 * (0.5 - 30 / 180)), int(180 * (0.5 + 30 / 180))); ref = cv2.resize(truth, (360, 180), interpolation=cv2.INTER_AREA); assert np.abs(out[mid].astype(int) - ref[mid].astype(int)).mean() < 8
+
+    def test_the_logo_strip_of_a_view_is_not_used(self):
+        a = np.full((100, 100, 3), 200, np.uint8); b = a.copy(); b[-5:, :] = (0, 0, 255)                     # a red strip where the logo is
+        one = CAM.stitch_pano({(0, 0): b}, (100, 50), 'std'); two = CAM.stitch_pano({(0, 0): a}, (100, 50), 'std'); assert np.array_equal(one, two)

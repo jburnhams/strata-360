@@ -388,20 +388,21 @@ function Legend({ scale, hasClips }: { scale: { lo: number; hi: number }; hasCli
 
 /** The preview video of a section: shown when it has been made, else a button to make it (in the background; kept, so it is made once). */
 function SectionVideo({ folder, section, pano = false }: { folder: string; section: SvSectionInfo; pano?: boolean }) {
-  const [st, setSt] = useState<SvVideo>(), [err, setErr] = useState<string>(), running = !!st?.running
+  const [st, setSt] = useState<SvVideo>(), [err, setErr] = useState<string>(), running = !!st?.running, [hires, setHires] = useState(false), hi = pano && section.provider === 'google' && hires
   useEffect(() => {
     let live = true; setSt(undefined); setErr(undefined)
-    const tick = () => api.svVideo(folder, section.key, pano).then(v => live && setSt(v)).catch(e => live && setErr((e as Error).message))
+    const tick = () => api.svVideo(folder, section.key, pano, hi).then(v => live && setSt(v)).catch(e => live && setErr((e as Error).message))
     tick(); const id = setInterval(tick, running ? 2500 : 30000); return () => { live = false; clearInterval(id) }
-  }, [folder, section.key, running, pano])
-  const make = async () => { setErr(undefined); try { const r = await api.makeSvVideo(folder, section.key, pano); if (!r.started && r.reason) setErr(r.reason); setSt(await api.svVideo(folder, section.key, pano)) } catch (e) { setErr((e as Error).message) } }
+  }, [folder, section.key, running, pano, hi])
+  const make = async () => { setErr(undefined); try { const r = await api.makeSvVideo(folder, section.key, pano, hi); if (!r.started && r.reason) setErr(r.reason); setSt(await api.svVideo(folder, section.key, pano, hi)) } catch (e) { setErr((e as Error).message) } }
   return (
     <div className="mt-2" aria-label={pano ? 'Look around' : 'Preview video'}>
-      {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the 360° pictures with the camera held level along the road, which you can pan</div>}
-      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={section.provider === 'google' ? 24 : undefined} fps={st.fps} />
+      {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the original 360° pictures, one at a time, with the camera held level along the road, which you can pan</div>}
+      {pano && section.provider === 'google' && <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={hires} onChange={e => setHires(e.target.checked)} /> Higher resolution (views twice as close: about 4 times the requests, much more detail)</label>}
+      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true, hi)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={section.provider === 'google' ? 24 : undefined} fps={st.fps} />
         : <StepVideo preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
       {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
-      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && section.provider === 'google' ? `. Google gives flat views only, so this asks it for ${section.frames * 16} zoomed-in views (16 for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
+      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && section.provider === 'google' ? `. Google gives flat views only, so this asks it for ${section.frames * (hi ? 60 : 16)} zoomed-in views (${hi ? 60 : 16} for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
       {running && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Making the video… {st?.log.slice(-1)[0] ?? ''}</p>}
       {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}
     </div>

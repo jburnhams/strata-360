@@ -56,31 +56,37 @@ def fetch(rd, section, token=None, get=None, download=None, log=print, preview=F
 
 # ---- the maths of a virtual camera ------------------------------------------------------------------------------------------------------------------------------------------------------------
 # ---- Google panoramas from flat views: the Static API gives flat views only, so a 360 picture is stitched from a grid of zoomed-in ones (asked for only when a look-around video is wanted, each kept so a retry asks for nothing twice) ------
-PANO_FOV, PANO_TILE_PX = 60.0, 640                   # each view covers 60 degrees (about 10.7 pixels a degree: 3840 wide all round)
-PANO_HEADINGS = tuple(range(0, 360, 45))             # eight views round (15 degrees of overlap each side)
-PANO_PITCHES = (-20, 20)                             # two rows: with the 60 degree views they cover -50 to +50, a fair amount of looking up and down
-PANO_SIZE = (3840, 1920)
+LOGO_STRIP = 0.07                                     # the share of a view's height at the bottom that has Google's logo on it
+PANO_TILE_PX = 640                                    # the largest view the Static API gives
+PANO_GRIDS = {                                        # std: 60 degree views, 10.7 pixels a degree (8 round x 2 rows = 16 a panorama); hi: 30 degree views, 21 pixels a degree (15 round x 4 rows = 60 a panorama)
+    'std': dict(fov=60.0, headings=tuple(range(0, 360, 45)), pitches=(-20, 20), size=(3840, 1920), video=(1920, 960)),
+    'hi': dict(fov=30.0, headings=tuple(range(0, 360, 24)), pitches=(-38, -13, 12, 37), size=(7680, 3840), video=(3840, 1920)),
+}
+PANO_FOV, PANO_HEADINGS, PANO_PITCHES, PANO_SIZE = PANO_GRIDS['std']['fov'], PANO_GRIDS['std']['headings'], PANO_GRIDS['std']['pitches'], PANO_GRIDS['std']['size']
 PANO_MAX_PITCH = 24                                  # the viewer's limit up and down so that the window never shows what was not asked for
 PANO_TO_PIC = np.array([[1.0, 0, 0], [0, 0, 1], [0, 1, 0]])        # (east, north, up) to the stitched picture's frame (east, up, north: the centre column is north)
 
 
-def pano_tiles(): return [(h, p) for p in PANO_PITCHES for h in PANO_HEADINGS]
-def pano_tile_path(rd, section, pid, h, p): return os.path.join(src_dir(rd, section), 'tiles', f'{pid}-h{h}-p{p}.jpg')
-def pano_path(rd, section, pid): return os.path.join(src_dir(rd, section), pid + '.pano.jpg')
+def pano_tiles(grid='std'): g = PANO_GRIDS[grid]; return [(h, p) for p in g['pitches'] for h in g['headings']]
+def pano_tile_path(rd, section, pid, h, p, grid='std'): return os.path.join(src_dir(rd, section), 'tiles', f"{pid}-h{h}-p{p}{'' if grid == 'std' else '-' + grid}.jpg")
+def pano_path(rd, section, pid, grid='std'): return os.path.join(src_dir(rd, section), pid + ('.pano.jpg' if grid == 'std' else f'.pano-{grid}.jpg'))
 
 
-def stitch_pano(tiles, size=PANO_SIZE):
-    """One equirectangular picture (the centre column looks north) from flat views {(heading, pitch): picture}: every view is looked up where it covers a direction and the views are blended, the middle of a view counting more than its edge. Directions no view covers stay black."""
-    W, H = size; lon = (np.arange(W) + 0.5) / W * 2 * math.pi - math.pi; lat = math.pi / 2 - (np.arange(H) + 0.5) / H * math.pi; lo, la = np.meshgrid(lon, lat)
-    d = np.stack([np.sin(lo) * np.cos(la), np.sin(la), np.cos(lo) * np.cos(la)], -1)                  # directions in the picture's frame (east, up, north)
-    acc = np.zeros((H, W, 3), np.float32); wsum = np.zeros((H, W), np.float32); t = math.tan(math.radians(PANO_FOV) / 2)
-    for (h, p), img in tiles.items():
-        V = PANO_TO_PIC @ level_view(h, p); c = d @ V; z = c[..., 2]; ok = z > 1e-6; z = np.where(ok, z, 1.0); nx, ny = c[..., 0] / z / t, c[..., 1] / z / t
-        w = np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1) * ok
-        if not w.any(): continue
-        S = img.shape[1]; mx = ((nx * 0.5 + 0.5) * S).astype(np.float32); my = ((0.5 - ny * 0.5) * img.shape[0]).astype(np.float32)
-        acc += cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32) * w[..., None]; wsum += w
-    return (acc / np.maximum(wsum, 1e-6)[..., None]).clip(0, 255).astype(np.uint8)
+def stitch_pano(tiles, size=None, grid='std'):
+    """One equirectangular picture (the centre column looks north) from flat views {(heading, pitch): picture}: every view is looked up where it covers a direction and the views are blended, the middle of a view counting more than its edge. Directions no view covers stay black.
+    Done a band of rows at a time, so a big picture does not need a lot of memory."""
+    W, H = size or PANO_GRIDS[grid]['size']; fov = PANO_GRIDS[grid]['fov']; t = math.tan(math.radians(fov) / 2); out = np.zeros((H, W, 3), np.uint8); lon = (np.arange(W) + 0.5) / W * 2 * math.pi - math.pi; band = 256
+    for r0 in range(0, H, band):
+        r1 = min(H, r0 + band); lat = math.pi / 2 - (np.arange(r0, r1) + 0.5) / H * math.pi; lo, la = np.meshgrid(lon, lat)
+        d = np.stack([np.sin(lo) * np.cos(la), np.sin(la), np.cos(lo) * np.cos(la)], -1); acc = np.zeros((r1 - r0, W, 3), np.float32); wsum = np.zeros((r1 - r0, W), np.float32)
+        for (h, p), img in tiles.items():
+            V = PANO_TO_PIC @ level_view(h, p); c = d @ V; z = c[..., 2]; ok = z > 1e-6; z = np.where(ok, z, 1.0); nx, ny = c[..., 0] / z / t, c[..., 1] / z / t
+            w = np.clip(1 - np.maximum(np.abs(nx), np.abs(ny)), 0, 1) * ok * (ny > -(1 - 2 * LOGO_STRIP))           # (the bottom strip of every view carries Google's logo and copyright: not used)
+            if not w.any(): continue
+            mx = ((nx * 0.5 + 0.5) * img.shape[1]).astype(np.float32); my = ((0.5 - ny * 0.5) * img.shape[0]).astype(np.float32)
+            acc += cv2.remap(img, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE).astype(np.float32) * w[..., None]; wsum += w
+        out[r0:r1] = (acc / np.maximum(wsum, 1e-6)[..., None]).clip(0, 255).astype(np.uint8)
+    return out
 
 
 def _nearest_first(section, road):
@@ -90,29 +96,29 @@ def _nearest_first(section, road):
     line = SV.Line(dict(line=road['line'], km0=road['km0'])); return sorted(section['items'], key=lambda it: line.locate((it['lat'], it['lon']))[1])
 
 
-def fetch_google_pano(rd, section, road=None, download=None, log=print, workers=4):
-    """Ask Google for the grid of zoomed-in views of each panorama of a Google section (the ones nearest the run's track first) and stitch each into a 360 picture. Every view and every stitched picture is kept: nothing already here is asked for again, so a retry only asks for what is missing.
-    Returns the number of requests made. RuntimeError when a view could not be had (the others stay)."""
+def fetch_google_pano(rd, section, road=None, download=None, log=print, workers=4, grid='std'):
+    """Ask Google for the grid of zoomed-in views of each panorama of a Google section (the ones nearest the run's track first) and stitch each into a 360 picture; `grid` 'hi' asks for views twice as close (four times as many). Every view and every stitched picture is kept: nothing already
+    here is asked for again, so a retry only asks for what is missing. Returns the number of requests made. RuntimeError when a view could not be had (the others stay)."""
     from concurrent.futures import ThreadPoolExecutor
     from strata360 import streetview as SV
-    download = download or SV._bytes; gkey = SV._key('GOOGLE_MAPS_API_KEY')
+    download = download or SV._bytes; gkey = SV._key('GOOGLE_MAPS_API_KEY'); fov = int(PANO_GRIDS[grid]['fov'])
     if not gkey: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
     os.makedirs(os.path.join(src_dir(rd, section), 'tiles'), exist_ok=True); asked = 0; items = _nearest_first(section, road)
     def get_tile(args):
-        pid, h, p = args; f = pano_tile_path(rd, section, pid, h, p)
+        pid, h, p = args; f = pano_tile_path(rd, section, pid, h, p, grid)
         if os.path.exists(f): return 0
         for attempt in (0, 1):
-            try: data = download('https://maps.googleapis.com/maps/api/streetview', dict(size=f'{PANO_TILE_PX}x{PANO_TILE_PX}', pano=pid, heading=h, fov=int(PANO_FOV), pitch=p, key=gkey)); break
+            try: data = download('https://maps.googleapis.com/maps/api/streetview', dict(size=f'{PANO_TILE_PX}x{PANO_TILE_PX}', pano=pid, heading=h, fov=fov, pitch=p, key=gkey)); break
             except RuntimeError:
                 if attempt: raise
         tmp = f + '.part'; open(tmp, 'wb').write(data); os.replace(tmp, f); return 1
     with ThreadPoolExecutor(workers) as ex:
         for n, it in enumerate(items, 1):
-            if os.path.exists(pano_path(rd, section, it['id'])): continue
-            asked += sum(ex.map(get_tile, [(it['id'], h, p) for h, p in pano_tiles()]))
-            tiles = {(h, p): cv2.imread(pano_tile_path(rd, section, it['id'], h, p)) for h, p in pano_tiles()}
+            if os.path.exists(pano_path(rd, section, it['id'], grid)): continue
+            asked += sum(ex.map(get_tile, [(it['id'], h, p) for h, p in pano_tiles(grid)]))
+            tiles = {(h, p): cv2.imread(pano_tile_path(rd, section, it['id'], h, p, grid)) for h, p in pano_tiles(grid)}
             if any(v is None for v in tiles.values()): raise RuntimeError(f"google {section['id']}: a view of {it['id']} could not be read")
-            tmp = pano_path(rd, section, it['id']) + '.part.jpg'; cv2.imwrite(tmp, stitch_pano(tiles), [cv2.IMWRITE_JPEG_QUALITY, 92]); os.replace(tmp, pano_path(rd, section, it['id']))
+            tmp = pano_path(rd, section, it['id'], grid) + '.part.jpg'; cv2.imwrite(tmp, stitch_pano(tiles, grid=grid), [cv2.IMWRITE_JPEG_QUALITY, 92]); os.replace(tmp, pano_path(rd, section, it['id'], grid))
             log(f"google {section['id']}: panorama {n} of {len(items)} stitched ({asked} requests so far)")
     return asked
 
@@ -260,7 +266,7 @@ class Rig:
     def __init__(self, items, prog, hs, view, rot=None, img=None): self.items, self.prog, self.hs, self.view, self.n, self.rot, self.img = items, prog, hs, view, len(items), rot, img         # rot(i, yaw, pitch): the turn for a level view of picture i (360 sections only); img(i) the picture
 
 
-def build(rd, section, road=None, size=OUT, preview=False, pano=False):
+def build(rd, section, road=None, size=OUT, preview=False, pano=False, grid='std'):
     """The camera rig for a section (see Rig); the maths depends on the kind of picture (module notes). Raises ValueError when there are too few pictures, RuntimeError when one has not been fetched."""
     its = forward_items(section)
     if len(its) < 8: raise ValueError(f"{section['id']}: only {len(its)} pictures face the way the runner went")
@@ -268,7 +274,7 @@ def build(rd, section, road=None, size=OUT, preview=False, pano=False):
     def img(i):
         if i not in imgs:
             if len(imgs) > 4: imgs.clear()
-            im = cv2.imread(pano_path(rd, section, its[i]['id']) if pano and prov == 'google' else src_path(rd, section, its[i]['id'], preview))
+            im = cv2.imread(pano_path(rd, section, its[i]['id'], grid) if pano and prov == 'google' else src_path(rd, section, its[i]['id'], preview))
             if im is None: raise RuntimeError(f"{section['id']}: picture {its[i]['id']} has not been fetched")
             imgs[i] = im
         return imgs[i]
@@ -293,12 +299,12 @@ def build(rd, section, road=None, size=OUT, preview=False, pano=False):
     return Rig(its, prog, hs, view, rot, img)
 
 
-def render_pano(rd, section, seconds, out, road=None, size=(1920, 960), log=print, preview=True):
+def render_pano(rd, section, seconds, out, road=None, size=None, log=print, preview=True, grid='std'):
     """Write a 360 video of a 360 section for looking around in: ONE VIDEO FRAME PER ORIGINAL PICTURE, each turned level so that the centre column looks along the road, and nothing blended or made up (the viewer steps from picture to picture). The frame rate is the pictures per second of
     `seconds`, so it plays as long as the clip would. For the page's viewer (WebGL), not for the film."""
-    rig = build(rd, section, road, OUT, preview, pano=True)
+    rig = build(rd, section, road, OUT, preview, pano=True, grid=grid)
     if rig.rot is None: raise ValueError(f"{section['id']}: only a 360 section can be looked around in")
-    hs, rot, img, n = rig.hs, rig.rot, rig.img, rig.n; fps = round(min(max(n / max(seconds, 0.5), 1.0), 15.0), 2); W, H = size
+    size = size or (PANO_GRIDS[grid]['video'] if section['provider'] == 'google' else (1920, 960)); hs, rot, img, n = rig.hs, rig.rot, rig.img, rig.n; fps = round(min(max(n / max(seconds, 0.5), 1.0), 15.0), 2); W, H = size
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-c:v', 'libx264', '-crf', '20', '-g', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']      # (every frame a key frame: stepping back is exact)
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     try:

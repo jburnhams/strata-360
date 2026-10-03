@@ -668,10 +668,10 @@ class TestStreetViewVideoApi(TestStreetViewApi):
     def test_the_command_makes_the_video_or_says_why_not(self, project, monkeypatch, capsys):
         import argparse
         from strata360 import cli, streetview as SV
-        key = self.key(project); made = []; monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False: made.append((s['key'], pano)) or '/x.mp4')
+        key = self.key(project); made = []; monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False, hires=False: made.append((s['key'], pano)) or '/x.mp4')
         cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key)); assert made == [(key, False)] and 'done: /x.mp4' in capsys.readouterr().out
         with pytest.raises(SystemExit, match='no section nope'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key='nope'))
-        monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False: (_ for _ in ()).throw(RuntimeError('boom')))
+        monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False, hires=False: (_ for _ in ()).throw(RuntimeError('boom')))
         with pytest.raises(SystemExit, match='streetview-video: boom'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key))
 
 
@@ -747,3 +747,12 @@ class TestStreetViewPanoVideo(TestStreetViewVideoApi):
         r = client.post('/api/streetview/video', json=dict(folder=project.folder, key=key, pano=True))
         if s['kind'] == '360' and s['provider'] != 'google': assert r.json() == dict(started=True) and '--pano' in fake_popen.instances[-1].cmd
         else: assert r.status_code == 400
+
+
+class TestStreetViewHiresVideo(TestStreetViewVideoApi):
+    def test_the_high_resolution_video_is_its_own_file_and_only_for_google(self, client, project, fake_popen):
+        from strata360 import streetview as SV
+        key = self.key(project); rd = project.race_dir; s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key)
+        assert len({SV.video_path(rd, s, True), SV.video_path(rd, s, True, True), SV.video_path(rd, s)}) == 3 and SV.video_path(rd, s, True, True).endswith('-360hi.mp4')
+        r = client.post('/api/streetview/video', json=dict(folder=project.folder, key=key, pano=True, hires=True))
+        if s['kind'] == '360': assert r.json() == dict(started=True) and '--hires' not in fake_popen.instances[-1].cmd           # (Mapillary / Panoramax pictures are already full size)
