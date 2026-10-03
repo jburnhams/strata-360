@@ -15,7 +15,7 @@ inside its usable stretches; (3) beam search over the ordered windows for the te
 import heapq, math
 from dataclasses import dataclass, field
 import numpy as np
-from strata360.edit import optimise as O
+from strata360.edit import optimise as O, pans as PN
 
 MIN_SEG_S = 2.0          # shortest window (the shortest everyday technique needs 2 s; whip pans are transitions, not windows)
 MAX_SEG_S = 8.0          # longest window: longer ones are split into adjacent windows, each with its own view
@@ -27,7 +27,7 @@ class Settings:
     seed: int = 0
     beam: int = 30
     temperature: float = 0.15
-    w_quality: float = 1.0; w_fit: float = 0.8; w_dur: float = 0.5; w_energy: float = 0.6; w_first: float = 0.4
+    w_quality: float = 1.0; w_fit: float = 0.8; w_dur: float = 0.5; w_energy: float = 0.6; w_first: float = 0.4; w_glide: float = 0.3
     dur_power: float = 0.6
     pen_recent: float = 0.8; recent_decay: float = 0.7; pen_family: float = 0.25; pen_scale: float = 0.15; pen_share: float = 6.0
     hero_share: float = 0.2
@@ -36,6 +36,7 @@ class Settings:
     dialogue_share: float = 0.15
     bans_techs: frozenset = frozenset()
     share_caps: dict = field(default_factory=lambda: {'dialogue_hold': 0.15})
+    tech_bias: dict = field(default_factory=lambda: {'selfie_hold': 0.25})        # a little extra score for a technique (per second of its window, as the other scores): the mid view of you is the one to reach for
     # the user's overrides (project.json): windows are identified by `wid` = "<clip>@<start seconds in the clip, 2 decimals>"
     locked: tuple = ()                                   # [{wid, clip, start_s, beats, cand_id, tech}]: kept exactly (clip window, length and technique)
     tech_force: dict = field(default_factory=dict)       # wid -> technique id that window must use (if feasible)
@@ -250,6 +251,16 @@ def plan(clips, lib, music, st=None):
     return assign_techniques(windows, clips, lib, music, st, rng, warnings)
 
 # --------------------------------------------------------------------------------------------------------------------------------------------- 3. techniques
+STEADY_LOW, STEADY_HIGH = 0.15, 0.60        # the camera's steadiness (0 shaking .. 1 still) that counts as full motion / calm: a running clip is 0.1 to 0.3, a walk or a stop 0.5 and more
+CLOSE_MAX_CALM, CLOSE_MAX_BUSY = 8.0, 3.0   # how long a close view of you may last in calm footage / in the busiest
+
+
+def calm(steady):
+    """0 (the busiest running) .. 1 (calm) from a candidate's `steady` feature; 1 when it is unknown."""
+    return 1.0 if steady is None else float(min(max((float(steady) - STEADY_LOW) / (STEADY_HIGH - STEADY_LOW), 0.0), 1.0))
+
+
+FACE_MIN_SHARE = 0.6           # the close view needs a clear face in at least this share of its seconds (when the clip has been analysed)
 VIEW_TECH = {'mid': 'selfie_hold', 'close': 'selfie_close', 'far': 'selfie_far'}      # the views of you a window can ask for (K6)
 
 
@@ -261,12 +272,16 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
     starts = []; pos = 0
     for w in windows: starts.append(pos); pos += w.beats
     wids = [wid_of(clips[w.clip_index]['id'], w.abs_start) for w in windows]; options = []
+    joined = [k > 0 and windows[k].clip_index == windows[k - 1].clip_index and abs(windows[k].abs_start - (windows[k - 1].abs_start + windows[k - 1].beats * beat_s)) <= PN.CONTIGUOUS_S for k in range(len(windows))]          # back to back in one clip: a glide can join them (edit/pans.py)
     for k, w in enumerate(windows):
         d = w.beats * beat_s; c = getattr(w.cand, 'orig', None) or w.cand; en = music.energy_at(starts[k]); opts = []
         for tid in ids:
             t = lib[tid]
             if w.speech and not t.dialogue_ok: continue
             if t.id == 'dialogue_hold' and not w.speech: continue
+            if t.id == 'selfie_close' and not w.speech and st.tech_force.get(wids[k]) != 'selfie_close' and getattr(w, 'view', None) != 'close': continue            # the close view of you is for the best of the dialogue (or when asked for)
+            if t.id == 'selfie_close' and st.tech_force.get(wids[k]) != 'selfie_close' and d > CLOSE_MAX_BUSY + (CLOSE_MAX_CALM - CLOSE_MAX_BUSY) * calm((getattr(c, 'features', None) or {}).get('steady')) + 1e-9: continue         # the busier the footage the shorter a close view may last: quick cuts, glided between
+            if t.id == 'selfie_close' and getattr(w, 'face', None) is not None and w.face < FACE_MIN_SHARE and st.tech_force.get(wids[k]) != 'selfie_close': continue         # ... and only where the face is clear (not the top of the head): analysis/face_view.py
             if not (t.dmin - 1e-9 <= d <= t.dmax + 1e-9): continue
             if t.beats == 'bar' and w.beats % music.bar_beats: continue
             f = O.fit(c, t)
@@ -274,14 +289,14 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             if f is None and w.speech and tid in ('dialogue_hold', 'selfie_hold'): f = 0.2                    # the script plays these lines: a dialogue shot is allowed whatever the footage's own features say
             if f is None: continue
             sig = max((t.dmax - t.dmin) / 3.0, 0.4); durfit = math.exp(-0.5 * ((d - t.dideal) / sig) ** 2); scale = d ** st.dur_power
-            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en))
+            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en)) + st.tech_bias.get(tid, 0.0) * scale
             opts.append((tid, base))
         options.append(sorted(opts, key=lambda x: -x[1])[:8])
         want = w.tech_id if w.fixed else st.tech_force.get(wids[k])
         view = getattr(w, 'view', None)
         if not want and view in VIEW_TECH:                                                                  # the script asked for a view of you (mid, close, far): used when the footage allows it
             if any(o[0] == VIEW_TECH[view] for o in opts): want = VIEW_TECH[view]
-            else: warnings.append(f"{wids[k]}: the {view} view of you was asked for but this window does not allow it (you are not found, or too near or too far); the planner chose its own shot")
+            else: warnings.append(f"{wids[k]}: the {view} view of you was asked for but this window does not allow it here ({'you are not found, or too near or too far' if view != 'close' else 'you are not found or too near; or your face is not clear; or the footage is too busy for a close view this long; or there is no mid view of you next to it to glide with'}); the planner chose its own shot")
         if want:
             if any(o[0] == want for o in opts): opts = [o for o in opts if o[0] == want]
             elif w.fixed: opts = [(want, 0.0)]                                                               # a locked window keeps its technique even if the rules would no longer allow it
@@ -292,6 +307,9 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
           for b in beams:
               for tid, base in opts:
                   t = lib[tid]; seq = b['seq']; forced_now = bool(want)
+                  if not relaxed:                                                                                   # (also for a view the script asked for)
+                      if tid == 'selfie_close' and not ((joined[k] and seq and seq[-1] == 'selfie_hold') or (k + 1 < len(windows) and joined[k + 1])): continue                  # a close view of you glides in from a mid view just before it, or out to one just after it (edit/pans.py)
+                      if seq and seq[-1] == 'selfie_close' and joined[k] and tid != 'selfie_hold' and not (len(seq) >= 2 and joined[k - 1] and seq[-2] == 'selfie_hold'): continue      # (so the one after a close view that had no mid before it is a mid view)
                   if not forced_now and not relaxed:
                       if t.cooldown and tid in seq[-t.cooldown:] and t.hero: continue
                       if t.cooldown and not t.hero and seq and seq[-1] == tid and sum(1 for x in seq[-t.max_consecutive:] if x == tid) >= t.max_consecutive: continue
@@ -304,8 +322,9 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
                       pt = lib[seq[-1]]; pen += (st.pen_family if pt.family == t.family else 0.0) + (st.pen_scale if pt.scale == t.scale else 0.0)
                   share = (b['secs'].get(tid, 0.0) + d) / (B * beat_s); cap = st.share_caps.get(tid, t.max_share) * 0.7
                   pen += st.pen_share * max(0.0, share - cap) ** 2 * d ** st.dur_power
+                  glide = st.w_glide if joined[k] and seq and PN.glide_pair(seq[-1], tid) else 0.0                 # two shots of one clip that can glide: no hard cut needed on the beat
                   first = st.w_first if tid not in b['uses'] else 0.0; keep = st.w_keep if st.prefer.get(wids[k]) == tid else 0.0
-                  sc = b['true'] + base - pen + first + keep
+                  sc = b['true'] + base - pen + first + keep + glide
                   nxt.append((sc + st.temperature * rng.gumbel(), sc, b, tid, d))
           if nxt: break
         if not nxt: raise O.Infeasible('every technique hit a limit (cooldown, caps): loosen the caps or add clips')
@@ -313,8 +332,13 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
         for noisy, sc, b, tid, d_ in nxt[:st.beam * 3]:
             t = lib[tid]; new.append(dict(score=noisy, true=sc, seq=b['seq'] + [tid], uses={**b['uses'], tid: b['uses'].get(tid, 0) + 1}, secs={**b['secs'], tid: b['secs'].get(tid, 0.0) + d_}, hero=b['hero'] + (d_ if t.hero else 0.0)))
         beams = sorted(new, key=lambda x: -x['score'])[:st.beam]
-    best = max(beams, key=lambda x: x['true']); out = []
-    for k, (w, tid) in enumerate(zip(windows, best['seq'])):
+    best = max(beams, key=lambda x: x['true']); out = []; seq = list(best['seq'])
+    for k, tid in enumerate(seq):                                                                          # a close view of you with no mid view next to it (the search had to relax its rules) is a mid view: it is for gliding in or out of one
+        if tid != 'selfie_close' or windows[k].fixed or st.tech_force.get(wids[k]) == 'selfie_close': continue
+        if not ((joined[k] and k > 0 and seq[k - 1] == 'selfie_hold') or (k + 1 < len(seq) and joined[k + 1] and seq[k + 1] == 'selfie_hold')) and any(o[0] == 'selfie_hold' for o in options[k]):
+            seq[k] = 'selfie_hold'
+            if getattr(windows[k], 'view', None) == 'close': warnings.append(f"{wids[k]}: the close view of you was asked for but there is no mid view of you next to it to glide with (the close view is for the windows of a talking stretch cut into shots); the planner chose the mid view")
+    for k, (w, tid) in enumerate(zip(windows, seq)):
         orig = getattr(w.cand, 'orig', None) or w.cand; cs = round(w.abs_start, 3)
         sg = Seg(start=starts[k], beats=w.beats, cand=orig, tech=lib[tid], in_s=round(cs - orig.start_s, 3), clip_index=w.clip_index, clip_start_s=cs, variant_seed=int(rng.integers(0, 2 ** 31 - 1)), forced=w.forced)
         sg._beat_s = beat_s; sg.parts = dict(wid=wids[k], speech=bool(getattr(w, 'speech', False)), options=[dict(tech=o[0], score=round(o[1], 3)) for o in options[k]], fixed=w.fixed, warnings=warnings if k == 0 else []); out.append(sg)

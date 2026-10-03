@@ -14,7 +14,7 @@ difference), narrow where they do not (two copies of a near object are never mix
 per ray."""
 import cv2
 import numpy as np
-from strata360.render import photo as ph
+from strata360.render import camera as cam, photo as ph
 
 COLS = 1024                 # seam columns (0.35 degrees each)
 BAND_COLS = 2048            # band columns (2 per seam column)
@@ -27,6 +27,8 @@ AGREE, DISAGREE = 0.004, 0.012   # structural disagreement (gradient difference 
 DIFF_W, CENTRE_W, TEMPORAL_W, TEMPORAL_NORM_DEG, TEMPORAL_CLAMP_DEG = 1.0, 0.15, 0.5, 0.5, 2.0
 COVERAGE_MIN, COVERAGE_W, COVERAGE_BLOCKED, FORBIDDEN = 0.5, 6.0, 0.02, 1.0e6
 MAX_STEP, STEP_PENALTY, SMOOTH_COLS, WIDTH_SMOOTH_COLS = 2, 0.03, 1.5, 3.0
+PERSON_W, PERSON_SIDE_W, PERSON_MARGIN_DEG = 8.0, 0.4, 1.5      # cost of a seam through a person (and 1.5 degrees round them: the feather), and the small cost of leaving a person on the lens that sees them more obliquely
+PERSON_WIDTH = 0.3                                              # a person's width as a share of their height
 EDGE_RAMP_DEG = 0.5         # validity ramp of a lens below its field-of-view limit where the seam decides the mix
 
 
@@ -57,6 +59,30 @@ def solve_dp(cost, max_step=MAX_STEP, step_penalty=STEP_PENALTY):
     r = int(np.argmin(acc)); path = np.zeros(2 * C, int); path[-1] = r
     for c in range(2 * C - 1, 0, -1): r = int(np.clip(r + back[r, c], 0, R - 1)); path[c - 1] = r
     return path[C:]
+
+
+def person_cost(people, lat_rows, cols=COLS):
+    """The extra cost, (len(lat_rows), cols), of putting the seam at each boundary row (latitude `lat_rows`, degrees) in each column for the people in the band. `people` is [(lat, lon, height)] in degrees: where each is in the seam layout (latitude from the seam circle toward the master lens, longitude
+    around the lens axis) and how tall (their width follows). A seam through a person (or within the feather's reach of them) costs PERSON_W, so it goes round them where the +-9 degree band allows; and the side matters a little: a person nearer the master lens is better left to it (the seam on the slave
+    side of them) and the other way round, as a lens sees them less obliquely near its axis. Never blended: a seam inside the feather would show both copies of a person seen from two viewpoints."""
+    out = np.zeros((len(lat_rows), cols), np.float32); lon_of = (np.arange(cols) + 0.5) / cols * 360.0 - 180.0
+    for lat, lon, h in people or []:
+        hw = max(PERSON_WIDTH * h / 2.0, 2.0) + PERSON_MARGIN_DEG; lat_lim = BAND_DEG + hw
+        if abs(lat) > lat_lim: continue
+        near = np.abs((lon_of - lon + 180.0) % 360.0 - 180.0) <= max(h / 2.0, 5.0)
+        if not near.any(): continue
+        inside = np.abs(lat_rows - lat) <= hw; beyond = (lat_rows > lat + hw) if lat > 0 else (lat_rows < lat - hw)
+        out[np.ix_(inside, near)] += PERSON_W; out[np.ix_(beyond, near)] += PERSON_SIDE_W
+    return out
+
+
+def people_in_layout(boxes, body_of):
+    """[(lat, lon, height)] in degrees for world-frame boxes [(yaw, pitch, height_deg)] (render/final.py hands them over): `body_of` turns a world direction (x east, y ahead, z up) into the body frame; the layout is the polar-axis one (`Seam.master_share`)."""
+    out = []
+    for yaw, pitch, h in boxes:
+        d = cam.direction(np.radians(yaw), np.radians(pitch)); b = np.asarray(body_of(d), float)
+        out.append((float(np.degrees(np.arcsin(np.clip(b[1], -1, 1)))), float(np.degrees(np.arctan2(b[2], b[0]))), float(h or 40.0)))
+    return out
 
 
 class Seam:
@@ -97,8 +123,8 @@ class SeamCarver:
             out.append((y, cov))
         return out
 
-    def carve(self, img_m, img_s, prior=None, warp=None):
-        """Carve the seam from two decoded lens frames (uint16 RGB code values, 3840 x 3840). `prior` (a Seam from the neighbouring frame) adds the hold and the clamp."""
+    def carve(self, img_m, img_s, prior=None, warp=None, people=None):
+        """Carve the seam from two decoded lens frames (uint16 RGB code values, 3840 x 3840). `prior` (a Seam from the neighbouring frame) adds the hold and the clamp; `people` ([(lat, lon, height)], see `person_cost`) steers the seam round them (none: as before, which the proxies rely on)."""
         (A, cA), (B, cB) = self.band(img_m, img_s, warp); h = lambda x: x.reshape(BAND_ROWS, COLS, 2).mean(2)             # to seam columns
         a, b, ca, cb = h(A), h(B), h(cA), h(cB); R = BAND_ROWS; S = R + 1; w = max(int(round(COST_WINDOW_DEG / self.row_deg)), 1)
         D = np.abs(a - b); cs = np.concatenate([np.zeros((1, COLS), np.float32), np.cumsum(D, 0)]); s_idx = np.arange(S)
@@ -109,6 +135,8 @@ class SeamCarver:
         cov = COVERAGE_W * (cm + (csl[R] - csl))
         blind = np.minimum(ca, cb) < COVERAGE_BLOCKED; bs = np.concatenate([np.zeros((1, COLS), np.float32), np.cumsum(blind, 0)]); forb = (bs[hi] - bs[lo]) > 0
         cost = DIFF_W * diff + cov + CENTRE_W * (np.abs(s_idx - R / 2.0) / (R / 2.0))[:, None]; cost = np.where(forb, FORBIDDEN, cost).astype(np.float32)
+        pcost = person_cost(people, self.lat_rows, COLS) if people else None
+        if pcost is not None: cost = cost + pcost
         used = False
         if prior is not None and len(prior.lat) == COLS:
             p = (BAND_DEG - np.degrees(prior.lat)) / self.row_deg                                               # prior seam in boundary rows
@@ -120,7 +148,9 @@ class SeamCarver:
         gA = np.abs(np.diff(a, axis=0, prepend=a[:1])) + np.abs(np.diff(a, axis=1, prepend=a[:, -1:])); gB = np.abs(np.diff(b, axis=0, prepend=b[:1])) + np.abs(np.diff(b, axis=1, prepend=b[:, -1:]))
         G = np.abs(gA - gB) * 0.5; gcs = np.concatenate([np.zeros((1, COLS), np.float32), np.cumsum(G, 0)]); s_c = np.clip(np.round((BAND_DEG - lat) / self.row_deg).astype(int), 0, R)
         lo_c = np.clip(s_c - w, 0, R); hi_c = np.clip(s_c + w, 0, R); resid = (gcs[hi_c, np.arange(COLS)] - gcs[lo_c, np.arange(COLS)]) / np.maximum(hi_c - lo_c, 1)
-        t = _smoothstep((resid - AGREE) / (DISAGREE - AGREE)); width = _gauss_circular(WIDE_DEG + (NARROW_DEG - WIDE_DEG) * t, WIDTH_SMOOTH_COLS)
+        t = _smoothstep((resid - AGREE) / (DISAGREE - AGREE))
+        if pcost is not None: t = np.maximum(t, (pcost[s_c, np.arange(COLS)] >= PERSON_W).astype(np.float32))                # a seam that has to cross a person (too big to go round) is a hard narrow one: never two viewpoints of a person mixed
+        width = _gauss_circular(WIDE_DEG + (NARROW_DEG - WIDE_DEG) * t, WIDTH_SMOOTH_COLS)
         info = dict(mean_lat_deg=float(lat.mean()), max_abs_lat_deg=float(np.abs(lat).max()), mean_half_width_deg=float(width.mean()), narrow_columns=int((t > 0.5).sum()), forced_columns=forced, used_prior=used,
                     mean_residual=float(resid.mean()))
         return Seam(np.radians(lat), np.radians(width), info)

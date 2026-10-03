@@ -65,6 +65,13 @@ def transcript_lines(cdir, label):
     return out
 
 
+def look_of(cdir, scale):
+    """How good the picture of a clip is (scenes v3, edit/quality_scale.py): the scenery ahead and behind on this race's own 0..10 scale, and the clarity (1 to 5); None for a clip without the ratings."""
+    from strata360.edit import quality_scale as QS
+    try: return QS.look(json.load(open(os.path.join(cdir, 'scenes.json'))), scale)
+    except (OSError, ValueError): return None
+
+
 def scene_summary(cdir):
     p = os.path.join(cdir, 'scenes.json')
     if not os.path.exists(p): return {}
@@ -80,7 +87,7 @@ def scene_summary(cdir):
 
 
 MAX_GAP_S = 45.0                       # the longest a gap is shown in the film (edit/synthetic.default_seconds caps at the same)
-FLYOVER_NOTE = 'a 3D terrain flyover: needs the user\'s approval to render, minutes of machine time'
+FLYOVER_NOTE = 'a 3D terrain flyover: the default for a gap, shows the land crossed'
 
 
 def you_views(cands):
@@ -133,7 +140,7 @@ def build(folder, tz=None):
     from strata360.edit import project as PJ
     from strata360.gps import track, context as X
     cfg = config.load(folder); rd = config.race_dir(folder); notes = N.load(folder); tp = config.track_path(folder, cfg); tr = track.load(tp) if tp else None; tz = tz or cfg.get('timezone', 'Europe/Brussels')
-    clips, missing = PJ.load_clips(folder); out = []
+    clips, missing = PJ.load_clips(folder); out = []; from strata360.edit import quality_scale as QS; scale = QS.project_scale(os.path.join(rd, 'clips'))
     for c in sorted(clips, key=lambda c: c['start_utc']):
         cdir = os.path.join(rd, 'clips', c['id']); label = label_of(c['id']); t0 = dt.datetime.fromisoformat(c['start_utc'].replace('Z', '+00:00')).timestamp(); dur = float(c['duration_s'])
         usable = merge([(x['start_s'], x['end_s']) for x in c['candidates']]); usable_s = sum(b - a for a, b in usable)
@@ -145,7 +152,7 @@ def build(folder, tz=None):
         if os.path.exists(pl):
             pj = json.load(open(pl))
             if pj.get('covered') and pj.get('summary'): d['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '')
-        d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
+        d['look'] = look_of(cdir, scale); d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
         d['speech_s'] = round(sum(l['t1'] - l['t0'] for l in d['lines']), 1); d['speech_words'] = sum(l['words'] for l in d['lines']); out.append(d)
     out = sorted(out + gap_clips(folder, tr, tz), key=lambda c: c['start_utc'])
     speech_s = sum(c['speech_s'] for c in out); speech_w = sum(c['speech_words'] for c in out)
@@ -175,11 +182,13 @@ def render(pack, with_usable=False, marks=None):
         if c.get('synthetic'):
             g = c.get('gap') or {}; pl = c.get('planned')
             L.append(f"NO FOOTAGE: a gap of {c['race_s'] / 3600:.1f} h between clips ({g.get('local_start')} to {g.get('local_end')}, km {g.get('km_start')} to {g.get('km_end')}, +{g.get('ascent_m')} m{', ' + g['daylight'] if g.get('daylight') else ''}); {int(round(100 * (g.get('moving_share') or 0)))}% of it spent moving. "
-                     f"Fill it with a generated clip: a 2D map (the route drawn as the runner moves along it) or a 3D terrain flyover (needs the user's approval to render), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
+                     f"Fill it with a generated clip: a generated clip (the planner draws it as a 2D map or a 3D terrain flyover: you only give its length), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
                      + (f" Already planned: {pl['kind']}, {pl['seconds']} s ({pl['status']})." if pl else ''))
         if c.get('track'): L.append('track: ' + c['track'])
         if c.get('place'): L.append('place: ' + c['place'])
         s = c.get('scene') or {}
+        lk = c.get('look')
+        if lk and (lk.get('ahead') is not None or lk.get('behind') is not None): L.append('picture quality (scenery on this race\'s own 0 worst to 10 best scale, people ignored; clarity 1 foggy or wet to 5 sharp): ' + ', '.join(x for x in [f"scenery {lk['ahead']:.1f} ahead" if lk.get('ahead') is not None else '', f"{lk['behind']:.1f} behind" if lk.get('behind') is not None else '', f"clarity {lk['clarity_ahead']:.1f} ahead" if lk.get('clarity_ahead') is not None else '', f"{lk['clarity_behind']:.1f} behind" if lk.get('clarity_behind') is not None else ''] if x))
         if s: L.append('camera sees: ' + '; '.join(x for x in [', '.join(s.get('settings') or []), ('weather ' + ', '.join(s['weather'])) if s.get('weather') else '', ('lighting ' + ', '.join(s['lighting'])) if s.get('lighting') else '', ('crowd ' + ', '.join(s['crowd'])) if s.get('crowd') and s['crowd'] != ['none'] else '', ('; '.join(s['seen'])) if s.get('seen') else '', ('lens problems: ' + ', '.join(s['lens_problems'])) if s.get('lens_problems') else ''] if x))
         yv = c.get('you_views')
         if yv and (yv['close'] >= 0.3 or yv['far'] >= 0.3): L.append(f"views of you (ask for one with \"view\" on a clip or b-roll item): mid {yv['mid'] * 100:.0f}% of the usable time, close (a face zoom) {yv['close'] * 100:.0f}%, far (ultra wide, the whole body and the surroundings) {yv['far'] * 100:.0f}%")

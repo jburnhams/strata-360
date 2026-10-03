@@ -29,6 +29,14 @@ def read_frames(osv, djmd_stream=3):
     return _cached(osv, f'frames{djmd_stream}', lambda: _read_frames(osv, djmd_stream))
 
 
+def has_dropped_frames(osv):
+    """Did the camera drop frames in this clip? Its timestamps then jump (more than 1.5 steps between two frames). Such a clip's video has undecodable frames after the jump (the references are missing): the hardware decoder silently leaves them out, which pairs the two lenses out of step, so it is
+    decoded in software with the damaged frames kept (render/flat.py `decoder`). The rows of `read_frames` are one per frame, in step with the pictures: no shift is needed."""
+    ts = np.asarray(read_frames(osv)['ts_us'], float)
+    if len(ts) < 3: return False
+    d = np.diff(ts); step = float(np.median(d)); return step > 0 and bool((d > 1.5 * step).any())
+
+
 def _read_frames(osv, djmd_stream=3):
     ts, q, acc = [], [], []
     for pk in packets(osv, djmd_stream):

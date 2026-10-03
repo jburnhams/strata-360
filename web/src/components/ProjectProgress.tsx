@@ -12,7 +12,7 @@ const Bar = ({ pct }: { pct: number }) => (
   <div className="h-2 overflow-hidden rounded-full bg-stone-200 dark:bg-stone-800"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${pct}%` }} /></div>
 )
 
-export default function ProjectProgress({ folder }: { folder: string }) {
+export default function ProjectProgress({ folder, onResults }: { folder: string; onResults?: () => void }) {
   const p = usePoll<Progress>(() => api.progress(folder), 2000, [folder])
   const [redo, setRedo] = useState<string | null | undefined>(undefined) // undefined = closed, null = all stages, string = that stage
   const cov = usePoll(() => api.coverage(folder).catch(() => null), 10000, [folder])
@@ -50,7 +50,7 @@ export default function ProjectProgress({ folder }: { folder: string }) {
       )}
       {!!p.needs?.length && <p className="mt-3 text-sm text-stone-500">To do: {p.needs.map(n => NEEDS[n] ?? n).join(', ')}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-        {p.state === 'complete' && <button className="rounded-lg bg-emerald-700 px-4 py-2 text-white">Go to results and export</button>}
+        {p.state === 'complete' && <button className="rounded-lg bg-emerald-700 px-4 py-2 text-white" onClick={onResults}>Go to results and export</button>}
         {p.state !== 'complete' && !p.workers && (p.runnable ?? 0) > 0 && <button className="rounded-lg bg-emerald-700 px-4 py-2 text-white" onClick={() => api.run(folder)}>Start processing</button>}
         {!!p.workers && (
           <span className="text-stone-500">

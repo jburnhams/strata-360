@@ -1,0 +1,49 @@
+"""`face_view` stage: how clearly the wearer's FACE is seen, once a second, for the close view of you (implementation plan: the close view is for clear face shots, not the top of the head).
+
+At every second the wearer was found (identity.json, as the `focus_samples`), a stabilised crop of the proxy video around them is taken (analysis/head_track.py) and YOLO pose is run on it (analysis/head_detect.py, in `.venv-vision`). The face is clear when its head pose says it is looking towards the camera: not tilted forward (the picture is then the top of the head) and not in profile.
+Output `face_view.json`: samples [{t, score, pitch, yaw}]: the HEAD POSE of the wearer's face (insightface 3D landmarks, in the crop) and score 1.0 when it is clear (found, pitch not below MIN_PITCH, yaw within MAX_YAW), 0.3 when found but tilted down or turned away, 0 when no face is found. (Ears are no use: a hat or a hood hides them.)"""
+import json, os, subprocess, tempfile
+
+import cv2, numpy as np
+
+from strata360.analysis import head_track as HT, views
+
+CLEAR = 0.5                   # a sample counts as a clear face from this score
+MIN_DET, MIN_PITCH, MAX_YAW = 0.5, -50.0, 45.0   # a face is clear when it is found (det score), not tilted forward (head pitch as the crop sees it: a face looking at the camera from below the stick reads about -10 to -30; looking down at the ground, -60 and beyond) and not turned away (yaw)
+
+
+def verdict(face):
+    """(score, pitch, yaw) for one detected face {box, score, pose}: score 1.0 when it is clear (found well enough, pitch not below MIN_PITCH, yaw within MAX_YAW), else 0.3; (0.0, None, None) when there is no face."""
+    if not face: return 0.0, None, None
+    pitch, yaw = face['pose'][0], face['pose'][1]
+    return (1.0 if (face['score'] >= MIN_DET and pitch >= MIN_PITCH and abs(yaw) <= MAX_YAW) else 0.3), pitch, yaw
+
+
+def analyse(clip_dir, osv, log=print):
+    samples = sorted(views.focus_samples(clip_dir, osv), key=lambda x: x['t']); pj = os.path.join(clip_dir, 'proxy.json'); proxy = os.path.join(clip_dir, 'proxy.mp4')
+    if not samples or not os.path.exists(pj) or not os.path.exists(proxy): return dict(samples=[], note='no wearer samples or no proxy')
+    frames = json.load(open(pj))['frames']; ts = np.array([f['t_s'] for f in frames]); idx = [int(np.argmin(np.abs(ts - x['t']))) for x in samples]; order = sorted(set(idx))
+    probe = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', proxy], capture_output=True, text=True).stdout.strip().split(','); W, H = int(probe[0]), int(probe[1]); tmp = tempfile.mkdtemp(prefix='s360face_')
+    where = {k: j for j, k in enumerate(order)}; crops = {}
+    for k in order:                                                                                      # one frame at a time by seeking (the proxy is written at a fixed 25 fps, so frame k is at k / 25 s)
+        for kk in (k, k - 1, k - 2):                                                                     # (proxy.json can list a frame or two past the last one in the video: the nearest earlier frame stands in)
+            r = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{kk / 25.0:.4f}', '-i', proxy, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-'], capture_output=True)
+            if len(r.stdout) >= W * H * 3: break
+        if len(r.stdout) < W * H * 3: raise RuntimeError(f'face_view: could not read proxy frame {k} of {os.path.basename(clip_dir)}: {r.stderr.decode(errors="replace")[-200:]}')
+        fr = np.frombuffer(r.stdout, np.uint8)[:W * H * 3].reshape(H, W, 3); x = samples[idx.index(k)]; mx, my = HT.crop_map(x['yaw'], x['pitch'], W, H)
+        cv2.imwrite(os.path.join(tmp, f'c{where[k]:05d}.jpg'), cv2.remap(fr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP), [cv2.IMWRITE_JPEG_QUALITY, 92]); crops[k] = where[k]
+    py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..'); out_json = os.path.join(tmp, 'det.json')
+    subprocess.run([py, '-m', 'strata360.analysis.head_detect', tmp, out_json, '--pose'], check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
+    det = json.load(open(out_json))['frames']; out = []
+    for x, k in zip(samples, idx):
+        score = 0.0; pitch = yaw = None
+        if k in crops:
+            d = det.get(str(crops[k]), {}); faces = d.get('faces', []); ppl = d.get('people', [])
+            head = HT.head_from_people(ppl)                                                                                      # where the pose model puts the head (nose and eyes), else the middle of the crop
+            ref = (head[0], head[1]) if head else (HT.CROP_PX / 2, HT.CROP_PX / 2)
+            if faces:
+                f = min(faces, key=lambda f: np.hypot((f['box'][0] + f['box'][2]) / 2 - ref[0], (f['box'][1] + f['box'][3]) / 2 - ref[1])); pitch, yaw = f['pose'][0], f['pose'][1]
+                score, pitch, yaw = verdict(f)
+        out.append(dict(t=x['t'], score=round(score, 2), pitch=None if pitch is None else round(pitch, 1), yaw=None if yaw is None else round(yaw, 1)))
+    log(f'face_view: {sum(1 for o in out if o["score"] >= CLEAR)} of {len(out)} seconds with a clear face')
+    return dict(samples=out, clear=CLEAR)

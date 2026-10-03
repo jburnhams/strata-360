@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import type { TrackClip, TrackLine } from '../api'
+import type { ExtraLine, Poi, TrackClip, TrackLine } from '../api'
 import { nearestIndex } from '../trackMath'
 
-const GREEN = '#16a34a', GREY = '#78716c'
+const GREEN = '#16a34a', GREY = '#78716c', ROUTE = '#2563eb', RUN = '#a3a3a3'
 const canvasOk = () => { try { return !!document.createElement('canvas').getContext('2d') } catch { return false } }       // the canvas renderer is quicker for a long line; without a 2D context (some test environments) Leaflet draws SVG
 const MARK_W = 42, MARK_H = 22
 const FAN: [number, number][] = [[0, 0], [0, -MARK_H], [0, MARK_H], [-MARK_W, 0], [MARK_W, 0], [0, -2 * MARK_H], [0, 2 * MARK_H], [-MARK_W, -MARK_H], [MARK_W, -MARK_H], [-MARK_W, MARK_H], [MARK_W, MARK_H]]
@@ -22,18 +22,18 @@ const DETAIL_ZOOM_STEPS = 1.5          // this far in from the first view the ma
 // The race on a Leaflet map (the background is the server's map tiles when `background` is given, else the track on a plain ground). Zoom with the buttons, the wheel, a double click or touch; drag to pan; the arrows button resets the view.
 // Every clip has a marker at the middle of its stretch of track (the stretch is drawn thick; green = the newest script draft plays it), hover for its card, click to open it. Zooming in fetches the track for the
 // part in view in more detail. Hovering the track moves the cursor shared with the charts.
-export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, onOpenClip, fetchDetail, background }: {
-  background?: { url: string; tilePx: number }; base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
+export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, onOpenClip, fetchDetail, background, extras = [], pois = [] }: {
+  extras?: ExtraLine[]; pois?: Poi[]; background?: { url: string; tilePx: number }; base: TrackLine; clips: TrackClip[]; cursor: number | null; onCursor: (t: number | null) => void; onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void
   onOpenClip: (id: string) => void; fetchDetail: (bbox: [number, number, number, number]) => Promise<TrackLine>
 }) {
-  const el = useRef<HTMLDivElement>(null), marks = useRef<L.Marker[]>([]), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.Marker | null>(null), detail = useRef<L.Polyline | null>(null)
+  const el = useRef<HTMLDivElement>(null), marks = useRef<L.Marker[]>([]), map = useRef<L.Map | null>(null), layer = useRef<L.LayerGroup | null>(null), dot = useRef<L.Marker | null>(null), detail = useRef<L.Polyline | null>(null), baseLine = useRef<L.Polyline | null>(null), extra = useRef<L.LayerGroup | null>(null)
   const props = useRef({ base, onCursor, onHoverClip, onOpenClip, fetchDetail }); props.current = { base, onCursor, onHoverClip, onOpenClip, fetchDetail }   // handlers read the latest props without rebuilding the map
 
   useEffect(() => {
     if (!el.current || !base.lat.length) return
     const canvas = canvasOk(); const m = L.map(el.current, { preferCanvas: canvas, ...(canvas ? {} : { renderer: L.svg() }), attributionControl: false, zoomSnap: 0.5, minZoom: 1, scrollWheelZoom: false }); map.current = m
     m.on('click', () => m.scrollWheelZoom.enable()); m.getContainer().addEventListener('mouseleave', () => m.scrollWheelZoom.disable())          // the wheel scrolls the page until you click the map, then it zooms
-    const pts = base.lat.map((la, i) => [la, base.lon[i]] as [number, number]); const line = L.polyline(pts, { color: '#15803d', weight: 2.5, opacity: 0.9 }).addTo(m)
+    const pts = base.lat.map((la, i) => [la, base.lon[i]] as [number, number]); const line = L.polyline(pts, { color: '#15803d', weight: 2.5, opacity: 0.9 }).addTo(m); baseLine.current = line; extra.current = L.layerGroup().addTo(m)
     m.fitBounds(line.getBounds(), { padding: [20, 20] }); const home = m.getBounds(); const z0 = m.getZoom(); layer.current = L.layerGroup().addTo(m)
     line.on('mousemove', (e: L.LeafletMouseEvent) => {                                         // the nearest point of the track to the mouse
       const b = props.current.base; let best = 0, bd = Infinity
@@ -57,7 +57,7 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
       }, 250)
     }
     m.on('moveend', more); m.on('zoomend', () => spread(m, marks.current))
-    return () => { window.clearTimeout(timer); m.remove(); map.current = null; layer.current = null; dot.current = null; detail.current = null }
+    return () => { window.clearTimeout(timer); m.remove(); map.current = null; layer.current = null; dot.current = null; detail.current = null; baseLine.current = null; extra.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base])
 
@@ -67,6 +67,21 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
     const t = L.tileLayer(background.url, { tileSize: background.tilePx, zoomOffset: retina ? -1 : 0, maxZoom: 19, maxNativeZoom: retina ? 19 : 18, keepBuffer: 2 }).addTo(m); t.setZIndex(0)
     return () => { t.remove() }
   }, [background?.url, background?.tilePx, base])         // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {                                                                             // the other tracks (each run and each route) under the race track, and the points of interest of all of them
+    const g = extra.current; if (!g) return; g.clearLayers()
+    for (const e of extras) {
+      const pts = e.lat.map((la, i) => [la, e.lon[i]] as [number, number]); if (pts.length < 2) continue
+      const route = e.kind === 'route'
+      L.polyline(pts, { color: route ? ROUTE : RUN, weight: route ? 3 : 2, opacity: route ? 0.9 : 0.8, dashArray: route ? '6 6' : undefined, interactive: false }).bindTooltip(e.name).addTo(g)
+    }
+    baseLine.current?.bringToFront()
+    for (const p of pois) {
+      const icon = L.divIcon({ className: '', html: `<div data-poi="" style="width:12px;height:12px;border-radius:2px;transform:rotate(45deg);background:#f59e0b;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.5)"></div>`, iconSize: [12, 12], iconAnchor: [6, 6] })
+      const mk = L.marker([p.lat, p.lon], { icon, title: p.name || 'Point of interest', keyboard: false }).addTo(g)
+      if (p.name || p.desc) mk.bindTooltip(p.name + (p.ele != null ? ` · ${Math.round(p.ele)} m` : '') + (p.desc ? ` — ${p.desc}` : ''), { direction: 'top', offset: [0, -6] })
+    }
+  }, [extras, pois, base])
 
   useEffect(() => {                                                                             // the clips: the stretch each covers, and a marker with the clip number
     const g = layer.current; if (!g) return; g.clearLayers(); marks.current = []

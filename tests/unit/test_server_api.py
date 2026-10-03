@@ -274,12 +274,12 @@ class TestGapClipsApi(TestRaceMapData):
         assert client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True); cmd = fake_popen.instances[-1].cmd; assert 'gap-clip' in cmd and cmd[cmd.index('--clip') + 1] == 'G01'
         g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert g['rendering'] is True and client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json()['started'] is False
 
-    def test_a_clip_the_script_planned_is_not_rendered_until_it_is_approved(self, client, project, fake_popen):
+    def test_no_clip_waits_for_approval_even_one_an_older_plan_left_unapproved(self, client, project, fake_popen):
         from strata360.edit import synthetic as SY
         self.with_gap(project); f = project.folder; g = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]
         SY.upsert(f, SY.make(g, seconds=10, kind='flyover', approved=False)); c = client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]; assert c['approved'] is False
-        r = client.post('/api/gaps/render', json=dict(folder=f, id='G01')); assert r.status_code == 409 and 'not approved yet' in r.json()['detail'] and not fake_popen.instances
-        assert client.post('/api/gaps/approve', json=dict(folder=f, id='G01')).json()['approved'] is True and client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True)
+        assert client.post('/api/gaps/render', json=dict(folder=f, id='G01')).json() == dict(started=True) and fake_popen.instances                      # no approval step: an older plan's unapproved flyover renders when asked
+        assert client.post('/api/gaps/approve', json=dict(folder=f, id='G01')).json()['approved'] is True
         assert client.post('/api/gaps/approve', json=dict(folder=f, id='nope')).status_code == 404
         client.post('/api/gaps/clip', json=dict(folder=f, gap='G01', seconds=10, kind='flyover')); assert client.get('/api/gaps', params=dict(folder=f)).json()['gaps'][0]['clips'][0]['approved'] is True              # asking for it yourself is the approval
 
@@ -562,3 +562,65 @@ class TestClockApi:
         from strata360.pipeline import config as C; cfg = C.load(project.folder)
         assert cfg['camera_clock']['offset_seconds'] == 42.5
         assert cfg['camera_clock']['utc_offset_hours'] == 0.0
+
+class TestClipSounds:
+    def test_the_clip_audio_endpoint_serves_original_clean_and_background(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID)
+        for name in ('audio_original.flac', 'audio_clean.flac', 'audio_background.flac'): open(os.path.join(p.clip_dir(), name), 'wb').write(name.encode())
+        get = lambda kind: client.get('/api/clip/audio', params={'folder': p.folder, 'clip': CLIP_ID, 'kind': kind})
+        assert get('original').content == b'audio_original.flac' and get('clean').content == b'audio_clean.flac' and get('background').content == b'audio_background.flac'
+        os.remove(os.path.join(p.clip_dir(), 'audio_background.flac')); assert get('background').status_code == 404
+
+    def test_the_clip_detail_says_which_sounds_exist(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID); open(os.path.join(p.clip_dir(), 'audio_background.flac'), 'wb').write(b'x')
+        d = client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()
+        assert d['audio_files'] == dict(original=False, clean=False, background=True)
+
+
+def test_the_interpreters_hashlib_noise_never_reaches_a_job_log_shown_in_the_web():
+    from strata360.server import app as SRV
+    noisy = ['ERROR:root:code for hash blake2s was not found.', 'Traceback (most recent call last):', '  File "/x/lib/python3.13/hashlib.py", line 247, in <module>', '    globals()[__func_name] = __get_hash(__func_name)',
+             '                             ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^', 'ValueError: unsupported hash type blake2s', 'writing draft 2 of 3', 'Traceback (most recent call last):', '  File "script_draft.py", line 9, in main', 'KeyError: gemini']
+    assert SRV.clean_log(noisy) == ['writing draft 2 of 3', 'Traceback (most recent call last):', '  File "script_draft.py", line 9, in main', 'KeyError: gemini']      # a real traceback stays
+    assert SRV.clean_log([]) == []
+
+
+class TestProposeKeepsAScriptPlan:
+    def test_the_beat_planner_does_not_replace_a_film_planned_from_the_script_unless_told_to(self, client, project, monkeypatch):
+        from strata360.edit import project as PJ
+        monkeypatch.setattr(PJ, 'load', lambda f: dict(plan=dict(source='script'))); called = []; monkeypatch.setattr(PJ, 'propose', lambda f, s=None, o=None, keep=True: called.append(1) or dict(plan=None))
+        r = client.post('/api/edit/propose', json=dict(folder=project.folder)); assert r.status_code == 409 and 'planned from the script' in r.json()['detail'] and not called
+        assert client.post('/api/edit/propose', json=dict(folder=project.folder, replace=True)).status_code == 200 and called
+
+
+class TestTracksCollection:
+    """Several tracks per project: runs merge into the race track, routes only show on the overview map."""
+
+    def gpx(self, n=60, lat0=50.0, t0=1_770_000_000, route=False, wpt=False):
+        from datetime import datetime, timezone
+        tm = lambda i: '' if route else f'<time>{datetime.fromtimestamp(t0 + i, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}</time>'
+        pts = ''.join(f'<trkpt lat="{lat0 + i * 1e-4}" lon="5.0"><ele>10</ele>{tm(i)}</trkpt>' for i in range(n))
+        w = '<wpt lat="50.001" lon="5.0"><name>Aid 1</name></wpt>' if wpt else ''
+        return f'<?xml version="1.0"?><gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">{w}<trk><trkseg>{pts}</trkseg></trk><!--{"x" * 100}--></gpx>'.encode()
+
+    def test_upload_mark_merge_and_remove(self, client, project):
+        q = dict(folder=project.folder); up = lambda name, data, **kw: client.post('/api/tracks', params=dict(q, filename=name, **kw), content=data)
+        a = up('a.gpx', self.gpx(wpt=True)).json(); assert a['kind'] == 'run'
+        b = up('b.gpx', self.gpx(lat0=50.01, t0=1_770_001_000)).json(); assert b['kind'] == 'route'
+        r = client.post('/api/tracks/kind', json=dict(q, id=b['id'], kind='run')); assert r.status_code == 200 and r.json()['runs'] == 2 and r.json()['merged']['samples'] == 120
+        ov = client.get('/api/track', params=q).json(); assert ov['samples'] == 120                                           # the one race track is the merged runs
+        assert client.get('/api/tracks/line', params=dict(q, id='merged', limit=50)).json()['lat'] and client.get('/api/tracks/line', params=dict(q, id=a['id'])).status_code == 200
+        assert [p['name'] for p in client.get('/api/tracks', params=q).json()['pois']] == ['Aid 1']
+        assert client.post('/api/tracks/kind', json=dict(q, id='zzz', kind='run')).status_code == 404 and client.post('/api/tracks/kind', json=dict(q, id=a['id'], kind='x')).status_code == 400
+        r = client.delete('/api/tracks', params=dict(q, id=b['id'])); assert r.json()['runs'] == 1 and r.json()['merged'] is None and client.get('/api/track', params=q).json()['samples'] == 60
+        assert client.delete('/api/tracks', params=dict(q, id='zzz')).status_code == 404 and client.get('/api/tracks/line', params=dict(q, id='merged')).status_code == 404
+
+    def test_bad_files_are_refused(self, client, project):
+        q = dict(folder=project.folder)
+        assert client.post('/api/tracks', params=dict(q, filename='a.txt'), content=b'x' * 300).status_code == 400
+        assert client.post('/api/tracks', params=dict(q, filename='a.gpx'), content=b'<gpx>' + b'x' * 300).status_code == 400
+        assert client.get('/api/tracks', params=q).json()['tracks'] == []
+
+    def test_the_older_single_upload_still_works_and_counts_as_a_run(self, client, project):
+        q = dict(folder=project.folder); assert client.post('/api/track', params=dict(q, filename='t.gpx'), content=self.gpx()).status_code == 200
+        t = client.get('/api/tracks', params=q).json(); assert [(x['id'], x['kind']) for x in t['tracks']] == [('main', 'run')]

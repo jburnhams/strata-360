@@ -50,16 +50,16 @@ describe('TranscriptPanel', () => {
     expect(getByText('2 · 10 s')).toBeInTheDocument() // short('CAM_2')
   })
 
-  it('triggers onOpen when clicking a phrase', async () => {
+  it('does not leave the overview when a phrase is clicked (so words can be dragged and marked there)', async () => {
     mockGet('/api/transcript', { segments: [makeSeg({ clip: 'CAM_1', t0: 12.5, text: 'hello' })] })
     const onOpen = vi.fn()
 
     const { user, findByText } = setup(<TranscriptPanel folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} tz="UTC" onOpen={onOpen} />)
 
     const phrase = await findByText('hello', { exact: false })
-    await user.click(phrase.closest('span.cursor-pointer')!)
+    await user.click(phrase); await user.pointer([{ keys: '[MouseLeft>]', target: phrase }, { keys: '[/MouseLeft]' }])
 
-    expect(onOpen).toHaveBeenCalledWith('CAM_1', 12.5)
+    expect(onOpen).not.toHaveBeenCalled()
   })
 
   it('triggers onOpen when clicking a clip header', async () => {

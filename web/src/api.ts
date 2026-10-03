@@ -19,6 +19,11 @@ export interface TrackOverview {
 }
 export interface TrackSeries { points: number; start_utc: string; end_utc: string; duration_s: number; distance_km: number | null; t: number[]; km: (number | null)[]; alt: (number | null)[]; alt_lo: (number | null)[]; alt_hi: (number | null)[]; pace: (number | null)[]; moving: number[]; hr: (number | null)[] }
 export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
+export type TrackKind = 'run' | 'route'
+export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number }
+export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string }
+export interface TracksListing { tracks: TrackEntry[]; merged: { runs: string[]; samples: number; start_utc: string; end_utc: string; distance_km: number } | null; pois: Poi[]; runs: number }
+export interface ExtraLine { id: string; kind: TrackKind | 'merged'; name: string; lat: number[]; lon: number[] }
 export interface TrackClipFacts { local: string; daylight: string | null; elapsed_h: number | null; distance_km: number | null; percent: number | null; pace_min_km: number | null; gradient_pct: number | null; altitude_m: number | null; heart_rate: number | null; text: string }
 export interface TrackClip {
   id: string; label: string; start_utc: string; end_utc: string; duration_s: number; covered: boolean; used: boolean; used_s: number; moments?: number | null; usable_s?: number | null; scene?: { settings: string[]; weather: string[] }
@@ -87,10 +92,10 @@ export interface Unusable { start_s: number; end_s: number; usable: false; reaso
 export interface Sounds { seconds: Record<string, number>; windows: { t0: number; t1: number; cats: Record<string, number>; top: [string, number][] }[]; hints: Record<string, [string, number]> }
 export interface ClipDetail {
   sounds?: Sounds
-  audio_files?: { original: boolean; clean: boolean }
+  audio_files?: { original: boolean; clean: boolean; background?: boolean }
   id: string; note: string; time: Record<string, string | number | boolean | null>; video: Record<string, any>; camera?: Record<string, string>
   motion: Record<string, number | null> | null; audio: { summary: any; segments: { label: string; t0_s: number; t1_s: number }[] } | null
-  transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; clarity?: { t: number; yaw: number; pitch: number; score?: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
+  transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; clarity?: { t: number; yaw: number; pitch: number; score?: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
   places?: Places | null; exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string; overlay?: boolean } | null; track?: Record<string, any>; track_text?: string
 }
 export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string>; vo_must?: { folder: string; folder_ordered: boolean; clips: Record<string, string> } }
@@ -130,6 +135,20 @@ export const api = {
     if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
     return j as TrackOverview
   },
+  tracks: (folder: string) => call<TracksListing>('/api/tracks?' + q({ folder })),
+  addTrack: async (folder: string, file: File, kind?: TrackKind) => {
+    const r = await fetch('/api/tracks?' + q(kind ? { folder, filename: file.name, kind } : { folder, filename: file.name }), { method: 'POST', body: file })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(`${file.name}: ${j.detail || `HTTP ${r.status}`}`)
+    return j as TrackEntry
+  },
+  setTrackKind: (folder: string, id: string, kind: TrackKind) => call<TracksListing>('/api/tracks/kind', { folder, id, kind }),
+  removeTrack: async (folder: string, id: string) => {
+    const r = await fetch('/api/tracks?' + q({ folder, id }), { method: 'DELETE' }); const j = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
+    return j as TracksListing
+  },
+  tracksLine: (folder: string, id: string, limit = 3000) => call<{ id: string; lat: number[]; lon: number[] }>('/api/tracks/line?' + q({ folder, id, limit: String(limit) })),
   clip: (folder: string, clip: string) => call<ClipDetail>('/api/clip?' + q({ folder, clip })),
   previewUrl: (folder: string, clip: string) => '/api/preview?' + q({ folder, clip }),
   thumbUrl: (folder: string, clip: string, v: string, overlay = false) => '/api/thumb?' + q({ folder, clip, v, ...(overlay ? { overlay: '1' } : {}) }),     // v: busts the browser cache when the picture changes
@@ -156,7 +175,7 @@ export const api = {
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
-  clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean') => '/api/clip/audio?' + q({ folder, clip, kind }),
+  clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean' | 'background') => '/api/clip/audio?' + q({ folder, clip, kind }),
   editScript: (folder: string, texts: Record<string, string>) => call<{ saved: string | null; speaking: boolean }>('/api/script/edit', { folder, texts }),
   voiceoverUse: (folder: string, seg: number, use: 'synth' | 'recorded') => call<{ ok: boolean }>('/api/voiceover/use', { folder, seg, use }),
   voiceoverAudio: (folder: string, seg?: number, source?: string, track?: string) => '/api/voiceover/audio?' + q(seg === undefined ? (track ? { folder, track } : { folder }) : { folder, seg: String(seg), source: source ?? 'synth' }),
@@ -190,7 +209,7 @@ export const api = {
   whoMeUrl: (folder: string, v: number) => '/api/who/me?' + q({ folder, v: String(v) }),
   setWho: (folder: string, me: number[]) => call<{ ok: boolean }>('/api/who', { folder, me }),
   editGet: (folder: string) => call<EditResponse>('/api/edit?' + q({ folder })),
-  propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; keep?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
+  propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; keep?: boolean; replace?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
   override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState }>('/api/edit/override', { folder, ...body }),
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),

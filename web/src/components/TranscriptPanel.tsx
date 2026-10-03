@@ -64,7 +64,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
                 <span key={i} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}
                   className={`mr-1 rounded px-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-950 ${s.who === 'wearer' ? 'font-medium' : ''} ${s.flagged ? 'italic opacity-50' : ''}`}>
                   <PlayIcons folder={folder} clip={s.clip} t0={s.play0 ?? s.t0} t1={s.play1 ?? s.t1} original={!!info[s.clip]?.audio_original} clean={!!info[s.clip]?.audio_clean} />
-                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`cursor-pointer ${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} onText={() => onOpen(s.clip, s.t0)} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1), used } : undefined} />
+                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1), used } : undefined} />
                 </span>
               ))}
             </p>

@@ -44,9 +44,26 @@ class EquirectRenderer(r4.Renderer):
 
 
 def decoder(osv, stream, every):
-    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
+    cmd = ['ffmpeg', '-v', 'error', *r4.decode_args(osv)[0], '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))'", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
     return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
+
+
+def clip_boxes(out, osv):
+    """t (clip seconds) -> [(yaw, pitch, height_deg)] of the people seen near t, from the analysis files next to the proxy (edit/clip_views.py), so the seam can be carved round them as in the final render; None when switched off (`STRATA_SEAM_PEOPLE=0`)
+    or the clip has no such files yet (the first proxy of a clip is made before the people are found: nobody is known then)."""
+    if os.environ.get('STRATA_SEAM_PEOPLE') == '0': return None
+    try:
+        from strata360.edit import clip_views as CV
+        return CV.load(os.path.dirname(os.path.abspath(out)), osv)['boxes']
+    except Exception: return None
+
+
+def seam_people(boxes, M, t):
+    """The people near clip time `t` in the seam's layout (render/seam.py `people_in_layout`), for the frame whose stabilisation matrix is `M`; None without boxes."""
+    if boxes is None: return None
+    from strata360.render import seam as SM
+    return SM.people_in_layout(boxes(float(t)), lambda d: M @ d) or None
 
 
 def make_proxy(*a, **k):
@@ -57,7 +74,7 @@ def _make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt'
     """encoder 'h264' (the pipeline default): H.264 from VideoToolbox with the clip's audio, one file for analysis AND the browser player; 'vt' HEVC / 'x265' for archival proxies."""
     """Render the canonical analysis proxy and its JSON sidecar (next to `out`, .json). Returns the sidecar dict."""
     W, H = map(int, size.split('x')); t0 = time.time()
-    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True
+    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True; boxes = clip_boxes(out, osv)
     tel = read_frames(osv); pts = video_pts(osv, 0); n_src = len(pts)
     idx = list(range(0, n_src, every))
     if frames_limit: idx = idx[:frames_limit]
@@ -73,11 +90,12 @@ def _make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt'
     for j, k in enumerate(idx):
         cm = r4.read_frame(dm); cs = r4.read_frame(ds)
         if cm is None or cs is None: break
-        R.update_seam(cm, cs, reset=(j == 0)); img = R.render(cm, cs, R.stab_matrix(tel['quat'][k]), None)
+        M = R.stab_matrix(tel['quat'][k]); R.update_seam(cm, cs, reset=(j == 0), people=seam_people(boxes, M, pts[k] - pts[0])); img = R.render(cm, cs, M, None)
         enc.stdin.write(np.ascontiguousarray(img).tobytes())
         frames.append(dict(proxy_frame=j, source_frame=int(k), t_s=round(float(pts[k] - pts[0]), 4)))
         if progress and j % 25 == 0: progress(j, len(idx))
     enc.stdin.close(); enc.wait(); dm.kill(); ds.kill()
+    if not frames_limit and len(frames) != len(idx): raise RuntimeError(f'the lens streams of {os.path.basename(osv)} gave {len(frames)} frames of the {len(idx)} expected: they would be paired out of step, so no proxy is made (a decoder dropped frames)')       # never a silent mismatch between the lenses
     if encoder == 'h264':                                                                            # add the clip's audio (AAC) and finish: one file for the detectors and the player
         subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', out, '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', final], check=True)
         os.remove(out); out = final
@@ -110,7 +128,7 @@ def make_preview(osv, out, size='2048x1024', bitrate='6M', progress=None, frames
     """Browser preview for the GUI player: the same upright, world-locked equirect as the proxy but at 25 fps (every 2nd source frame), H.264 8-bit (plays in every browser, seeks well)
     with the clip's audio (AAC). The GUI viewer projects it on a sphere (drag to pan, wheel to zoom) and can follow the runner's heading. Sidecar `<name>.json` has the per-frame source times."""
     W, H = map(int, size.split('x')); t0 = time.time(); every = 2
-    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True; tel = read_frames(osv); pts = video_pts(osv, 0); idx = list(range(0, len(pts), every))
+    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True; boxes = clip_boxes(out, osv); tel = read_frames(osv); pts = video_pts(osv, 0); idx = list(range(0, len(pts), every))
     if frames_limit: idx = idx[:frames_limit]
     dm, ds = decoder(osv, 1, every), decoder(osv, 0, every); tmp = out + '.video.mp4'
     enc = guard.popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', '25', '-i', '-',
@@ -119,7 +137,7 @@ def make_preview(osv, out, size='2048x1024', bitrate='6M', progress=None, frames
     for j, k in enumerate(idx):
         cm = r4.read_frame(dm); cs = r4.read_frame(ds)
         if cm is None or cs is None: break
-        R.update_seam(cm, cs, reset=(j == 0)); enc.stdin.write(np.ascontiguousarray(R.render(cm, cs, R.stab_matrix(tel['quat'][k]), None)).tobytes()); frames.append(round(float(pts[k] - pts[0]), 3))
+        M = R.stab_matrix(tel['quat'][k]); R.update_seam(cm, cs, reset=(j == 0), people=seam_people(boxes, M, pts[k] - pts[0])); enc.stdin.write(np.ascontiguousarray(R.render(cm, cs, M, None)).tobytes()); frames.append(round(float(pts[k] - pts[0]), 3))
         if progress and j % 50 == 0: progress(j, len(idx))
     enc.stdin.close(); enc.wait(); dm.kill(); ds.kill()
     dur = len(frames) / 25.0

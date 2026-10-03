@@ -23,3 +23,14 @@ def test_a_sunny_race_and_a_wet_race_each_use_the_full_scale_but_keep_raw_scores
 def test_missing_values_are_ignored_and_no_data_is_the_identity_scale():
     s = Q.fit([None, 4, 6, float('nan'), 8]); assert s['n'] == 3
     ident = Q.fit([]); assert Q.apply(ident, 7.0) == 7.0
+
+
+def test_a_project_scale_is_fitted_to_the_front_scores_of_every_clip_and_a_clips_look_uses_it(tmp_path):
+    import json, os
+    def clip(name, front, rear=(), clarity=4.0):
+        os.makedirs(tmp_path / name); items = [dict(view='front', scenery=v, clarity=clarity) for v in front] + [dict(view='rear', scenery=v, clarity=clarity - 1) for v in rear]
+        json.dump(dict(items=items), open(tmp_path / name / 'scenes.json', 'w'))
+    clip('a', [3, 4, 5, 5, 6]); clip('b', [4, 5, 5, 6, 7], rear=[2, 4]); os.makedirs(tmp_path / 'c'); (tmp_path / 'c' / 'scenes.json').write_text('not json')                      # an unreadable file is left out
+    sc = Q.project_scale(str(tmp_path)); assert sc['n'] == 10 and 3 <= sc['lo'] <= 4 and 6 <= sc['hi'] <= 7 and Q.front_scores(dict(items=[dict(view='rear', scenery=9)])) == [] and Q.front_scores(None) == []
+    lk = Q.look(json.load(open(tmp_path / 'b' / 'scenes.json')), sc); assert 4 < lk['ahead'] < 7 and lk['behind'] < lk['ahead'] and lk['clarity_ahead'] == 4.0 and lk['clarity_behind'] == 3.0
+    assert Q.project_scale(str(tmp_path / 'nothing')) == Q.fit([]) and Q.look(dict(items=[dict(view='front', scenic=0.4)]), sc) is None                                         # no ratings: the identity scale, no look

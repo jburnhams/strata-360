@@ -19,3 +19,30 @@ def fit(raw, lo_pct=LO_PCT, hi_pct=HI_PCT, min_spread=MIN_SPREAD):
 def apply(scale, raw):
     a = np.asarray(raw, float); out = np.clip((a - scale['lo']) / max(scale['hi'] - scale['lo'], 1e-9), 0.0, 1.0) * 10.0
     return float(out) if a.ndim == 0 else out
+
+
+def front_scores(scenes):
+    """The raw scenery scores (1 to 10, people ignored) of the front views in one clip's scenes.json (`scenery`, scenes stage v3); [] for an older file or none."""
+    return [float(i['scenery']) for i in (scenes or {}).get('items') or [] if i.get('view') == 'front' and isinstance(i.get('scenery'), (int, float))]
+
+
+def project_scale(clips_dir):
+    """The scale of a whole project: fitted to the front scenery scores of every clip's scenes.json under `clips_dir` (the race dir's `clips`). The identity scale (0 to 10) when there are none, so a project that has not run scenes v3 is unchanged."""
+    import json, os
+    raw = []
+    try: names = sorted(os.listdir(clips_dir))
+    except OSError: names = []
+    for n in names:
+        try: raw += front_scores(json.load(open(os.path.join(clips_dir, n, 'scenes.json'))))
+        except (OSError, ValueError): pass
+    return fit(raw)
+
+
+def look(scenes, scale):
+    """{ahead, behind, clarity_ahead, clarity_behind}: a clip's picture quality from its scenes.json: the mean scenery of the front and of the rear views on the project's 0..10 scale, and the mean clarity (1 to 5); None where there is nothing."""
+    out = {}
+    for view, key in (('front', 'ahead'), ('rear', 'behind')):
+        v = [float(i['scenery']) for i in (scenes or {}).get('items') or [] if i.get('view') == view and isinstance(i.get('scenery'), (int, float))]
+        c = [float(i['clarity']) for i in (scenes or {}).get('items') or [] if i.get('view') == view and isinstance(i.get('clarity'), (int, float))]
+        out[key] = round(float(apply(scale, np.mean(v))), 1) if v else None; out['clarity_' + key] = round(float(np.mean(c)), 1) if c else None
+    return out if any(x is not None for x in out.values()) else None

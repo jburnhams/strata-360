@@ -119,16 +119,16 @@ def test_the_backend_is_metal_on_a_mac_and_can_be_chosen(monkeypatch):
     monkeypatch.setattr(hw.sys, 'platform', 'darwin'); assert hw.mbgl_backend() == 'metal'; monkeypatch.setenv('STRATA_MBGL_BACKEND', 'vulkan'); assert hw.mbgl_backend() == 'vulkan'
 
 
-def test_a_frame_is_a_4k_rgb_picture_cropped_from_the_taller_render_with_the_overlay_on_top(series, tmp_path, fake_mbgl):
+def test_a_frame_is_a_4k_rgb_picture_cropped_from_the_taller_render_with_nothing_drawn_over_it(series, tmp_path, fake_mbgl):
     c = clip(series, size=(3840, 2160), tmp=tmp_path); f = c.frame(5); assert f.shape == (2160, 3840, 3) and f.dtype == np.uint8 and len(fake_mbgl.calls) == 1
     assert tuple(f[1000, 1900]) == (160, 90, 30)                                                                            # the fake's BGR (30, 90, 160) as RGB where nothing is drawn over it
-    assert (f != np.array([160, 90, 30], np.uint8)).any(axis=2).sum() > 1000                                                # the clock, distance, pace and credit were drawn
+    assert (f == np.array([160, 90, 30], np.uint8)).all()                                                                 # no overlay and no credit: the film adds its overlay; credits go with the distribution
     assert len(c.style['sources']['me']['data']['features']) == 2                                                             # the marker and its halo
     c.close()
 
 
 def test_the_credit_names_the_imagery_and_the_terrain(series, tmp_path):
-    c = clip(series, tmp=tmp_path, imagery='topo'); lines = [w.lines for w in c.overlay.widgets if hasattr(w, 'lines')]; assert lines == [['Map © OpenTopoMap (CC-BY-SA), data © OpenStreetMap contributors · Terrain © Mapterhorn']]
+    c = clip(series, tmp=tmp_path, imagery='topo'); assert c.credit == 'Map © OpenTopoMap (CC-BY-SA), data © OpenStreetMap contributors · Terrain © Mapterhorn' and not hasattr(c, 'overlay')
 
 
 def test_frame_k_shows_the_race_at_speedup_times_k_over_fps(series, tmp_path):
@@ -166,3 +166,24 @@ def test_bad_arguments_are_refused(series, tmp_path):
     with pytest.raises(ValueError): FO.FlyoverClip(series, T0 + 100, T0 + 100, 5, size=(1280, 720))
     with pytest.raises(ValueError): clip(series, size=(1000, 600), tmp=tmp_path)
     with pytest.raises(ValueError): clip(series, tmp=tmp_path, imagery='nope')
+
+
+def test_a_4k_frame_is_also_rendered_at_the_detail_that_reaches_the_horizon_as_the_background(series, tmp_path):
+    c = clip(series, size=(3840, 2160), tmp=tmp_path); cmd = c.args(3, 's', 'f', coarse=True); a = lambda f: cmd[cmd.index(f) + 1]
+    assert (a('-w'), a('-h'), a('-r')) == ('1920', '1230', '2') and float(a('-z')) == pytest.approx(c.cam['zoom'][3] + np.log2(1.5), abs=1e-3)       # 1920 wide at ratio 2 is the 4K size, at 1080p's tile detail
+    assert clip(series, size=(1920, 1080), tmp=tmp_path).coarse is False and clip(series, size=(3840, 2160), tmp=tmp_path, sharp=False).coarse is False
+
+
+def test_where_the_fine_render_has_no_tiles_the_coarse_one_shows_through_and_otherwise_only_one_render_is_made(series, tmp_path, monkeypatch):
+    calls = []; real = subprocess.run
+    def run(cmd, **kw):
+        if '-o' not in cmd or '-z' not in cmd: return real(cmd, **kw)
+        calls.append(cmd); arg = lambda f: cmd[cmd.index(f) + 1]; r = float(arg('-r')); w, h = int(int(arg('-w')) * r), int(int(arg('-h')) * r)
+        img = np.full((h, w, 3), (30, 90, 160), np.uint8)
+        if r == 1.0 and fine_gap[0]: img[:h // 4] = FO.BACKGROUND_BGR                                           # the fine render: nothing drawn along the top quarter
+        elif r != 1.0: img[:] = (200, 10, 10)                                                                    # the coarse one: a different colour all over
+        cv2.imwrite(arg('-o'), img); return subprocess.CompletedProcess(cmd, 0, '', '')
+    monkeypatch.setattr(FO.subprocess, 'run', run); fine_gap = [True]
+    c = clip(series, size=(3840, 2160), tmp=tmp_path); img = c.still(3)
+    assert len(calls) == 2 and img.shape == (2160, 3840, 3) and tuple(img[10, 1920]) == (10, 10, 200) and tuple(img[1500, 1920]) == (160, 90, 30)      # RGB: coarse (200,10,10) on top, fine (160,90,30) below
+    fine_gap[0] = False; calls.clear(); c.still(4); assert len(calls) == 1                                       # nothing missing: one render

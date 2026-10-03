@@ -24,17 +24,18 @@ from strata360.overlay.tiles import Tiles, STYLES, world
 
 REF_W, REF_H = 1920, 1080
 ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the element keeps its distance from
+    'profile': dict(kind='profile', height=120),
     'clock': dict(kind='clock', x=200, y=24),
     'distance': dict(kind='big', x=150, y=124, metric='dist', label='km'),
-    'pace': dict(kind='big', x=150, y=875, v='bottom', metric='pace', label='min/km'),
-    'altitude': dict(kind='stat', x=16, y=980, v='bottom', icon='mountain', metric='alt', label='ALT (m)'),
-    'slope': dict(kind='stat', x=220, y=980, v='bottom', icon='slope', metric='slope', label='SLOPE (%)'),
-    'heart_rate': dict(kind='stat', x=1900, y=980, h='right', v='bottom', icon='heart', metric='hr', label='BPM', align='right'),
+    'pace': dict(kind='big', x=150, y=745, v='bottom', metric='pace', label='min/km'),
+    'altitude': dict(kind='stat', x=16, y=850, v='bottom', icon='mountain', metric='alt', label='ALT (m)'),
+    'slope': dict(kind='stat', x=220, y=850, v='bottom', icon='slope', metric='slope', label='SLOPE (%)'),
+    'heart_rate': dict(kind='stat', x=1900, y=850, h='right', v='bottom', icon='heart', metric='hr', label='BPM', align='right'),
     'route_map': dict(kind='route_map', x=1644, y=24, h='right', size=256, radius=35, style='tf-landscape'),
     'local_map': dict(kind='local_map', x=1644, y=304, h='right', size=256, radius=35, outline=(255, 0, 0), style='tf-outdoors'),
     'credit': dict(kind='credit', x=1900, y=566, h='right', size=11),
 }
-DEFAULTS = dict(enabled=True, style=None, elements=list(ELEMENTS), scale=1.0, map_opacity=0.6, local_zoom=14, auto_zoom=True, zoom_range=1.5, font=None, label_font=None, layout={})
+DEFAULTS = dict(enabled=True, style=None, elements=[e for e in ELEMENTS if e != 'credit'], scale=1.0, map_opacity=0.6, local_zoom=14, auto_zoom=True, zoom_range=1.5, font=None, label_font=None, layout={})
 DASH = '–'
 
 
@@ -107,6 +108,34 @@ class Stat:
                 self.c.text(e, tx, y + 20, fmt(e['metric'], val), 32, align=al)]
 
 
+class Profile:
+    """The elevation profile of the WHOLE race along the bottom of the frame, with where the runner is: the part already run in a light fill, the part to come darker, a cursor and a dot on the line. The same on every shot, camera or generated clip.
+    The bottom row of numbers sits above it (ELEMENTS)."""
+    def __init__(self, c, el): self.c, self.el = c, el; self.built = None
+
+    def _build(self):
+        c = self.c; W = c.W; H = max(8, int(round(self.el['height'] * c.s))); d = c.series.cols['dist_m']; a = c.series.cols['alt_m']; ok = np.isfinite(d) & np.isfinite(a); self.built = False
+        if ok.sum() < 2: return
+        dd, first = np.unique(d[ok], return_index=True); aa = a[ok][first]
+        if len(dd) < 2 or dd[-1] - dd[0] <= 0: return
+        self.d0, self.d1 = float(dd[0]), float(dd[-1]); alt = np.interp(np.linspace(self.d0, self.d1, W), dd, aa); alt = np.convolve(np.pad(alt, 4, mode='edge'), np.ones(9) / 9, 'valid')       # (smoothed a little: a 350 km profile in 1920 pixels)
+        lo, hi = float(alt.min()), float(alt.max()); pad = 0.14 * H; ys = H - pad - (alt - lo) / max(hi - lo, 60.0) * (H - 2 * pad); self.ys = ys; self.H = H
+        pts = np.stack([np.arange(W), ys], 1).round().astype(np.int32); poly = np.concatenate([pts, [[W - 1, H], [0, H]]]).reshape(-1, 1, 2); w = max(1, int(round(2 * c.s)))
+        self.done = np.zeros((H, W, 4), np.uint8); self.todo = np.zeros((H, W, 4), np.uint8)
+        cv2.fillPoly(self.done, [poly], (255, 255, 255, 105)); cv2.polylines(self.done, [pts.reshape(-1, 1, 2)], False, (255, 255, 255, 255), w, cv2.LINE_AA)
+        cv2.fillPoly(self.todo, [poly], (0, 0, 0, 120)); cv2.polylines(self.todo, [pts.reshape(-1, 1, 2)], False, (255, 255, 255, 150), w, cv2.LINE_AA)
+        self.dot = D.marker(6 * c.s); self.built = True
+
+    def patches(self, t, v):
+        if self.built is None: self._build()
+        d = v['dist_m']
+        if not self.built: return []
+        if not math.isfinite(d): d = self.d0 if t <= float(self.c.series._pt[0]) else self.d1                    # before the track starts the cursor is at the start, after it ends at the end (the profile is on every shot)
+        c = self.c; W = c.W; x = int(round(float(np.clip((d - self.d0) / (self.d1 - self.d0), 0.0, 1.0)) * (W - 1))); Y = c.H - self.H; r = self.dot.shape[0] / 2; cur = np.zeros((self.H, max(2, int(round(2 * c.s))), 4), np.uint8); cur[...] = (255, 255, 255, 235)
+        out = [(0, Y, self.done[:, :x + 1]), (x + 1, Y, self.todo[:, x + 1:]), (x - cur.shape[1] / 2, Y, cur), (x - r, Y + float(self.ys[x]) - r, self.dot)]
+        return [p for p in out if p[2].shape[1] > 0]
+
+
 class RouteMap:
     """The whole route on its map, the position marker moving along it."""
     def __init__(self, c, el): self.c, self.el = c, el; self.base = None
@@ -173,7 +202,7 @@ class Credit:
         return [self.c.text(self.el, self.el['x'], self.el['y'] + 14 * i, line, self.el['size'], label=True, align='right') for i, line in enumerate(self.lines)]
 
 
-KINDS = dict(clock=Clock, big=Big, stat=Stat, route_map=RouteMap, local_map=LocalMap, credit=Credit)
+KINDS = dict(profile=Profile, clock=Clock, big=Big, stat=Stat, route_map=RouteMap, local_map=LocalMap, credit=Credit)
 
 
 def settings(st=None):

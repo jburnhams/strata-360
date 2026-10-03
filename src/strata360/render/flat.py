@@ -189,7 +189,7 @@ class Renderer(Globe):
             out.append((uu.reshape(self.gh, self.gw), vv.reshape(self.gh, self.gw), np.degrees(th).reshape(self.gh, self.gw)))
         return out
 
-    def update_seam(self, L_master, L_slave, reset=False):
+    def update_seam(self, L_master, L_slave, reset=False, people=None):
         """Carve the seam for this frame (the previous one steadies it: `reset` forgets it, after a jump in time). A no-op unless carve_seam is on."""
         if not (self.carve_seam or self.parallax): return
         from strata360.render import seam as SM, parallax as PX
@@ -197,7 +197,7 @@ class Renderer(Globe):
         if self.parallax:                                                                                    # 1. measure how far the lenses disagree and move them toward each other where that helps
             (A, cA), (B, cB) = self._carver.band(L_master, L_slave); self.warp = PX.measure(A, B, cA, cB, None if (reset or self.warp is None) else self.warp)
         else: self.warp = None
-        if self.carve_seam: self.seam = self._carver.carve(L_master, L_slave, None if (reset or self.seam is None) else self.seam, self.warp)     # 2. the seam is carved through the corrected bands
+        if self.carve_seam: self.seam = self._carver.carve(L_master, L_slave, None if (reset or self.seam is None) else self.seam, self.warp, people)     # 2. the seam is carved through the corrected bands
 
     def set_gains(self, g_master, g_slave):
         self.gain_m, self.gain_s = np.asarray(g_master, float), np.asarray(g_slave, float)
@@ -255,8 +255,24 @@ class Renderer(Globe):
         return out
 
 
+def frame_at(pts, t):
+    """Index of the frame shown at clip time `t` (seconds from the first frame): found by the frame timestamps `pts`, never by t times the nominal frame rate (a clip whose camera dropped frames has timestamps that jump; t x 50 then lands on a frame 9 too early after a 0.18 s jump). Held at the ends."""
+    pts = np.asarray(pts, float); return np.clip(np.searchsorted(pts - pts[0], np.asarray(t, float) - 1e-4), 0, len(pts) - 1)
+
+
+def decode_args(osv, hw=True):
+    """The ffmpeg input options to decode a lens stream so that EVERY frame comes out, in order: hardware decoding where it is available, except for a clip whose camera dropped frames (osv/telemetry.py `has_dropped_frames`): there the hardware decoder drops the frames it cannot decode (28 of 3149 in one lens of
+    clip 0021 of the Legends race), the two lenses are then paired out of step, and the seam shows it. Software decoding with the damaged frames kept gives one frame per packet."""
+    from strata360.osv.telemetry import has_dropped_frames
+    damaged = False
+    try: damaged = has_dropped_frames(osv)
+    except Exception: pass
+    return (['-flags', '+output_corrupt'] if damaged else (hwmod.hwaccel_args() if hw else [])), damaged
+
+
 def decoder(osv, stream, hw=True, ss=0.0):
-    cmd = ['ffmpeg', '-v', 'error'] + (hwmod.hwaccel_args() if hw else []) + (['-ss', f'{ss:.4f}'] if ss > 0 else []) + \
+    args, _ = decode_args(osv, hw)
+    cmd = ['ffmpeg', '-v', 'error'] + args + (['-ss', f'{ss:.4f}'] if ss > 0 else []) + \
           ['-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough', '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
     return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=LS * LS * BYTES * 2)
 

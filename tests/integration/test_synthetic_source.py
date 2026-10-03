@@ -52,3 +52,20 @@ def test_a_synthetic_clip_keeps_its_approval_when_planned_again_with_the_same_ke
     from strata360.edit import synthetic as SY
     gap = dict(id='G01', t0=1_771_754_000.0, t1=1_771_754_000.0 + 3600); monkeypatch.setattr(SY, 'load', lambda f: doc); monkeypatch.setattr(SY, 'save', lambda f, d: d.update(saved=True)); doc = dict(clips=[dict(SY.make(gap, seconds=8, kind='flyover', approved=False), approved=True, status='ready')])
     again = SY.upsert('x', SY.make(gap, seconds=8, kind='flyover', approved=False)); assert again['approved'] is True and again['status'] == 'ready'
+
+
+def test_the_race_time_of_a_frame_follows_the_clip_and_holds_at_its_end():
+    sg = dict(utc_start='2026-02-22T10:00:00Z', utc_end='2026-02-22T12:00:00Z', synthetic_seconds=10.0, clip_start_s=0.0, dur_s=12.0); t0 = 1_771_754_400.0
+    assert SYN.race_time(sg, 0, 10.0) == t0 and SYN.race_time(sg, 50, 10.0) == pytest.approx(t0 + 3600) and SYN.race_time(sg, 100, 10.0) == pytest.approx(t0 + 7200) and SYN.race_time(sg, 115, 10.0) == pytest.approx(t0 + 7200)   # a longer window holds the last moment
+    assert SYN.race_time(dict(sg, clip_start_s=2.0), 0, 10.0) == pytest.approx(t0 + 1440) and SYN.race_time(dict(sg, synthetic_seconds=None, dur_s=20.0), 100, 10.0) == pytest.approx(t0 + 3600)
+
+
+def test_the_film_puts_its_own_overlay_on_a_generated_clip_at_the_race_time_each_frame_shows(video):
+    from strata360.render import final as FI
+    seen = []
+    class Overlay:
+        def apply(self, img, t): seen.append(t); img[0, 0] = 65535; return img
+    sg = dict(clip='G01', synthetic=video, utc_start='2026-02-22T10:00:00Z', utc_end='2026-02-22T12:00:00Z', synthetic_seconds=2.0, clip_start_s=0.0, dur_s=2.0, id='G01@0.00')
+    src = FI.FinalSource('x', [sg], {}, 32, 18, 10.0, overlay=Overlay()); out = list(src.frames(0, 0, 20)); t0 = 1_771_754_400.0
+    assert len(out) == 20 and out[0].dtype == np.uint16 and all(f[0, 0, 0] == 65535 for f in out) and seen[0] == t0 and seen[-1] == pytest.approx(t0 + 7200 * 19 / 20) and seen == sorted(seen)
+    assert list(FI.FinalSource('x', [sg], {}, 32, 18, 10.0, overlay=None).frames(0, 0, 3))[0][0, 0, 0] != 65535                                                                       # without an overlay: the picture as it is

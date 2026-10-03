@@ -56,3 +56,15 @@ if __name__ == '__main__':
         try: fn(); print('ok  ', fn.__name__)
         except Exception as e: bad += 1; print('FAIL', fn.__name__, repr(e)[:300])
     print(f'{len(fns) - bad}/{len(fns)} passed'); sys.exit(bad)
+
+
+def test_a_seam_goes_round_a_person_when_the_band_allows_and_leaves_the_proxies_cost_alone():
+    from strata360.render import seam as SM
+    lat_rows = SM.BAND_DEG - np.arange(SM.BAND_ROWS + 1) * (2 * SM.BAND_DEG / SM.BAND_ROWS)
+    assert not SM.person_cost([], lat_rows).any() and not SM.person_cost(None, lat_rows).any()
+    c = SM.person_cost([(2.0, 0.0, 30.0)], lat_rows); col = SM.COLS // 2                                                       # a 30 degree person 2 degrees to the master side, at longitude 0
+    assert c[:, col].max() >= SM.PERSON_W and c[np.argmin(np.abs(lat_rows - 2.0)), col] >= SM.PERSON_W and c[-1, col] < SM.PERSON_W and not c[:, 0].any()
+    cost = np.zeros((SM.BAND_ROWS + 1, SM.COLS), np.float32) + c; path = SM.solve_dp(cost)                                    # a seam solved on that cost avoids them in the columns they fill
+    lat = SM.BAND_DEG - path * (2 * SM.BAND_DEG / SM.BAND_ROWS); assert all(abs(lat[k] - 2.0) > 3.0 for k in range(col - 20, col + 20))
+    assert SM.person_cost([(40.0, 0.0, 30.0)], lat_rows).max() == 0                                                              # far from the seam: no effect
+    lay = SM.people_in_layout([(90.0, 0.0, 40.0)], lambda d: d); assert abs(lay[0][0] - 0.0) < 1e-6 and abs(lay[0][1] - 0.0) < 1e-6 and lay[0][2] == 40.0      # due east is on the seam circle at longitude 0

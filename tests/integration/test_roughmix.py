@@ -46,3 +46,18 @@ def test_with_no_plan_it_says_so(tmp_path):
 def test_reset_forgets_the_mix_and_a_new_version_makes_every_mix_stale(folder, monkeypatch):
     RM.build(folder); assert RM.reset(folder) is True and not RM.status(folder)['exists'] and not os.path.exists(RM.path_of(folder)) and RM.reset(folder) is False
     RM.build(folder); monkeypatch.setattr(RM, 'VERSION', RM.VERSION + 1); st = RM.status(folder); assert st['stale'] is True and st['stale_because'] == ['settings']
+
+
+def test_a_dialogue_window_plays_the_clips_voice_only_over_the_wanted_lines_and_the_background_elsewhere(tmp_path):
+    from strata360.render import preview as PV
+    f = str(tmp_path / 'trip'); rd = config.race_dir(f); cdir = os.path.join(rd, 'clips', 'Y'); os.makedirs(cdir)
+    tone = lambda path, hz, vol: subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', f'sine=frequency={hz}:duration=6', '-af', f'volume={vol}', path], check=True)
+    tone(os.path.join(cdir, 'audio_clean.flac'), 1000, 0.8); tone(os.path.join(cdir, 'audio_background.flac'), 200, 0.2)                 # the "speech" is the loud 1 kHz tone, the background the quiet 200 Hz one
+    w = dict(clip='Y', clip_start_s=0.0, dur_s=4.0, speech=True, role='clip', voice_span=[1.0, 2.5])                                      # the lines the script wants fill 1.0 to 2.5 s of the 4 s window
+    out = str(tmp_path / 'a.wav'); PV.build_audio(f, dict(segments=[w], film=dict(length_s=4.0)), out, 4.0)
+    def band(a, b, hz):
+        raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', out, '-f', 'f32le', '-ac', '1', '-ar', '8000', '-'], capture_output=True).stdout; x = np.frombuffer(raw, np.float32)[int(a * 8000):int(b * 8000)]; t = np.arange(len(x)) / 8000.0
+        return float(abs(np.mean(x * np.exp(-2j * np.pi * hz * t))) * 2)                                                                  # the level of one frequency
+    assert band(1.2, 2.3, 1000) > 0.07 and band(1.2, 2.3, 200) < 0.002                       # inside the wanted lines: the voice, not the background
+    assert band(0.1, 0.8, 1000) < 0.002 and band(0.1, 0.8, 200) > 0.004 and band(3.0, 3.9, 1000) < 0.002 and band(3.0, 3.9, 200) > 0.004          # before and after: the background only, no voice
+    w2 = dict(w, voice_span=None); PV.build_audio(f, dict(segments=[w2], film=dict(length_s=4.0)), out, 4.0); assert band(3.0, 3.9, 1000) > 0.07                  # no span known (an older plan): the whole window as before
