@@ -8,7 +8,7 @@ Mapillary and Panoramax images are CC BY-SA (credit them); Google's are credited
 Each provider stage records the id of the roads it was made from, and is redone when that changes.
   quality.json     stage `quality`: for each plausible Mapillary / Panoramax section, a score from 0 to 100 for how good a clip of it will look (edit/streetview_cam.py `quality`: how well the pictures between two real ones can be made, and how
                    steady the view is at 25 m/s), measured on the smaller copies of its pictures; {sections: {key: {score, grade, psnr, jerk, roll, frames}}}."""
-import collections, datetime as dt, hashlib, json, math, os, time, urllib.error, urllib.parse, urllib.request
+import collections, datetime as dt, hashlib, json, math, os, re, time, urllib.error, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -362,7 +362,7 @@ def overlaps(sections, share=0.3):
 def _state(rd):
     try: d = json.load(open(os.path.join(adir(rd), 'choices.json')))
     except (OSError, ValueError): d = {}
-    return dict(choices={k: v for k, v in (d.get('choices') or {}).items() if v in CHOICES}, labels=d.get('labels') or {}, next=int(d.get('next') or 1), lengths={k: float(v) for k, v in (d.get('lengths') or {}).items() if isinstance(v, (int, float))})
+    return dict(choices={k: v for k, v in (d.get('choices') or {}).items() if v in CHOICES}, labels=d.get('labels') or {}, next=int(d.get('next') or 1), lengths={k: float(v) for k, v in (d.get('lengths') or {}).items() if isinstance(v, (int, float))}, hires={k for k, v in (d.get('hires') or {}).items() if v})
 
 
 def choices(rd): return _state(rd)['choices']
@@ -380,7 +380,14 @@ def set_choice(rd, key, choice):
 
 
 def _save_state(rd, st):
-    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(st, open(tmp, 'w'), indent=1); os.replace(tmp, p)
+    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'choices.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump({**st, 'hires': {k: True for k in st['hires']}}, open(tmp, 'w'), indent=1); os.replace(tmp, p)
+
+
+def set_hires(rd, s, on):
+    """Ask for the higher resolution of a Google section (an annotated one): its look-around video, its preview and its clip in the film are made from views twice as close (a stitched 360 picture of 7680 pixels), which means about four times as many requests to Google (asked for when the video
+    or the film is made, and kept). Only a Google section has the choice. Returns whether it is on."""
+    if s['provider'] != 'google': raise ValueError('only a Google section has a higher resolution (the other pictures are already full size)')
+    st = _state(rd); (st['hires'].add if on else st['hires'].discard)(s['key']); _save_state(rd, st); return bool(on)
 
 
 def set_length(rd, s, seconds):
@@ -438,7 +445,7 @@ def annotate(rd, docs, tr=None, clips=None, gaps=None):
     out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; have = {section_key(s) for s in out}; out += [dict(s) for s in manual_sections(rd) if section_key(s) not in have]; ov = overlaps(out); st = _state(rd); ch = st['choices']; qs = quality_of(rd)
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
-        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['near'] = nearest_clips(s, clips, tr, gaps) if tr is not None else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['seconds'] = st['lengths'].get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
+        s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['near'] = nearest_clips(s, clips, tr, gaps) if tr is not None else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['seconds'] = st['lengths'].get(s['key']); s['hires'] = s['provider'] == 'google' and s['key'] in st['hires']; s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
     return sorted(out, key=lambda s: (s['km0'], s['provider']))
 
 
@@ -452,21 +459,37 @@ def default_seconds(s):
     lo, hi = clip_range(s); return round(max(lo, min(s['length_m'] / PREVIEW_MS, hi)), 1)
 
 
-def video_path(rd, s, pano=False, hires=False):
+def video_path(rd, s, pano=False):
     """Where the preview video of a (annotated) section is kept: named by the section and by what it is made from, so a changed section or camera gets a new one."""
-    h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION, ('pano-frames-hi' if hires else 'pano-frames') if pano else 'view'], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}{('-360hi' if hires else '-360') if pano else ''}.mp4")
+    h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION, ('pano-frames' if pano else 'view'), bool(s.get('hires'))], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}{('-360' if pano else '') + ('-hi' if s.get('hires') else '')}.mp4")
 
 
-def make_video(rd, s, log=print, pano=False, hires=False):
+VIDEO_STEPS = [(re.compile(r'panorama (\d+) of (\d+) stitched'), 'asking Google for views and stitching panoramas', 0.0, 0.8), (re.compile(r'fetching picture (\d+) of (\d+)'), 'fetching pictures', 0.0, 0.5),
+               (re.compile(r'rendering (\d+) of (\d+)'), 'rendering the video', None, None)]
+
+
+def video_progress(lines, google_pano=False):
+    """How far a video being made has got, from the lines its job logged: {pct 0 to 100, phase, done, total}, or None before the first step is reported. Fetching (or stitching) is the first part and rendering the rest."""
+    fetch_w = 0.8 if google_pano else 0.5; best = None
+    for l in lines:
+        for rx, phase, lo, hi in VIDEO_STEPS:
+            m = rx.search(l)
+            if not m: continue
+            done, total = int(m.group(1)), max(int(m.group(2)), 1); frac = done / total
+            best = dict(pct=round(100 * (frac * fetch_w if lo is not None else fetch_w + frac * (1 - fetch_w))), phase=phase, done=done, total=total)
+    return best
+
+
+def make_video(rd, s, log=print, pano=False):
     """Make the preview video of an (annotated) Mapillary or Panoramax section with the app's own camera, from the smaller copies of its pictures; kept (a finished one is not made again). Returns the path."""
     from strata360.edit import streetview_cam as CAM
-    out = video_path(rd, s, pano, hires)
+    out = video_path(rd, s, pano); hires = bool(s.get('hires')); grid = 'hi' if hires else 'std'
     if os.path.exists(out): return out
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    if pano and s['provider'] == 'google': CAM.fetch_google_pano(rd, s, road=road_of(rd, s), log=log, grid='hi' if hires else 'std')                         # (asked for only now: a grid of zoomed-in views a panorama)
+    if s['provider'] == 'google' and (pano or hires): CAM.fetch_google_pano(rd, s, road=road_of(rd, s), log=log, grid=grid)                         # (asked for only now: a grid of zoomed-in views a panorama)
     else: CAM.fetch(rd, s, token=_key('MAPILLARY_TOKEN'), log=log, preview=True)
-    if pano: CAM.render_pano(rd, s, default_seconds(s), out, road=road_of(rd, s), log=log, grid='hi' if hires else 'std'); return out
-    CAM.render(rd, s, default_seconds(s), out, road=road_of(rd, s), size=PREVIEW_SIZE, preview=True, log=log); return out
+    if pano: CAM.render_pano(rd, s, default_seconds(s), out, road=road_of(rd, s), log=log, grid=grid); return out
+    CAM.render(rd, s, default_seconds(s), out, road=road_of(rd, s), size=PREVIEW_SIZE, preview=True, log=log, **(dict(grid='hi') if hires else {})); return out
 
 
 def chosen(rd, docs):

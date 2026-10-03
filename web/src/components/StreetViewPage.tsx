@@ -67,6 +67,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
   const [sel, setSel] = useState<{ kind: 'section' | 'stretch'; id: string }>()
   const [shown, setShown] = useState<Record<string, boolean>>({ mapillary: true, panoramax: true, google: true, '360': true, '2d': true, clips: true })
   const choose = async (key: string, c: SvChoice | 'none') => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }
+  const hires = async (key: string, on: boolean) => { await api.setSvHires(folder, key, on).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }
   const [probe, setProbe] = useState<{ lat: number; lon: number }>(), [near, setNear] = useState<SvNearResult>(), [nearBusy, setNearBusy] = useState(false), [nearErr, setNearErr] = useState<string>(), [nearLog, setNearLog] = useState<string[]>([])
   const [nearGen, setNearGen] = useState(0)                                                       // changes with each click, so an old answer is not shown for a new point
   const look = async (lat: number, lon: number, gen: number) => {
@@ -135,7 +136,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
         </div>
       )}
       {probe && <NearPanel key={nearGen} folder={folder} tz={tz} probe={probe} result={near} busy={nearBusy} log={nearLog} error={nearErr} onSearch={search} onPromoted={() => setTick(t => t + 1)} onClose={() => { nearGenRef.current++; setProbe(undefined); setNear(undefined); setNearErr(undefined); setNearBusy(false) }} />}
-      {(section || chosenStretch) && <Detail folder={folder} tz={tz} section={section} stretch={chosenStretch} sections={sections.filter(s => s.stretch === chosenStretch?.id)} onSel={setSel} onChoose={choose} />}
+      {(section || chosenStretch) && <Detail folder={folder} tz={tz} section={section} stretch={chosenStretch} sections={sections.filter(s => s.stretch === chosenStretch?.id)} onSel={setSel} onChoose={choose} onHires={hires} />}
       {roads && <List title="Every section found" tz={tz} sections={visible} sel={sel} onSel={setSel} none={sections.length === 0} />}
     </section>
   )
@@ -270,8 +271,17 @@ export function ChoiceRadios({ section, onChoose }: { section: SvSectionInfo; on
   )
 }
 
+/** The higher resolution of a Google section: the look-around video, the preview and the clip in the final film are made from views twice as close (about four times the requests to Google, asked for when they are made, and kept). */
+export function HiresTick({ section, onHires }: { section: SvSectionInfo; onHires: (key: string, on: boolean) => void }) {
+  return (
+    <label className="mt-1 flex items-center gap-1 text-xs" title="Google gives flat views only, so a 360 picture is stitched from zoomed-in ones: closer views mean more detail, and more requests (60 a panorama instead of 16)">
+      <input type="checkbox" aria-label="Higher resolution" checked={!!section.hires} onChange={e => onHires(section.key, e.target.checked)} /> Higher resolution, everywhere this section is used (the videos here and the clip in the final film): about 4 times the requests to Google, asked for when the video or the film is made
+    </label>
+  )
+}
+
 /** One section as the street view page shows it: what it is, when it was filmed and passed, its camera, the choice for the film, the preview video and its pictures. The section's page in the film list reuses it. */
-export function SectionContent({ folder, tz, section, onChoose, showChoice = true }: { folder: string; tz: string; section: SvSectionInfo; onChoose: (key: string, c: SvChoice | 'none') => void; showChoice?: boolean }) {
+export function SectionContent({ folder, tz, section, onChoose, onHires, showChoice = true }: { folder: string; tz: string; section: SvSectionInfo; onChoose: (key: string, c: SvChoice | 'none') => void; onHires?: (key: string, on: boolean) => void; showChoice?: boolean }) {
   const [big, setBig] = useState<{ provider: SvProvider; id: string }>()
   useEffect(() => { setBig(undefined) }, [section.id])
   return (
@@ -281,6 +291,7 @@ export function SectionContent({ folder, tz, section, onChoose, showChoice = tru
           <div className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(section.filmed?.[0], tz)}{section.filmed && section.filmed[1] - section.filmed[0] > 60 ? ` to ${when(section.filmed[1], tz)}` : ''} · you pass it {when(section.passed?.[0], tz)}{section.passed ? ` to ${when(section.passed[1], tz).split(' ').slice(-1)[0]}` : ''}</div>
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
           {showChoice && <ChoiceRadios section={section} onChoose={onChoose} />}
+          {onHires && section.provider === 'google' && section.kind === '360' && <HiresTick section={section} onHires={onHires} />}
           <SectionVideo folder={folder} section={section} />
           {section.kind === '360' && <SectionVideo folder={folder} section={section} pano />}
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -294,13 +305,13 @@ export function SectionContent({ folder, tz, section, onChoose, showChoice = tru
   )
 }
 
-function Detail({ folder, tz, section, stretch, sections, onSel, onChoose }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onChoose: (key: string, c: SvChoice | 'none') => void; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
+function Detail({ folder, tz, section, stretch, sections, onSel, onChoose, onHires }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onChoose: (key: string, c: SvChoice | 'none') => void; onHires: (key: string, on: boolean) => void; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
   return (
     <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
       {stretch && <div className="text-sm"><span className="font-medium">{stretch.names.join(', ') || 'Unnamed road'}</span> · {stretch.highways.join(', ')} · {span(stretch)} · {metres(stretch.length_m)} of the run on this road
         {!section && <span className="text-stone-600 dark:text-stone-400"> · {sections.length ? `${sections.length} section${sections.length === 1 ? '' : 's'} of street view` : 'no street view found'}</span>}</div>}
       {!section && sections.length > 0 && <ul className="mt-2 flex flex-wrap gap-2">{sections.map(s => <li key={s.id}><button onClick={() => onSel({ kind: 'section', id: s.id })} className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-600">{NAME[s.provider]} {kindLabel(s)} · {metres(s.length_m)}</button></li>)}</ul>}
-      {section && <SectionContent folder={folder} tz={tz} section={section} onChoose={onChoose} />}
+      {section && <SectionContent folder={folder} tz={tz} section={section} onChoose={onChoose} onHires={onHires} />}
     </div>
   )
 }
@@ -388,22 +399,29 @@ function Legend({ scale, hasClips }: { scale: { lo: number; hi: number }; hasCli
 
 /** The preview video of a section: shown when it has been made, else a button to make it (in the background; kept, so it is made once). */
 function SectionVideo({ folder, section, pano = false }: { folder: string; section: SvSectionInfo; pano?: boolean }) {
-  const [st, setSt] = useState<SvVideo>(), [err, setErr] = useState<string>(), running = !!st?.running, [hires, setHires] = useState(false), hi = pano && section.provider === 'google' && hires
+  const [st, setSt] = useState<SvVideo>(), [err, setErr] = useState<string>(), [starting, setStarting] = useState(false), running = !!st?.running || starting
+  useEffect(() => { setSt(undefined); setErr(undefined); setStarting(false) }, [folder, section.key, pano, section.hires])              // (only a different video starts from nothing: asking again as it runs does not blank the page)
   useEffect(() => {
-    let live = true; setSt(undefined); setErr(undefined)
-    const tick = () => api.svVideo(folder, section.key, pano, hi).then(v => live && setSt(v)).catch(e => live && setErr((e as Error).message))
-    tick(); const id = setInterval(tick, running ? 2500 : 30000); return () => { live = false; clearInterval(id) }
-  }, [folder, section.key, running, pano, hi])
-  const make = async () => { setErr(undefined); try { const r = await api.makeSvVideo(folder, section.key, pano, hi); if (!r.started && r.reason) setErr(r.reason); setSt(await api.svVideo(folder, section.key, pano, hi)) } catch (e) { setErr((e as Error).message) } }
+    let live = true; const tick = () => api.svVideo(folder, section.key, pano).then(v => { if (!live) return; setSt(v); if (v.running || v.exists || v.error) setStarting(false) }).catch(e => live && setErr((e as Error).message))
+    tick(); const id = setInterval(tick, running ? 1500 : 30000); return () => { live = false; clearInterval(id) }
+  }, [folder, section.key, pano, section.hires, running])
+  const make = async () => { setErr(undefined); setStarting(true); try { const r = await api.makeSvVideo(folder, section.key, pano); if (!r.started && r.reason) { setErr(r.reason); setStarting(false); return } const v = await api.svVideo(folder, section.key, pano); setSt(v); if (v.running || v.exists || v.error) setStarting(false) } catch (e) { setErr((e as Error).message); setStarting(false) } }
+  const pr = st?.progress, google = section.provider === 'google', hi = section.hires && google
   return (
     <div className="mt-2" aria-label={pano ? 'Look around' : 'Preview video'}>
       {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the original 360° pictures, one at a time, with the camera held level along the road, which you can pan</div>}
-      {pano && section.provider === 'google' && <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={hires} onChange={e => setHires(e.target.checked)} /> Higher resolution (views twice as close: about 4 times the requests, much more detail)</label>}
-      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true, hi)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={section.provider === 'google' ? 24 : undefined} fps={st.fps} />
-        : <StepVideo preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
+      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true, hi)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={google ? 24 : undefined} fps={st.fps} />
+        : <StepVideo preload="metadata" src={api.svVideoUrl(folder, section.key, false, hi)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
       {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
-      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && section.provider === 'google' ? `. Google gives flat views only, so this asks it for ${section.frames * (hi ? 60 : 16)} zoomed-in views (${hi ? 60 : 16} for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
-      {running && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Making the video… {st?.log.slice(-1)[0] ?? ''}</p>}
+      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && google ? `. Google gives flat views only, so this asks it for ${section.frames * (hi ? 60 : 16)} zoomed-in views (${hi ? 60 : 16} for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
+      {running && (
+        <div role="status" aria-label="Making the video" className="max-w-xl space-y-1 text-sm text-stone-600 dark:text-stone-400">
+          <div className="flex items-center justify-between text-xs"><span>{pr ? `${pr.phase}: ${pr.done} of ${pr.total}` : 'starting…'}</span><span>{pr ? `${pr.pct}%` : ''}</span></div>
+          <div role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pr?.pct} className="h-2 w-full overflow-hidden rounded bg-stone-200 dark:bg-stone-700">
+            <div className={`h-full rounded bg-emerald-600 transition-[width] duration-500 ${pr ? '' : 'w-1/4 animate-pulse'}`} style={pr ? { width: `${pr.pct}%` } : undefined} /></div>
+          <ul aria-label="What it is doing" className="max-h-32 overflow-auto rounded bg-stone-100 p-1.5 font-mono text-[11px] leading-snug text-stone-600 dark:bg-stone-800 dark:text-stone-300">{(st?.log ?? []).map((l, i) => <li key={i}>{l}</li>)}{!st?.log?.length && <li>waiting for the job to report…</li>}</ul>
+        </div>
+      )}
       {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}
     </div>
   )

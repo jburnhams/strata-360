@@ -27,8 +27,10 @@ def race_span(folder, sec):
 
 def render(folder, sec, seconds, path, log=print):
     rd = config.race_dir(folder)
-    CAM.fetch(rd, sec, token=SV._key('MAPILLARY_TOKEN'), log=log)
-    os.makedirs(os.path.dirname(path), exist_ok=True); return CAM.render(rd, sec, seconds, path, road=SV.road_of(rd, sec), encode_size=tuple(int(x) for x in SY.STREETVIEW_SIZE.split('x')), log=log)
+    hires = bool(sec.get('hires')) and sec['provider'] == 'google'                                                         # (ticked on the street view page: the film clip is made from the stitched higher resolution pictures)
+    if hires: CAM.fetch_google_pano(rd, sec, road=SV.road_of(rd, sec), log=log, grid='hi')
+    else: CAM.fetch(rd, sec, token=SV._key('MAPILLARY_TOKEN'), log=log)
+    os.makedirs(os.path.dirname(path), exist_ok=True); return CAM.render(rd, sec, seconds, path, road=SV.road_of(rd, sec), encode_size=tuple(int(x) for x in SY.STREETVIEW_SIZE.split('x')), log=log, grid='hi' if hires else None)
 
 
 def sync(folder, specs, log=print):

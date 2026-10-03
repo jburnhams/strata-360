@@ -333,13 +333,14 @@ describe('the preview video of a section', () => {
 
   it('offers to make it when it is not there, and starts it in the background', async () => {
     const seen = recordRequests('/api/streetview/video'); server.use(http.post('/api/streetview/video', () => HttpResponse.json({ started: true })))
-    const { user } = await pick(); await user.click(await screen.findByRole('button', { name: 'Make a preview video' })); expect(screen.getByText(/about 12 s long, made in the background and kept/)).toBeInTheDocument()
+    const { user } = await pick(); expect(await screen.findByText(/about 12 s long, made in the background and kept/)).toBeInTheDocument(); await user.click(await screen.findByRole('button', { name: 'Make a preview video' })); expect(await screen.findByRole('status', { name: 'Making the video' })).toHaveTextContent('starting…')
     await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen.find(r => r.method === 'POST')!.body).toEqual({ folder: '/data', key: 'mapillary:s1:1.20' })
   })
 
   it('shows that it is being made, with the last line of its log', async () => {
-    server.use(http.get('/api/streetview/video', () => HttpResponse.json({ exists: false, running: true, log: ['fetching', 'M1: 90 frames'], error: '', seconds: 12 }))); await pick()
-    expect(await screen.findByRole('status')).toHaveTextContent('Making the video… M1: 90 frames'); expect(screen.queryByRole('button', { name: 'Make a preview video' })).toBeNull()
+    server.use(http.get('/api/streetview/video', () => HttpResponse.json({ exists: false, running: true, log: ['fetching picture 3 of 36', 'rendering 9 of 36 pictures'], progress: { pct: 63, phase: 'rendering the video', done: 9, total: 36 }, error: '', seconds: 12 }))); await pick()
+    const box = await screen.findByRole('status', { name: 'Making the video' }); expect(box).toHaveTextContent('rendering the video: 9 of 36'); expect(box).toHaveTextContent('63%'); expect(within(box).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '63')
+    expect(within(box).getByLabelText('What it is doing')).toHaveTextContent('rendering 9 of 36 pictures'); expect(screen.queryByRole('button', { name: 'Make a preview video' })).toBeNull()
   })
 
   it('plays it when it exists', async () => {
@@ -369,10 +370,17 @@ describe('the preview video of a section', () => {
     expect(await screen.findByLabelText(/: look around$/)).toBeInTheDocument()
   })
 
+  it('says how many views a higher resolution Google section will ask for, once the setting is on', async () => {
+    const sv = makeStreetView(); sv.sections[0] = makeSvSection({ id: 'G1', key: 'google:g:1.20', provider: 'google', kind: '360', angles: null, frames: 25, hires: true }); await pick(sv)
+    expect(await screen.findByLabelText('Higher resolution')).toBeChecked(); expect(await screen.findByText(/asks it for 1500 zoomed-in views \(60 for each of the 25 panoramas/)).toBeInTheDocument()
+  })
+
   it('offers a look-around for Google too and says how many views it will ask for', async () => {
     const sv = makeStreetView(); sv.sections[0] = makeSvSection({ id: 'G1', key: 'google:g:1.20', provider: 'google', kind: '360', angles: null, frames: 25 }); await pick(sv)
     expect(await screen.findByRole('button', { name: 'Make a 360° video to look around in' })).toBeInTheDocument(); expect(screen.getByText(/asks it for 400 zoomed-in views \(16 for each of the 25 panoramas/)).toBeInTheDocument()
-    const { default: ue } = await import('@testing-library/user-event'); await ue.setup().click(screen.getByLabelText(/Higher resolution/)); expect(await screen.findByText(/asks it for 1500 zoomed-in views \(60 for each of the 25 panoramas/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Higher resolution')).not.toBeChecked()
+    const hi = recordRequests('/api/streetview/hires'); server.use(http.post('/api/streetview/hires', () => HttpResponse.json({ key: 'google:g:1.20', hires: true })))
+    const { default: ue } = await import('@testing-library/user-event'); await ue.setup().click(screen.getByLabelText('Higher resolution')); await waitFor(() => expect(hi.filter(r => r.method === 'POST')).toHaveLength(1)); expect(hi.filter(r => r.method === 'POST')[0].body).toEqual({ folder: '/data', key: 'google:g:1.20', hires: true })
   })
 
   it('offers no 360 video for a flat camera', async () => {

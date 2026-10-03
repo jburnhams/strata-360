@@ -36,9 +36,10 @@ def fetch(rd, section, token=None, get=None, download=None, log=print, preview=F
     except (OSError, ValueError): meta = {}
     heading = dict(zip([i['id'] for i in section['items']], smooth_heading([i['b'] for i in section['items']], 3.0))) if section['provider'] == 'google' else {}      # (a Google view is asked for along the road: its panoramas are levelled and north-referenced)
     gkey = (SV._key('GOOGLE_MAPS_API_KEY') if section['provider'] == 'google' else None)
-    for it in section['items']:
+    for n, it in enumerate(section['items'], 1):
         f = src_path(rd, section, it['id'], preview)
         if os.path.exists(f) and it['id'] in meta: continue
+        log(f"fetching picture {n} of {len(section['items'])}")
         if section['provider'] == 'google':
             if not gkey: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
             meta[it['id']] = {'heading': round(float(heading[it['id']]), 1)}; url = None
@@ -104,6 +105,8 @@ def fetch_google_pano(rd, section, road=None, download=None, log=print, workers=
     download = download or SV._bytes; gkey = SV._key('GOOGLE_MAPS_API_KEY'); fov = int(PANO_GRIDS[grid]['fov'])
     if not gkey: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
     os.makedirs(os.path.join(src_dir(rd, section), 'tiles'), exist_ok=True); asked = 0; items = _nearest_first(section, road)
+    missing = sum(1 for it in items for h, p in pano_tiles(grid) if not os.path.exists(pano_tile_path(rd, section, it['id'], h, p, grid)))
+    log(f"google {section['id']}: {len(items)} panoramas, {missing} views still to ask Google for ({len(items) * len(pano_tiles(grid)) - missing} already kept), the ones nearest your track first")
     def get_tile(args):
         pid, h, p = args; f = pano_tile_path(rd, section, pid, h, p, grid)
         if os.path.exists(f): return 0
@@ -114,7 +117,7 @@ def fetch_google_pano(rd, section, road=None, download=None, log=print, workers=
         tmp = f + '.part'; open(tmp, 'wb').write(data); os.replace(tmp, f); return 1
     with ThreadPoolExecutor(workers) as ex:
         for n, it in enumerate(items, 1):
-            if os.path.exists(pano_path(rd, section, it['id'], grid)): continue
+            if os.path.exists(pano_path(rd, section, it['id'], grid)): log(f"google {section['id']}: panorama {n} of {len(items)} stitched (kept from before)"); continue
             asked += sum(ex.map(get_tile, [(it['id'], h, p) for h, p in pano_tiles(grid)]))
             tiles = {(h, p): cv2.imread(pano_tile_path(rd, section, it['id'], h, p, grid)) for h, p in pano_tiles(grid)}
             if any(v is None for v in tiles.values()): raise RuntimeError(f"google {section['id']}: a view of {it['id']} could not be read")
@@ -308,7 +311,8 @@ def render_pano(rd, section, seconds, out, road=None, size=None, log=print, prev
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-c:v', 'libx264', '-crf', '20', '-g', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']      # (every frame a key frame: stepping back is exact)
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     try:
-        for i in range(n): p.stdin.write(reproject_equirect(img(i), rot(i, float(hs[i]) % 360, 0.0), size).tobytes())
+        for i in range(n):
+            p.stdin.write(reproject_equirect(img(i), rot(i, float(hs[i]) % 360, 0.0), size).tobytes()); log(f"rendering {i + 1} of {n} pictures")
         p.stdin.close(); p.wait()
     except BrokenPipeError: p.wait()
     if p.returncode: raise RuntimeError('ffmpeg failed to write the 360 street view video')
@@ -325,10 +329,10 @@ def cached_ups(rd, section, imgs, n, preview=False):
     u = np.array([estimate_up(im) for im in (imgs if imgs is not None else [])]); np.save(f, u); return u
 
 
-def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False):
+def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False, grid=None):
     """Write the clip of `section` (an entry of streetview.annotate with `items`) lasting `seconds` to `out` (H.264). The whole section is played through, so its pictures per second follow from the length. `road` is the stretch
     {line: [[lat, lon], ...], km0} (for Panoramax headings). `encode_size`, e.g. (3840, 2160), scales the finished picture; `preview` uses the smaller copies of the pictures."""
-    rig = build(rd, section, road, size, preview); prog, hs, view, n = rig.prog, rig.hs, rig.view, rig.n
+    rig = build(rd, section, road, size, preview, pano=bool(grid), grid=grid or 'std'); prog, hs, view, n = rig.prog, rig.hs, rig.view, rig.n          # (grid: a Google section made from its stitched 360 pictures instead of the one flat view along the road)
     L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); w, h = encode_size or size
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{size[0]}x{size[1]}', '-r', str(fps), '-i', '-'] + (['-vf', f'scale={w}:{h}:flags=lanczos'] if (w, h) != tuple(size) else []) + ['-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', out + '.part.mp4']
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -336,6 +340,7 @@ def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=N
         for k in range(N):
             pos = prog[0] + L * k / (N - 1); i = max(0, min(int(np.searchsorted(prog, pos, side='right') - 1), n - 2)); a = float(np.clip((pos - prog[i]) / max(prog[i + 1] - prog[i], 1e-6), 0, 1))
             yaw = (hs[i] + ((hs[i + 1] - hs[i] + 180) % 360 - 180) * a) % 360; p.stdin.write(flow_blend(view(i, yaw), view(i + 1, yaw), a).tobytes())
+            if k % 15 == 0 or k == N - 1: log(f"rendering {k + 1} of {N} frames")
         p.stdin.close(); p.wait()
     except BrokenPipeError: p.wait()
     if p.returncode: raise RuntimeError('ffmpeg failed to write the street view clip')

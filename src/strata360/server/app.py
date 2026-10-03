@@ -1068,8 +1068,15 @@ def create_app(roots, token=None):
             lab = norm_label(it.get('clip', ''))
             if lab.startswith('V'): said.setdefault(lab, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
         for s in SV.chosen(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}):
-            a, b = SV.passed(s, tr); out.append(dict(key=s['key'], label=s['label'], id=s['id'], provider=s['provider'], kind=s['kind'], choice=s['choice'], t0=a, t1=b, length_m=s['length_m'], quality=(s.get('quality') or {}).get('grade'), min_s=s['min_s'], max_s=s['max_s'], seconds=s.get('seconds'), default_s=SV.default_seconds(s), script=said.get(s['label'], [])))
+            a, b = SV.passed(s, tr); out.append(dict(key=s['key'], label=s['label'], id=s['id'], provider=s['provider'], kind=s['kind'], choice=s['choice'], t0=a, t1=b, length_m=s['length_m'], quality=(s.get('quality') or {}).get('grade'), min_s=s['min_s'], max_s=s['max_s'], seconds=s.get('seconds'), default_s=SV.default_seconds(s), hires=bool(s.get('hires')), script=said.get(s['label'], [])))
         return dict(sections=sorted(out, key=lambda x: x['t0']))
+
+    @api.post('/api/streetview/hires', dependencies=[Depends(auth)])
+    def post_streetview_hires(body: dict):                                               # {folder, key, hires}: a Google section's look-around video, preview and film clip are made from the higher resolution pictures (about 4 times the requests to Google, asked for when they are made)
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); rd, s = sv_section(f, str(body.get('key') or ''))
+        try: return dict(key=s['key'], hires=SV.set_hires(rd, s, bool(body.get('hires'))))
+        except ValueError as ex: raise HTTPException(400, str(ex))
 
     @api.post('/api/streetview/length', dependencies=[Depends(auth)])
     def post_streetview_length(body: dict):                                              # {folder, key, seconds | null}: fix how long the film shows this section (within what it can play), or leave it to the plan
@@ -1104,32 +1111,32 @@ def create_app(roots, token=None):
         if s is None: raise HTTPException(404, 'no such street view section')
         return rd, s
 
-    def sv_video_state(f, key, pano=False, hires=False):
+    def sv_video_state(f, key, pano=False):
         from strata360 import streetview as SV
-        rd, s = sv_section(f, key); job = STREETVIEW_VIDEO_JOBS.get((f, key, pano, hires)); running = bool(job and job.poll() is None); lines = []
-        try: lines = open(os.path.splitext(SV.video_path(rd, s, pano, hires))[0] + '.log', errors='replace').read().strip().splitlines()
+        rd, s = sv_section(f, key); job = STREETVIEW_VIDEO_JOBS.get((f, key, pano, bool(s.get('hires')))); running = bool(job and job.poll() is None); lines = []
+        try: lines = open(os.path.splitext(SV.video_path(rd, s, pano))[0] + '.log', errors='replace').read().strip().splitlines()
         except OSError: pass
         fail = next((l for l in reversed(lines) if l.startswith('streetview-video:')), '')
-        return dict(exists=os.path.exists(SV.video_path(rd, s, pano, hires)), running=running, log=lines[-4:], error='' if running else fail[:400], seconds=SV.default_seconds(s), **(dict(fps=round(min(max(s['frames'] / max(SV.default_seconds(s), 0.5), 1.0), 15.0), 2)) if pano else {}))
+        return dict(exists=os.path.exists(SV.video_path(rd, s, pano)), running=running, log=lines[-8:], progress=SV.video_progress(lines, pano and s['provider'] == 'google'), error='' if running else fail[:400], seconds=SV.default_seconds(s), hires=bool(s.get('hires')), **(dict(fps=round(min(max(s['frames'] / max(SV.default_seconds(s), 0.5), 1.0), 15.0), 2)) if pano else {}))
 
     @api.get('/api/streetview/video', dependencies=[Depends(auth)])
-    def get_streetview_video(folder: str, key: str, pano: bool = False, hires: bool = False):                  # whether the section's preview video (pano: the 360 one to look around in) exists, is being made, or failed
-        return sv_video_state(folder_of(folder), key, pano, hires)
+    def get_streetview_video(folder: str, key: str, pano: bool = False):                  # whether the section's preview video (pano: the 360 one to look around in) exists, is being made, or failed
+        return sv_video_state(folder_of(folder), key, pano)
 
     @api.post('/api/streetview/video', dependencies=[Depends(auth)])
     def post_streetview_video(body: dict):                                                # {folder, key, pano?}: make the preview video (pano: the 360 one to look around in, 360 sections only) in the background (nothing to do when it exists)
         from strata360 import streetview as SV
-        f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd, s = sv_section(f, key); pano = bool(body.get('pano')); hires = bool(body.get('hires')) and pano and s['provider'] == 'google'
+        f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd, s = sv_section(f, key); pano = bool(body.get('pano')); hires = bool(s.get('hires'))
         if pano and s['kind'] != '360': raise HTTPException(400, 'only a 360 section can be looked around in')
-        if os.path.exists(SV.video_path(rd, s, pano, hires)): return dict(started=False, reason='the video is already made')
+        if os.path.exists(SV.video_path(rd, s, pano)): return dict(started=False, reason='the video is already made')
         if any(p.poll() is None for (ff, _, _p, _h), p in STREETVIEW_VIDEO_JOBS.items() if ff == f): return dict(started=False, reason='another preview video is being made')
-        out = SV.video_path(rd, s, pano, hires); os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
-        STREETVIEW_VIDEO_JOBS[(f, key, pano, hires)] = subprocess.Popen([*oslib.cli_command(), 'streetview-video', f, key] + (['--pano'] if pano else []) + (['--hires'] if hires else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+        out = SV.video_path(rd, s, pano); os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
+        STREETVIEW_VIDEO_JOBS[(f, key, pano, hires)] = subprocess.Popen([*oslib.cli_command(), 'streetview-video', f, key] + (['--pano'] if pano else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.get('/api/streetview/video/file')
-    def get_streetview_video_file(request: Request, folder: str, key: str, pano: bool = False, hires: bool = False):               # the video itself (a <video> cannot send headers: the cookie / query token authenticates)
+    def get_streetview_video_file(request: Request, folder: str, key: str, pano: bool = False):               # the video itself (a <video> cannot send headers: the cookie / query token authenticates)
         from strata360 import streetview as SV
-        auth(request); rd, s = sv_section(folder_of(folder), key); p = SV.video_path(rd, s, pano, hires)
+        auth(request); rd, s = sv_section(folder_of(folder), key); p = SV.video_path(rd, s, pano)
         if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
 

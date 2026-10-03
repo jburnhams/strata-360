@@ -209,3 +209,12 @@ class TestLength:
         with pytest.raises(ValueError, match='can play'): SV.set_length(rd, s, 0.5)
         with pytest.raises(ValueError, match='number'): SV.set_length(rd, s, 'long')
         assert SV.set_length(rd, s, None) is None and SV.annotate(rd, docs)[0]['seconds'] is None
+
+
+class TestVideoProgress:
+    def test_progress_follows_the_latest_step_with_fetching_first_and_rendering_the_rest(self):
+        assert SV.video_progress([]) is None and SV.video_progress(['starting']) is None
+        g = ['google G+1: 25 panoramas, 400 views still to ask', 'google G+1: panorama 5 of 25 stitched (80 requests so far)']
+        assert SV.video_progress(g, True) == dict(pct=16, phase='asking Google for views and stitching panoramas', done=5, total=25)
+        assert SV.video_progress(g + ['google G+1: panorama 25 of 25 stitched (400 requests so far)', 'rendering 10 of 25 pictures'], True) == dict(pct=88, phase='rendering the video', done=10, total=25)
+        assert SV.video_progress(['fetching picture 3 of 36']) == dict(pct=4, phase='fetching pictures', done=3, total=36) and SV.video_progress(['fetching picture 36 of 36', 'rendering 36 of 36 pictures'])['pct'] == 100

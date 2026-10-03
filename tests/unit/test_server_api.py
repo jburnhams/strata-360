@@ -749,10 +749,20 @@ class TestStreetViewPanoVideo(TestStreetViewVideoApi):
         else: assert r.status_code == 400
 
 
-class TestStreetViewHiresVideo(TestStreetViewVideoApi):
-    def test_the_high_resolution_video_is_its_own_file_and_only_for_google(self, client, project, fake_popen):
+class TestStreetViewHires(TestStreetViewApi):
+    def test_the_higher_resolution_is_a_setting_of_a_google_section_that_changes_its_videos(self, client, project, fake_popen):
         from strata360 import streetview as SV
-        key = self.key(project); rd = project.race_dir; s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key)
-        assert len({SV.video_path(rd, s, True), SV.video_path(rd, s, True, True), SV.video_path(rd, s)}) == 3 and SV.video_path(rd, s, True, True).endswith('-360hi.mp4')
-        r = client.post('/api/streetview/video', json=dict(folder=project.folder, key=key, pano=True, hires=True))
-        if s['kind'] == '360': assert r.json() == dict(started=True) and '--hires' not in fake_popen.instances[-1].cmd           # (Mapillary / Panoramax pictures are already full size)
+        self.make_docs(project); rd = project.race_dir; g = dict(SV.load(rd, 'mapillary')['sections'][0], id='G1', provider='google', seq='g', kind='360'); SV._save(rd, 'google', SV.provider_doc('google', [g], SV.load(rd, 'roads'))); key = SV.section_key(g); q = dict(folder=project.folder)
+        before = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); assert before['hires'] is False
+        assert client.post('/api/streetview/hires', json=dict(q, key=key, hires=True)).json() == dict(key=key, hires=True)
+        after = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); assert after['hires'] is True and len({SV.video_path(rd, before, True), SV.video_path(rd, after, True), SV.video_path(rd, after), SV.video_path(rd, before)}) == 4
+        assert client.get('/api/streetview/video', params=dict(q, key=key, pano='true')).json()['hires'] is True
+        assert client.post('/api/streetview/hires', json=dict(q, key=key, hires=False)).json() == dict(key=key, hires=False)
+        m = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['provider'] == 'mapillary'); assert client.post('/api/streetview/hires', json=dict(q, key=m['key'], hires=True)).status_code == 400 and client.post('/api/streetview/hires', json=dict(q, key='nope', hires=True)).status_code == 404
+
+    def test_a_chosen_google_section_in_the_film_is_made_from_the_higher_resolution_pictures_when_ticked(self, project, monkeypatch):
+        from strata360.edit import streetview_clip as SC, streetview_cam as CAM
+        from strata360 import streetview as SV
+        calls = []; monkeypatch.setattr(CAM, 'fetch_google_pano', lambda *a, **k: calls.append(('pano', k.get('grid')))); monkeypatch.setattr(CAM, 'fetch', lambda *a, **k: calls.append(('flat', None))); monkeypatch.setattr(CAM, 'render', lambda *a, **k: calls.append(('render', k.get('grid'))) or {})
+        sec = dict(provider='google', id='G1', key='k', seq='g', km0=0.0, hires=True); SC.render(project.folder, sec, 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('pano', 'hi'), ('render', 'hi')]
+        calls.clear(); SC.render(project.folder, dict(sec, hires=False), 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('flat', None), ('render', None)]

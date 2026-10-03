@@ -18,7 +18,7 @@ export default function SvItemPage({ folder, item, tz, onChanged }: { folder: st
     <ItemPage folder={folder} noun="street view section" must={item.choice === 'must'} script={item.script} err={err} noteClip={item.label} noteTitle="Notes for this street view section" notePlaceholder="What is this road? What was it like to run, what to mention or avoid…"
       heading={<>Street view {item.label} <span className="text-sm font-normal text-stone-500">{names[item.provider]} · {item.kind === '360' ? '360°' : '2D'} · {Math.round(item.length_m)} m</span></>}
       sub={item.quality ? `clip quality: ${item.quality}` : undefined}
-      preview={section ? <><SectionContent folder={folder} tz={tz} section={section} onChoose={choose} showChoice={false} /><div className="mt-2 space-y-0.5"><SectionFacts s={section} tz={tz} by={by} /></div></> : <p className="text-sm text-stone-500">Loading the section…</p>}
+      preview={section ? <><SectionContent folder={folder} tz={tz} section={section} onChoose={choose} onHires={(key, on) => run(() => api.setSvHires(folder, key, on))} showChoice={false} /><div className="mt-2 space-y-0.5"><SectionFacts s={section} tz={tz} by={by} /></div></> : <p className="text-sm text-stone-500">Loading the section…</p>}
       settings={<>
         <div className="flex items-center gap-2"><span className="w-24 text-stone-500">Drawn as</span><span>along the road, with a steady virtual camera</span></div>
         <LengthField id={item.key} mode={item.seconds == null ? '' : 'set'} seconds={item.seconds} modes={['set']} min={item.min_s} max={item.max_s} fallback={item.default_s} onChange={(_, seconds) => run(() => api.setSvLength(folder, item.key, seconds))} />
