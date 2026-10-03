@@ -99,11 +99,11 @@ class TestMaps:
         ov = overlay(series, tiles, elements=['route_map']); y_start = ov.patches(T0)[2][1]; y_end = ov.patches(T0 + 899)[2][1]
         assert abs(y_start - y_end) == pytest.approx(256 * 0.86, abs=2)
 
-    def test_the_part_already_run_is_a_strong_line_over_a_paler_whole_route(self, series, tiles):
+    def test_the_part_already_run_is_a_darker_line_over_the_whole_route(self, series, tiles):
         ov = overlay(series, tiles, elements=['route_map']); first = ov.patches(T0 - 100)[1][2]; mid = ov.patches(T0 + 450)[1][2]; end = ov.patches(T0 + 899)[1][2]
         covered = lambda p: int((p[..., 3] > 0).sum())
-        assert covered(first) == 0 and 0 < covered(mid) < covered(end) and tuple(mid[mid[..., 3] > 0][0][:3]) == LY.RUN_COLOUR                                   # nothing run yet; more run later
-        base = ov.patches(T0)[0][2]; assert base[..., 3].max() > 0 and ov.patches(T0 + 450)[0][2] is base                                                        # the pale whole route is in the base picture, drawn once
+        assert covered(first) == 0 and 0 < covered(mid) < covered(end) and tuple(mid[mid[..., 3] > 0][0][:3]) == LY.DONE_DARK                                   # nothing run yet; more run later
+        base = ov.patches(T0)[0][2]; assert base[..., 3].max() > 0 and ov.patches(T0 + 450)[0][2] is base                                                        # the whole route (medium red) is in the base picture, drawn once
 
     def test_local_map_draws_the_run_part_stronger_than_the_part_to_come(self, series, tiles):
         ov = overlay(series, tiles, elements=['local_map']); pic = ov.patches(T0 + 450)[0][2]
