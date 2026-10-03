@@ -26,9 +26,9 @@ def race_span(folder, sec):
 
 
 def render(folder, sec, seconds, path, log=print):
-    rd = config.race_dir(folder); roads = SV.load(rd, 'roads') or {'stretches': []}; st = next((s for s in roads['stretches'] if s['id'] == sec['stretch']), None)
+    rd = config.race_dir(folder)
     CAM.fetch(rd, sec, token=SV._key('MAPILLARY_TOKEN'), log=log)
-    os.makedirs(os.path.dirname(path), exist_ok=True); return CAM.render(rd, sec, seconds, path, road=dict(line=st['line'], km0=st['km0']) if st else None, encode_size=tuple(int(x) for x in SY.STREETVIEW_SIZE.split('x')), log=log)
+    os.makedirs(os.path.dirname(path), exist_ok=True); return CAM.render(rd, sec, seconds, path, road=SV.road_of(rd, sec), encode_size=tuple(int(x) for x in SY.STREETVIEW_SIZE.split('x')), log=log)
 
 
 def sync(folder, specs, log=print):

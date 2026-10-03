@@ -3,10 +3,11 @@
 Three kinds of picture, three ways of keeping the camera steady:
   * Mapillary 360: each picture has its true 3D rotation from Mapillary's own reconstruction (`computed_rotation`), so the horizon is levelled exactly; the heading follows the smoothed path of the camera's positions, looking `LOOK_M` ahead.
   * Panoramax 360: no rotation is given, so which way is up is estimated from the picture (vertical things are vertical), lightly smoothed over neighbours; the heading follows the road.
+  * Google: each panorama is asked for as a 640x360 view along the road (levelled and north-referenced by Google), enlarged and blended.
   * Flat cameras (dashcams, phones): the pictures that face the way the runner went, each steadied by matching the far field (hills, sky line) to its neighbours, smoothing that path and cropping in a little.
 The pictures between two real ones are made by moving each along the optical flow towards the other and mixing (a plain cross-fade ghosts anything near). The experiments behind the settings: docs/implementation-plan.md (street view).
 
-`fetch(rd, section)` downloads what a section needs (once, into streetview/src/); `render(rd, section, seconds, out)` makes the clip; nothing here talks to the network except `fetch`."""
+`fetch(rd, section)` downloads what a section needs (once, into streetview/src/; for Google a 640x360 view along the road for each panorama); `render(rd, section, seconds, out)` makes the clip; nothing here talks to the network except `fetch`."""
 import json, math, os, subprocess
 
 import cv2
@@ -33,9 +34,16 @@ def fetch(rd, section, token=None, get=None, download=None, log=print, preview=F
     get = get or SV._get; download = download or SV._bytes; os.makedirs(src_dir(rd, section), exist_ok=True)
     try: meta = json.load(open(meta_path(rd, section)))                                                                         # what an earlier fetch learnt (a picture already here needs no question to Mapillary)
     except (OSError, ValueError): meta = {}
+    heading = dict(zip([i['id'] for i in section['items']], smooth_heading([i['b'] for i in section['items']], 3.0))) if section['provider'] == 'google' else {}      # (a Google view is asked for along the road: its panoramas are levelled and north-referenced)
+    gkey = (SV._key('GOOGLE_MAPS_API_KEY') if section['provider'] == 'google' else None)
     for it in section['items']:
         f = src_path(rd, section, it['id'], preview)
         if os.path.exists(f) and it['id'] in meta: continue
+        if section['provider'] == 'google':
+            if not gkey: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
+            meta[it['id']] = {'heading': round(float(heading[it['id']]), 1)}; url = None
+            if not os.path.exists(f): tmp = f + '.part'; open(tmp, 'wb').write(download('https://maps.googleapis.com/maps/api/streetview', dict(size='640x360', pano=it['id'], heading=meta[it['id']]['heading'], fov=90, pitch=0, key=gkey))); os.replace(tmp, f)
+            continue
         if section['provider'] == 'mapillary':
             m = get(f"https://graph.mapillary.com/{it['id']}", dict(access_token=token, fields='thumb_original_url,thumb_2048_url,computed_rotation,computed_geometry,computed_compass_angle,compass_angle'))
             meta[it['id']] = {k: m.get(k) for k in ('computed_rotation', 'computed_geometry', 'computed_compass_angle', 'compass_angle')}; url = m.get('thumb_2048_url' if preview else 'thumb_original_url')
@@ -195,7 +203,9 @@ def build(rd, section, road=None, size=OUT, preview=False):
             imgs[i] = im
         return imgs[i]
     km = np.array([it['km'] for it in its]) * 1000.0; n = len(its); view = None
-    if section['kind'] == '360' and prov == 'mapillary':
+    if prov == 'google':                                                                                      # views already looking along the road (see `fetch`): nothing to level or aim, only to blend
+        prog = km; hs = np.zeros(n); view = lambda i, yaw: cv2.resize(img(i), size, interpolation=cv2.INTER_CUBIC)
+    elif section['kind'] == '360' and prov == 'mapillary':
         meta = json.load(open(meta_path(rd, section))); pos = np.array([meta[it['id']]['computed_geometry']['coordinates'] for it in its]); la0 = pos[:, 1].mean()
         xy = np.stack([(pos[:, 0] - pos[0, 0]) * math.cos(math.radians(la0)) * 111320, (pos[:, 1] - pos[0, 1]) * 111320], 1); xy = np.stack([gaussian_filter1d(xy[:, 0], 1.0, mode='nearest'), gaussian_filter1d(xy[:, 1], 1.0, mode='nearest')], 1)
         prog = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]) + km[0]; Rc = [sfm_to_world(meta[it['id']]['computed_rotation']) for it in its]

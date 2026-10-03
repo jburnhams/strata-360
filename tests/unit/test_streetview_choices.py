@@ -21,8 +21,8 @@ class TestJudge:
         assert SV.judge(sec('M1', spacing=15.0)) == (False, 'pictures 15.0 m apart (needs 10 m or less)')
         assert SV.judge(sec('M1', spacing=None))[0] is False
 
-    def test_google_is_never_offered(self):
-        ok, why = SV.judge(sec('G1', provider='google')); assert ok is False and 'terms' in why
+    def test_google_is_offered_like_the_others(self):
+        ok, why = SV.judge(sec('G1', provider='google')); assert ok is True
 
 
 def test_how_well_the_camera_can_be_steadied_depends_on_the_pictures():
@@ -108,12 +108,12 @@ class TestQualityStage:
         def fetch(rd_, sec_, token=None, log=print, preview=False): fetched.append((sec_['id'], preview, token))
         def measure(rd_, sec_, road=None): measured.append((sec_['id'], road['km0'])); return dict(psnr=15.0, jerk=0.3, roll=0.2, score=70 if sec_['id'] == 'M1' else 20)
         assert SV.run(rd, {}, ['quality'], measure=measure, fetch=fetch, log=log.append) == ['quality']
-        assert fetched == [('M1', True, 'tok'), ('P1', True, 'tok')] and measured == [('M1', 0.5), ('P1', 0.5)] and len(log) == 2
-        q = SV.quality_of(rd); assert q['mapillary:a:1.00']['grade'] == 'good' and q['panoramax:b:2.00']['grade'] == 'poor' and q['mapillary:a:1.00']['frames'] == 60 and set(q) == {'mapillary:a:1.00', 'panoramax:b:2.00'}
-        assert SV.run(rd, {}, ['quality'], measure=measure, fetch=fetch) == [] and len(measured) == 2                                  # nothing new to score
-        assert SV.run(rd, {}, ['quality'], force=True, measure=measure, fetch=fetch) == ['quality'] and len(measured) == 4
-        out = {s['id']: s for s in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})}; assert out['M1']['quality']['score'] == 70 and out['M1']['quality']['grade'] == 'good' and out['M2']['quality'] is None and out['G1']['quality'] is None
-        assert SV.status(rd)['quality'] == dict(done=True, scored=2, km=0) and 'quality' in SV.STAGES
+        assert fetched == [('M1', True, 'tok'), ('P1', True, 'tok'), ('G1', True, 'tok')] and measured == [('M1', 0.5), ('P1', 0.5), ('G1', 0.5)] and len(log) == 3
+        q = SV.quality_of(rd); assert q['mapillary:a:1.00']['grade'] == 'good' and q['panoramax:b:2.00']['grade'] == 'poor' and q['mapillary:a:1.00']['frames'] == 60 and set(q) == {'mapillary:a:1.00', 'panoramax:b:2.00', 'google:g:4.00'}
+        assert SV.run(rd, {}, ['quality'], measure=measure, fetch=fetch) == [] and len(measured) == 3                                  # nothing new to score
+        assert SV.run(rd, {}, ['quality'], force=True, measure=measure, fetch=fetch) == ['quality'] and len(measured) == 6
+        out = {s['id']: s for s in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})}; assert out['M1']['quality']['score'] == 70 and out['M1']['quality']['grade'] == 'good' and out['M2']['quality'] is None and out['G1']['quality']['score'] == 20
+        assert SV.status(rd)['quality'] == dict(done=True, scored=3, km=0) and 'quality' in SV.STAGES
 
     def test_a_section_whose_pictures_changed_is_scored_again(self, tmp_path, monkeypatch):
         rd = str(tmp_path); roads = self.setup_docs(rd); monkeypatch.setattr(SV, '_key', lambda n: 'tok'); measure = lambda rd_, s_, road=None: dict(psnr=1, jerk=1, roll=1, score=50); fetch = lambda *a, **k: None
@@ -127,7 +127,7 @@ class TestQualityStage:
             if s_['id'] == 'M1': raise RuntimeError('picture x1 has not been fetched')
             return dict(psnr=15.0, jerk=0.3, roll=0.2, score=60)
         SV.run(rd, {}, ['quality'], measure=measure, fetch=lambda *a, **k: None); out = {s['id']: s for s in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})}
-        assert out['M1']['quality']['score'] is None and 'has not been fetched' in out['M1']['quality']['error'] and out['P1']['quality']['score'] == 60 and SV.status(rd)['quality']['scored'] == 1
+        assert out['M1']['quality']['score'] is None and 'has not been fetched' in out['M1']['quality']['error'] and out['P1']['quality']['score'] == 60 and SV.status(rd)['quality']['scored'] == 2
 
     def test_the_quality_stage_needs_the_roads_and_mapillary_needs_its_token(self, tmp_path, monkeypatch):
         with pytest.raises(RuntimeError, match='roads stage first'): SV.run(str(tmp_path), {}, ['quality'])
@@ -157,7 +157,7 @@ class TestTimesAndVideo:
         assert SV.default_seconds(sec('M1', km0=1.0, km1=1.4, length_m=400, frames=80)) == 16.0 and SV.default_seconds(sec('M1', length_m=100, frames=80)) == 4.0
         assert SV.default_seconds(sec('M1', length_m=2000, frames=40)) == 10.0 and SV.default_seconds(sec('M1', length_m=10, frames=80)) == 2.0
 
-    def test_making_the_video_fetches_the_small_pictures_renders_once_and_refuses_google(self, tmp_path, monkeypatch):
+    def test_making_the_video_fetches_the_small_pictures_renders_once_and_(self, tmp_path, monkeypatch):
         from strata360.edit import streetview_cam as CAM
         rd = str(tmp_path); roads = dict(schema=1, id='r', stretches=[dict(id='R1', km0=0.5, km1=3.0, length_m=2500, highways=[], names=[], line=[[1, 1], [1, 2]])], run=[], total_km=4)
         SV._save(rd, 'roads', roads); a = SV.annotate(rd, {'mapillary': doc(self.section())})[0]; calls = []
@@ -167,8 +167,7 @@ class TestTimesAndVideo:
         monkeypatch.setattr(CAM, 'render', render)
         out = SV.make_video(rd, a); assert os.path.exists(out) and calls == [('fetch', 'M1', 'tok', True), ('render', SV.default_seconds(a), dict(line=[[1, 1], [1, 2]], km0=0.5), (960, 540), True)]
         assert SV.make_video(rd, a) == out and len(calls) == 2                                                                         # kept: not made again
-        with pytest.raises(RuntimeError, match='terms'): SV.make_video(rd, dict(a, provider='google'))
-
+    
 
 class TestNearestClips:
     T0 = 1_726_401_600.0

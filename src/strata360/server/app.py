@@ -1049,6 +1049,25 @@ def create_app(roots, token=None):
         except ValueError as ex: raise HTTPException(400, str(ex))
         return dict(key=key, choice=None if choice == 'none' else choice)
 
+    @api.post('/api/streetview/promote', dependencies=[Depends(auth)])
+    def post_streetview_promote(body: dict):                                             # {folder, provider, id, sequence, lat, lon}: make a capture run found by the nearest-street-view search a section like the others
+        from strata360 import streetview as SV
+        from strata360.edit import llm_remote as LR
+        f = folder_of(body.get('folder')); rd = config.race_dir(f); prov = str(body.get('provider') or '')
+        if prov not in SV.PROVIDERS: raise HTTPException(400, f'provider is one of {", ".join(SV.PROVIDERS)}')
+        try: lat, lon = float(body['lat']), float(body['lon'])
+        except (KeyError, TypeError, ValueError): raise HTTPException(400, 'lat and lon are needed')
+        try: s = SV.promote(rd, prov, str(body.get('id') or ''), str(body.get('sequence') or ''), lat, lon, sv_track(f), token=LR.secret('MAPILLARY_TOKEN'), gkey=LR.secret('GOOGLE_MAPS_API_KEY'))
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        return dict(key=SV.section_key(s), id=s['id'])
+
+    @api.post('/api/streetview/unpromote', dependencies=[Depends(auth)])
+    def post_streetview_unpromote(body: dict):                                           # {folder, key}: take a section made that way out again
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder'))
+        if not SV.unpromote(config.race_dir(f), str(body.get('key') or '')): raise HTTPException(404, 'no such promoted section')
+        return dict(removed=True)
+
     def sv_section(f, key):
         """The annotated street view section with this key, or a 404."""
         from strata360 import streetview as SV
@@ -1072,7 +1091,6 @@ def create_app(roots, token=None):
     def post_streetview_video(body: dict):                                                # {folder, key}: make the preview video in the background (nothing to do when it exists)
         from strata360 import streetview as SV
         f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd, s = sv_section(f, key)
-        if s['provider'] == 'google': raise HTTPException(400, "Google's terms do not allow its pictures in a video")
         if os.path.exists(SV.video_path(rd, s)): return dict(started=False, reason='the video is already made')
         if any(p.poll() is None for (ff, _), p in STREETVIEW_VIDEO_JOBS.items() if ff == f): return dict(started=False, reason='another preview video is being made')
         out = SV.video_path(rd, s); os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
@@ -1102,7 +1120,7 @@ def create_app(roots, token=None):
         if item is None: raise HTTPException(404, 'no such picture: click the map again')
         try: data = SV.image_near(config.race_dir(f), provider, item, w)
         except RuntimeError as ex: raise HTTPException(502, str(ex))
-        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store' if provider == 'google' else 'max-age=86400'})
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
 
     @api.get('/api/streetview/image')
     def get_streetview_image(request: Request, folder: str, provider: str, id: str, w: int = 640):   # one frame as a JPEG (an <img> cannot send headers: the cookie / query token authenticates); only frames the stage found can be asked for
@@ -1112,7 +1130,7 @@ def create_app(roots, token=None):
         try: data = SV.image(rd, provider, SV.load(rd, provider), id, w)
         except KeyError: raise HTTPException(404, 'no such frame')
         except RuntimeError as ex: raise HTTPException(502, str(ex))
-        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store' if provider == 'google' else 'max-age=86400'})
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
 
     def start_photo_job(f, stages=(), photo=(), force=False):
         """Start `photos-analyse` in the background (one at a time per project); {started, reason?}."""

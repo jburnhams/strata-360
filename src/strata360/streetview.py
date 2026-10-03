@@ -4,7 +4,7 @@
                    {id, provider, stretch, kind '360' | '2d', km0, km1, length_m, frames, spacing_m, year, camera, size, angles, items: [{id, km, lat, lon, a, b, c, t, u, h}]}.
                    For a flat ('2d') camera `a` is the way the camera faced relative to the way the runner went (0 = the same way, 90 = to the right, 180 = back at the runner) and `angles` counts the frames facing forward / right / back / left;
                    a 360 camera sees every way. `b` is the runner's bearing at that frame (to aim a panorama).
-Mapillary and Panoramax images are CC BY-SA (credit them); Google's terms do not allow keeping or re-using its imagery, so its pictures are only fetched for display and never kept on disk (server/app.py).
+Mapillary and Panoramax images are CC BY-SA (credit them); Google's are credited "© Google". All three are kept in streetview/img/ and streetview/src/ once fetched (a Google view costs a request each, so it is fetched once). `manual.json` holds sections promoted from the click-the-map search (they stay when the stages are run again).
 Each provider stage records the id of the roads it was made from, and is redone when that changes.
   quality.json     stage `quality`: for each plausible Mapillary / Panoramax section, a score from 0 to 100 for how good a clip of it will look (edit/streetview_cam.py `quality`: how well the pictures between two real ones can be made, and how
                    steady the view is at 25 m/s), measured on the smaller copies of its pictures; {sections: {key: {score, grade, psnr, jerk, roll, frames}}}."""
@@ -211,10 +211,10 @@ def find_quality(rd, rdoc, force=False, log=print, measure=None, fetch=None):
     """Score the plausible Mapillary / Panoramax sections that have no score yet (or whose pictures changed): fetch the smaller copies of their pictures and measure (edit/streetview_cam.py `quality`). Saved after each section so a long run
     keeps what it did. Returns the keys scored. A section that cannot be measured is recorded with its error."""
     from strata360.edit import streetview_cam as CAM
-    measure = measure or CAM.quality; fetch = fetch or CAM.fetch; docs = {p: load(rd, p) for p in PROVIDERS}; done = quality_of(rd) if not force else {}; roads = {x['id']: x for x in rdoc['stretches']}; made = []
-    todo = [x for x in annotate(rd, docs) if x['plausible'] and x['provider'] != 'google' and (x['key'] not in done or done[x['key']].get('frames') != x['frames'])]
+    measure = measure or CAM.quality; fetch = fetch or CAM.fetch; docs = {p: load(rd, p) for p in PROVIDERS}; done = quality_of(rd) if not force else {}; made = []
+    todo = [x for x in annotate(rd, docs) if x['plausible'] and (x['key'] not in done or done[x['key']].get('frames') != x['frames'])]
     for n, x in enumerate(todo, 1):
-        st = roads.get(x['stretch']); road = dict(line=st['line'], km0=st['km0']) if st else None
+        road = road_of(rd, x)
         try:
             if x['provider'] == 'mapillary' and not _key('MAPILLARY_TOKEN'): raise RuntimeError('no MAPILLARY_TOKEN in secrets.env')
             fetch(rd, x, token=_key('MAPILLARY_TOKEN'), log=lambda *_: None, preview=True); m = measure(rd, x, road=road); m['grade'] = CAM.grade(m['score']); m['frames'] = x['frames']; done[x['key']] = m
@@ -263,8 +263,8 @@ def run(rd, track, stages=None, force=False, log=print, svc=None, get=_get, meas
 
 
 # --- pictures (the page asks the server, which fetches and keeps them; the keys never reach the browser) ---------------------------------------------------------------------
-def find_item(doc, item_id):
-    for s in (doc or {}).get('sections', []):
+def find_item(doc, item_id, extra=()):
+    for s in [*(doc or {}).get('sections', []), *extra]:
         for it in s['items']:
             if it['id'] == item_id: return s, it
     return None, None
@@ -277,14 +277,10 @@ def _bytes(url, params=None):
 
 
 def image(rd, provider, doc, item_id, w=640, fetch=_bytes, get=_get):
-    """JPEG bytes of one frame of a section in `doc`: Mapillary (the 256 / 1024 / 2048 px copy) and Panoramax are kept in streetview/img/; Google's is fetched each time and never kept (its terms). KeyError if the frame is not in the doc."""
-    sec, it = find_item(doc, item_id)
+    """JPEG bytes of one frame of a section in `doc`: Mapillary (the 256 / 1024 / 2048 px copy), Panoramax and Google (a 640 px view along the road) are kept in streetview/img/. KeyError if the frame is not in the doc."""
+    sec, it = find_item(doc, item_id, [x for x in manual_sections(rd) if x['provider'] == provider])
     if it is None: raise KeyError(item_id)
     rd_img = os.path.join(adir(rd), 'img'); w = 256 if w <= 256 else 1024 if w <= 1024 else 2048
-    if provider == 'google':
-        key = _key('GOOGLE_MAPS_API_KEY')
-        if not key: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
-        return fetch('https://maps.googleapis.com/maps/api/streetview', dict(size='640x400', pano=item_id, heading=it['b'], fov=90, pitch=0, key=key))
     f = os.path.join(rd_img, f'{provider[0]}-{item_id}-{w}.jpg')
     if os.path.exists(f): return open(f, 'rb').read()
     if provider == 'mapillary':
@@ -296,6 +292,10 @@ def image(rd, provider, doc, item_id, w=640, fetch=_bytes, get=_get):
     elif provider == 'panoramax':
         if not it.get('u'): raise RuntimeError('panoramax gave no picture address for this frame')
         data = fetch(it['u'])
+    elif provider == 'google':
+        key = _key('GOOGLE_MAPS_API_KEY')
+        if not key: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
+        data = fetch('https://maps.googleapis.com/maps/api/streetview', dict(size='640x400', pano=item_id, heading=it['b'], fov=90, pitch=0, key=key))
     else: raise KeyError(provider)
     os.makedirs(rd_img, exist_ok=True); tmp = f'{f}.{os.getpid()}.tmp'; open(tmp, 'wb').write(data); os.replace(tmp, f); return data
 
@@ -314,16 +314,15 @@ def clip_range(s):
 
 
 def steadying(s):
-    """How well the clip's camera can be kept steady: 'exact' (a 360 camera whose true rotation Mapillary reconstructed), 'estimated' (a 360 camera levelled from the picture itself) or 'by matching only' (a flat camera: the far field of neighbouring pictures is matched, and it may still wobble)."""
-    return 'by matching only' if s['kind'] != '360' else 'exact' if s['provider'] == 'mapillary' else 'estimated'
+    """How well the clip's camera can be kept steady: 'exact' (a 360 camera whose true rotation Mapillary reconstructed, or a Google panorama, which is levelled and north-referenced), 'estimated' (a 360 camera levelled from the picture itself) or 'by matching only' (a flat camera: the far field of neighbouring pictures is matched, and it may still wobble)."""
+    return 'by matching only' if s['kind'] != '360' else 'estimated' if s['provider'] == 'panoramax' else 'exact'
 
 
 def section_key(s): return f"{s['provider']}:{s['seq']}:{s['km0']:.2f}"                  # stays the same when the stage is run again (the numbers M1.. may move)
 
 
 def judge(s):
-    """(plausible, why not): whether a section has enough pictures, close enough together, over enough road, to make a clip of it. Google's are never offered (its terms do not allow its pictures in a film; kept for looking at only)."""
-    if s['provider'] == 'google': return False, 'Google\'s terms do not allow its pictures in a film'
+    """(plausible, why not): whether a section has enough pictures, close enough together, over enough road, to make a clip of it."""
     if s['frames'] < MIN_FRAMES: return False, f"only {s['frames']} pictures (needs {MIN_FRAMES})"
     if s['length_m'] < MIN_LENGTH_M: return False, f"only {s['length_m']} m long (needs {MIN_LENGTH_M} m)"
     if s['spacing_m'] is None or s['spacing_m'] > MAX_SPACING_M: return False, f"pictures {s['spacing_m']} m apart (needs {MAX_SPACING_M:g} m or less)"
@@ -402,7 +401,7 @@ def nearest_clips(s, clips, tr, gaps=None):
 
 def annotate(rd, docs, tr=None, clips=None, gaps=None):
     """Every section of the provider docs {provider: doc or None} (and, with the race track `tr`, the light they were filmed in against the race's there) with what the page needs: key, plausible (and why not), pictures' play time and apparent speed at PLAY_FPS, the ids it overlaps, and the choice. Sorted by km."""
-    out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; ov = overlaps(out); st = _state(rd); ch = st['choices']; qs = quality_of(rd)
+    out = [dict(s) for p in PROVIDERS for s in (docs.get(p) or {}).get('sections', [])]; have = {section_key(s) for s in out}; out += [dict(s) for s in manual_sections(rd) if section_key(s) not in have]; ov = overlaps(out); st = _state(rd); ch = st['choices']; qs = quality_of(rd)
     for s in out:
         s['key'] = section_key(s); s['plausible'], s['why_not'] = judge(s); s['play_s'] = round(s['frames'] / PLAY_FPS, 1); s['min_s'], s['max_s'] = clip_range(s); s['speed_ms'] = round(s['spacing_m'] * PLAY_FPS, 1) if s['spacing_m'] else None
         s['steadied'] = steadying(s); q = qs.get(s['key']); s['quality'] = dict(score=q.get('score'), grade=q.get('grade'), psnr=q.get('psnr'), jerk=q.get('jerk'), roll=q.get('roll'), error=q.get('error')) if q and q.get('frames') == s['frames'] else None; caps = [i['t'] for i in s['items'] if i.get('t')]; s['filmed'] = [min(caps), max(caps)] if caps else None; s['passed'] = passed(s, tr) if tr is not None else None; s['has_video'] = os.path.exists(video_path(rd, s)); s['near'] = nearest_clips(s, clips, tr, gaps) if tr is not None else None; s['light'] = light(s, tr) if tr is not None and s['items'] else None; s['overlaps'] = ov[s['id']]; s['choice'] = ch.get(s['key']); s['label'] = f"V{st['labels'][s['key']]}" if s['key'] in st['labels'] and s['choice'] else None
@@ -427,12 +426,10 @@ def video_path(rd, s):
 def make_video(rd, s, log=print):
     """Make the preview video of an (annotated) Mapillary or Panoramax section with the app's own camera, from the smaller copies of its pictures; kept (a finished one is not made again). Returns the path."""
     from strata360.edit import streetview_cam as CAM
-    if s['provider'] == 'google': raise RuntimeError("Google's terms do not allow its pictures in a film or a video")
     out = video_path(rd, s)
     if os.path.exists(out): return out
-    roads = load(rd, 'roads') or {'stretches': []}; st = next((x for x in roads['stretches'] if x['id'] == s['stretch']), None)
     CAM.fetch(rd, s, token=_key('MAPILLARY_TOKEN'), log=log, preview=True); os.makedirs(os.path.dirname(out), exist_ok=True)
-    CAM.render(rd, s, default_seconds(s), out, road=dict(line=st['line'], km0=st['km0']) if st else None, size=PREVIEW_SIZE, preview=True, log=log); return out
+    CAM.render(rd, s, default_seconds(s), out, road=road_of(rd, s), size=PREVIEW_SIZE, preview=True, log=log); return out
 
 
 def chosen(rd, docs):
@@ -473,7 +470,7 @@ def _frames_panoramax(lat, lon, r, token, get):
         try: t = dt.datetime.fromisoformat(p['datetime'].replace('Z', '+00:00')).timestamp()
         except (KeyError, ValueError): pass
         out.append(dict(seq=f.get('collection') or f['id'], id=f['id'], lat=g[1], lon=g[0], compass=p.get('view:azimuth'), pano=cam.get('field_of_view') == 360 or (len(size) == 2 and size[0] >= 1.9 * size[1]), t=t,
-                        camera=' '.join(v for v in (cam.get('camera_manufacturer'), cam.get('camera_model')) if v) or None, size=list(size) if len(size) == 2 else None, url=((f.get('assets') or {}).get('sd') or {}).get('href')))
+                        camera=' '.join(v for v in (cam.get('camera_manufacturer'), cam.get('camera_model')) if v) or None, size=list(size) if len(size) == 2 else None, url=((f.get('assets') or {}).get('sd') or {}).get('href'), hd=((f.get('assets') or {}).get('hd') or {}).get('href')))
     return out
 
 
@@ -490,42 +487,119 @@ def _groups(frames, lat, lon, n):
     return sorted(out, key=lambda g: g['nearest']['distance_m'])[:n]
 
 
+GOOGLE_LINK_M, GOOGLE_STEP_M, GOOGLE_STEPS = 40.0, 15.0, 12      # panoramas this close (metres) belong to one run; the run is followed along the road in steps of this length, this many each way
+
+
+def _pano(m, f_lat, f_lon):
+    try: t = dt.datetime.strptime(m.get('date', ''), '%Y-%m').replace(tzinfo=dt.timezone.utc).timestamp()
+    except ValueError: t = None
+    return dict(seq='g', id=m['pano_id'], lat=m['location']['lat'], lon=m['location']['lng'], compass=None, pano=True, t=t, camera='Google Street View car', size=None, url=None)
+
+
+def _google_ask(la, lo, key, get, radius=30):
+    m = get(GOOGLE_META, dict(location=f'{la:.6f},{lo:.6f}', radius=radius, source='outdoor', key=key))
+    if m.get('status') not in ('OK', 'ZERO_RESULTS'): raise RuntimeError(f'Google refused the Street View lookup: {m.get("status")} {m.get("error_message", "")[:120]}')
+    return _pano(m, la, lo) if m.get('status') == 'OK' else None
+
+
 def _google_near(lat, lon, n, key, get):
-    """The panoramas nearest the point: Google only answers with the single nearest to a spot, so ask at the point and on rings round it."""
+    """The nearest runs of Google panoramas. Google only answers with the single nearest panorama to a spot, so ask at the point and on rings round it; panoramas within GOOGLE_LINK_M of each other are one run (the frames of one drive along a road), and each run is followed
+    along the road in both directions (GOOGLE_STEPS steps of GOOGLE_STEP_M, trying a little to either side to follow a bend) to find its other panoramas. Each run is {seq, nearest, count, spacing_m, frames}."""
     spots = [(lat, lon)] + [(lat + r * math.cos(math.radians(a)) / 111320.0, lon + r * math.sin(math.radians(a)) / (111320.0 * math.cos(math.radians(lat)))) for r in GOOGLE_RING_M for a in range(0, 360, 45)]
-    found = {}
-    for la, lo in spots:
-        m = get(GOOGLE_META, dict(location=f'{la:.6f},{lo:.6f}', radius=30, source='outdoor', key=key))
-        if m.get('status') not in ('OK', 'ZERO_RESULTS'): raise RuntimeError(f'Google refused the Street View lookup: {m.get("status")} {m.get("error_message", "")[:120]}')
-        if m.get('status') == 'OK' and m['pano_id'] not in found:
-            try: t = dt.datetime.strptime(m.get('date', ''), '%Y-%m').replace(tzinfo=dt.timezone.utc).timestamp()
-            except ValueError: t = None
-            found[m['pano_id']] = dict(seq='g', id=m['pano_id'], lat=m['location']['lat'], lon=m['location']['lng'], compass=None, pano=True, t=t, camera='Google Street View car', size=None, url=None)
-    gs = [dict(seq=f['id'], nearest=dict(f, distance_m=round(_metres((lat, lon), (f['lat'], f['lon'])), 1)), count=1, spacing_m=None) for f in found.values()]
-    return sorted(gs, key=lambda g: g['nearest']['distance_m'])[:n]
+    with ThreadPoolExecutor(8) as ex: found = {p['id']: p for p in ex.map(lambda sp: _google_ask(sp[0], sp[1], key, get), spots) if p}
+    pts = list(found.values()); parent = list(range(len(pts)))
+    def root(i):
+        while parent[i] != i: parent[i] = parent[parent[i]]; i = parent[i]
+        return i
+    for i in range(len(pts)):
+        for j in range(i):
+            if _metres((pts[i]['lat'], pts[i]['lon']), (pts[j]['lat'], pts[j]['lon'])) <= GOOGLE_LINK_M: parent[root(i)] = root(j)
+    runs = collections.defaultdict(list)
+    for i, p in enumerate(pts): runs[root(i)].append(p)
+    seen = dict(found); lock = __import__('threading').Lock()
+    def follow(end, ahead):
+        """Walk on from the panorama `end` heading `ahead` degrees: at each step look a step further, a little to either side too, and take the new panorama nearest the straight way on."""
+        cur, head, out = end, ahead, []
+        for _ in range(GOOGLE_STEPS):
+            best = None
+            for off in (0, -25, 25):
+                h = math.radians(head + off); la = cur['lat'] + GOOGLE_STEP_M * math.cos(h) / 111320.0; lo = cur['lon'] + GOOGLE_STEP_M * math.sin(h) / (111320.0 * math.cos(math.radians(cur['lat'])))
+                p = _google_ask(la, lo, key, get, 8)
+                with lock: new = p is not None and p['id'] not in seen
+                if new and 4.0 <= _metres((cur['lat'], cur['lon']), (p['lat'], p['lon'])) <= 2.5 * GOOGLE_STEP_M and (best is None or abs(off) < abs(best[0])): best = (off, p)
+            if best is None: break
+            with lock:
+                if best[1]['id'] in seen: break
+                seen[best[1]['id']] = best[1]
+            out.append(best[1]); head = _bearing((cur['lat'], cur['lon']), (best[1]['lat'], best[1]['lon'])); cur = best[1]
+        return out
+    def fill(fs):
+        """Panoramas the rings stepped over: between two found ones more than 1.2 steps apart, look at the middle (a few passes)."""
+        for _ in range(3):
+            if len(fs) < 2: return
+            k = math.cos(math.radians(lat)); xy = np.array([[(f['lon'] - lon) * 111320.0 * k, (f['lat'] - lat) * 111320.0] for f in fs]); c = xy - xy.mean(axis=0); proj = c @ np.linalg.svd(c, full_matrices=False)[2][0]; order = list(np.argsort(proj)); added = 0
+            for a, b in zip(order, order[1:]):
+                pa, pb = fs[a], fs[b]
+                if _metres((pa['lat'], pa['lon']), (pb['lat'], pb['lon'])) <= 1.2 * GOOGLE_STEP_M: continue
+                p = _google_ask((pa['lat'] + pb['lat']) / 2, (pa['lon'] + pb['lon']) / 2, key, get, 8)
+                with lock:
+                    if p is not None and p['id'] not in seen: seen[p['id']] = p; fs.append(p); added += 1
+            if not added: return
+    with ThreadPoolExecutor(8) as ex: list(ex.map(fill, runs.values()))
+    jobs = []
+    for fs in runs.values():
+        if len(fs) == 1: jobs += [(fs, fs[0], a) for a in (0, 180)]; continue                                                    # (one panorama alone: the road could run either way; try along and across the compass)
+        k = math.cos(math.radians(lat)); xy = np.array([[(f['lon'] - lon) * 111320.0 * k, (f['lat'] - lat) * 111320.0] for f in fs]); c = xy - xy.mean(axis=0); axis = np.linalg.svd(c, full_matrices=False)[2][0]; proj = c @ axis
+        lo_i, hi_i = int(np.argmin(proj)), int(np.argmax(proj)); bearing = math.degrees(math.atan2(axis[0], axis[1])) % 360
+        jobs += [(fs, fs[hi_i], bearing), (fs, fs[lo_i], (bearing + 180) % 360)]
+    with ThreadPoolExecutor(8) as ex: extra = list(ex.map(lambda j: follow(j[1], j[2]), jobs))
+    for (fs, _, _), more in zip(jobs, extra): fs.extend(more)
+    out = []
+    for fs in runs.values():
+        fs = list({f['id']: f for f in fs}.values()); pts_ = [(f['lat'], f['lon']) for f in fs]; gaps = [min(_metres(pts_[i], pts_[j]) for j in range(len(fs)) if j != i) for i in range(len(fs))] if len(fs) > 1 else []
+        near = min(fs, key=lambda f: _metres((lat, lon), (f['lat'], f['lon']))); out.append(dict(seq='g:' + near['id'][:8], nearest=dict(near, distance_m=round(_metres((lat, lon), (near['lat'], near['lon'])), 1)), count=len(fs), spacing_m=round(float(np.median(gaps)), 1) if gaps else None, frames=fs))
+    return sorted(out, key=lambda g: g['nearest']['distance_m'])[:n]
 
 
 def _rule(key, ok, text): return dict(key=key, ok=ok, text=text)
 
 
+def _road_rule(ctx, run_pos):
+    """Whether the run was within ON_ROAD_M of a drivable road at the nearest point of the run (street-level pictures are on roads, and count when they are that close to the run): from the road data of the area (OpenStreetMap, through the cached mirror pool)."""
+    ways = ctx.get('ways')
+    if run_pos is None: return _rule('on_road', None, 'there is no race track yet')
+    if ways is None: return _rule('on_road', None, 'the roads here could not be looked up')
+    d, who = roads.distances(np.array([run_pos[0]]), np.array([run_pos[1]]), ways)[0]; name = ways[who].get('name') or ways[who].get('highway') if who >= 0 else None
+    if who >= 0 and d <= ON_ROAD_M: return _rule('on_road', True, f"the run was {d:.0f} m from a road there ({name})")
+    return _rule('on_road', False, 'no road within ' + f"{ON_ROAD_M:g} m of the run there" + ('' if who < 0 else f" (the nearest, {name}, is {d:.0f} m away)") + ': a trail, a path or off the roads')
+
+
+def _roads_near(rd, lat, lon, r, svc=None):
+    """The drivable roads within r metres of a point ([{id, highway, name, geometry}]) from the cached OpenStreetMap lookup; None when it cannot be had."""
+    a = (svc or osm.pool(os.path.join(rd, 'cache', 'osm'))).query(osm.ways_ql(_box_sn(lat, lon, r), osm.DRIVABLE))
+    return None if a is None else osm.ways(a)
+
+
+def _box_sn(lat, lon, r):
+    w, s, e, n = _box(lat, lon, r); return s, w, n, e
+
+
 def describe_near(prov, g, radius, secs, ctx):
     """One capture run near the point as the page shows it, with the rules that would rule it out (as for the sections found along the run): each {key, ok (True / False / None unknown), text}. `ctx`: tr (the race track or None), roads (the roads doc or None), clips, gaps."""
-    f = g['nearest']; tr = ctx.get('tr'); rules = []; run_d = run_km = run_t = bearing = None
+    f = g['nearest']; tr = ctx.get('tr'); rules = []; run_d = run_km = run_t = bearing = run_pos = None
     if tr is not None:
         d, t = track_dist(tr); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); la, lo = np.asarray(tr['lat'])[ok], np.asarray(tr['lon'])[ok]
         k = math.cos(math.radians(f['lat'])); dd = np.hypot((la - f['lat']) * 111320.0, (lo - f['lon']) * 111320.0 * k); i = int(np.argmin(dd)); run_d, run_km, run_t = float(dd[i]), float(d[i]) / 1000.0, float(t[i])
-        j0, j1 = max(0, i - 25), min(len(la) - 1, i + 25); bearing = _bearing((la[j0], lo[j0]), (la[j1], lo[j1])) if j1 > j0 else None
-    kind = '360' if f['pano'] else '2d'; sec = next((s for s in secs if s['provider'] == prov and s['seq'] == g['seq'] and run_km is not None and s['km0'] - 0.03 <= run_km <= s['km1'] + 0.03), None)
+        run_pos = (float(la[i]), float(lo[i])); j0, j1 = max(0, i - 25), min(len(la) - 1, i + 25); bearing = _bearing((la[j0], lo[j0]), (la[j1], lo[j1])) if j1 > j0 else None
+    kind = '360' if f['pano'] else '2d'; sec = next((s for s in secs if s['provider'] == prov and (s['seq'] == g['seq'] or prov == 'google') and run_km is not None and s['km0'] - 0.03 <= run_km <= s['km1'] + 0.03), None)
     rules.append(_rule('near_run', None if run_d is None else run_d <= ON_ROAD_M, 'there is no race track yet' if run_d is None else f"{run_d:.0f} m from the run's track (pictures count within {ON_ROAD_M:g} m)"))
-    stretches = (ctx.get('roads') or {}).get('stretches')
-    rules.append(_rule('on_road', None if stretches is None or run_km is None else any(s['km0'] <= run_km <= s['km1'] for s in stretches),
-                       'the road parts have not been found yet' if stretches is None else 'no race track yet' if run_km is None else (f"the run was on a road there (km {run_km:.2f})" if any(s['km0'] <= run_km <= s['km1'] for s in stretches) else f"the run was not on a road part there (km {run_km:.2f}): a trail, a path or off the roads")))
+    rules.append(_road_rule(ctx, run_pos))
     if f['pano']: rules.append(_rule('direction', True, 'a 360 camera sees every way'))
     elif f.get('compass') is None or bearing is None: rules.append(_rule('direction', None, 'the way the camera faced or the way the runner went is not known'))
     else:
         rel = _rel(f['compass'], bearing); rules.append(_rule('direction', abs(rel) <= 45, f"the flat camera faced {direction(rel)} of the way the runner went ({abs(rel):.0f}° off)" ))
     if sec is not None: rules.append(_rule('pictures', sec['plausible'], f"part of section {sec['id']}: " + (sec['why_not'] if not sec['plausible'] else f"{sec['frames']} pictures, {sec['spacing_m']} m apart, enough for a clip")))
-    elif prov != 'google':                                                                                    # (a Google panorama is one point on the road, not a run of pictures)
+    else:
         enough = g['count'] >= MIN_FRAMES and g['spacing_m'] is not None and g['spacing_m'] <= MAX_SPACING_M
         rules.append(_rule('pictures', enough, f"{g['count']} picture{'s' if g['count'] != 1 else ''} of this capture run within {radius:.0f} m" + (f", {g['spacing_m']:.0f} m apart" if g['spacing_m'] is not None else '') + f" (a clip needs {MIN_FRAMES} or more, {MAX_SPACING_M:g} m apart or less, along {MIN_LENGTH_M} m of the run)"))
     if run_t is not None and f.get('t') and prov != 'google': lt = light_between(f['lat'], f['lon'], f['t'], run_t); rules.append(_rule('light', lt['warning'] is None, lt['warning'] or f"the light fits: {sun_phrase(lt['captured_sun'])} when filmed, {sun_phrase(lt['race_sun'])} when you passed"))
@@ -534,13 +608,13 @@ def describe_near(prov, g, radius, secs, ctx):
         nc = nearest_clips(dict(passed=[run_t - 5, run_t + 5]), ctx['clips'], tr, ctx.get('gaps')); rules.append(_rule('footage', not nc['overlaps'], f"overlaps camera clip {', '.join(nc['overlaps'])}" if nc['overlaps'] else (f"fills gap {nc['in_gap']}" if nc['in_gap'] else 'between camera clips')))
     if sec is not None and sec.get('quality') and sec['quality'].get('grade'): rules.append(_rule('quality', sec['quality']['grade'] != 'poor', f"clip quality {sec['quality']['grade']} ({sec['quality']['score']})"))
     return dict(provider=prov, id=f['id'], sequence=g['seq'], lat=round(f['lat'], 6), lon=round(f['lon'], 6), distance_m=f['distance_m'], kind=kind, camera=f.get('camera'), size=f.get('size'), captured=f.get('t'), compass=f.get('compass'), pictures=g['count'], spacing_m=g['spacing_m'],
-                section=sec['id'] if sec else None, run_distance_m=None if run_d is None else round(run_d, 1), run_km=None if run_km is None else round(run_km, 3), passed=run_t, url=f.get('url'), rules=rules, usable=all(r['ok'] is not False for r in rules), ruled_out=[r['text'] for r in rules if r['ok'] is False])
+                section=sec['id'] if sec else None, section_key=sec['key'] if sec else None, run_distance_m=None if run_d is None else round(run_d, 1), run_km=None if run_km is None else round(run_km, 3), passed=run_t, url=f.get('url'), rules=rules, usable=all(r['ok'] is not False for r in rules), ruled_out=[r['text'] for r in rules if r['ok'] is False])
 
 
-def near_point(rd, lat, lon, n=5, tr=None, clips=None, gaps=None, get=_get, token=None, gkey=None):
+def near_point(rd, lat, lon, n=5, tr=None, clips=None, gaps=None, get=_get, token=None, gkey=None, osm_svc=None):
     """The street view nearest (as the crow flies) to a point, from each provider, whatever the run did there: the `n` nearest capture runs of Mapillary and Panoramax (the search widens from NEAR_RADII until there are enough) and the nearest panoramas of Google,
     each with the rules that would rule it out. No filters. {lat, lon, n, providers: {name: {items, radius_m, error?}}}."""
-    docs = {p: load(rd, p) for p in PROVIDERS}; secs = annotate(rd, docs, tr, clips, gaps); ctx = dict(tr=tr, roads=load(rd, 'roads'), clips=clips, gaps=gaps); out = {}
+    docs = {p: load(rd, p) for p in PROVIDERS}; secs = annotate(rd, docs, tr, clips, gaps); ctx = dict(tr=tr, ways=_roads_near(rd, lat, lon, NEAR_RADII[-1] + 150.0, osm_svc) if tr is not None else None, clips=clips, gaps=gaps); out = {}
     for prov, fetch, key in (('mapillary', _frames_mapillary, token), ('panoramax', _frames_panoramax, True), ('google', None, gkey)):
         if not key: out[prov] = dict(items=[], radius_m=None, error=('no MAPILLARY_TOKEN in secrets.env' if prov == 'mapillary' else 'no GOOGLE_MAPS_API_KEY in secrets.env')); continue
         try:
@@ -555,11 +629,7 @@ def near_point(rd, lat, lon, n=5, tr=None, clips=None, gaps=None, get=_get, toke
 
 
 def image_near(rd, provider, item, w=256, fetch=_bytes, get=_get):
-    """JPEG bytes of a picture found by `near_point` (`item` has id, url for Panoramax, compass for Google): Mapillary and Panoramax kept in streetview/img/, Google fetched each time and not kept."""
-    if provider == 'google':
-        key = _key('GOOGLE_MAPS_API_KEY')
-        if not key: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
-        return fetch('https://maps.googleapis.com/maps/api/streetview', dict(size='640x400', pano=item['id'], heading=item.get('compass') or 0, fov=90, pitch=0, key=key))
+    """JPEG bytes of a picture found by `near_point` (`item` has id, url for Panoramax, compass for Google): kept in streetview/img/."""
     w = 256 if w <= 256 else 1024 if w <= 1024 else 2048; f = os.path.join(adir(rd), 'img', f"{provider[0]}-{item['id']}-{w}.jpg")
     if os.path.exists(f): return open(f, 'rb').read()
     if provider == 'mapillary':
@@ -567,7 +637,72 @@ def image_near(rd, provider, item, w=256, fetch=_bytes, get=_get):
         if not tok: raise RuntimeError('mapillary: no MAPILLARY_TOKEN in secrets.env')
         url = get(f"https://graph.mapillary.com/{item['id']}", dict(access_token=tok, fields=f'thumb_{w}_url')).get(f'thumb_{w}_url')
         if not url: raise RuntimeError('mapillary has no picture for this frame')
-    else:
+    elif provider == 'panoramax':
         url = item.get('url')
         if not url: raise RuntimeError('panoramax gave no picture address for this frame')
-    data = fetch(url); os.makedirs(os.path.dirname(f), exist_ok=True); tmp = f'{f}.{os.getpid()}.tmp'; open(tmp, 'wb').write(data); os.replace(tmp, f); return data
+    else:
+        key = _key('GOOGLE_MAPS_API_KEY')
+        if not key: raise RuntimeError('google: no GOOGLE_MAPS_API_KEY in secrets.env')
+        data = fetch('https://maps.googleapis.com/maps/api/streetview', dict(size='640x400', pano=item['id'], heading=item.get('compass') or 0, fov=90, pitch=0, key=key)); url = None
+    if url: data = fetch(url)
+    os.makedirs(os.path.dirname(f), exist_ok=True); tmp = f'{f}.{os.getpid()}.tmp'; open(tmp, 'wb').write(data); os.replace(tmp, f); return data
+
+
+# --- sections promoted from the click-the-map search --------------------------------------------------------------------------------------------------------------------------------------
+PROMOTE_M = 30.0                  # a promoted capture run counts the pictures within this far of the run (the stages use ON_ROAD_M): you chose it, so it is looser
+PROMOTE_REACH_M = 500.0           # and the stretch of the run it is placed on reaches this far each way from the place
+
+
+def manual_sections(rd):
+    """The sections promoted by hand ([] when there are none), each with `manual` and the `road` (line, km0) it was placed on."""
+    try: return json.load(open(os.path.join(adir(rd), 'manual.json')))['sections']
+    except (OSError, ValueError, KeyError): return []
+
+
+def _save_manual(rd, sections):
+    os.makedirs(adir(rd), exist_ok=True); p = os.path.join(adir(rd), 'manual.json'); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(dict(schema=SCHEMA, sections=sections), open(tmp, 'w'), separators=(',', ':')); os.replace(tmp, p)
+
+
+def road_of(rd, s):
+    """{line, km0} of the road a section was found on: its stretch in the roads doc, else the stretch a promoted section was placed on (None when neither)."""
+    st = next((x for x in (load(rd, 'roads') or {'stretches': []})['stretches'] if x['id'] == s.get('stretch')), None)
+    return dict(line=st['line'], km0=st['km0']) if st else s.get('road')
+
+
+def _run_frames(provider, item_id, seq, lat, lon, token, gkey, get):
+    """The pictures of one capture run round a place, as the stages make them (without their km): [{seq, lat, lon, a?, c, t, id, pano, camera, size, u, h}]."""
+    if provider == 'google':
+        run = next((g for g in _google_near(lat, lon, 6, gkey, get) if any(f['id'] == item_id for f in g['frames'])), None)
+        return [] if run is None else [dict(seq='g', id=f['id'], lat=f['lat'], lon=f['lon'], compass=None, pano=True, t=f['t'], camera=f['camera'], size=None, u=None, h=None) for f in run['frames']]
+    frames = (_frames_mapillary if provider == 'mapillary' else _frames_panoramax)(lat, lon, 450.0, token, get)
+    return [dict(f, u=f.get('url'), h=f.get('hd')) for f in frames if f['seq'] == seq]
+
+
+def promote(rd, provider, item_id, seq, lat, lon, tr, token=None, gkey=None, get=_get):
+    """Make a section of the capture run found near a clicked place, so it can be chosen for the film like the others: the run's pictures within PROMOTE_M of the race track, placed along the stretch of the run PROMOTE_REACH_M each way from the place. Saved in manual.json
+    (kept when the stages are run again). Returns the section; ValueError (with the reason) when nothing of the run lies along the run track. A section already there with the same key is returned as it is."""
+    if tr is None: raise ValueError('there is no race track to place it on')
+    frames = _run_frames(provider, item_id, seq, lat, lon, token, gkey, get)
+    if not frames: raise ValueError('the picture was not found again: click the map again')
+    d, t = track_dist(tr); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); la, lo = np.asarray(tr['lat'])[ok], np.asarray(tr['lon'])[ok]; k = math.cos(math.radians(lat))
+    i = int(np.argmin(np.hypot((la - lat) * 111320.0, (lo - lon) * 111320.0 * k))); lo_m, hi_m = max(0.0, d[i] - PROMOTE_REACH_M), d[i] + PROMOTE_REACH_M
+    marks = np.arange(lo_m, min(hi_m, d[-1]) + 1e-6, 20.0); idx = np.searchsorted(d, marks).clip(0, len(d) - 1); st = dict(id='manual', km0=round(float(d[idx[0]]) / 1000.0, 3), line=[[round(float(la[j]), 5), round(float(lo[j]), 5)] for j in idx])
+    line = Line(st); kept = []
+    for f in frames:
+        km, dist, b = line.locate((f['lat'], f['lon']))
+        if dist <= PROMOTE_M: kept.append(dict(f, seq=f['seq'], km=km, b=b, c=f.get('compass'), a=None if f['pano'] or f.get('compass') is None else _rel(f['compass'], b), t=f.get('t')))
+    secs = sections_of(provider, st, kept)
+    if not secs: raise ValueError(f'none of its {len(frames)} pictures lies within {PROMOTE_M:g} m of the run track')
+    sec = next((x for x in secs if any(i_['id'] == item_id for i_ in x['items'])), max(secs, key=lambda x: x['frames']))
+    for x in sec['items']: x.pop('u', None) if x.get('u') is None else None
+    key = section_key(sec); existing = [x for x in manual_sections(rd) if section_key(x) == key]
+    if existing: return existing[0]
+    n = sum(1 for x in manual_sections(rd) if x['provider'] == provider) + 1; sec.update(id=f"{provider[0].upper()}+{n}", manual=True, stretch='manual', road=dict(line=st['line'], km0=st['km0']))
+    _save_manual(rd, manual_sections(rd) + [sec]); return sec
+
+
+def unpromote(rd, key):
+    """Take a promoted section out again (and its choice). Returns whether there was one."""
+    keep = [x for x in manual_sections(rd) if section_key(x) != key]; had = len(keep) != len(manual_sections(rd))
+    if had: _save_manual(rd, keep); set_choice(rd, key, 'none')
+    return had

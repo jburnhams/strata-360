@@ -117,7 +117,7 @@ def test_run_makes_missing_stages_redoes_stale_ones_and_needs_the_keys(tmp_path,
 def sec_doc(item): return dict(sections=[dict(items=[item])])
 
 
-def test_pictures_are_kept_for_mapillary_and_panoramax_but_never_for_google(tmp_path, monkeypatch):
+def test_pictures_are_kept_for_every_provider(tmp_path, monkeypatch):
     rd = str(tmp_path); fetched = []
     monkeypatch.setattr(SV, '_key', lambda n: 'KEY')
     fetch = lambda url, params=None: fetched.append((url, params)) or b'JPEG:' + url.encode()
@@ -128,7 +128,7 @@ def test_pictures_are_kept_for_mapillary_and_panoramax_but_never_for_google(tmp_
     pd = sec_doc(dict(id='p1', km=1, lat=1, lon=1, b=0, u='https://pmx/p1.jpg')); assert SV.image(rd, 'panoramax', pd, 'p1', 100, fetch, get) == b'JPEG:https://pmx/p1.jpg' and (tmp_path / 'streetview' / 'img' / 'p-p1-256.jpg').exists()
     gd = sec_doc(dict(id='g1', km=1, lat=1, lon=1, b=45))
     SV.image(rd, 'google', gd, 'g1', 640, fetch, get); SV.image(rd, 'google', gd, 'g1', 640, fetch, get)
-    assert fetched[-1][1] == dict(size='640x400', pano='g1', heading=45, fov=90, pitch=0, key='KEY') and len(fetched) == 4 and not list((tmp_path / 'streetview' / 'img').glob('g-*'))
+    assert fetched[-1][1] == dict(size='640x400', pano='g1', heading=45, fov=90, pitch=0, key='KEY') and len(fetched) == 3 and list((tmp_path / 'streetview' / 'img').glob('g-*'))
     with pytest.raises(KeyError): SV.image(rd, 'mapillary', doc, 'other', 640, fetch, get)
     with pytest.raises(RuntimeError, match='no picture address'): SV.image(rd, 'panoramax', sec_doc(dict(id='x', b=0)), 'x', 640, fetch, get)
 

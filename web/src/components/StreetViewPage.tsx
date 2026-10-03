@@ -32,7 +32,9 @@ export const FILTERS: { title: string; items: [string, string][] }[] = [
   { title: 'Position among the footage', items: [['p:gap', 'In a gap (fills a gap in the footage)'], ['p:clip', 'Overlaps a camera clip']] },
   { title: 'Usable', items: [['plausible', 'Only sections with enough pictures to make a clip']] },
 ]
-export const DEFAULT_FILTERS: Record<string, boolean> = Object.fromEntries(FILTERS.flatMap(g => g.items.map(([k]) => [k, k !== 'plausible'])))
+export const SHOW_ALL: Record<string, boolean> = Object.fromEntries(FILTERS.flatMap(g => g.items.map(([k]) => [k, k !== 'plausible'])))
+/** What is shown to start with: only sections that could be used (enough pictures, not poor, the light fits, not over a camera clip); the user shows more. */
+export const DEFAULT_FILTERS: Record<string, boolean> = { ...SHOW_ALL, plausible: true, 'q:poor': false, 'l:warn': false, 'p:clip': false }
 export const passes = (s: SvSectionInfo, f: Record<string, boolean>) =>
   !!f[`q:${s.quality?.grade ?? 'none'}`] && !!f[`s:${s.steadied}`] && !!f[`l:${s.light?.warning ? 'warn' : 'fits'}`] && !!f[s.near?.overlaps.length ? 'p:clip' : 'p:gap'] && !(f.plausible && !s.plausible)
 const away = (c: SvNearClip) => `${c.km} km / ${dur(c.seconds)}`
@@ -56,7 +58,7 @@ function previews(s: SvSection) {
 
 // The street view page: the stages that find the road parts of the run and the street-level imagery on them (Mapillary, Panoramax, Google), a map of the road parts (click one) with a marker for each
 // stretch of imagery found (click for its pictures), and the same sections as a list underneath.
-export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { folder: string; tz?: string }) {
+export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initialFilters = DEFAULT_FILTERS }: { folder: string; tz?: string; initialFilters?: Record<string, boolean> }) {
   const [tick, setTick] = useState(0)
   const data = usePoll(() => api.streetview(folder), 5000, [folder, tick])
   const [tiles, setTiles] = useState<TileStatus>()
@@ -74,7 +76,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { fol
       .then(r => { if (live) setRoutes(r.filter((x): x is { id: string; name: string; pts: [number, number][] } => !!x)) }).catch(() => {})
     return () => { live = false }
   }, [folder])
-  const [err, setErr] = useState<string>(), [clips, setClips] = useState<TrackClip[]>([]), [filters, setFilters] = useState<Record<string, boolean>>(DEFAULT_FILTERS)
+  const [err, setErr] = useState<string>(), [clips, setClips] = useState<TrackClip[]>([]), [filters, setFilters] = useState<Record<string, boolean>>(initialFilters)
   useEffect(() => { api.trackClips(folder).then(r => setClips(r.clips.filter(c => c.covered && c.stretch?.length))).catch(() => setClips([])) }, [folder])
   useEffect(() => { api.tilesStatus().then(setTiles).catch(() => setTiles({ ok: false, style: 'tf-landscape', error: 'no map background' })) }, [])
   useEffect(() => { setSel(undefined) }, [folder])
@@ -96,7 +98,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels' }: { fol
         <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">Where the run was on a road, and the street-level pictures there are of those roads: a gap in the film could be shown as the view along the road.</p>
         {!data ? <p className="text-sm text-stone-500">Loading…</p> : <Stages data={data} onRun={run} err={err} />}
       </div>
-      {probe && <NearPanel folder={folder} tz={tz} probe={probe} result={near} busy={nearBusy} error={nearErr} onClose={() => { setProbe(undefined); setNear(undefined); setNearErr(undefined) }} />}
+      {probe && <NearPanel folder={folder} tz={tz} probe={probe} result={near} busy={nearBusy} error={nearErr} onPromoted={() => setTick(t => t + 1)} onClose={() => { setProbe(undefined); setNear(undefined); setNearErr(undefined) }} />}
       {data && roads && sections.length > 0 && <Candidates folder={folder} tz={tz} sections={visible} all={sections} sel={sel} onSel={setSel} onChoose={async (key, c) => { await api.setStreetviewChoice(folder, key, c).catch(e => setErr((e as Error).message)); setTick(t => t + 1) }} />}
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
@@ -137,7 +139,6 @@ function Stages({ data, onRun, err }: { data: StreetView; onRun: (stages?: strin
               <div className="font-medium">{k === 'roads' ? 'Road parts of the run' : k === 'quality' ? 'Quality check' : NAME[k]}</div>
               <div className="text-xs text-stone-600 dark:text-stone-400">{line(k)}</div>
               {why && <div className="text-xs text-amber-700 dark:text-amber-400">{why}</div>}
-              {k === 'google' && <div className="text-xs text-stone-500">Google's terms do not allow keeping or re-using its pictures: shown here for looking only, never saved.</div>}
               <button disabled={blocked} onClick={() => onRun([k], s.done)} aria-label={`${s.done && !s.stale ? 'Redo' : 'Run'} ${k === 'roads' ? 'road parts' : k === 'quality' ? 'quality check' : NAME[k]}`}
                 className="mt-1 rounded bg-emerald-700 px-2 py-0.5 text-xs text-white disabled:opacity-40">{s.done && !s.stale ? 'Redo' : 'Run'}</button>
             </li>
@@ -171,7 +172,7 @@ function Filters({ shown, setShown, data, filters, setFilters, total, showing }:
             <fieldset key={g.title}><legend className="text-xs font-semibold uppercase tracking-wide text-stone-500">{g.title}</legend>
               {g.items.map(([k, label]) => <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={!!filters[k]} onChange={e => setFilters({ ...filters, [k]: e.target.checked })} />{label}</label>)}</fieldset>
           ))}
-          <button type="button" className="text-xs underline" onClick={() => setFilters(DEFAULT_FILTERS)}>Show everything again</button>
+          <div className="flex gap-3"><button type="button" className="text-xs underline" onClick={() => setFilters(DEFAULT_FILTERS)}>Usable only</button><button type="button" className="text-xs underline" onClick={() => setFilters(SHOW_ALL)}>Show everything</button></div>
         </div>
       )}
     </div>
@@ -348,7 +349,6 @@ function SectionVideo({ folder, section }: { folder: string; section: SvSectionI
     tick(); const id = setInterval(tick, running ? 2500 : 30000); return () => { live = false; clearInterval(id) }
   }, [folder, section.key, running])
   const make = async () => { setErr(undefined); try { const r = await api.makeSvVideo(folder, section.key); if (!r.started && r.reason) setErr(r.reason); setSt(await api.svVideo(folder, section.key)) } catch (e) { setErr((e as Error).message) } }
-  if (section.provider === 'google') return <p className="mt-2 text-xs text-stone-500">Google's terms do not allow its pictures in a video.</p>
   return (
     <div className="mt-2" aria-label="Preview video">
       {st?.exists && <video controls preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />}
@@ -363,13 +363,16 @@ function SectionVideo({ folder, section }: { folder: string; section: SvSectionI
 const RULE_ICON = { true: '✓', false: '✗', null: '?' } as const
 
 /** The nearest street view to a clicked point, from each provider, with every rule that would rule each one out (no filters): the nearest capture runs first. */
-function NearPanel({ folder, tz, probe, result, busy, error, onClose }: { folder: string; tz: string; probe: { lat: number; lon: number }; result?: SvNearResult; busy: boolean; error?: string; onClose: () => void }) {
+function NearPanel({ folder, tz, probe, result, busy, error, onPromoted, onClose }: { folder: string; tz: string; probe: { lat: number; lon: number }; result?: SvNearResult; busy: boolean; error?: string; onPromoted: () => void; onClose: () => void }) {
+  const [made, setMade] = useState<Record<string, string>>({}), [promoErr, setPromoErr] = useState<string>()
+  const promote = async (it: SvNearItem) => { setPromoErr(undefined); try { const r = await api.promoteSv(folder, it, probe.lat, probe.lon); setMade(m => ({ ...m, [it.id]: r.id })); onPromoted() } catch (e) { setPromoErr((e as Error).message) } }
   return (
     <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Nearest street view to the clicked point">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Nearest street view to {probe.lat.toFixed(5)}, {probe.lon.toFixed(5)}</h3><button onClick={onClose} className="text-xs underline">Close</button></div>
       <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">As the crow flies, whatever the run did there. Each shows what would rule it out of the film: how far it is from the run, whether the run was on a road, which way it faces, how many pictures, the light and the footage.</p>
       {busy && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Asking Mapillary, Panoramax and Google…</p>}
       {error && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p>}
+      {promoErr && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{promoErr}</p>}
       {result && (
         <div className="grid gap-3 lg:grid-cols-3">
           {PROVIDERS.map(p => {
@@ -389,6 +392,9 @@ function NearPanel({ folder, tz, probe, result, busy, error, onClose }: { folder
                           <div className="text-stone-600 dark:text-stone-400">Filmed {when(it.captured, tz)}{it.passed ? ` · you passed ${when(it.passed, tz)}` : ''}</div></div>
                       </div>
                       <div className={`mt-1 font-medium ${it.usable ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}>{it.usable ? 'Nothing rules it out' : `Ruled out: ${it.ruled_out.length} reason${it.ruled_out.length === 1 ? '' : 's'}`}</div>
+                      {it.section || made[it.id]
+                        ? <div className="mt-1 text-stone-600 dark:text-stone-400">Already a candidate: section {it.section ?? made[it.id]}</div>
+                        : <button type="button" onClick={() => promote(it)} className="mt-1 rounded border border-stone-300 px-2 py-0.5 dark:border-stone-600">Make this a candidate</button>}
                       <ul className="mt-0.5 space-y-0.5">{it.rules.map(r => <li key={r.key} data-rule={r.key} className={r.ok === false ? 'text-red-700 dark:text-red-400' : r.ok === null ? 'text-stone-500' : ''}><span aria-label={r.ok === false ? 'rules it out' : r.ok === null ? 'not known' : 'fine'} className="mr-1 inline-block w-3">{RULE_ICON[String(r.ok) as 'true' | 'false' | 'null']}</span>{r.text}</li>)}</ul>
                     </li>
                   ))}

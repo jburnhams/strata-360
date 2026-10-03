@@ -41,7 +41,7 @@ export interface SvStageStatus { done: boolean; stale?: boolean; stretches?: num
 export interface SvRule { key: string; ok: boolean | null; text: string }
 /** One capture run found near a clicked point, with the rules that would rule it out. */
 export interface SvNearItem { provider: SvProvider; id: string; sequence: string; lat: number; lon: number; distance_m: number; kind: '360' | '2d'; camera: string | null; size: number[] | null; captured: number | null; compass: number | null; pictures: number; spacing_m: number | null
-  section: string | null; run_distance_m: number | null; run_km: number | null; passed: number | null; rules: SvRule[]; usable: boolean; ruled_out: string[] }
+  section: string | null; section_key?: string | null; run_distance_m: number | null; run_km: number | null; passed: number | null; rules: SvRule[]; usable: boolean; ruled_out: string[] }
 export interface SvNearResult { lat: number; lon: number; n: number; providers: Record<SvProvider, { items: SvNearItem[]; radius_m: number | null; error?: string }> }
 export interface SvNearClip { label: string; seconds: number; km: number }
 /** Where a section sits among the camera clips along the run: the nearest clip each way (time and distance between), the clips it overlaps, and the gap in the footage that holds it. */
@@ -189,6 +189,8 @@ export const api = {
   runStreetview: (folder: string, body: { stages?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/streetview/run', { folder, ...body }),
   setStreetviewChoice: (folder: string, key: string, choice: SvChoice | 'none') => call<{ key: string; choice: SvChoice | null }>('/api/streetview/choice', { folder, key, choice }),
   svNear: (folder: string, lat: number, lon: number, n = 5) => call<SvNearResult>('/api/streetview/near?' + q({ folder, lat: String(lat), lon: String(lon), n: String(n) })),
+  promoteSv: (folder: string, it: { provider: SvProvider; id: string; sequence: string }, lat: number, lon: number) => call<{ key: string; id: string }>('/api/streetview/promote', { folder, provider: it.provider, id: it.id, sequence: it.sequence, lat, lon }),
+  unpromoteSv: (folder: string, key: string) => call<{ removed: boolean }>('/api/streetview/unpromote', { folder, key }),
   svNearImage: (folder: string, provider: SvProvider, id: string, w = 256) => '/api/streetview/near/image?' + q({ folder, provider, id, w: String(w) }),
   svVideo: (folder: string, key: string) => call<SvVideo>('/api/streetview/video?' + q({ folder, key })),
   makeSvVideo: (folder: string, key: string) => call<{ started: boolean; reason?: string }>('/api/streetview/video', { folder, key }),

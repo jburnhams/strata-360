@@ -661,12 +661,9 @@ class TestStreetViewVideoApi(TestStreetViewApi):
         os.remove(p); open(os.path.splitext(p)[0] + '.log', 'w').write('fetching\nstreetview-video: mapillary answered 500\n')
         assert 'answered 500' in client.get('/api/streetview/video', params=q).json()['error']
 
-    def test_unknown_sections_and_google_are_refused(self, client, project):
-        from strata360 import streetview as SV
-        key = self.key(project); rd = project.race_dir
-        assert client.get('/api/streetview/video', params=dict(folder=project.folder, key='nope')).status_code == 404 and client.post('/api/streetview/video', json=dict(folder=project.folder, key='nope')).status_code == 404
-        g = dict(SV.load(rd, 'mapillary')['sections'][0], id='G1', provider='google', seq='g'); SV._save(rd, 'google', SV.provider_doc('google', [g], SV.load(rd, 'roads')))
-        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key=SV.section_key(g))).status_code == 400
+    def test_unknown_sections_are_refused(self, client, project):
+        assert client.get('/api/streetview/video', params=dict(folder=project.folder, key='nope')).status_code == 404
+        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key='nope')).status_code == 404
 
     def test_the_command_makes_the_video_or_says_why_not(self, project, monkeypatch, capsys):
         import argparse
@@ -700,3 +697,21 @@ class TestStreetViewNearApi(TestStreetViewApi):
         r = client.get('/api/streetview/near/image', params=dict(q, provider='panoramax', id='p1')); assert r.status_code == 200 and r.content == b'\xff\xd8panoramaxp1' and r.headers['content-type'] == 'image/jpeg'
         assert client.get('/api/streetview/near/image', params=dict(q, provider='mapillary', id='other')).status_code == 404 and client.get('/api/streetview/near/image', params=dict(q, provider='bing', id='m1')).status_code == 404
         monkeypatch.setattr(SV, 'image_near', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('mapillary answered 500'))); assert client.get('/api/streetview/near/image', params=dict(q, provider='mapillary', id='m1')).status_code == 502
+
+
+class TestStreetViewPromote:
+    def test_a_nearby_capture_is_made_a_section_or_refused_with_the_reason(self, client, project, monkeypatch):
+        from strata360 import streetview as SV
+        body = dict(folder=project.folder, provider='mapillary', id='m1', sequence='s1', lat=50.0, lon=5.0)
+        assert client.post('/api/streetview/promote', json=dict(body, provider='bing')).status_code == 400
+        assert client.post('/api/streetview/promote', json={k: v for k, v in body.items() if k != 'lat'}).status_code == 400
+        monkeypatch.setattr(SV, 'promote', lambda *a, **k: (_ for _ in ()).throw(ValueError('none of its 3 pictures lies within 30 m of the run track')))
+        r = client.post('/api/streetview/promote', json=body); assert r.status_code == 400 and 'within 30 m' in r.json()['detail']
+        monkeypatch.setattr(SV, 'promote', lambda rd, prov, i, seq, lat, lon, tr, **k: dict(provider=prov, seq=seq, km0=1.0, id='M+1'))
+        assert client.post('/api/streetview/promote', json=body).json() == dict(key='mapillary:s1:1.00', id='M+1')
+
+    def test_a_promoted_section_can_be_taken_out(self, client, project, monkeypatch):
+        from strata360 import streetview as SV
+        monkeypatch.setattr(SV, 'unpromote', lambda rd, key: key == 'k')
+        assert client.post('/api/streetview/unpromote', json=dict(folder=project.folder, key='k')).json() == dict(removed=True)
+        assert client.post('/api/streetview/unpromote', json=dict(folder=project.folder, key='x')).status_code == 404
