@@ -286,3 +286,10 @@ class TestStageText:
         ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['stage']}, tz='UTC', tiles=tiles, stages=stages)
         for t, want in ((T0 - (4 * 3600 + 3 * 60), '-4h3m'), (T0 - 30, '0m'), (T0 + 800 + 34 * 3600 + 4 * 60, '+34h4m'), (T0 + 805, '0m')):
             texts.clear(); ov.c._text.clear(); ov.patches(t); assert want in texts, (t, texts)
+
+
+class TestDistanceHolds:
+    def test_before_the_run_it_is_zero_and_after_it_the_distance_reached(self, series, tiles, texts):
+        ov = LY.Overlay(series, (1920, 1080), {'style': 'osm', 'elements': ['distance']}, tz='UTC', tiles=tiles)
+        ov.patches(T0 - 100); assert '0.0' in texts
+        texts.clear(); ov.c._text.clear(); ov.patches(T0 + 100000); assert any(x not in ('0.0', 'km', LY.DASH) for x in texts) and LY.DASH not in texts

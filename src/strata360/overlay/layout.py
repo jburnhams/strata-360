@@ -27,7 +27,7 @@ ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the 
     'profile': dict(kind='profile', height=120),
     'clock': dict(kind='clock', x=16, y=24),
     'stage': dict(kind='stage', x=16, y=164),
-    'distance': dict(kind='big', x=150, y=262, metric='dist', label='km'),
+    'distance': dict(kind='big', x=520, y=28, metric='dist', label='km'),
     'pace': dict(kind='big', x=150, y=745, v='bottom', metric='pace', label='min/km'),
     'altitude': dict(kind='stat', x=16, y=850, v='bottom', icon='mountain', metric='alt', label='ALT (m)'),
     'slope': dict(kind='stat', x=220, y=850, v='bottom', icon='slope', metric='slope', label='SLOPE (%)'),
@@ -133,7 +133,11 @@ class Big:
     def __init__(self, c, el): self.c, self.el = c, el
 
     def patches(self, t, v):
-        e = self.el; return [self.c.text(e, e['x'], e['y'], fmt(e['metric'], v[METRIC[e['metric']]]), 48, align='right'), self.c.text(e, e['x'], e['y'] + 56, e['label'], 16, label=True, align='right')]
+        e = self.el; val = v[METRIC[e['metric']]]
+        if e['metric'] == 'dist' and not (val is not None and math.isfinite(val)):                                     # before the run 0 km, after it the whole distance (the counter stays on the figure it reached)
+            d = self.c.series.cols['dist_m']; d = d[np.isfinite(d)]
+            if len(d): val = 0.0 if t <= float(self.c.series._pt[0]) else float(d[-1])
+        return [self.c.text(e, e['x'], e['y'], fmt(e['metric'], val), 48, align='right'), self.c.text(e, e['x'], e['y'] + 56, e['label'], 16, label=True, align='right')]
 
 
 class Stat:
