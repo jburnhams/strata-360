@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import PanoPlayer from './PanoPlayer'
+import StepVideo from './FrameStep'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
 import type { StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
@@ -397,8 +398,8 @@ function SectionVideo({ folder, section, pano = false }: { folder: string; secti
   return (
     <div className="mt-2" aria-label={pano ? 'Look around' : 'Preview video'}>
       {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the 360° pictures with the camera held level along the road, which you can pan</div>}
-      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={section.provider === 'google' ? 24 : undefined} />
-        : <video controls preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
+      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={section.provider === 'google' ? 24 : undefined} fps={st.fps} />
+        : <StepVideo preload="metadata" src={api.svVideoUrl(folder, section.key)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
       {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
       {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && section.provider === 'google' ? `. Google gives flat views only, so this asks it for ${section.frames * 16} zoomed-in views (16 for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
       {running && <p role="status" className="text-sm text-stone-600 dark:text-stone-400">Making the video… {st?.log.slice(-1)[0] ?? ''}</p>}

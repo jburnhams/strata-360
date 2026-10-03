@@ -3,6 +3,7 @@ import { api, type Gap, type GapClip, type GapKind, type GapSettings } from '../
 import { usePoll } from '../usePoll'
 import ItemPage, { LengthField } from './ItemPage'
 import { PanelSkeleton } from './Skeleton'
+import StepVideo from './FrameStep'
 
 // A gap in the footage as a page of its own, like a clip: the preview of its generated clip, how it is drawn (2D map or 3D flyover, or left to the planner) and how long it is (set exactly, or at least),
 // whether the film must use it, what the script says over it, and your notes with the voice-over you want inside it (they go to the script writer like a clip's).
@@ -34,7 +35,7 @@ export default function GapView({ folder, gap }: { folder: string; gap: string }
       heading={<>Gap {g.id} <span className="text-sm font-normal text-stone-500">{g.local_start} → {g.local_end}</span></>}
       sub={`${(g.duration_s / 3600).toFixed(1)} h · km ${g.km_start}–${g.km_end} · +${g.ascent_m} m${g.daylight ? ` · ${g.daylight}` : ''} · ${Math.round(100 * g.moving_share)}% moving`}
       preview={<>
-        {c?.exists ? <video aria-label={`${g.id} ${c.kind === 'flyover' ? 'flyover' : 'map clip'}`} className="w-full max-w-3xl rounded" controls src={api.gapVideoUrl(folder, c.id)} />
+        {c?.exists ? <StepVideo aria-label={`${g.id} ${c.kind === 'flyover' ? 'flyover' : 'map clip'}`} className="w-full max-w-3xl rounded" src={api.gapVideoUrl(folder, c.id)} />
           : <div className="flex aspect-video w-full max-w-3xl items-center justify-center rounded bg-stone-200 text-sm text-stone-500 dark:bg-stone-800">{c?.rendering ? (c.progress || 'rendering…') : 'No clip rendered yet'}</div>}
         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
           <span className={c?.error && !c.rendering ? 'text-red-600' : 'text-stone-500'} aria-label="State">{state}</span>

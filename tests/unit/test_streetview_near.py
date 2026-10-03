@@ -44,7 +44,7 @@ class Net:
             w, s, e, n = (float(x) for x in params['bbox'].split(','))
             return {'features': [f for f in self.pmx if s <= f['geometry']['coordinates'][1] <= n and w <= f['geometry']['coordinates'][0] <= e]}
         la, lo = (float(x) for x in params['location'].split(',')); dist = lambda p: math.hypot((p[1] - la) * 111320, (p[2] - lo) * 111320 * math.cos(math.radians(la))); best = min(self.google.get('panos', []), key=dist, default=None)
-        return dict(status='OK', pano_id=best[0], location=dict(lat=best[1], lng=best[2]), date='2024-09') if best and self.google.get('ok', True) and dist(best) <= params.get('radius', 50) else dict(status='ZERO_RESULTS')
+        return dict(status='OK', pano_id=best[0], location=dict(lat=best[1], lng=best[2]), date=best[3] if len(best) > 3 else '2024-09') if best and self.google.get('ok', True) and dist(best) <= params.get('radius', 50) else dict(status='ZERO_RESULTS')
 
 
 def roads_doc(rd, km0=0.0, km1=9.0):
@@ -172,3 +172,9 @@ def test_the_search_says_what_it_is_doing(tmp_path):
     rd = str(tmp_path); roads_doc(rd); log = []
     SV.near_point(rd, LAT0 + 1000 * M, LON0, 3, track(), [], [], get=Net(mly=[mfr(i, 1000 + 8 * i, pano=True) for i in range(5)]), token='t', osm_svc=Osm(), log=log.append)
     assert log[0].startswith('looking up the roads') and any('asking mapillary' in l for l in log) and any(l.startswith('mapillary: pictures within') for l in log) and any('capture run' in l for l in log)
+
+
+def test_google_panoramas_of_another_date_are_a_run_of_their_own(tmp_path):
+    panos = [(f'new{i}', LAT0 + (600 + 12 * i) * M, LON0, '2024-09') for i in range(8)] + [('old', LAT0 + (600 + 12 * 3) * M + 6 * M, LON0 + lonm(5), '2022-05')]
+    g = near(tmp_path, Net(google=dict(panos=panos)), n=5)['providers']['google']; counts = sorted(i['pictures'] for i in g['items'])
+    assert 1 in counts and max(counts) >= 6 and sum(counts) == len(panos)           # the 2022 panorama is not counted with the 2024 drive it sits among

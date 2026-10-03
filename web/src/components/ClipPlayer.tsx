@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { Follower, aimPitch, vfovDeg } from '../aim'
 import { useThumbOverlay } from '../thumbOverlay'
+import { FrameStepButtons, useFrameLength } from './FrameStep'
 
 // Player for a clip's 360 preview (upright equirect video). The thumbnail is shown first; play loads the video. The picture is a flat window into the sphere that you can pan by dragging
 // (touch too) and zoom with the wheel or the slider. Four ways to aim: Free (stays where you put it), Heading (points where the runner is going, from the motion data), You (turns to the wearer) and Person
@@ -45,7 +46,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; focus?: Focus[] | null; person?: Focus[] | null; clarity?: { t: number; yaw: number; pitch: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; sounds?: { original?: boolean; clean?: boolean; background?: boolean }; hasPreview: boolean; duration: number
   window?: { start: number; end: number }; autoStart?: boolean   // play only this part of the clip (the timeline's window); autoStart begins at once
 }) {
-  const video = useRef<HTMLVideoElement>(null)
+  const video = useRef<HTMLVideoElement>(null), frameS = useFrameLength(video)
   const canvas = useRef<HTMLCanvasElement>(null)
   const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, fol: null as null | Follower, folAim: '' as string, lastT: 0, lastMs: 0, active: 0, gl: null as null | { draw: () => void }, raf: 0 })
   const [started, setStarted] = useState(false)
@@ -195,6 +196,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
       </div>
       <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
         <button disabled={noPreview} onClick={play} className="w-9 rounded bg-emerald-700 py-1 text-white disabled:opacity-40" aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
+        {started && <FrameStepButtons video={video} frameS={frameS} />}
         <span className="w-24 font-mono text-xs text-stone-500">{mmss(t)} / {mmss(duration)}</span>
         <input type="range" min={0} max={duration} step={0.04} value={t} disabled={!started} className="min-w-32 flex-1"
           onChange={e => { const v = video.current; if (v) { v.currentTime = Number(e.target.value); setT(v.currentTime) } }} aria-label="Seek" />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { FrameStepButtons, useFrameLength } from './FrameStep'
 
 // A 360 video (upright equirectangular, the centre looking along the road) shown as a flat window into the sphere that you pan by dragging (touch too) and zoom with the wheel or the slider, as on the clip pages.
 const VS = `#version 300 es
@@ -15,8 +16,9 @@ void main(){
 }`
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-export default function PanoPlayer({ src, label, maxPitch = 83 }: { src: string; label: string; maxPitch?: number }) {
+export default function PanoPlayer({ src, label, maxPitch = 83, fps }: { src: string; label: string; maxPitch?: number; fps?: number }) {
   const cv = useRef<HTMLCanvasElement>(null), video = useRef<HTMLVideoElement>(null), st = useRef({ yaw: 0, pitch: 0, fov: 90, drag: null as null | { x: number; y: number }, raf: 0 })
+  const learnt = useFrameLength(video, src), frameS = () => (fps ? 1 / fps : learnt())                       // (the video shows one original picture a frame, at a known rate)
   const [fov, setFov] = useState(90), [playing, setPlaying] = useState(false), [t, setT] = useState(0), [dur, setDur] = useState(0), [gl, setGl] = useState(true)
   useEffect(() => {
     const c = cv.current, v = video.current; if (!c || !v) return
@@ -50,6 +52,7 @@ export default function PanoPlayer({ src, label, maxPitch = 83 }: { src: string;
         : <p className="text-sm text-stone-500">This browser cannot show a 360° view.</p>}
       <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-stone-600 dark:text-stone-400">
         <button type="button" onClick={toggle} className="rounded border border-stone-300 px-2 py-0.5 dark:border-stone-600">{playing ? 'Pause' : 'Play'}</button>
+        <FrameStepButtons video={video} frameS={frameS} />
         <input aria-label="Position" type="range" min={0} max={dur || 1} step={0.05} value={t} onChange={e => { if (video.current) video.current.currentTime = Number(e.target.value) }} className="w-48" /> <span>{mmss(t)} / {mmss(dur)}</span>
         <label className="flex items-center gap-1">Zoom <input aria-label="Zoom" type="range" min={30} max={140} step={1} value={170 - fov} onChange={e => zoom(170 - Number(e.target.value))} className="w-24" /></label>
         <button type="button" onClick={() => { st.current.yaw = 0; st.current.pitch = 0; zoom(90) }} className="underline">Look along the road</button>

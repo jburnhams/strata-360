@@ -168,3 +168,23 @@ class TestWeb:
         with pytest.raises(RuntimeError, match='x.example answered 404'): SV._bytes('https://x.example/a.jpg')
         self.reply(monkeypatch, OSError('down'))
         with pytest.raises(RuntimeError, match='answered None'): SV._bytes('https://x.example/a.jpg')
+
+
+def _gframe(i, t, cr='© Google', km=None):
+    return dict(seq='g', km=0.1 + 0.01 * i if km is None else km, lat=50.0 + 0.0001 * i, lon=5.0, a=None, b=0.0, t=t, id=f'g{i}', pano=True, camera='Google Street View car', size=None, cr=cr)
+
+
+def test_google_panoramas_of_other_dates_or_photographers_are_not_part_of_the_newest_drive():
+    new, old = 1_725_000_000, 1_650_000_000; stretch = dict(id='R1', km0=0.0, line=[[50.0, 5.0], [50.01, 5.0]])
+    frames = [_gframe(0, old)] + [_gframe(i, new) for i in range(1, 41)] + [_gframe(41, new, '© Some Person')]
+    secs = SV.sections_of('google', stretch, frames); main = [s for s in secs if s['seq'] == 'g']
+    assert len(main) == 1 and main[0]['frames'] == 40 and main[0]['years'] == [2024] and 'g0' not in [i['id'] for i in main[0]['items']]
+    assert {s['seq'] for s in secs} >= {'g'} and len(secs) >= 1 and all(s['seq'] == 'g' or s['frames'] < 30 for s in secs)               # the others are runs of their own (too short to be candidates)
+    assert SV.sections_of('google', stretch, [])  == []
+
+
+def test_a_promoted_google_section_made_before_is_cut_back_to_the_newest_drive(tmp_path):
+    new, old = 1_725_000_000, 1_650_000_000; rd = str(tmp_path); fs = [_gframe(0, old)] + [_gframe(i, new) for i in range(1, 41)]
+    stretch = dict(id='manual', km0=0.0, line=[[50.0, 5.0], [50.01, 5.0]]); big = SV.sections_of('google', stretch, [dict(f, seq='g') for f in fs])
+    sec = dict(big[0], seq='g'); sec['items'] = [{**i, 'id': i['id']} for i in sorted((i for s in big for i in s['items']), key=lambda i: i['km'])]; sec.update(manual=True, id='G+1', stretch='manual', road=dict(line=stretch['line'], km0=0.0), frames=41, years=[2022, 2024])
+    SV._save_manual(rd, [sec]); out = SV.manual_sections(rd)[0]; assert out['frames'] == 40 and out['years'] == [2024] and out['id'] == 'G+1' and out['manual']

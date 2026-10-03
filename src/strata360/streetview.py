@@ -88,8 +88,24 @@ class Line:
         return min(lo) - dn, min(la) - dl, max(lo) + dn, max(la) + dl
 
 
+def _month(t): return dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m') if t else 'undated'
+
+
+def _google_sets(frames):
+    """Google panoramas of one stretch kept to one capture at a time: the panoramas of a drive have one date (month) and one copyright (Google's own cars, or a person who shared a photo), and a panorama of another date or another photographer is not part of that drive's run (it can be on another road or a trail). The newest drive keeps the
+    run name `seq`; every other set is a run of its own, named for its date (and photographer). Returns copies."""
+    fs = [dict(f) for f in frames]
+    if not fs: return fs
+    newest = max(f['t'] or 0 for f in fs); main_cr = collections.Counter((f.get('cr') or '') for f in fs if (f['t'] or 0) == newest).most_common(1)[0][0]
+    for f in fs:
+        cr = f.get('cr') or ''
+        if (f['t'] or 0) != newest or cr != main_cr: f['seq'] = f"{f['seq']}-{_month(f['t'])}" + (f"-{hashlib.sha1(cr.encode()).hexdigest()[:4]}" if cr != main_cr else '')
+    return fs
+
+
 def sections_of(provider, stretch, frames):
     """Group frames [{seq, km, lat, lon, a (angle or None), b, t, id, u, pano, camera, size}] of one stretch into sections: one per capture run (`seq`), split where the frames leave a gap of more than SPLIT_M."""
+    if provider == 'google': frames = _google_sets(frames)
     by = collections.defaultdict(list)
     for f in frames: by[f['seq']].append(f)
     out = []
@@ -105,7 +121,7 @@ def sections_of(provider, stretch, frames):
             sec = dict(provider=provider, stretch=stretch['id'], kind='360' if pano else '2d', km0=round(r[0]['km'], 3), km1=round(r[-1]['km'], 3), length_m=int(round((r[-1]['km'] - r[0]['km']) * 1000)), frames=len(r),
                        spacing_m=round(float(np.median(gaps)), 1) if gaps else None, years=years, camera=camera[0][0] if camera else None, size=list(size[0][0]) if size else None, seq=seq,
                        angles=None if pano else dict(collections.Counter(direction(f['a']) for f in r if f['a'] is not None)),
-                       items=[{k: v for k, v in dict(id=f['id'], km=round(f['km'], 3), lat=round(f['lat'], 6), lon=round(f['lon'], 6), a=None if f['a'] is None else round(f['a']), b=round(f['b']), t=f['t'], u=f.get('u'), h=f.get('h'), c=None if f.get('c') is None else round(f['c'], 1)).items() if v is not None} for f in r])
+                       items=[{k: v for k, v in dict(id=f['id'], km=round(f['km'], 3), lat=round(f['lat'], 6), lon=round(f['lon'], 6), a=None if f['a'] is None else round(f['a']), b=round(f['b']), t=f['t'], u=f.get('u'), h=f.get('h'), c=None if f.get('c') is None else round(f['c'], 1), cr=f.get('cr')).items() if v is not None} for f in r])
             out.append(sec)
     return out
 
@@ -175,6 +191,10 @@ def find_panoramax(rdoc, get=_get, log=print):
     log(f'panoramax: {len(out)} sections'); return _number(out)
 
 
+def _google_camera(m):
+    cr = (m.get('copyright') or '').strip(); return 'Google Street View car' if not cr or 'google' in cr.lower() else f'photo shared by {cr.replace(chr(169), "").strip()}'
+
+
 def find_google(rdoc, key, get=_get, log=print, workers=8):
     """Google panoramas along the stretches, one metadata question (free) per sample point of the stretch every STEP_M: a pano is a frame, and a capture run is the panoramas in a row."""
     jobs = []
@@ -195,7 +215,7 @@ def find_google(rdoc, key, get=_get, log=print, workers=8):
             loc = m['location']; km = line.locate((loc['lat'], loc['lng']))[0]; seen[m['pano_id']] = 1
             try: t = dt.datetime.strptime(m.get('date', ''), '%Y-%m').replace(tzinfo=dt.timezone.utc).timestamp()
             except ValueError: t = None
-            frames.append(dict(seq='g', km=km, lat=loc['lat'], lon=loc['lng'], a=None, b=b, t=t, id=m['pano_id'], pano=True, camera='Google Street View car', size=None))
+            frames.append(dict(seq='g', km=km, lat=loc['lat'], lon=loc['lng'], a=None, b=b, t=t, id=m['pano_id'], pano=True, camera=_google_camera(m), size=None, cr=m.get('copyright')))
         out += sections_of('google', st, frames)
     log(f'google: {len(out)} sections'); return _number(out)
 
@@ -434,7 +454,7 @@ def default_seconds(s):
 
 def video_path(rd, s, pano=False):
     """Where the preview video of a (annotated) section is kept: named by the section and by what it is made from, so a changed section or camera gets a new one."""
-    h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION, 'pano' if pano else 'view'], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}{'-360' if pano else ''}.mp4")
+    h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION, 'pano-frames' if pano else 'view'], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}{'-360' if pano else ''}.mp4")
 
 
 def make_video(rd, s, log=print, pano=False):
@@ -510,7 +530,7 @@ GOOGLE_LINK_M, GOOGLE_STEP_M, GOOGLE_STEPS = 40.0, 15.0, 12      # panoramas thi
 def _pano(m, f_lat, f_lon):
     try: t = dt.datetime.strptime(m.get('date', ''), '%Y-%m').replace(tzinfo=dt.timezone.utc).timestamp()
     except ValueError: t = None
-    return dict(seq='g', id=m['pano_id'], lat=m['location']['lat'], lon=m['location']['lng'], compass=None, pano=True, t=t, camera='Google Street View car', size=None, url=None)
+    return dict(seq='g', id=m['pano_id'], lat=m['location']['lat'], lon=m['location']['lng'], compass=None, pano=True, t=t, camera=_google_camera(m), size=None, url=None, cr=m.get('copyright'))
 
 
 def _google_ask(la, lo, key, get, radius=30):
@@ -571,8 +591,12 @@ def _google_near(lat, lon, n, key, get):
         jobs += [(fs, fs[hi_i], bearing), (fs, fs[lo_i], (bearing + 180) % 360)]
     with ThreadPoolExecutor(8) as ex: extra = list(ex.map(lambda j: follow(j[1], j[2]), jobs))
     for (fs, _, _), more in zip(jobs, extra): fs.extend(more)
-    out = []
-    for fs in runs.values():
+    out = []; sets = []
+    for fs in runs.values():                                                                                    # (a run is one drive: panoramas of another date or photographer are a run of their own)
+        by_set = collections.defaultdict(list)
+        for f in {f['id']: f for f in fs}.values(): by_set[(f['t'], f.get('cr') or '')].append(f)
+        sets += list(by_set.values())
+    for fs in sets:
         fs = list({f['id']: f for f in fs}.values()); pts_ = [(f['lat'], f['lon']) for f in fs]; gaps = [min(_metres(pts_[i], pts_[j]) for j in range(len(fs)) if j != i) for i in range(len(fs))] if len(fs) > 1 else []
         near = min(fs, key=lambda f: _metres((lat, lon), (f['lat'], f['lon']))); out.append(dict(seq='g:' + near['id'][:8], nearest=dict(near, distance_m=round(_metres((lat, lon), (near['lat'], near['lon'])), 1)), count=len(fs), spacing_m=round(float(np.median(gaps)), 1) if gaps else None, frames=fs))
     return sorted(out, key=lambda g: g['nearest']['distance_m'])[:n]
@@ -694,9 +718,19 @@ PROMOTE_REACH_M = 500.0           # and the stretch of the run it is placed on r
 
 
 def manual_sections(rd):
-    """The sections promoted by hand ([] when there are none), each with `manual` and the `road` (line, km0) it was placed on."""
-    try: return json.load(open(os.path.join(adir(rd), 'manual.json')))['sections']
+    """The sections promoted by hand ([] when there are none), each with `manual` and the `road` (line, km0) it was placed on. A Google section made before the sets were kept apart is cut back to the newest drive."""
+    try: secs = json.load(open(os.path.join(adir(rd), 'manual.json')))['sections']
     except (OSError, ValueError, KeyError): return []
+    return [_one_set(x) for x in secs]
+
+
+def _one_set(sec):
+    """A promoted Google section with panoramas of several dates is cut back to the newest drive (see `_google_sets`); anything else, or one already of a single date, is returned as it is."""
+    if sec.get('provider') != 'google' or len({_month(i.get('t')) for i in sec['items']}) < 2 or not sec.get('road'): return sec
+    frames = [dict(seq='g', km=i['km'], lat=i['lat'], lon=i['lon'], a=None, b=i['b'], t=i.get('t'), id=i['id'], pano=True, camera=sec.get('camera'), size=sec.get('size'), cr=i.get('cr'), u=i.get('u'), h=i.get('h'), c=i.get('c')) for i in sec['items']]
+    parts = sections_of('google', dict(id='manual', km0=sec['road']['km0'], line=sec['road']['line']), frames)
+    keep = next((p for p in parts if p['seq'] == 'g'), None)
+    return sec if keep is None else {**sec, **{k: keep[k] for k in ('km0', 'km1', 'length_m', 'frames', 'spacing_m', 'years', 'items')}}
 
 
 def _save_manual(rd, sections):
@@ -713,7 +747,7 @@ def _run_frames(provider, item_id, seq, lat, lon, token, gkey, get):
     """The pictures of one capture run round a place, as the stages make them (without their km): [{seq, lat, lon, a?, c, t, id, pano, camera, size, u, h}]."""
     if provider == 'google':
         run = next((g for g in _google_near(lat, lon, 6, gkey, get) if any(f['id'] == item_id for f in g['frames'])), None)
-        return [] if run is None else [dict(seq='g', id=f['id'], lat=f['lat'], lon=f['lon'], compass=None, pano=True, t=f['t'], camera=f['camera'], size=None, u=None, h=None) for f in run['frames']]
+        return [] if run is None else [dict(seq='g', id=f['id'], lat=f['lat'], lon=f['lon'], compass=None, pano=True, t=f['t'], camera=f['camera'], size=None, u=None, h=None, cr=f.get('cr')) for f in run['frames']]
     frames = (_frames_mapillary if provider == 'mapillary' else _frames_panoramax)(lat, lon, 450.0, token, get)
     return [dict(f, u=f.get('url'), h=f.get('hd')) for f in frames if f['seq'] == seq]
 

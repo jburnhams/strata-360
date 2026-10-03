@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, type Gap, type GapClip, type GapKind } from '../api'
 import { usePoll } from '../usePoll'
+import StepVideo from './FrameStep'
 
 // The stretches of the race with no camera clip, and the generated clip that can fill each one: choose the kind (the animated 2D map, or a 3D terrain flyover in 4K) and how long it is in the film, generate it
 // (the camera follows the runner at a speed-up with the race overlay on top), watch it, and use it in the script as a clip labelled with the gap's name (G01 ...).
@@ -54,7 +55,7 @@ export default function GapsPanel({ folder, onOpen }: { folder: string; onOpen?:
                   {c && !c.rendering && <button aria-label={`Remove ${g.id} clip`} className="text-stone-500 underline" onClick={() => run(() => api.deleteGapClip(folder, c.id))}>Remove</button>}
                 </span>
               </div>
-              {open === g.id && c?.exists && <video aria-label={`${g.id} ${c.kind === 'flyover' ? 'flyover' : 'map clip'}`} className="mt-2 w-full max-w-2xl rounded" controls src={api.gapVideoUrl(folder, c.id)} />}
+              {open === g.id && c?.exists && <StepVideo aria-label={`${g.id} ${c.kind === 'flyover' ? 'flyover' : 'map clip'}`} className="mt-2 w-full max-w-2xl rounded" src={api.gapVideoUrl(folder, c.id)} />}
             </li>
           )
         })}

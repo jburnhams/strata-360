@@ -1110,7 +1110,7 @@ def create_app(roots, token=None):
         try: lines = open(os.path.splitext(SV.video_path(rd, s, pano))[0] + '.log', errors='replace').read().strip().splitlines()
         except OSError: pass
         fail = next((l for l in reversed(lines) if l.startswith('streetview-video:')), '')
-        return dict(exists=os.path.exists(SV.video_path(rd, s, pano)), running=running, log=lines[-4:], error='' if running else fail[:400], seconds=SV.default_seconds(s))
+        return dict(exists=os.path.exists(SV.video_path(rd, s, pano)), running=running, log=lines[-4:], error='' if running else fail[:400], seconds=SV.default_seconds(s), **(dict(fps=round(min(max(s['frames'] / max(SV.default_seconds(s), 0.5), 1.0), 15.0), 2)) if pano else {}))
 
     @api.get('/api/streetview/video', dependencies=[Depends(auth)])
     def get_streetview_video(folder: str, key: str, pano: bool = False):                  # whether the section's preview video (pano: the 360 one to look around in) exists, is being made, or failed

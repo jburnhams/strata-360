@@ -52,7 +52,7 @@ export interface SvNear { before: SvNearClip | null; after: SvNearClip | null; o
 export type SvChoice = 'possible' | 'must'
 /** A section with what the page needs: a key that survives the stage being run again, whether it could make a clip (and why not), how long it plays at 15 pictures a second and how fast that looks, the sections over the same road, and your choice. */
 export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; near: SvNear | null; filmed: [number, number] | null; passed: [number, number] | null; has_video: boolean; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
-export interface SvVideo { exists: boolean; running: boolean; log: string[]; error: string; seconds: number }
+export interface SvVideo { exists: boolean; running: boolean; log: string[]; error: string; seconds: number; fps?: number }
 export interface StreetView {
   status: Record<'roads' | SvProvider | 'quality', SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { frames: number; km: number } | null>; sections: SvSectionInfo[]
   job: PhotoJob; keys: { mapillary: boolean; google: boolean }

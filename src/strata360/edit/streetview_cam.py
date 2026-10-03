@@ -268,7 +268,7 @@ def build(rd, section, road=None, size=OUT, preview=False, pano=False):
     def img(i):
         if i not in imgs:
             if len(imgs) > 4: imgs.clear()
-            im = cv2.imread(pano_path(rd, section, its[i]['id']) if pano else src_path(rd, section, its[i]['id'], preview))
+            im = cv2.imread(pano_path(rd, section, its[i]['id']) if pano and prov == 'google' else src_path(rd, section, its[i]['id'], preview))
             if im is None: raise RuntimeError(f"{section['id']}: picture {its[i]['id']} has not been fetched")
             imgs[i] = im
         return imgs[i]
@@ -293,21 +293,20 @@ def build(rd, section, road=None, size=OUT, preview=False, pano=False):
     return Rig(its, prog, hs, view, rot, img)
 
 
-def render_pano(rd, section, seconds, out, road=None, fps=24, size=(1920, 960), log=print, preview=True):
-    """Write a 360 video of a 360 section for looking around in: every picture turned level and so that the centre column looks along the road, blended between pictures, played through in `seconds`. For the page's viewer (WebGL), not for the film."""
+def render_pano(rd, section, seconds, out, road=None, size=(1920, 960), log=print, preview=True):
+    """Write a 360 video of a 360 section for looking around in: ONE VIDEO FRAME PER ORIGINAL PICTURE, each turned level so that the centre column looks along the road, and nothing blended or made up (the viewer steps from picture to picture). The frame rate is the pictures per second of
+    `seconds`, so it plays as long as the clip would. For the page's viewer (WebGL), not for the film."""
     rig = build(rd, section, road, OUT, preview, pano=True)
     if rig.rot is None: raise ValueError(f"{section['id']}: only a 360 section can be looked around in")
-    prog, hs, rot, img, n = rig.prog, rig.hs, rig.rot, rig.img, rig.n; L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); W, H = size
-    cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-c:v', 'libx264', '-crf', '27', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE); view = lambda i, yaw: reproject_equirect(img(i), rot(i, yaw, 0.0), size)
+    hs, rot, img, n = rig.hs, rig.rot, rig.img, rig.n; fps = round(min(max(n / max(seconds, 0.5), 1.0), 15.0), 2); W, H = size
+    cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-c:v', 'libx264', '-crf', '20', '-g', '1', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']      # (every frame a key frame: stepping back is exact)
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     try:
-        for k in range(N):
-            pos = prog[0] + L * k / (N - 1); i = max(0, min(int(np.searchsorted(prog, pos, side='right') - 1), n - 2)); a = float(np.clip((pos - prog[i]) / max(prog[i + 1] - prog[i], 1e-6), 0, 1))
-            yaw = (hs[i] + ((hs[i + 1] - hs[i] + 180) % 360 - 180) * a) % 360; p.stdin.write(flow_blend(view(i, yaw), view(i + 1, yaw), a).tobytes())
+        for i in range(n): p.stdin.write(reproject_equirect(img(i), rot(i, float(hs[i]) % 360, 0.0), size).tobytes())
         p.stdin.close(); p.wait()
     except BrokenPipeError: p.wait()
     if p.returncode: raise RuntimeError('ffmpeg failed to write the 360 street view video')
-    os.replace(out + '.part.mp4', out); log(f"{section['id']}: 360 video, {N} frames over {L:.0f} m in {seconds:g} s"); return dict(frames=N)
+    os.replace(out + '.part.mp4', out); log(f"{section['id']}: 360 video of the {n} original pictures at {fps:g} a second"); return dict(frames=n, fps=fps)
 
 
 def ups_path(rd, section, preview=False): return meta_path(rd, section) + ('.preview' if preview else '') + '.ups.npy'
