@@ -386,6 +386,9 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     segs = CH.assign_techniques(windows, clips, lib, music, st, rng, warn, B=B) if windows else []
     for sg, w in zip(segs, windows): sg.clip_start_s = round(w._start, 3); sg.in_s = round(w._start - sg.cand.start_s, 3)
     join_runs(segs, windows, ps, beat_s)
+    for sg, w in zip(segs, windows):                                                                                  # the part of each dialogue window that is the lines the script wants (the rest of the window, from rounding up to whole beats or from lengthening it, is not their sound)
+        p = ps[w._piece]
+        if p['kind'] == 'clip': sg.parts['voice_span'] = [round(max(p['start'] - sg.clip_start_s, 0.0), 3), round(min(p['start'] + p['seconds'] - sg.clip_start_s, sg.beats * beat_s), 3)]
     syn = {k: max(1, int(math.ceil(p['seconds'] / beat_s - 1e-9))) for k, p in enumerate(ps) if p['kind'] == 'synthetic'}; before = {}; run = 0              # beats of generated clips ahead of each piece
     for k in range(len(ps)): before[k] = run; run += syn.get(k, 0)
     for sg, w in zip(segs, windows): sg.start += before[w._piece]

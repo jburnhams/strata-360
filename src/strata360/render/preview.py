@@ -198,13 +198,23 @@ def _nest(parts): return parts[0] if len(parts) == 1 else f'min({parts[0]},{_nes
 def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None):
     """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track. `music_gain` is the music's level; `bg_gain`, when given, is the level of the clips' own
     background sound in narration and b-roll windows (the rough mix plays it quietly)."""
-    inputs = []; chains = []; n = 0
+    inputs = []; chains = []; outs = []; n = 0                                                        # n counts the inputs, outs the windows' sounds in order
     for g in plan['segments']:
         p = audio_of(folder, g['clip'], g.get('role')); d = g['dur_s']; gain = bg_gain if bg_gain is not None and not role_has_speech(g.get('role')) else window_gain(folder, g)
+        span = g.get('voice_span')
+        if p and span and g.get('role') == 'clip':                                                       # the clip's voice only over the lines the script wants; the rest of the window is the speech-free background (a window run on past the wanted words must not play the next sentence)
+            a, b = max(float(span[0]), 0.0), min(float(span[1]), d); outside = [x for x in ((0.0, a), (b, d)) if x[1] - x[0] > 1e-3]; bgp = audio_of(folder, g['clip'], 'broll'); bg_level = bg_gain if bg_gain is not None else window_gain(folder, dict(g, speech=False))
+            inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]
+            voice = f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain}{mute_filter(sorted(set(outside) | set(never_spans(folder, g['clip'], g['clip_start_s'], d))))},apad=whole_dur={d:.3f},atrim=0:{d:.3f}"
+            if bgp and outside:
+                inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', bgp]
+                chains.append(voice + f"[v{n}];[{n + 1}:a]aresample=48000,aformat=channel_layouts=mono,volume={bg_level}{mute_filter([(a, b)])},apad=whole_dur={d:.3f},atrim=0:{d:.3f}[b{n}];[v{n}][b{n}]amix=inputs=2:normalize=0:duration=longest[s{n}]"); outs.append(f's{n}'); n += 2
+            else: chains.append(voice + f'[s{n}]'); outs.append(f's{n}'); n += 1
+            continue
         if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain}{mute_filter(never_spans(folder, g['clip'], g['clip_start_s'], d) if role_has_speech(g.get('role')) else [])},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
         else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
-        n += 1
-    vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); chain = ';'.join(chains) + ';' + ''.join(f'[s{i}]' for i in range(n)) + f'concat=n={n}:v=0:a=1[nat]'
+        outs.append(f's{n}'); n += 1
+    vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); chain = ';'.join(chains) + ';' + ''.join(f'[{o}]' for o in outs) + f'concat=n={len(outs)}:v=0:a=1[nat]'
     mus = (plan.get('film') or {}).get('music'); mp = os.path.join(config.race_dir(folder), mus['file']) if mus else None; has_mu = bool(mp and os.path.exists(mp)); has_vo = os.path.exists(vo); k = n
     tail = f'apad=whole_dur={total_s:.3f},atrim=0:{total_s:.3f},alimiter=limit=0.95[m]'
     if has_vo: inputs += ['-i', vo]; chain += f";[{k}:a]aresample=48000,aformat=channel_layouts=mono,{'asplit=2[vo][vokey]' if has_mu else 'anull[vo]'}"; k += 1

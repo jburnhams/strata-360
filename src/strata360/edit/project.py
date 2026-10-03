@@ -104,7 +104,7 @@ def serialise(segs, clips, music, lib, locked_wids=()):
         out.append(dict(id=sg.parts['wid'], index=i, clip=sg.cand.clip, cand_id=sg.cand.id, cand_start_s=sg.cand.start_s, cand_end_s=sg.cand.end_s, film_start_s=round(sg.start * music.beat_s, 3), start_beat=sg.start, beats=sg.beats,
                         dur_s=round(dur, 3), clip_start_s=sg.clip_start_s, in_s=sg.in_s, utc_start=t0.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z', utc_end=(t0 + dt.timedelta(seconds=dur)).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
                         energy=round(float(sg.cand.energy), 3), technique=sg.tech.id, family=sg.tech.family, hero=sg.tech.hero, variant_seed=sg.variant_seed, forced=sg.forced, speech=bool(sg.parts.get('speech', sg.cand.speech)), kind=getattr(sg.cand, 'kind', 'span'), view=getattr(sg.cand, 'view', 'ahead'), locked=sg.parts['wid'] in locked_wids,
-                        options=sg.parts['options']))
+                        options=sg.parts['options'], voice_span=sg.parts.get('voice_span')))
     return out
 
 
