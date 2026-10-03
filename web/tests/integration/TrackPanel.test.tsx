@@ -103,13 +103,13 @@ describe('TrackPanel', () => {
 
   describe('tracks list', () => {
     const present = () => mockGet('/api/track', makeTrackOverview({ present: true, file: 'race.fit', distance_km: 75.6 }))
-    const two = () => makeTracksListing({ runs: 1, divergences: [{ lat: 50.05, lon: 5.07, peak_m: 120, length_m: 300, km: 5, t: 0, line: [[50.04, 5.06], [50.06, 5.08]] }], tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'route', timed: false, start_utc: null, pois: 2, distance_km: 80 })], pois: [{ name: 'Aid 1', lat: 50.05, lon: 5.07, ele: 120, sym: '', desc: '', track: 't2' }] })
+    const two = () => makeTracksListing({ runs: 1, divergences: [{ lat: 50.05, lon: 5.07, peak_m: 120, length_m: 300, km: 5, t: 0, line: [[50.04, 5.06], [50.06, 5.08]] }], tracks: [makeTrackEntry(), makeTrackEntry({ id: 't2', name: 'course.gpx', kind: 'route', timed: false, start_utc: null, pois: 2, distance_km: 80, order: 2, km_start: 70.9, km_end: 119 })], pois: [{ name: 'Aid 1', lat: 50.05, lon: 5.07, ele: 120, sym: '', desc: '', track: 't2' }] })
 
     it('lists each track with its kind, and shows routes on the map with their points of interest', async () => {
       present(); mockGet('/api/tracks', two()); mockGet('/api/tracks/line', { id: 't2', lat: [50, 50.1], lon: [5, 5.1] })
       setup(<TrackPanel folder="/data" />)
       expect(await screen.findByLabelText('Kind of course.gpx')).toHaveValue('route'); expect(screen.getByLabelText('Kind of race.gpx')).toHaveValue('run')
-      expect(screen.getByText(/80 km · no times · 2 POI/)).toBeInTheDocument()
+      expect(screen.getByText(/80 km · no times · 2 POI · km 70.9–119 of the run/)).toBeInTheDocument(); expect(screen.getByTitle('section 2 of the race')).toHaveTextContent('2')
       expect(await screen.findByText(/run leaves the route by over 50 m \(the 1 farthest\)/)).toBeInTheDocument();
       expect(await screen.findByText('route (planning only)')).toBeInTheDocument(); expect(screen.getByText('point of interest')).toBeInTheDocument()
       await waitFor(() => expect(document.querySelector('[data-poi]')).not.toBeNull())

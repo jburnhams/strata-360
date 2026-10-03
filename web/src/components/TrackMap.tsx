@@ -77,6 +77,10 @@ export default function TrackMap({ base, clips, cursor, onCursor, onHoverClip, o
     }
     baseLine.current?.bringToFront()
     for (const p of pois) {
+      if (p.sym === 'checkpoint') {                                                              // where one route ends and the next begins: numbered, in race order
+        const ic = L.divIcon({ className: '', html: `<div data-checkpoint="" style="min-width:22px;height:22px;padding:0 4px;box-sizing:border-box;border-radius:11px;background:#1d4ed8;color:#fff;border:2px solid #fff;font:700 12px/18px ui-sans-serif,sans-serif;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.55)">${p.n ?? ''}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] })
+        L.marker([p.lat, p.lon], { icon: ic, title: p.name, keyboard: false, zIndexOffset: 400 }).bindTooltip(`${p.name}${p.desc ? ` — ${p.desc}` : ''}`, { direction: 'top', offset: [0, -10] }).addTo(g); continue
+      }
       const icon = L.divIcon({ className: '', html: `<div data-poi="" style="width:12px;height:12px;border-radius:2px;transform:rotate(45deg);background:#f59e0b;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.5)"></div>`, iconSize: [12, 12], iconAnchor: [6, 6] })
       const mk = L.marker([p.lat, p.lon], { icon, title: p.name || 'Point of interest', keyboard: false }).addTo(g)
       if (p.name || p.desc) mk.bindTooltip(p.name + (p.ele != null ? ` · ${Math.round(p.ele)} m` : '') + (p.desc ? ` — ${p.desc}` : ''), { direction: 'top', offset: [0, -6] })

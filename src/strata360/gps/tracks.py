@@ -196,12 +196,18 @@ def pois(path):
 def listing(rd):
     """Everything the app shows: the tracks with their summaries and kinds, the merged run track when there is one, the points of interest of all of them, and where the race track leaves the routes (`divergences`)."""
     items = []; points = []
+    try: order, marks = route_order(rd)
+    except Exception: order, marks = [], []                                         # (the map is not worth failing the list over)
+    info_of = {o['id']: o for o in order}
     for e in entries(rd):
         try: info = summary(e['file'])
         except Exception as ex: items.append(dict(id=e['id'], name=e['name'], kind=e['kind'], error=f'{type(ex).__name__}: {ex}')); continue
         try: p = [dict(q, track=e['id']) for q in pois(e['file'])]
         except Exception: p = []
-        points += p; items.append(dict(id=e['id'], name=e['name'], kind=e['kind'], pois=len(p), **info))
+        points += p; o = info_of.get(e['id']); items.append(dict(id=e['id'], name=e['name'], kind=e['kind'], pois=len(p), **info, **({k: o[k] for k in ('order', 'whole', 'reversed', 'km_start', 'km_end')} if o else {})))
+    items.sort(key=lambda x: (x['kind'] != 'run', x.get('order') is None, x.get('order') or 0))                        # runs first, then the routes in race order (the whole course last)
+    name = {x['id']: x['name'] for x in items}
+    for c in marks: points.append(dict(name=f"Checkpoint {c['n']}", lat=c['lat'], lon=c['lon'], ele=None, sym='checkpoint', desc=f"{name.get(c['before'], '')} → {name.get(c['after'], '')}" + (f" (their ends are {c['gap_m']} m apart)" if c['gap_m'] >= 20 else ''), track='checkpoint', n=c['n']))
     merged = None
     if len(runs(rd)) >= 2:
         current_path(rd)
@@ -269,3 +275,41 @@ def divergences(rd, threshold_m=50.0, top=10, step_m=10.0, join_m=150.0):
         pk = unxy(Q[m]); out.append(dict(lat=round(pk[0], 6), lon=round(pk[1], 6), peak_m=round(float(d[m])), wrong=round(share, 2), score=round(float(d[m]) * share), length_m=round((b - a + 1) * step_m), km=round(float(u[m]) / 1000.0, 1), t=float(tt[m]), line=[[round(unxy(Q[q])[0], 6), round(unxy(Q[q])[1], 6)] for q in idx]))
         i = j + 1
     out = sorted(out, key=lambda x: -x['score'])[:top]; _DIV.clear(); _DIV[key] = out; return out
+
+
+_ORDER = {}
+
+
+def route_order(rd, step_m=10.0):
+    """The routes in the order the race runs them, from the race track: each route is placed by where its points are nearest along the race track (the median), and turned round when its last points are earlier along the race than its first. Returns
+    [{id, order (1 = first), reversed, km_start, km_end (along the race track), start: [lat, lon], end: [lat, lon]}] and, between each route and the next, the checkpoints [{n, lat, lon, gap_m, before, after}]: halfway between the end of one route and the start of the next, which need not meet exactly.
+    The start of the first route and the end of the last are not checkpoints. A route that holds two or more others is the whole course: it has `order` None and `whole` True and takes no part in the checkpoints. Empty without a race track."""
+    rts = [e for e in entries(rd) if e['kind'] == 'route']; cur = current_path(rd)
+    if not rts or not cur: return [], []
+    key = (cur, os.path.getmtime(cur), tuple((e['file'], os.path.getmtime(e['file'])) for e in rts), step_m)
+    if key in _ORDER: return _ORDER[key]
+    from scipy.spatial import cKDTree
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']); lat, lon = run['lat'][ok], run['lon'][ok]
+    if len(lat) < 2: return [], []
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0
+    xy = lambda la, lo: np.column_stack([(lo - 5.0) * kx, (la - lat0) * ky]); ll = lambda q: [float(q[1] / ky + lat0), float(q[0] / kx + 5.0)]
+    P = xy(lat, lon); s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))]); u = np.arange(0, s[-1], step_m)
+    if len(u) < 2: return [], []
+    Q = np.column_stack([np.interp(u, s, P[:, 0]), np.interp(u, s, P[:, 1])]); tree = cKDTree(Q); found = []
+    for e in rts:
+        r = read(e['file']); g = np.isfinite(r['lat']) & np.isfinite(r['lon'])
+        if g.sum() < 2: continue
+        R = xy(r['lat'][g], r['lon'][g]); _, nn = tree.query(R); pos = u[nn]; k = max(1, len(R) // 10); rev = bool(np.median(pos[:k]) > np.median(pos[-k:]))
+        if rev: R, pos = R[::-1], pos[::-1]
+        found.append(dict(id=e['id'], key=float(np.median(pos)), reversed=rev, km_start=round(float(pos[0]) / 1000.0, 1), km_end=round(float(pos[-1]) / 1000.0, 1), a=R[0], b=R[-1]))
+    def span(f): return min(f['km_start'], f['km_end']), max(f['km_start'], f['km_end'])
+    def inside(f, g):                                                               # the share of g's stretch of the race that lies within f's
+        a, b = span(f); c, d = span(g); return max(0.0, min(b, d) - max(a, c)) / max(d - c, 1e-9)
+    whole = [f for f in found if sum(1 for g in found if g is not f and inside(f, g) >= 0.8 and span(g)[1] - span(g)[0] < 0.8 * (span(f)[1] - span(f)[0])) >= 2]       # a route that holds two or more others: the whole course, not a section of it
+    found = [f for f in found if f not in whole]; found.sort(key=lambda x: x['key']); order = [dict(id=f['id'], order=None, whole=True, reversed=False, km_start=span(f)[0], km_end=span(f)[1], start=ll(f['a']), end=ll(f['b'])) for f in whole]; marks = []
+    for n, f in enumerate(found, 1):
+        order.append(dict(id=f['id'], order=n, whole=False, reversed=f['reversed'], km_start=f['km_start'], km_end=f['km_end'], start=ll(f['a']), end=ll(f['b'])))
+        if n > 1:
+            p = found[n - 2]['b']; mid = (p + f['a']) / 2; la, lo = ll(mid)
+            marks.append(dict(n=n - 1, lat=round(la, 6), lon=round(lo, 6), gap_m=round(float(np.hypot(*(f['a'] - p)))), before=found[n - 2]['id'], after=f['id']))
+    _ORDER.clear(); _ORDER[key] = (order, marks); return order, marks

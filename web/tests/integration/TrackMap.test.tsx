@@ -41,6 +41,11 @@ describe('TrackMap', () => {
     expect(lines.mock.calls.some(c => (c[1] as L.PolylineOptions).color === '#dc2626')).toBe(true); lines.mockRestore()
   })
 
+  it('numbers the checkpoints between routes', () => {
+    const { container } = setup(<TrackMap {...props()} pois={[{ name: 'Checkpoint 2', lat: 50.05, lon: 5.05, ele: null, sym: 'checkpoint', desc: 'a → b', track: 'checkpoint', n: 2 }]} />)
+    expect(screen.getByTitle('Checkpoint 2')).toHaveTextContent('2'); expect(container.querySelector('[data-checkpoint]')).not.toBeNull()
+  })
+
   it('colours a marker green when the draft plays the clip and grey when it does not', () => {
     setup(<TrackMap {...props()} />)
     expect(screen.getByTitle('Clip 0023').innerHTML).toContain('#16a34a'); expect(screen.getByTitle('Clip 0024').innerHTML).toContain('#78716c')
