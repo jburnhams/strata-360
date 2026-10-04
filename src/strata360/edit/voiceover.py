@@ -3,14 +3,14 @@ recording; the mix then uses the recording for that line and the synthetic voice
 
 Files in `<project>/voiceover/`:
   synth/<seg>-<hash>.wav   one spoken line (hash of voice, rate and text: a changed line is spoken again, an unchanged one is reused)
-  recorded/<seg>.wav       your recording of a line (any audio file is converted)
+  recorded/<seg>-<UTC time>.wav   your recordings of a line (any audio file is converted); every take is kept, the newest is used; removing moves them to recorded/removed/
   state.json               {voice, rate, use: {seg: 'synth' | 'recorded'}}  (a recording is used when there is one, unless the line is set to 'synth')
   timings.json             per line: source, film start, length, the window it has, tempo applied, fit ('ok' | 'sped' | 'over'); and the measured speaking rate
   voiceover.wav            the mix at the film's length: the audio the final render takes
 
 A line starts a moment after its window starts and may run on into following windows that have no line of their own. A synthetic line that still does not fit is sped up (at most 1.25x);
 a recording is never changed. What cannot fit is cut at the next line's start with a short fade, and reported as 'over'."""
-import glob, hashlib, json, os, re, subprocess, time
+import datetime as dt, glob, hashlib, json, os, re, subprocess, time
 from strata360.pipeline import config
 
 LEAD_S = 0.12; GAP_S = 0.15; MAX_TEMPO = 1.25; SR = 48000
@@ -244,18 +244,33 @@ def synth_line(folder, seg, text, engine, voice, rate):
     return p
 
 
-def recorded_path(folder, seg): return os.path.join(base(folder), 'recorded', f'{_name(seg)}.wav')
+def _takes(folder, seg):
+    """Every recording of a line, oldest first: `recorded/<line>-<UTC time>.wav` (and the older single `<line>.wav`). A take is never overwritten, so none is ever lost."""
+    d = os.path.join(base(folder), 'recorded'); n = _name(seg); pat = re.compile(rf'^{re.escape(n)}(-\d{{8}}T\d{{9}}Z)?\.wav$')
+    return sorted((os.path.join(d, f) for f in (os.listdir(d) if os.path.isdir(d) else []) if pat.match(f)), key=lambda p: (os.path.basename(p) != f'{n}.wav', os.path.basename(p)))      # the legacy single file is the oldest
+
+
+def recorded_path(folder, seg):
+    """The line's current recording (its newest take), or the path where the legacy single recording would be when there is none (so `os.path.exists` says whether there is one)."""
+    t = _takes(folder, seg); return t[-1] if t else os.path.join(base(folder), 'recorded', f'{_name(seg)}.wav')
 
 
 def save_recording(folder, seg, raw_path):
-    """Convert an uploaded audio file to the line's recording (mono wav, silence trimmed at both ends)."""
-    p = recorded_path(folder, seg); os.makedirs(os.path.dirname(p), exist_ok=True)
+    """Convert an uploaded audio file to a NEW take of the line (mono wav, silence trimmed at both ends); earlier takes stay on disk and the newest one is used."""
+    d = os.path.join(base(folder), 'recorded'); os.makedirs(d, exist_ok=True)
+    while True:                                                                          # millisecond time stamp; a clash (two takes in one ms) waits for the next one
+        now = dt.datetime.now(dt.timezone.utc); p = os.path.join(d, f"{_name(seg)}-{now.strftime('%Y%m%dT%H%M%S')}{now.microsecond // 1000:03d}Z.wav")
+        if not os.path.exists(p): break
+        time.sleep(0.002)
     _run(['ffmpeg', '-y', '-v', 'error', '-i', raw_path, '-af', _TRIM, '-ar', str(SR), '-ac', '1', p + '.part.wav']); os.replace(p + '.part.wav', p); return p
 
 
 def delete_recording(folder, seg):
-    p = recorded_path(folder, seg)
-    if os.path.exists(p): os.remove(p)
+    """Take the line's recording out of use: all its takes move to `recorded/removed/` (never deleted)."""
+    t = _takes(folder, seg)
+    if t:
+        g = os.path.join(base(folder), 'recorded', 'removed'); os.makedirs(g, exist_ok=True)
+        for p in t: os.replace(p, os.path.join(g, os.path.basename(p)))
 
 
 def source_for(state, seg, has_recording):

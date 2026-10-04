@@ -1,20 +1,21 @@
 """Project metadata backups: `<project>/backups/meta-<UTC time>.tar.gz`, at most one every 30 minutes, and only when something changed.
 
 *What is saved* is everything in the project folder except what can be rebuilt or is bulky: the folder `backups/` itself, claim / worker / lock / temp / log files, media and image files (`SKIP_EXT`) and any
-file over `MAX_FILE_MB`. It is a rule of exclusion, not a list of names, so a new data file written by any new feature is included without anyone registering it.
+file over `MAX_FILE_MB` (but .gpx / .fit tracks are always saved, whatever their size). Uploaded photos, tracks and voice-over takes are not backed up as media: they are never overwritten or deleted instead (new unique names; removal moves to a `removed/` folder). It is a rule of exclusion, not a list of names, so a new data file written by any new feature is included without anyone registering it.
 
 *The flag* is a fingerprint of the saved files (path, size, modification time) kept in `backups/state.json`: no writer has to remember to mark anything. The project is "dirty" while the fingerprint differs from the
 last backup's, and `maybe_backup` (cheap: one directory walk) does nothing until it is dirty and `INTERVAL_S` has passed since the last backup. Processes may race: the check is repeated under a file lock.
 
 *Retention* thins old backups on an exponential scale (`TIERS`): all of the last 3 hours, then one per hour for a day, one per day for a week, one per week for 5 weeks, one per month for 13 months, then one per year;
 the newest backup of each period is the one kept."""
-import datetime as dt, hashlib, json, os, tarfile, threading, time
+import datetime as dt, hashlib, json, os, re, tarfile, threading, time
 from strata360 import oslib
 from strata360.pipeline import config
 
 INTERVAL_S = 30 * 60
 DIR = 'backups'
 MAX_FILE_MB = 5
+TRACK_RE = re.compile(r'\.(gpx|fit)(\.|$)', re.I)                                                       # track.gpx, tracks/t2-run.gpx, track.gpx.replaced..., the .pois.json of one is small anyway
 SKIP_DIRS = {DIR, '.claims', '.workers', '__pycache__'}
 SKIP_EXT = {'.lock', '.tmp', '.log', '.pyc', '.mp4', '.mov', '.mkv', '.m4v', '.avi', '.ts', '.m3u8', '.wav', '.flac', '.mp3', '.m4a', '.aac', '.ogg', '.jpg', '.jpeg', '.png', '.webp', '.osv', '.insv', '.npy'}
 TIERS = [(3 * 3600, None), (86400, '%Y%m%d%H'), (7 * 86400, '%Y%m%d'), (35 * 86400, '%G-W%V'), (400 * 86400, '%Y%m'), (float('inf'), '%Y')]       # (age up to, calendar period of which one backup is kept; None keeps all)
@@ -33,7 +34,7 @@ def collect(folder):
             p = os.path.join(root, n)
             if os.path.splitext(n)[1].lower() in SKIP_EXT or '.tmp' in n: continue          # `stages.json.123.tmp` style names are half-written files
             try:
-                if os.path.getsize(p) > MAX_FILE_MB * 1_000_000: continue
+                if os.path.getsize(p) > MAX_FILE_MB * 1_000_000 and not TRACK_RE.search(n): continue          # tracks are metadata whatever their size
             except OSError: continue
             out.append((os.path.relpath(p, rd).replace(os.sep, '/'), p))
     return sorted(out)

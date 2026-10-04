@@ -58,3 +58,9 @@ def test_restore_unpacks_beside_not_over_the_project(proj, tmp_path):
 def test_ticker_backs_up_and_survives_errors(proj, monkeypatch):
     t = B.Ticker(lambda: [proj, '/no/such/place'], every=999); t.tick(); assert len(B.list_backups(proj)) == 1
     monkeypatch.setattr(B, 'backup', lambda f: 1 / 0); t.tick()
+
+
+def test_gpx_tracks_are_always_metadata_whatever_their_size(proj):
+    rd = config.race_dir(proj); os.makedirs(os.path.join(rd, 'tracks'))
+    for rel in ('track.gpx', 'tracks/t2-run.gpx', 'track.gpx.20260101.replaced'): open(os.path.join(rd, rel), 'wb').write(b'x' * 6_000_000)
+    assert {'track.gpx', 'tracks/t2-run.gpx', 'track.gpx.20260101.replaced'} <= {r for r, _ in B.collect(proj)}

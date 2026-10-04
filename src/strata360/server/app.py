@@ -792,7 +792,7 @@ def create_app(roots, token=None):
         for n in config.TRACK_NAMES:
             for suffix in ('', '.npz'):
                 q = os.path.join(rd, n + suffix)
-                if os.path.exists(q): os.replace(q, q + '.replaced')                       # keep the previous file next to it, never silently lose it
+                if os.path.exists(q): os.replace(q, q + __import__('datetime').datetime.now().strftime('.%Y%m%dT%H%M%S%f') + '.replaced')                       # keep the previous file next to it, never silently lose it
         dest = os.path.join(rd, 'track' + ext); open(dest, 'wb').write(data)
         from strata360.gps.overview import overview
         from strata360.gps import tracks as TKS
