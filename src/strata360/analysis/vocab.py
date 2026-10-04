@@ -281,8 +281,10 @@ def collect(root, write=True):
     """The project's StatsBook rebuilt from the repo's seed and the numbers each clip's objects.json recorded (clips are processed in parallel, so each keeps its own; this is the one place they are added up). Written to the
     project's vocab_stats.json unless `write` is False."""
     import glob
+    files = sorted(glob.glob(os.path.join(root, 'strata360', 'clips', '*', 'objects.json')))
+    if not files: return StatsBook.read(project_paths(root)['stats'])                    # no clip has recorded anything: keep what the project's file says
     book = StatsBook.read(SEED_FILE); book.sources = list(book.sources)
-    for fn in sorted(glob.glob(os.path.join(root, 'strata360', 'clips', '*', 'objects.json'))):
+    for fn in files:
         try: doc = json.load(open(fn))
         except (OSError, ValueError): continue
         if doc.get('stats'): book.merge(StatsBook(doc['stats'])); book.sources.append(os.path.basename(os.path.dirname(fn)))

@@ -6,7 +6,7 @@ worn gear are named classes so they are never sent on; boxes in the wearer's own
 word statistics (vocab.StatsBook.route): a trusted word keeps the detector's name, anything else is cropped (re-rendered at lens resolution) and labelled by Qwen (analysis/objects_vlm.py). What the labelling model said is
 recorded against the detector's word, so words earn trust (or lose their place) over time.
 
-Not sent at all: a clip in the dark (sun below -12 degrees and a dim exposure), a moment whose exposure is black, boxes too small for any lens to resolve, ground/sky/body-part labels (the stop-list) and big scenery
+Not sent at all: small marks on the ground, a clip in the dark (sun below -12 degrees and a dim exposure), a moment whose exposure is black, boxes too small for any lens to resolve, ground/sky/body-part labels (the stop-list) and big scenery
 words (tree, snow, river ...: counted per clip under `areas`, not labelled one by one). `detect` and `label` are arguments so the logic runs without a model in the tests."""
 import json
 import math
@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections import Counter
 
 import numpy as np
 
@@ -36,6 +37,7 @@ CROP_MARGIN, CROP_FOV = 1.8, (10.0, 60.0)
 TINY_DEG = V.CROP_WANT_PX / 3 / V.NATIVE_PPD       # below this even the lens frame gives the box fewer than a third of the pixels the labelling model wants
 DARK_SUN, DARK_EXPOSURE, BLACK_FRAME = -12.0, 0.2, 0.02
 WEARER_NEAR_S = 1.5
+GROUND_LAT, GROUND_DEG = -40.0, 8.0         # a small prompt-free box this far below the horizon is a mark on the ground (snow patch, puddle, leaves), not something passed: not sent to the labelling model
 SAME_OBJECT_DEG = 2.0                     # two boxes closer than this (or 0.6 of their size) in the world frame are the same object
 BATCH = 8                                 # moments per detector call (their tile pictures are on disk meanwhile)
 
@@ -190,7 +192,7 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
     why = clip_is_dark(sun, exposure)
     if why: return dict(doc, skipped=why, objects=[], areas={}, counts={}, stats=VOC.StatsBook().to_json())
     import cv2
-    cr = renderer or V.CropRenderer(osv); mem = Memory(); areas = {}; counts = dict(black=0, tiles=0, wearer=0, tiny=0); tmp = tempfile.mkdtemp(prefix='s360obj_', dir=work_dir); crops = os.path.join(tmp, 'crops'); os.makedirs(crops)
+    cr = renderer or V.CropRenderer(osv); mem = Memory(); areas = {}; counts = dict(black=0, tiles=0, wearer=0, tiny=0, ground=0); tmp = tempfile.mkdtemp(prefix='s360obj_', dir=work_dir); crops = os.path.join(tmp, 'crops'); os.makedirs(crops)
     low = {w for c in ('wildlife', 'farm_rural') for w in vocab['categories'].get(c, {}).get('words', [])}; rng = rng or random.Random(0); todo = []
     try:
         use = [t for t in times if not black_at(exposure, t)]; counts['black'] = len(times) - len(use)
@@ -208,6 +210,7 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
                 for c in merge_moment(cands, people, wearer_dirs(focus, t)):
                     if c['wearer']: counts['wearer'] += 1; continue
                     if c['deg'] < TINY_DEG: counts['tiny'] += 1; continue
+                    if c['kind'] == 'other' and c['lat'] < GROUND_LAT and c['deg'] < GROUND_DEG: counts['ground'] += 1; continue
                     o, new = mem.see(c, t)
                     if not new: continue
                     route = stats.route(o['yoloe'], o['conf'], vocab, rng) if o['kind'] == 'named' else 'label'; o['route'] = route
@@ -225,10 +228,10 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
             o.update(label=lab, source='vlm'); kind = VOC.kind_of_label(lab, vocab) if lab else 'stop'; word = VOC.normalise_label(lab, vocab) if lab else ''
             if o['kind'] == 'named': book.record_named(o['yoloe'], lab or 'unclear', vocab, categories)
             elif kind == 'feature' and word: book.record_leftover(lab, clip, vocab)
-            o['word'] = word if kind != 'stop' else None; o['stop'] = kind == 'stop'
+            o['word'] = word if kind != 'stop' else None; o['stop'] = kind == 'stop'; o['scenery'] = kind == 'scenery'
             if crops_to and kind != 'stop': os.makedirs(crops_to, exist_ok=True); shutil.copy(os.path.join(crops, f"o{o['id']:03d}.jpg"), os.path.join(crops_to, f"o{o['id']:03d}.jpg"))
         for c in categories: book.use_category(c)
         for o in mem.objects: o['word'] = o.get('word') or (o['yoloe'] if o['source'] == 'detector' else None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), areas=areas, counts=counts, stats=book.to_json())
+    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop') and not o.get('scenery')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('scenery')).most_common()), areas=areas, counts=counts, stats=book.to_json())

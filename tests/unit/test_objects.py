@@ -134,3 +134,16 @@ def test_the_projects_statistics_are_added_up_from_the_clips_and_the_seed(tmp_pa
     (tmp_path / 'strata360' / 'clips' / 'CAM_3').mkdir(); book = VOC.collect(str(tmp_path)); assert book.words['zzword']['fired'] == 7 and book.sources[-2:] == ['CAM_1', 'CAM_2'] and 'sheep' in book.words
     again = VOC.collect(str(tmp_path)); assert again.words['zzword']['fired'] == 7                              # rebuilt from the clips every time: running it twice does not count twice
     assert VOC.stats_for(str(tmp_path)).words['zzword']['fired'] == 7 and 'zzword' not in VOC.stats_for(str(tmp_path / 'none')).words
+    assert VOC.collect(str(tmp_path / 'empty')).words == {}                                                    # nothing recorded and no file: nothing invented
+
+
+def test_small_marks_on_the_ground_are_not_sent_and_scenery_labels_are_counted_apart(tmp_path):
+    low = O.TILES.index((-55, 0.0)); detect, label, seen = fakes({}, {0: 'tall tree trunk'}, pf_by_moment={0: [('thing', 0.5, [472, 472, 552, 552])]})
+    inner = detect
+    def lower(images, words, out):                                                               # the same boxes, in a tile that looks at the ground
+        d = inner(images, words, out); f = d['files']
+        for n in list(f):
+            if n.endswith(f't{TILE:02d}.jpg'): f[n[:-6] + f'{low:02d}.jpg'], f[n] = f[n], dict(named=[], pf=[])
+        return d
+    doc = run(tmp_path, lower, label, times=(1.0,)); assert doc['counts']['ground'] == 1 and doc['objects'] == [] and seen['label'] == []
+    doc = run(tmp_path, detect, label, times=(1.0,)); assert doc['objects'] == [] and doc['scenery_labels'] == {'tree trunk': 1} and doc['dropped_by_stoplist'] == 0
