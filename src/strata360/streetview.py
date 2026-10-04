@@ -464,7 +464,7 @@ def video_path(rd, s, pano=False):
     h = hashlib.sha1(json.dumps([s['key'], s['frames'], default_seconds(s), VIDEO_VERSION, ('pano-frames' if pano else 'view'), bool(s.get('hires'))], sort_keys=True).encode()).hexdigest()[:12]; return os.path.join(adir(rd), 'video', f"{s['id']}-{h}{('-360' if pano else '') + ('-hi' if s.get('hires') else '')}.mp4")
 
 
-VIDEO_STEPS = [(re.compile(r'panorama (\d+) of (\d+) stitched'), 'asking Google for views and stitching panoramas', 0.0, 0.8), (re.compile(r'fetching picture (\d+) of (\d+)'), 'fetching pictures', 0.0, 0.5),
+VIDEO_STEPS = [(re.compile(r'panorama (\d+) of (\d+): view (\d+) of (\d+)'), 'asking Google for views', 0.0, 0.8), (re.compile(r'panorama (\d+) of (\d+) stitched'), 'asking Google for views and stitching panoramas', 0.0, 0.8), (re.compile(r'fetching picture (\d+) of (\d+)'), 'fetching pictures', 0.0, 0.5),
                (re.compile(r'rendering (\d+) of (\d+)'), 'rendering the video', None, None)]
 
 
@@ -476,6 +476,7 @@ def video_progress(lines, google_pano=False):
             m = rx.search(l)
             if not m: continue
             done, total = int(m.group(1)), max(int(m.group(2)), 1); frac = done / total
+            if m.re.groups == 4: frac = (done - 1 + int(m.group(3)) / max(int(m.group(4)), 1)) / total              # (part way through a panorama's views)
             best = dict(pct=round(100 * (frac * fetch_w if lo is not None else fetch_w + frac * (1 - fetch_w))), phase=phase, done=done, total=total)
     return best
 

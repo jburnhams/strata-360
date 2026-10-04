@@ -328,6 +328,7 @@ def cmd_streetview(a):
     """Street view: the stretches of the run on a road (stage roads) and the street-level imagery on them from Mapillary, Panoramax and Google (one stage each); only what is missing or out of date unless --force. Details: streetview.py."""
     from strata360 import streetview as SV
     from strata360.gps import track
+    sys.stdout.reconfigure(line_buffering=True)                                                  # (the page reads this job's log while it runs: lines must not wait in a buffer)
     oslib.lower_priority(); cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
     if not tp: sys.exit('streetview: no race track: add the .fit or .gpx first')
     tr = track.load(tp); d, _ = SV.track_dist(tr); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); tr = dict(lat=tr['lat'][ok], lon=tr['lon'][ok], dist=d, t=tr['t'][ok])
@@ -339,6 +340,7 @@ def cmd_streetview(a):
 def cmd_streetview_video(a):
     """Make the preview video of one street view section (by its key, from the Street view page) with the app's own camera; kept, so a second call finishes at once."""
     from strata360 import streetview as SV
+    sys.stdout.reconfigure(line_buffering=True)                                                  # (the page reads this job's log while it runs)
     oslib.lower_priority(); rd = config.race_dir(a.name); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; sec = next((s for s in SV.annotate(rd, docs) if s['key'] == a.key), None)
     if sec is None: sys.exit(f'streetview-video: no section {a.key}')
     try: out = SV.make_video(rd, sec, pano=getattr(a, 'pano', False))
