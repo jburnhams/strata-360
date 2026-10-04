@@ -766,3 +766,18 @@ class TestStreetViewHires(TestStreetViewApi):
         calls = []; monkeypatch.setattr(CAM, 'fetch_google_pano', lambda *a, **k: calls.append(('pano', k.get('grid')))); monkeypatch.setattr(CAM, 'fetch', lambda *a, **k: calls.append(('flat', None))); monkeypatch.setattr(CAM, 'render', lambda *a, **k: calls.append(('render', k.get('grid'))) or {})
         sec = dict(provider='google', id='G1', key='k', seq='g', km0=0.0, hires=True); SC.render(project.folder, sec, 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('pano', 'hi'), ('render', 'hi')]
         calls.clear(); SC.render(project.folder, dict(sec, hires=False), 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('flat', None), ('render', None)]
+
+
+class TestSidebarThumbs(TestStreetViewApi):
+    def test_a_gap_clip_and_a_street_view_section_have_a_thumbnail_made_from_a_frame_of_their_video(self, client, project, monkeypatch):
+        import subprocess
+        from strata360 import streetview as SV
+        from strata360.edit import synthetic as SY
+        self.make_docs(project); rd = project.race_dir; q = dict(folder=project.folder); made = []
+        def fake_run(cmd, **k): made.append(cmd); open(cmd[-1], 'wb').write(b'\xff\xd8JPEG'); return subprocess.CompletedProcess(cmd, 0)
+        monkeypatch.setattr(subprocess, 'run', fake_run)
+        assert client.get('/api/gaps/thumb', params=dict(q, id='G99')).status_code == 404
+        s = SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})[0]; v = SV.video_path(rd, s); os.makedirs(os.path.dirname(v), exist_ok=True); open(v, 'wb').write(b'MP4')
+        r = client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)); assert r.status_code == 200 and r.content == b'\xff\xd8JPEG' and r.headers['content-type'] == 'image/jpeg' and any('scale=100:-2' in ' '.join(c) for c in made)
+        n = len(made); assert client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)).status_code == 200 and len(made) == n                      # kept
+        assert client.get('/api/streetview/thumb', params=dict(q, key='nope')).status_code == 404

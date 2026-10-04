@@ -48,9 +48,9 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         <ul className="min-h-0 flex-1 space-y-1 overflow-auto md:pr-1">
           {clips === undefined ? Array.from({ length: 8 }, (_, i) => <li key={i} className="flex gap-2 p-1.5"><Skeleton className="h-11 w-20 shrink-0" /><div className="flex-1 space-y-1.5"><Skeleton className="h-3 w-full" /><Skeleton className="h-3 w-1/2" /></div></li>)
             : timeline(clips, gaps ?? [], (photos ?? []).filter(p => p.use), svChosen ?? []).map(e => e.kind === 'clip' ? <Row key={e.id} folder={folder} c={e.c} overlay={overlay} active={sel === e.id} onClick={() => { setFocus(undefined); setSel(e.id) }} />
-              : e.kind === 'gap' ? <GapRow key={e.id} g={e.g} active={sel === `@gap:${e.g.id}`} onClick={() => { setFocus(undefined); setSel(`@gap:${e.g.id}`) }} />
+              : e.kind === 'gap' ? <GapRow key={e.id} folder={folder} g={e.g} active={sel === `@gap:${e.g.id}`} onClick={() => { setFocus(undefined); setSel(`@gap:${e.g.id}`) }} />
               : e.kind === 'photo' ? <PhotoRow key={e.id} folder={folder} p={e.p} active={sel === `@photo:${e.p.id}`} onClick={() => { setFocus(undefined); setSel(`@photo:${e.p.id}`) }} />
-              : <SvRow key={e.id} s={e.s} active={sel === `@sv:${e.s.key}`} onClick={() => { setFocus(undefined); setSel(`@sv:${e.s.key}`) }} />)}
+              : <SvRow key={e.id} folder={folder} s={e.s} active={sel === `@sv:${e.s.key}`} onClick={() => { setFocus(undefined); setSel(`@sv:${e.s.key}`) }} />)}
         </ul>
       </aside>
       <div className="min-w-0">
@@ -99,21 +99,22 @@ function PhotoRow({ folder, p, active, onClick }: { folder: string; p: Photo; ac
   )
 }
 
-function SvRow({ s, active, onClick }: { s: SvChosen; active: boolean; onClick: () => void }) {
+function SvRow({ folder, s, active, onClick }: { folder: string; s: SvChosen; active: boolean; onClick: () => void }) {
   return (
     <li onClick={onClick} data-in-film="" data-sv-row={s.label} className={`flex cursor-pointer gap-2 rounded-lg border-2 border-emerald-600 p-1.5 ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
-      <div className="flex h-11 w-20 shrink-0 items-center justify-center rounded bg-sky-200 text-sm font-semibold text-sky-900 dark:bg-sky-900 dark:text-sky-100">{s.label}</div>
+      <div className="relative h-11 w-20 shrink-0"><img loading="lazy" src={api.svThumbUrl(folder, s.key, String(s.seconds ?? '') + (s.hires ? 'h' : ''))} alt="" className="h-11 w-20 rounded bg-sky-200 object-cover dark:bg-sky-900" /><span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-semibold text-white">{s.label}</span></div>
       <div className="min-w-0 flex-1 text-xs"><div className="truncate">Street view · {s.provider}</div><div className="text-stone-500">{s.kind === '360' ? '360°' : '2D'} · {Math.round(s.length_m)} m · {s.choice === 'must' ? 'must use' : 'may use'}{s.quality ? ` · ${s.quality}` : ''}</div></div>
     </li>
   )
 }
 
-function GapRow({ g, active, onClick }: { g: Gap; active: boolean; onClick: () => void }) {
+function GapRow({ folder, g, active, onClick }: { folder: string; g: Gap; active: boolean; onClick: () => void }) {
   const c = g.clips.find(x => x.id === g.id), s = g.settings
   const state = c?.rendering ? 'rendering…' : c?.exists ? (c.kind === 'flyover' ? '3D' : '2D') + ` · ${c.seconds} s` : c ? 'planned' : 'no clip'
   return (
     <li onClick={onClick} data-in-film={g.in_film ? '' : undefined} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-lg border-2 p-1.5 ${g.in_film ? 'border-emerald-600' : 'border-transparent'} ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-200/60 dark:hover:bg-stone-800'}`}>
-      <div className={`flex h-11 w-20 shrink-0 items-center justify-center rounded text-sm font-semibold ${c?.exists ? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{g.id}</div>
+      {c?.exists ? <div className="relative h-11 w-20 shrink-0"><img loading="lazy" src={api.gapThumbUrl(folder, g.id, String(c.seconds ?? ''))} alt="" className="h-11 w-20 rounded object-cover" /><span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-semibold text-white">{g.id}</span></div>
+        : <div className={`flex h-11 w-20 shrink-0 items-center justify-center rounded text-sm font-semibold ${c?.exists ? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{g.id}</div>}
       <div className="min-w-0 flex-1 text-xs"><div className="truncate">{g.local_start}</div><div className="text-stone-500">{(g.duration_s / 3600).toFixed(1)} h · {g.final ? 'to the finish · ' : ''}{state}{s?.must ? ' · must use' : ''}</div></div>
     </li>
   )

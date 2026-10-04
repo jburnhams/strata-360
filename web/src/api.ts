@@ -173,6 +173,8 @@ export const api = {
   renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
   deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),
   approveGapClip: (folder: string, id: string) => call<GapClip>('/api/gaps/approve', { folder, id }),
+  gapThumbUrl: (folder: string, id: string, v = '') => '/api/gaps/thumb?' + q({ folder, id, ...(v ? { v } : {}) }),
+  svThumbUrl: (folder: string, key: string, v = '') => '/api/streetview/thumb?' + q({ folder, key, ...(v ? { v } : {}) }),
   gapVideoUrl: (folder: string, id: string) => '/api/gaps/video?' + q({ folder, id }),
   track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
   uploadTrack: async (folder: string, file: File) => {

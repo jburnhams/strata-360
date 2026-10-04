@@ -1057,6 +1057,21 @@ def create_app(roots, token=None):
         except ValueError as ex: raise HTTPException(400, str(ex))
         return dict(key=key, choice=None if choice == 'none' else choice)
 
+    @api.get('/api/streetview/thumb')
+    def get_streetview_thumb(request: Request, folder: str, key: str, w: int = 160):      # a picture for the film list: a frame of the section's clip in the film if it is made, else of its preview video, else its middle picture
+        from strata360 import streetview as SV
+        from strata360.edit import synthetic as SY
+        auth(request); f = folder_of(folder); rd, s = sv_section(f, key)
+        film = next((c for c in SY.load(f)['clips'] if c['id'] == s.get('label')), None); cands = [os.path.join(rd, film['file'])] if film and film.get('file') else []
+        for p in cands + [SV.video_path(rd, s)]:
+            if os.path.exists(p):
+                try: return FileResponse(video_thumb(p, w), media_type='image/jpeg', headers={'Cache-Control': 'max-age=600'})
+                except HTTPException: pass
+        it = s['items'][len(s['items']) // 2]
+        try: data = SV.image(rd, s['provider'], {'sections': [s]}, it['id'], w)
+        except (KeyError, RuntimeError) as ex: raise HTTPException(404, str(ex))
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'max-age=600'})
+
     @api.get('/api/streetview/chosen', dependencies=[Depends(auth)])
     def get_streetview_chosen(folder: str):                                              # the street view sections chosen for the film (possible or must), each with when the runner passed it, its length setting and what the newest script draft says over it: they sit among the clips in the sidebar and have a page like a gap
         from strata360 import streetview as SV
@@ -1372,6 +1387,24 @@ def create_app(roots, token=None):
         SY.remove(f, id); p = os.path.join(config.race_dir(f), c.get('file') or '-')
         if c.get('file') and os.path.exists(p): os.remove(p)
         return dict(removed=True)
+
+    def video_thumb(video, w):
+        """A small JPEG of a frame from a video (a second in, else the first frame), kept beside it under thumbs/ and made again when the video changes. Raises HTTPException 404 when the video is not there, 500 when ffmpeg cannot read it."""
+        if not os.path.exists(video): raise HTTPException(404, 'no video yet')
+        w = max(64, min(int(w), 640)); st = os.stat(video); d = os.path.join(os.path.dirname(video), 'thumbs'); os.makedirs(d, exist_ok=True)
+        out = os.path.join(d, f"{os.path.splitext(os.path.basename(video))[0]}-{int(st.st_mtime)}-{st.st_size}-{w}.jpg")
+        if not os.path.exists(out):
+            for ss in ('1', '0'):
+                r = subprocess.run(['ffmpeg', '-y', '-v', 'error', '-ss', ss, '-i', video, '-frames:v', '1', '-vf', f'scale={w}:-2', out + '.part.jpg'], capture_output=True)
+                if r.returncode == 0 and os.path.exists(out + '.part.jpg'): os.replace(out + '.part.jpg', out); break
+            else: raise HTTPException(500, 'could not take a frame from the video')
+        return out
+
+    @api.get('/api/gaps/thumb')
+    def get_gap_thumb(request: Request, folder: str, id: str, w: int = 160):             # a frame of the gap's rendered clip, for the film list (404 when it has not been rendered)
+        from strata360.edit import synthetic as SY
+        auth(request); f = folder_of(folder); c = next((c for c in SY.load(f)['clips'] if c['id'] == id), None); p = os.path.join(config.race_dir(f), (c or {}).get('file') or '-')
+        return FileResponse(video_thumb(p, w), media_type='image/jpeg', headers={'Cache-Control': 'max-age=3600'})
 
     @api.get('/api/gaps/video')
     def get_gap_video(request: Request, folder: str, id: str):                           # the rendered video (Range requests are handled; <video> cannot send headers, so the cookie authenticates)
