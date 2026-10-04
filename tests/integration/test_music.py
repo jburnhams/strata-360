@@ -1,5 +1,5 @@
 """Music analysis on a synthetic track."""
-import json, os, subprocess, shutil
+import json, os, re, subprocess, shutil
 import numpy as np
 import pytest
 from strata360.edit import music as M
@@ -50,7 +50,7 @@ class TestMusicRecord:
 
     def test_a_new_track_keeps_the_old_one_aside(self, tmp_path):
         rd = str(tmp_path); a = open(make_track(str(tmp_path / 'a.wav'), 124.0, 1.3, 30), 'rb').read(); M.store(rd, a, '.wav', 'a.wav'); M.store(rd, a, '.wav', 'b.wav')
-        assert os.path.exists(os.path.join(rd, 'music', 'track.wav.replaced')) and json.load(open(os.path.join(rd, 'music.json')))['name'] == 'b.wav'
+        assert [f for f in os.listdir(os.path.join(rd, 'music')) if re.fullmatch(r'track\.wav\.\d{8}T\d{9}Z\.replaced', f)] and json.load(open(os.path.join(rd, 'music.json')))['name'] == 'b.wav'
 
     def test_remove_forgets_the_record(self, tmp_path):
         rd = str(tmp_path); M.store(rd, open(make_track(str(tmp_path / 'a.wav'), 124.0, 1.3, 30), 'rb').read(), '.wav', 'a.wav'); M.remove(rd)
