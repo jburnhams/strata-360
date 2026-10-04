@@ -6,14 +6,14 @@
                        killed when the job ends, fails or is interrupted (a render that crashed used to leave its decoders and encoder running for hours).
   heavy(label, gb)     the context manager that does both and then WATCHES the job: every few seconds it compares the machine's load and free memory (and this job's own memory) with the limits and, when
                        they are passed, kills the job's whole process tree and stops it with an explanation: `STRATA_KILL_LOAD` (load per CPU, default 1.5), `STRATA_KILL_FREE_GB` (1.5), `STRATA_KILL_SWAP_PCT`
-                       (20 percent of memory; and `STRATA_START_SWAP_PCT`, 15, for starting), the system's memory-pressure level (macOS: warning or critical), `max_gb` (the job's cap). It polls every 2 s: memory runs out in seconds, not minutes.
+                       (30 percent of memory; and `STRATA_START_SWAP_PCT`, 25, for starting), the system's memory-pressure level (macOS: warning or critical), `max_gb` (the job's cap). It polls every 2 s: memory runs out in seconds, not minutes.
   watch(label)         the same watchdog without the start check, for things that are not one job (the test run).
   panic()              kill every ffmpeg/ffprobe/pytest/strata360 process of this user except the server and this one (`./strata360 stop-all`).
 STRATA_NO_RESOURCE_LIMITS=1 turns all of it off (tests, CI). Limits can be set per call."""
 import atexit, contextlib, os, signal, subprocess, sys, threading, time
 from strata360.pipeline import resources as RS
 
-MAX_FFMPEG = 8; KILL_LOAD = 1.5; KILL_FREE_GB = 1.5; KILL_SWAP_PCT = 20.0; POLL_S = 2.0; START_SWAP_PCT = 15.0
+MAX_FFMPEG = 8; KILL_LOAD = 1.5; KILL_FREE_GB = 1.5; KILL_SWAP_PCT = 30.0; POLL_S = 2.0; START_SWAP_PCT = 25.0
 _CHILDREN = []; _LOCK = threading.Lock()
 
 
@@ -70,8 +70,8 @@ def pressure_level():
 
 
 def swap_limit_gb(kind):
-    """The swap limit in GB: a share of the machine's physical memory (so a 16 GB and a 64 GB machine are judged alike). `kind` is 'start' (no new heavy job above it, 15 percent: 2.4 GB on 16 GB) or 'kill' (a running job
-    is stopped above it, 20 percent: 3.2 GB on 16 GB). `STRATA_START_SWAP_PCT` / `STRATA_KILL_SWAP_PCT` change the share; `STRATA_KILL_SWAP_GB` still sets the kill limit in GB."""
+    """The swap limit in GB: a share of the machine's physical memory (so a 16 GB and a 64 GB machine are judged alike). `kind` is 'start' (no new heavy job above it, 25 percent: 4 GB on 16 GB) or 'kill' (a running job
+    is stopped above it, 30 percent: 4.8 GB on 16 GB). `STRATA_START_SWAP_PCT` / `STRATA_KILL_SWAP_PCT` change the share; `STRATA_KILL_SWAP_GB` still sets the kill limit in GB."""
     if kind == 'kill' and os.environ.get('STRATA_KILL_SWAP_GB'): return _env_f('STRATA_KILL_SWAP_GB', 0.0)
     pct = _env_f('STRATA_START_SWAP_PCT', START_SWAP_PCT) if kind == 'start' else _env_f('STRATA_KILL_SWAP_PCT', KILL_SWAP_PCT); return pct / 100.0 * RS.mem_total_gb()
 

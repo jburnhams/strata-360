@@ -410,10 +410,10 @@ def sun_phrase(e):
 
 def light_between(lat, lon, cap_t, race_t):
     """The light of a picture taken at `cap_t` against the light the runner had at `race_t` at the same place (epoch seconds; cap_t may be None): {captured, race, captured_sun, race_sun, warning}; see `light`."""
-    from strata360.gps import context as X, clock as CK
+    from strata360.gps import sun as SUN, clock as CK
     sun = lambda tt: float(CK.sun_elevation_deg(lat, lon, tt)) if tt else None; ce, re = sun(cap_t), sun(race_t); warn = None
     if ce is not None and ((ce >= LIT and re < DARK_BELOW) or (ce < DARK_BELOW and re >= LIT)): warn = f'Filmed with {sun_phrase(ce)}, but the runner passes here with {sun_phrase(re)}: it would look wrong in the film.'
-    return dict(captured=None if ce is None else X.daylight(ce), race=X.daylight(re), captured_sun=None if ce is None else round(ce, 1), race_sun=round(re, 1), warning=warn)
+    return dict(captured=None if ce is None else SUN.daylight(ce), race=SUN.daylight(re), captured_sun=None if ce is None else round(ce, 1), race_sun=round(re, 1), warning=warn)
 
 
 def light(sec, tr):

@@ -772,9 +772,10 @@ def create_app(roots, token=None):
 
     @api.get('/api/track/clips', dependencies=[Depends(auth)])
     def get_track_clips(folder: str):                                                    # every clip placed on the track (middle, the stretch it covers, facts for the hover card), with whether the newest script draft plays it
-        from strata360.gps import series as GS
+        from strata360.gps import series as GS, sun as SUN
         from strata360.edit import script_draft as SD, script_pack as SP
-        f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f) if os.path.exists(os.path.join(rd, 'race.json')) else {}; items = GS.clips(loaded_track(f), GS.load_spans(f), cfg.get('timezone', 'Europe/Brussels'))
+        f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f) if os.path.exists(os.path.join(rd, 'race.json')) else {}
+        items = GS.clips(loaded_track(f), GS.load_spans(f), cfg.get('timezone', 'Europe/Brussels'), sun_of=lambda cid: SUN.load(os.path.join(rd, 'clips', cid)))
         draft = SD.load_draft(f); used = {}
         for it in (draft or {}).get('items') or []: used[norm_label(it.get('clip', ''))] = used.get(norm_label(it.get('clip', '')), 0.0) + float(it.get('seconds') or 0)
         for c in items:

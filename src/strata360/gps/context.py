@@ -5,15 +5,12 @@ coordinates only (no place names offline); the user's notes fill that gap."""
 import datetime as dt
 import numpy as np
 from strata360.gps.clock import sun_elevation_deg
+from strata360.gps.sun import daylight                      # the label for a sun elevation is made in one place (gps/sun.py); kept importable from here
 
 
 def _local(t, tz):
     from zoneinfo import ZoneInfo
     return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).astimezone(ZoneInfo(tz))
-
-
-def daylight(elev):
-    return 'day' if elev > 6 else 'golden hour' if elev > 0 else 'twilight' if elev > -12 else 'night'
 
 
 def _window(tr, a, b):
