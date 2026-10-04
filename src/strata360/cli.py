@@ -613,6 +613,17 @@ def cmd_render(a):
     sys.argv = ['render'] + a.args; flat.main()
 
 
+def cmd_backup(a):
+    """Metadata backups (pipeline/backup.py): make one now, list them, or unpack one into a folder (the project itself is never overwritten)."""
+    from strata360.pipeline import backup
+    if a.restore:
+        dest = a.to or os.path.join(backup.backup_dir(a.name), 'restored-' + a.restore.replace('.tar.gz', '')); print(f'{backup.restore(a.name, a.restore, dest)} files restored to {dest}'); return
+    if a.list:
+        for n, t, size in backup.list_backups(a.name): print(f'{n}  {size / 1e3:.0f} kB')
+        print('changes since the last backup' if backup.is_dirty(a.name) else 'no changes since the last backup'); return
+    path = backup.backup(a.name, force=True); print(f'saved {path}' if path else 'nothing changed since the last backup')
+
+
 def cmd_stop_all(a):
     from strata360.pipeline import guard
     killed = guard.panic(); print(f'killed {len(killed)} processes' + (f': {killed[:20]}' if killed else '')); print(f'memory pressure level {guard.pressure_level()}, swap {guard.swap_used_gb():.1f} GB, load {os.getloadavg()[0]:.1f}')
@@ -630,6 +641,8 @@ def main():
     p = sub.add_parser('show', help='summarise one clip'); p.add_argument('name'); p.add_argument('clip'); p.set_defaults(fn=cmd_show)
     p = sub.add_parser('report', help='race-level summary (report.json and report.md)'); p.add_argument('name'); p.set_defaults(fn=cmd_report)
     p = sub.add_parser('doctor', help='check the environment'); p.set_defaults(fn=cmd_doctor)
+    p = sub.add_parser('backup', help='back up the project metadata now (also done every 30 min while changed), list the backups, or unpack one'); p.add_argument('name'); p.add_argument('--list', action='store_true')
+    p.add_argument('--restore', metavar='ARCHIVE', help='unpack this backup (name from --list)'); p.add_argument('--to', help='folder to unpack into (default: backups/restored-<name>)'); p.set_defaults(fn=cmd_backup)
     p = sub.add_parser('stop-all', help='emergency stop: kill every ffmpeg, ffprobe, pytest and strata360 process of this user (not the web server)'); p.set_defaults(fn=cmd_stop_all)
     p = sub.add_parser('fetch-models', help='download the models the default stages need'); p.add_argument('race', nargs='?'); p.set_defaults(fn=cmd_fetch_models)
     p = sub.add_parser('who', help='cluster the faces, show them, and save which one is you'); p.add_argument('name'); p.add_argument('--me', help='cluster number(s) that are you, comma separated: 101 or 101,103'); p.add_argument('--label', default='me'); p.add_argument('--auto', action='store_true', help='save the suggested wearer as the profile if the suggestion is confident'); p.set_defaults(fn=cmd_who)

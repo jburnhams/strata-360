@@ -11,7 +11,7 @@ import argparse, glob, io, json, os, re, secrets, subprocess, sys, threading, ti
 from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
-from strata360.pipeline import config, clips as clipmod
+from strata360.pipeline import backup as Backup, config, clips as clipmod
 from strata360.analysis import thumbs as TH, transcript_edits as TE, transcript_fix as TF, transcript_marks as TM
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
@@ -170,8 +170,10 @@ def create_app(roots, token=None):
         if request.query_params.get('token') == token or request.headers.get('authorization') == f'Bearer {token}' or request.cookies.get('strata360_token') == token: return
         raise HTTPException(401, 'token required')
 
+    watched = set(); Backup.Ticker(lambda: watched).start()                                # project metadata backups (pipeline/backup.py) for every project opened through this server
+
     def folder_of(path):
-        try: return safe_path(roots, path)
+        try: f = safe_path(roots, path); f in watched or not os.path.exists(os.path.join(config.race_dir(f), 'race.json')) or watched.add(f); return f
         except Forbidden as e: raise HTTPException(403, str(e))
 
     @api.middleware('http')
@@ -791,7 +793,7 @@ def create_app(roots, token=None):
         for n in config.TRACK_NAMES:
             for suffix in ('', '.npz'):
                 q = os.path.join(rd, n + suffix)
-                if os.path.exists(q): os.replace(q, q + '.replaced')                       # keep the previous file next to it, never silently lose it
+                if os.path.exists(q): os.replace(q, q + __import__('datetime').datetime.now().strftime('.%Y%m%dT%H%M%S%f') + '.replaced')                       # keep the previous file next to it, never silently lose it
         dest = os.path.join(rd, 'track' + ext); open(dest, 'wb').write(data)
         from strata360.gps.overview import overview
         from strata360.gps import tracks as TKS
