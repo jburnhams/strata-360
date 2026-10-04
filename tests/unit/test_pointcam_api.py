@@ -76,6 +76,11 @@ class TestPointCamApi:
         monkeypatch.setattr(A.subprocess, 'run', lambda cmd, **kw: (open(cmd[-1], 'wb').write(b'\xff\xd8jpg'), type('R', (), dict(returncode=0))())[1])
         r = client.get('/api/pointcams/thumb', params=dict(folder=proj.folder, id='C1', w=120)); assert r.status_code == 200 and r.headers['content-type'] == 'image/jpeg' and r.content == b'\xff\xd8jpg'
 
+    def test_the_aim_over_time_is_served_for_the_page_to_draw(self, client, proj):
+        self.make(client, proj); q = dict(folder=proj.folder, id='C1'); a = client.get('/api/pointcams/path', params=q).json()
+        assert a['kind'] == 'world' and len(a['t']) == len(a['yaw']) == len(a['fov']) and a['t'][0] >= 0.0 and all(a['on'])
+        assert client.get('/api/pointcams/path', params=dict(q, view='pano')).status_code == 400 and client.get('/api/pointcams/path', params=dict(q, view='x')).status_code == 400 and client.get('/api/pointcams/path', params=dict(q, id='C9')).status_code == 404
+
     def test_a_camera_can_be_taken_away(self, client, proj):
         self.make(client, proj); assert client.post('/api/pointcams/delete', json=dict(folder=proj.folder, id='C1')).json() == dict(removed=True) and client.post('/api/pointcams/delete', json=dict(folder=proj.folder, id='C1')).json() == dict(removed=False)
         assert client.get('/api/pointcams', params=dict(folder=proj.folder)).json()['cams'] == []

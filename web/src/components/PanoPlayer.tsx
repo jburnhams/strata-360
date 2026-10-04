@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FrameStepButtons, useFrameLength } from './FrameStep'
+import { aimAt, drawAim } from '../aimOverlay'
+import type { AimPath } from '../api'
 
 // A 360 video (upright equirectangular, the centre looking along the road) shown as a flat window into the sphere that you pan by dragging (touch too) and zoom with the wheel or the slider, as on the clip pages.
 const VS = `#version 300 es
@@ -16,8 +18,9 @@ void main(){
 }`
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-export default function PanoPlayer({ src, label, maxPitch = 83, fps }: { src: string; label: string; maxPitch?: number; fps?: number }) {
-  const cv = useRef<HTMLCanvasElement>(null), video = useRef<HTMLVideoElement>(null), st = useRef({ yaw: 0, pitch: 0, fov: 90, drag: null as null | { x: number; y: number }, raf: 0 })
+export default function PanoPlayer({ src, label, maxPitch = 83, fps, aimPath }: { src: string; label: string; maxPitch?: number; fps?: number; aimPath?: AimPath | null }) {
+  const cv = useRef<HTMLCanvasElement>(null), ov = useRef<HTMLCanvasElement>(null), aimRef = useRef(aimPath), video = useRef<HTMLVideoElement>(null), st = useRef({ yaw: 0, pitch: 0, fov: 90, drag: null as null | { x: number; y: number }, raf: 0 })
+  aimRef.current = aimPath                                                                                 // (a point camera's aim: a dot and the edge of its frame, through the view you have now)
   const learnt = useFrameLength(video, src), frameS = () => (fps ? 1 / fps : learnt())                       // (the video shows one original picture a frame, at a known rate)
   const [fov, setFov] = useState(90), [playing, setPlaying] = useState(false), [t, setT] = useState(0), [dur, setDur] = useState(0), [gl, setGl] = useState(true)
   useEffect(() => {
@@ -33,6 +36,8 @@ export default function PanoPlayer({ src, label, maxPitch = 83, fps }: { src: st
       const s = st.current; if (c.width !== c.clientWidth || c.height !== c.clientHeight) { c.width = c.clientWidth; c.height = c.clientHeight; g.viewport(0, 0, c.width, c.height) }
       if (v.readyState >= 2) { g.bindTexture(g.TEXTURE_2D, tex); g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, v) }
       g.uniform1f(U('yaw'), s.yaw); g.uniform1f(U('pitch'), s.pitch); g.uniform1f(U('tanx'), Math.tan((s.fov * Math.PI) / 360)); g.uniform1f(U('aspect'), c.width / Math.max(c.height, 1)); g.drawArrays(g.TRIANGLE_STRIP, 0, 4)
+      const o = ov.current, c2 = o?.getContext('2d')
+      if (o && c2) { if (o.width !== c.width || o.height !== c.height) { o.width = c.width; o.height = c.height } drawAim(c2, o.width, o.height, { yaw: (s.yaw * 180) / Math.PI, pitch: (s.pitch * 180) / Math.PI, fov: s.fov, aspect: c.width / Math.max(c.height, 1) }, aimAt(aimRef.current, v.currentTime)) }
       s.raf = requestAnimationFrame(draw)
     }
     st.current.raf = requestAnimationFrame(draw); return () => cancelAnimationFrame(st.current.raf)
@@ -48,7 +53,7 @@ export default function PanoPlayer({ src, label, maxPitch = 83, fps }: { src: st
   return (
     <div aria-label={`${label}: look around`} className="max-w-3xl">
       <video ref={video} src={src} loop muted playsInline preload="auto" className="hidden" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onTimeUpdate={e => setT(e.currentTarget.currentTime)} onLoadedMetadata={e => setDur(e.currentTarget.duration)} />
-      {gl ? <canvas ref={cv} role="img" aria-label="360° view: drag to look around" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onWheel={e => zoom(st.current.fov + (e.deltaY > 0 ? 6 : -6))} className="aspect-video w-full cursor-grab touch-none rounded bg-black active:cursor-grabbing" />
+      {gl ? <div className="relative"><canvas ref={cv} role="img" aria-label="360° view: drag to look around" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onWheel={e => zoom(st.current.fov + (e.deltaY > 0 ? 6 : -6))} className="aspect-video w-full cursor-grab touch-none rounded bg-black active:cursor-grabbing" /><canvas ref={ov} aria-hidden="true" data-aim-overlay="" className="pointer-events-none absolute inset-0 h-full w-full rounded" /></div>
         : <p className="text-sm text-stone-500">This browser cannot show a 360° view.</p>}
       <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-stone-600 dark:text-stone-400">
         <button type="button" onClick={toggle} className="rounded border border-stone-300 px-2 py-0.5 dark:border-stone-600">{playing ? 'Pause' : 'Play'}</button>

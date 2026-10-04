@@ -11,7 +11,7 @@ import WordMarker from './WordMarker'
 import { usedSet } from '../marks'
 import { usePoll } from '../usePoll'
 import TrackMap from './TrackMap'
-import { PointCamTool, usePointCams } from './PointCams'
+import { CamAimPicker, PointCamTool, useAimPath, usePointCams } from './PointCams'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -26,7 +26,7 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
   const [mode, setMode] = useState<Mode>('translated')
   const script = usePoll(() => api.script2(folder), 15000, [folder, clip])
   const used = useMemo(() => usedSet(script?.used), [script])
-  const pc = usePointCams(folder, { kind: 'clip', clip })
+  const pc = usePointCams(folder, { kind: 'clip', clip }), [aimId, setAimId] = useState<string>(), [seek, setSeek] = useState<{ t: number; n: number }>(), aimCam = pc.cams.find(c => c.id === aimId), aim = useAimPath(folder, aimCam, 'clip')           // (a point camera picked under the player: its aim is drawn over the video)
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
   const reload = () => api.clip(folder, clip).then(setC).catch(() => {})
   useEffect(() => { if (c && focus != null) document.getElementById(`seg-${Math.round(focus * 100)}`)?.scrollIntoView({ block: 'center' }) }, [c, focus])
@@ -35,7 +35,8 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
   const utc = String(c.time.start_utc ?? ''), m = c.motion, sc = c.scenes?.summary, id = c.identity
   return (
     <div className="space-y-4">
-      <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} person={c.person} clarity={c.clarity} scenic={c.scenic} sounds={c.audio_files} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} />
+      <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} person={c.person} clarity={c.clarity} scenic={c.scenic} sounds={c.audio_files} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} aimPath={aim.path} seekTo={seek} />
+      <CamAimPicker pc={pc} picked={aimId} onPick={setAimId} onGo={cam => { setAimId(cam.id); setSeek({ t: Math.max((cam.window?.[0] ?? 0) - Date.parse(utc) / 1000, 0), n: Date.now() }) }} note={aim.err} />
       <div className="-mt-2 flex items-center justify-between px-1 text-xs text-stone-500"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : 'no thumbnail yet'}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
       {Number.isFinite(Date.parse(utc)) && <Card title="Where on the route"><PointCamTool folder={folder} source={{ kind: 'clip', clip }} pc={pc} map={h => <TrackMap folder={folder} tz={tz} span={[Date.parse(utc) / 1000, Date.parse(utc) / 1000 + c.video.source_frames / c.video.nominal_fps]} label={`Clip ${clip.replace(/^CAM_/, '').replace(/_D$/, '')}`} {...h} />} /></Card>}
       <div className="grid gap-4 md:grid-cols-2">

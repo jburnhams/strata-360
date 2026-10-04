@@ -170,3 +170,31 @@ class TestStreetViewShot:
         rots = [c for c in calls if c[0] == 'rot']; assert rots[0] == ('rot', 0, 10.0, -3.0) and ('rot', 1, 20.0, 0.0) in rots and any(c[2] == 400 % 360 for c in rots) and [c[1] for c in calls if c[0] == 'view'][:2] == [50.0, 60.0] and 'rendering 4 of 4 frames' in logs[-2]
         flat = CAM.Rig([dict(id='0')] * 8, np.arange(8.0), np.zeros(8), lambda i, y: img); monkeypatch.setattr(CAM, 'build', lambda *a, **k: flat)
         with pytest.raises(ValueError, match='only a 360 section'): CAM.render_point('rd', dict(id='M2'), [0.0], [0.0], [0.0], [60.0], out)
+
+
+class TestAim:
+    """Where the camera looks over time, for the page to draw over a playing video."""
+    def test_a_clips_aim_is_its_path_in_the_clips_own_frame_and_seconds(self, proj):
+        cam = make_cam(proj.race_dir, before_m=30, after_m=30); pl = PCL.plan(proj.folder, cam); a = PCL.aim_path(proj.folder, cam)
+        assert a['kind'] == 'world' and len(a['t']) == len(a['yaw']) == len(a['pitch']) == len(a['fov']) == len(a['on']) and all(a['on']) and a['t'][0] == pytest.approx(pl['t0'] - (T0 + 100.0), abs=0.01) and a['t'][-1] - a['t'][0] == pytest.approx(pl['seconds'], abs=0.2)
+        assert a['yaw'][0] == pytest.approx(pl['samples']['bearing'][0] - pl['north_offset'], abs=0.01) and np.all(np.abs(np.diff(a['yaw'])) < 90)
+        with pytest.raises(ValueError, match='not a clip'): PCL.aim_path(proj.folder, cam, 'pano')
+
+    def sv(self, proj, monkeypatch, hs=None):
+        key = sv_section(proj); cam = make_cam(proj.race_dir, source=dict(kind='streetview', key=key), along=450.0, east=25.0, before_m=100.0, after_m=100.0)
+        monkeypatch.setattr(CAM, 'headings', lambda rd, sec, road=None, pano=False: np.zeros(len(CAM.forward_items(sec))) if hs is None else hs); return key, cam
+
+    def test_the_look_around_aim_is_relative_to_the_middle_of_each_picture_and_only_on_inside_the_stretch(self, proj, monkeypatch):
+        key, cam = self.sv(proj, monkeypatch); a = PCL.aim_path(proj.folder, cam, 'pano'); n = 40
+        assert a['kind'] == 'rel' and len(a['t']) == len(a['on']) == n and 'viewer' not in a
+        on = [i for i, x in enumerate(a['on']) if x]; assert 0 < len(on) < n and on == list(range(on[0], on[-1] + 1))
+        i = on[len(on) // 2]; assert a['yaw'][i] == pytest.approx(90.0, abs=8.0)                            # heading north along the road, the point is to the east near the closest approach: 90 degrees to the right
+        assert all(-180 <= y <= 180 for y in a['yaw'])
+        key2, cam2 = self.sv(proj, monkeypatch, hs=np.full(40, 90.0)); a2 = PCL.aim_path(proj.folder, cam2, 'pano'); j = [i for i, x in enumerate(a2['on']) if x][len(on) // 2]; assert abs(a2['yaw'][j]) < 8.0          # facing the point, it is dead ahead
+
+    def test_the_flat_preview_aim_is_sampled_over_the_videos_time_with_its_fixed_view(self, proj, monkeypatch):
+        key, cam = self.sv(proj, monkeypatch); a = PCL.aim_path(proj.folder, cam, 'flat'); sec = PCL.section_of(proj.race_dir, key)
+        assert a['viewer'] == dict(yaw=0.0, pitch=CAM.PITCH, fov=CAM.FOV) and a['t'][0] == 0.0 and a['t'][-1] == pytest.approx(SV.default_seconds(sec), abs=0.2) and a['t'][1] == 0.2 and any(a['on']) and not all(a['on'])
+        sec['provider'] = 'google'
+        monkeypatch.setattr(PCL, 'section_of', lambda rd, key: sec)
+        with pytest.raises(ValueError, match='cannot be aimed over'): PCL.aim_path(proj.folder, cam, 'flat')

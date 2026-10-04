@@ -63,6 +63,7 @@ export interface PointCam extends PointCamSettings {
   id: string; label: string; source: PointCamSource; lat: number; lon: number; use: PointCamUse; t_pass: number; seconds?: number | null; name?: string | null; script: GapScriptItem[]
   ok: boolean; error?: string; facts?: PointCamFacts; source_seconds?: number; range?: [number, number]; window?: [number, number]; geometry?: PointCamGeometry; north_offset?: number
 }
+export interface AimPath { kind: 'world' | 'rel'; t: number[]; yaw: number[]; pitch: number[]; fov: number[]; on: boolean[]; viewer?: { yaw: number; pitch: number; fov: number } }
 export interface PointCams { cams: PointCam[]; limits: Record<keyof PointCamSettings, [number, number]>; defaults: PointCamSettings & { use: PointCamUse } }
 export interface PointCamVideo { exists: boolean; running: boolean; log: string[]; error: string; progress?: { pct: number; phase: string; done: number; total: number } | null }
 export interface SvVideo { exists: boolean; running: boolean; log: string[]; error: string; seconds: number; fps?: number; hires?: boolean; progress?: { pct: number; phase: string; done: number; total: number } | null }
@@ -213,6 +214,7 @@ export const api = {
   addPointCam: (folder: string, source: PointCamSource, lat: number, lon: number) => call<PointCam>('/api/pointcams', { folder, source, lat, lon }),
   updatePointCam: (folder: string, id: string, fields: Partial<PointCamSettings> & { use?: PointCamUse; name?: string | null; seconds?: number | null }) => call<PointCam>('/api/pointcams/update', { folder, id, ...fields }),
   deletePointCam: (folder: string, id: string) => call<{ removed: boolean }>('/api/pointcams/delete', { folder, id }),
+  pointCamPath: (folder: string, id: string, view: 'clip' | 'pano' | 'flat') => call<AimPath>('/api/pointcams/path?' + q({ folder, id, view })),
   pointCamVideo: (folder: string, id: string) => call<PointCamVideo>('/api/pointcams/video?' + q({ folder, id })),
   makePointCamVideo: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/pointcams/video', { folder, id }),
   pointCamVideoUrl: (folder: string, id: string, v = '') => '/api/pointcams/video/file?' + q({ folder, id, ...(v ? { v } : {}) }),

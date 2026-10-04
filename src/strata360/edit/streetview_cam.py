@@ -272,6 +272,22 @@ class Rig:
     def __init__(self, items, prog, hs, view, rot=None, img=None): self.items, self.prog, self.hs, self.view, self.n, self.rot, self.img = items, prog, hs, view, len(items), rot, img         # rot(i, yaw, pitch): the turn for a level view of picture i (360 sections only); img(i) the picture
 
 
+def headings(rd, section, road=None, pano=False):
+    """The heading (compass degrees) `build` wants at each picture of a section, worked out the same way but without reading a picture (the point camera overlay needs where the video's centre looks). Raises ValueError for a flat camera, and for Google when only the flat views along the road are
+    meant (`pano` false: those need no turning, so the centre is the road's direction and the overlay has nothing to add)."""
+    its = forward_items(section); prov = section['provider']
+    if len(its) < 8: raise ValueError(f"{section['id']}: only {len(its)} pictures face the way the runner went")
+    km = np.array([it['km'] for it in its]) * 1000.0
+    if prov == 'google' and pano: return smooth_heading([it['b'] for it in its], 3.0)
+    if section['kind'] != '360' or prov == 'google': raise ValueError('only a 360 section has a view that can be aimed at a point')
+    if prov == 'mapillary':
+        meta = json.load(open(meta_path(rd, section))); pos = np.array([meta[it['id']]['computed_geometry']['coordinates'] for it in its]); la0 = pos[:, 1].mean()
+        xy = np.stack([(pos[:, 0] - pos[0, 0]) * math.cos(math.radians(la0)) * 111320, (pos[:, 1] - pos[0, 1]) * 111320], 1); xy = np.stack([gaussian_filter1d(xy[:, 0], 1.0, mode='nearest'), gaussian_filter1d(xy[:, 1], 1.0, mode='nearest')], 1)
+        prog = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]) + km[0]; return smooth_heading([heading_along(prog, xy, p, LOOK_M) for p in prog], SIGMA_HEADING['mapillary'])
+    if not road: raise ValueError('a Panoramax 360 section needs the road (its line and where it starts) to aim along')
+    rp, rxy = road_xy(road['line']); rp = rp + road['km0'] * 1000.0; return smooth_heading([heading_along(rp, rxy, p, LOOK_M) for p in km], SIGMA_HEADING['panoramax'])
+
+
 def build(rd, section, road=None, size=OUT, preview=False, pano=False, grid='std'):
     """The camera rig for a section (see Rig); the maths depends on the kind of picture (module notes). Raises ValueError when there are too few pictures, RuntimeError when one has not been fetched."""
     its = forward_items(section)

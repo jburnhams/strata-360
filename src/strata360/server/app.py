@@ -1263,6 +1263,16 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
 
+    @api.get('/api/pointcams/path', dependencies=[Depends(auth)])
+    def get_pointcam_path(folder: str, id: str, view: str = 'clip'):                    # where the camera looks over time, for the page to draw the aim point and the edge of its frame over a playing video: view = clip | pano | flat (edit/pointcam_clip.aim_path)
+        from strata360.edit import pointcam_clip as PCL
+        f = folder_of(folder); cam = pointcam_get(f, id)
+        if view not in ('clip', 'pano', 'flat'): raise HTTPException(400, 'view: clip, pano or flat')
+        try: tr = loaded_track(f)
+        except HTTPException: tr = None
+        try: return PCL.aim_path(f, cam, view, tr)
+        except (ValueError, RuntimeError, OSError) as e: raise HTTPException(400, str(e))
+
     @api.get('/api/pointcams/thumb')
     def get_pointcam_thumb(request: Request, folder: str, id: str, w: int = 160):       # a picture for the film list: a frame of the shot's video when it is made, else 404 (the list then shows an icon)
         from strata360.edit import pointcam_clip as PCL, synthetic as SY

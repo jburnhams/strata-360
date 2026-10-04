@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '../api'
+import { api, type AimPath } from '../api'
+import { aimAt, drawAim } from '../aimOverlay'
 import { Follower, aimPitch, vfovDeg } from '../aim'
 import { useThumbOverlay } from '../thumbOverlay'
 import { FrameStepButtons, useFrameLength } from './FrameStep'
@@ -42,12 +43,13 @@ function describeAim(a: Aim, found: boolean, speaking: boolean): string {
 const AIMS: [Aim, string, string][] = [['free', 'Free', 'stays where you put it'], ['heading', 'Heading', 'points where the runner is going, at 95°'], ['you', 'You mid', 'turns to you, the wearer, at the film\'s mid view (85°)'], ['you_close', 'You close', 'you, close up (50°)'], ['you_far', 'You far', 'you, far out with the surroundings (130°)'],
   ['person', 'Person', 'always another person (70°): stays with the same one as long as it can, and jumps as little as possible'], ['clarity', 'Clarity', 'the part of the picture with the most detail, contrast and colour (and away from a foggy lens), at 100°'], ['scenic', 'Scenic', 'the best scenery with nobody in view, at 100°']]
 
-export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, person, clarity, scenic, sounds, hasPreview, duration, window: win, autoStart }: {
+export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, person, clarity, scenic, sounds, hasPreview, duration, window: win, autoStart, aimPath, seekTo }: {
   folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; focus?: Focus[] | null; person?: Focus[] | null; clarity?: { t: number; yaw: number; pitch: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; sounds?: { original?: boolean; clean?: boolean; background?: boolean }; hasPreview: boolean; duration: number
+  aimPath?: AimPath | null; seekTo?: { t: number; n: number }     // a point camera's aim to draw over the picture (a dot and the edge of its frame, through whatever view the player has: dragged, or following someone), and a place to go to
   window?: { start: number; end: number }; autoStart?: boolean   // play only this part of the clip (the timeline's window); autoStart begins at once
 }) {
   const video = useRef<HTMLVideoElement>(null), frameS = useFrameLength(video)
-  const canvas = useRef<HTMLCanvasElement>(null)
+  const canvas = useRef<HTMLCanvasElement>(null), ov = useRef<HTMLCanvasElement>(null), aimRef = useRef<AimPath | null | undefined>(aimPath), pendingSeek = useRef<number | null>(null)
   const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, fol: null as null | Follower, folAim: '' as string, lastT: 0, lastMs: 0, active: 0, gl: null as null | { draw: () => void }, raf: 0 })
   const [started, setStarted] = useState(false)
   const [overlay] = useThumbOverlay()
@@ -119,6 +121,8 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
       const yaw = s.yaw + baseYaw, pitch = Math.max(-1.45, Math.min(1.45, s.pitch + (follow ? basePitch : 0)))
       gl.uniform1f(U('yaw'), yaw); gl.uniform1f(U('pitch'), pitch); gl.uniform1f(U('tanx'), Math.tan((s.fov * Math.PI) / 360)); gl.uniform1f(U('aspect'), cv.width / cv.height)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
+      const o = ov.current, c2 = o?.getContext('2d')
+      if (o && c2) { if (o.width !== cv.width || o.height !== cv.height) { o.width = cv.width; o.height = cv.height } drawAim(c2, o.width, o.height, { yaw: (yaw * 180) / Math.PI, pitch: (pitch * 180) / Math.PI, fov: s.fov, aspect: cv.width / cv.height }, aimAt(aimRef.current, now)) }          // the camera's aim through the view as it is NOW (dragged, or following someone)
     }
     st.current.gl = { draw }
     // Draw every frame only while something is happening (playing, dragging, zooming, a switch of aim, the follower still moving); when the picture is idle, and whenever the tab is hidden, a few checks a second: an
@@ -142,6 +146,11 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   }
   useEffect(() => { const id = setInterval(() => { const a = st.current.aim, f = FOCUS_AIMS.includes(a) ? focusAt(video.current?.currentTime ?? 0, a) : null; setShown(describeAim(a, !!f, !!f?.speaking)) }, 500); return () => clearInterval(id) }, [focusAt, headingAt])
   useEffect(() => { st.current.fov = fov; st.current.active = performance.now() }, [fov])
+  useEffect(() => { aimRef.current = aimPath; st.current.active = performance.now() }, [aimPath])
+  useEffect(() => {                                                                                    // go to the start of a camera: now, or once the video has loaded
+    if (!seekTo) return; const v = video.current
+    if (started && v && v.readyState >= 1) { v.currentTime = seekTo.t; st.current.active = performance.now() } else { pendingSeek.current = seekTo.t; setStarted(true) }
+  }, [seekTo?.n])           // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setStarted(false); setPlaying(false); setT(0); setErr(undefined); st.current.yaw = 0; st.current.pitch = 0 }, [clip])
 
   // The other sounds (clean, background) are a second element that follows the video: play, pause, seeks, speed, and a drift correction while playing.
@@ -182,10 +191,11 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
       <div className="relative aspect-video w-full bg-black">
         {thumbKind && !started && <img src={api.thumbUrl(folder, clip, thumbKind + (overlay ? '+overlay' : ''), overlay)} alt="" className="absolute inset-0 h-full w-full object-cover" />}
         <video ref={video} src={started ? api.previewUrl(folder, clip) : undefined} muted={muted || sound !== 'original'} playsInline preload="auto" crossOrigin="anonymous" className="hidden"
-          onLoadedMetadata={e => { if (win) (e.target as HTMLVideoElement).currentTime = win.start }}
+          onLoadedMetadata={e => { const v = e.target as HTMLVideoElement; if (pendingSeek.current != null) { v.currentTime = pendingSeek.current; pendingSeek.current = null } else if (win) v.currentTime = win.start }}
           onTimeUpdate={e => { const v = e.target as HTMLVideoElement; setT(v.currentTime); if (win && v.currentTime >= win.end) { v.pause(); v.currentTime = win.start } }} onPlay={() => { setPlaying(true); st.current.active = performance.now() }} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onError={() => setErr('could not load the preview video')} />
         <canvas ref={canvas} className={`absolute inset-0 h-full w-full cursor-grab touch-none active:cursor-grabbing ${started ? '' : 'hidden'}`}
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={() => (drag.current = null)} onPointerCancel={() => (drag.current = null)} onWheel={onWheel} onDoubleClick={reset} />
+        <canvas ref={ov} aria-hidden="true" data-aim-overlay="" className={`pointer-events-none absolute inset-0 h-full w-full ${started ? '' : 'hidden'}`} />
         {!started && (
           <button disabled={noPreview} onClick={play} className="absolute inset-0 grid place-items-center disabled:cursor-not-allowed" aria-label="Play">
             <span className={`grid h-16 w-16 place-items-center rounded-full bg-black/60 text-3xl text-white ${noPreview ? 'opacity-40' : 'hover:bg-emerald-700'}`}>▶</span>

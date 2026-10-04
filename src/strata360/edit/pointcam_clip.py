@@ -162,6 +162,35 @@ def progress(lines, cam_source, google=False):
     return None
 
 
+def _circ(a, idx):
+    """The values of the angles `a` (degrees) at the fractional indexes `idx`, the short way round."""
+    a = np.degrees(np.unwrap(np.radians(np.asarray(a, float)))); return np.interp(idx, np.arange(len(a)), a) % 360.0
+
+
+def aim_path(folder, cam, view='clip', tr=None):
+    """Where the camera looks, for the page to draw over a playing video (the aim point and the edge of the camera's frame): dict(kind, t, yaw, pitch, fov, on, viewer?) with one entry every 0.2 s of video time (a clip) or each picture (a 360 look-around) and `yaw`, `pitch`, `fov` in degrees.
+      view 'clip'  the clip's preview video (time = clip seconds): `yaw` in the clip's own frame (the same the player's view uses), `on` true during the camera's stretch.
+      view 'pano'  the 360 look-around video of a street view section (one picture a frame): `yaw` relative to the middle of the picture (which looks along the road).
+      view 'flat'  the section's flat preview video (a fixed view of 85 degrees, a little down, along the road): `yaw` relative to the middle, and `viewer` its pose. Only 360 sections of Mapillary and Panoramax have it.
+    Raises ValueError when the camera cannot be worked out or the video cannot be aimed over."""
+    pl = plan(folder, cam, tr=tr); sm = pl['samples']; t0, t1 = pl['t0'], pl['t1']
+    if cam['source']['kind'] == 'clip':
+        if view != 'clip': raise ValueError('that video is not a clip')
+        cs = pl['extra'][0]; yaw = np.degrees(np.unwrap(np.radians(sm['bearing'] - pl['north_offset']))); return dict(kind='world', t=[round(float(x), 2) for x in sm['t'] - cs], yaw=[round(float(x), 2) for x in yaw], pitch=[round(float(x), 2) for x in sm['pitch']], fov=[round(float(x), 1) for x in sm['fov']], on=[True] * len(sm['t']))
+    from strata360.edit import streetview_cam as CAM
+    sec = pl['extra']; rd = config.race_dir(folder); p = pl['poly']; items = CAM.forward_items(sec); road = SV.road_of(rd, sec); pano = view == 'pano'
+    if view == 'flat' and (sec['provider'] == 'google' or sec['kind'] != '360'): raise ValueError('the flat preview of this section cannot be aimed over: only the look-around video can')
+    hs = CAM.headings(rd, sec, road, pano=pano or sec['provider'] == 'google')
+    if pano:
+        seconds = SV.default_seconds(sec); fps = round(min(max(len(items) / max(seconds, 0.5), 1.0), 15.0), 2); k = np.arange(len(items)); times = p['t']; vt = k / fps; idx = k.astype(float)
+    else:
+        seconds = SV.default_seconds(sec); vt = np.arange(0.0, seconds + 1e-9, 0.2); prog = np.array([it['km'] for it in items]) * 1000.0; pos = prog[0] + (prog[-1] - prog[0]) * vt / max(seconds, 1e-9); idx = np.interp(pos, prog, np.arange(len(items))); times = np.interp(idx, np.arange(len(items)), p['t'])
+    c = PC.at_times(sm, times); rel = ((c['bearing'] - _circ(hs, idx) + 180.0) % 360.0) - 180.0
+    out = dict(kind='rel', t=[round(float(x), 3) for x in vt], yaw=[round(float(x), 2) for x in rel], pitch=[round(float(x), 2) for x in c['pitch']], fov=[round(float(x), 1) for x in c['fov']], on=[bool(x) for x in c['inside']])
+    if view == 'flat': out['viewer'] = dict(yaw=0.0, pitch=CAM.PITCH, fov=CAM.FOV)
+    return out
+
+
 def preview_path(folder, cam):
     """Where a camera's preview video is kept: named by the camera's settings and source, so a changed camera gets a new one."""
     import hashlib

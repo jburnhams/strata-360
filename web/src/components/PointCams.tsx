@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type L from 'leaflet'
-import { api, type PointCam, type PointCams, type PointCamSettings, type PointCamSource, type PointCamUse, type PointCamVideo } from '../api'
+import { api, type AimPath, type PointCam, type PointCams, type PointCamSettings, type PointCamSource, type PointCamUse, type PointCamVideo } from '../api'
+import { aimAt, drawAim } from '../aimOverlay'
 import { addPointCams } from '../mapLayers'
 import StepVideo from './FrameStep'
 import { LengthField } from './ItemPage'
@@ -154,4 +155,47 @@ function PointCamCard({ folder, cam, pc }: { folder: string; cam: PointCam; pc: 
 export function PointCamLength({ cam, onChange }: { cam: PointCam; onChange: (seconds: number | null) => void }) {
   const [lo, hi] = cam.range ?? [2, 30]
   return <LengthField id={cam.id} mode={cam.seconds == null ? '' : 'set'} seconds={cam.seconds ?? null} modes={['set']} min={lo} max={hi} fallback={Math.min(Math.max(cam.facts?.seconds ?? 8, lo), hi)} onChange={(_, s) => onChange(s)} />
+}
+
+/** Where the camera `cam` looks over time, for drawing over a video of its source ('clip': the clip's preview; 'pano': a street view look-around; 'flat': its flat preview). `path` is null until it arrives or when there is no camera; `err` says why a video cannot be aimed over. Fetched again when the camera changes. */
+export function useAimPath(folder: string, cam: PointCam | undefined, view: 'clip' | 'pano' | 'flat') {
+  const [path, setPath] = useState<AimPath | null>(null), [err, setErr] = useState<string>(), id = cam?.id, s = cam ? sig(cam) : ''
+  useEffect(() => {
+    setPath(null); setErr(undefined); if (!id) return; let live = true
+    api.pointCamPath(folder, id, view).then(p => live && setPath(p)).catch(e => live && setErr((e as Error).message)); return () => { live = false }
+  }, [folder, id, s, view])
+  return { path, err }
+}
+
+/** Under a player: the cameras of what it shows, one of which can be picked so the player draws its aim (a dot) and the edge of its frame while the video plays; it follows the view as you pan or as an aim follows someone. `onGo` jumps to where the camera begins. */
+export function CamAimPicker({ pc, picked, onPick, onGo, note }: { pc: PointCamState; picked?: string; onPick: (id: string | undefined) => void; onGo?: (cam: PointCam) => void; note?: string }) {
+  const cams = pc.cams.filter(c => c.ok)
+  if (cams.length === 0) return null
+  const cur = cams.find(c => c.id === picked)
+  return (
+    <div role="group" aria-label="Show a point camera on the video" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+      <span className="text-stone-500">Show on the video</span>
+      <label className="flex items-center gap-1"><input type="radio" name="aim-cam" aria-label="No camera" checked={!cur} onChange={() => onPick(undefined)} /> none</label>
+      {cams.map(c => <label key={c.id} className="flex items-center gap-1"><input type="radio" name="aim-cam" aria-label={`Show ${c.label}`} checked={picked === c.id} onChange={() => onPick(c.id)} /> {c.label}{c.name ? ` · ${c.name}` : ''} <span className="text-xs text-stone-500">{c.facts?.seconds} s</span></label>)}
+      {cur && onGo && <button type="button" onClick={() => onGo(cur)} className="rounded border border-teal-700 px-2 py-0.5 text-xs text-teal-800 dark:text-teal-300">Go to {cur.label}</button>}
+      {cur && <span className="text-xs text-stone-500">● where it aims · the outline is the edge of its frame, while the video is inside its stretch</span>}
+      {note && <span role="note" className="text-xs text-amber-700 dark:text-amber-400">{note}</span>}
+    </div>
+  )
+}
+
+/** Draws a camera's aim over a plain video element (the section's flat preview, whose view never changes): put it in a relatively positioned box with the video. */
+export function AimVideoOverlay({ video, path }: { video: RefObject<HTMLVideoElement | null>; path: AimPath | null }) {
+  const cv = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    if (!path) { const c = cv.current, g = c?.getContext('2d'); if (c && g) g.clearRect(0, 0, c.width, c.height); return }
+    let raf = 0; const v = path.viewer ?? { yaw: 0, pitch: 0, fov: 90 }
+    const tick = () => {
+      const c = cv.current, vid = video.current, g = c?.getContext('2d')
+      if (c && g && vid) { const w = vid.clientWidth, h = vid.clientHeight; if (c.width !== w || c.height !== h) { c.width = w; c.height = h } drawAim(g, w, h, { ...v, aspect: w / Math.max(h, 1) }, aimAt(path, vid.currentTime)) }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf)
+  }, [path, video])
+  return <canvas ref={cv} aria-hidden="true" data-aim-overlay="" className="pointer-events-none absolute left-0 top-0" />
 }

@@ -156,6 +156,12 @@ def samples(p, cam, t0, t1, step=STEP_S):
     return dict(t=times, dist=dist, bearing=bearing, rel=rel, pitch=pitch, fov=fov, course=pos['course'], speed=pos['speed'])
 
 
+def at_times(sm, times):
+    """The camera of `samples` at other moments `times` (epoch s): dict(bearing, pitch, fov, dist, inside), the bearing continuous (unwrapped) between the samples, `inside` false for a moment outside the stretch the samples cover."""
+    t = sm['t']; b = np.degrees(np.unwrap(np.radians(sm['bearing']))); times = np.asarray(times, float)
+    return dict(bearing=np.interp(times, t, b) % 360.0, pitch=np.interp(times, t, sm['pitch']), fov=np.interp(times, t, sm['fov']), dist=np.interp(times, t, sm['dist']), inside=(times >= t[0] - 1e-6) & (times <= t[-1] + 1e-6))
+
+
 def facts(sm, p=None):
     """What the page shows about a camera path: its length in seconds, the closest and furthest the point is, the fastest pan and the field of view range, with warnings."""
     t = sm['t']; secs = float(t[-1] - t[0]); rate = np.abs(np.gradient(sm['rel'], t)) if len(t) > 2 else np.zeros(1); warn = []

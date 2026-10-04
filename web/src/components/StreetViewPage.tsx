@@ -6,7 +6,8 @@ import StepVideo from './FrameStep'
 import { addEnds, addPois, addRoutes, addTiles } from '../mapLayers'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
-import type { EndMarkers, Poi, StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
+import { AimVideoOverlay, useAimPath } from './PointCams'
+import type { EndMarkers, PointCam, Poi, StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
@@ -266,7 +267,7 @@ export function HiresTick({ section, onHires }: { section: SvSectionInfo; onHire
 }
 
 /** One section as the street view page shows it: what it is, when it was filmed and passed, its camera, the choice for the film, the preview video and its pictures. The section's page in the film list reuses it. */
-export function SectionContent({ folder, tz, section, onChoose, onHires, showChoice = true }: { folder: string; tz: string; section: SvSectionInfo; onChoose: (key: string, c: SvChoice | 'none') => void; onHires?: (key: string, on: boolean) => void; showChoice?: boolean }) {
+export function SectionContent({ folder, tz, section, onChoose, onHires, showChoice = true, aimCam }: { folder: string; tz: string; section: SvSectionInfo; onChoose: (key: string, c: SvChoice | 'none') => void; onHires?: (key: string, on: boolean) => void; showChoice?: boolean; aimCam?: PointCam }) {
   const [big, setBig] = useState<{ provider: SvProvider; id: string }>()
   useEffect(() => { setBig(undefined) }, [section.id])
   return (
@@ -277,8 +278,8 @@ export function SectionContent({ folder, tz, section, onChoose, onHires, showCho
           <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
           {showChoice && <ChoiceRadios section={section} onChoose={onChoose} />}
           {onHires && section.provider === 'google' && section.kind === '360' && <HiresTick section={section} onHires={onHires} />}
-          <SectionVideo folder={folder} section={section} />
-          {section.kind === '360' && <SectionVideo folder={folder} section={section} pano />}
+          <SectionVideo folder={folder} section={section} aimCam={aimCam} />
+          {section.kind === '360' && <SectionVideo folder={folder} section={section} pano aimCam={aimCam} />}
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
               <li key={it.id}><button onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>
@@ -383,7 +384,8 @@ function Legend({ scale, hasClips }: { scale: { lo: number; hi: number }; hasCli
 }
 
 /** The preview video of a section: shown when it has been made, else a button to make it (in the background; kept, so it is made once). */
-function SectionVideo({ folder, section, pano = false }: { folder: string; section: SvSectionInfo; pano?: boolean }) {
+function SectionVideo({ folder, section, pano = false, aimCam }: { folder: string; section: SvSectionInfo; pano?: boolean; aimCam?: PointCam }) {
+  const flat = useRef<HTMLVideoElement>(null), aim = useAimPath(folder, aimCam, pano ? 'pano' : 'flat')                         // (a point camera picked on the page: its aim is drawn over the video while it plays)
   const [st, setSt] = useState<SvVideo>(), [err, setErr] = useState<string>(), [starting, setStarting] = useState(false), running = !!st?.running || starting
   useEffect(() => { setSt(undefined); setErr(undefined); setStarting(false) }, [folder, section.key, pano, section.hires])              // (only a different video starts from nothing: asking again as it runs does not blank the page)
   useEffect(() => {
@@ -395,8 +397,9 @@ function SectionVideo({ folder, section, pano = false }: { folder: string; secti
   return (
     <div className="mt-2" aria-label={pano ? 'Look around' : 'Preview video'}>
       {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the original 360° pictures, one at a time, with the camera held level along the road, which you can pan</div>}
-      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true, hi)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={google ? 24 : undefined} fps={st.fps} />
-        : <StepVideo preload="metadata" src={api.svVideoUrl(folder, section.key, false, hi)} className="max-h-[360px] rounded" aria-label="Preview video of this section" />)}
+      {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true, hi)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={google ? 24 : undefined} fps={st.fps} aimPath={aim.path} />
+        : <div className="relative inline-block"><StepVideo videoRef={flat} preload="metadata" src={api.svVideoUrl(folder, section.key, false, hi)} className="max-h-[360px] rounded" aria-label="Preview video of this section" /><AimVideoOverlay video={flat} path={aim.path} /></div>)}
+      {st?.exists && aimCam && aim.err && <p role="note" className="text-xs text-amber-700 dark:text-amber-400">{aimCam.label} cannot be drawn on this video: {aim.err}</p>}
       {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
       {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && google ? `. Google gives flat views only, so this asks it for ${section.frames * (hi ? 60 : 16)} zoomed-in views (${hi ? 60 : 16} for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
       {running && (
