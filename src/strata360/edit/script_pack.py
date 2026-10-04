@@ -174,6 +174,29 @@ def streetview_clips(folder, tr, tz):
     return out
 
 
+def camera_clips(folder, tr, tz):
+    """Every point camera you offered (edit/pointcam.py, the Point camera section of a clip or street view page; possible or must include) as a pack clip `C1`...: no footage and no words, a shot that keeps one place in frame while the clip or the street view passes it, with
+    where and when that is on the course, what it looks at and from where, and how long it can play (a `camera` item). A camera whose source cannot give the shot (no track, no proxy needed here) is left out."""
+    import datetime as dt
+    from strata360.edit import pointcam as PC, pointcam_clip as PCL
+    from strata360.gps import context as X
+    from strata360.pipeline import config
+    from strata360.pipeline import notes as N
+    rd = config.race_dir(folder); notes = N.load(folder).get('clips') or {}; out = []
+    for cam in PC.load(rd)['cams']:
+        if cam.get('use') not in ('possible', 'must') or tr is None: continue
+        try: pl = PCL.plan(folder, cam, tr=tr); lo, hi = PCL.range_s(folder, cam, tr=tr)
+        except (ValueError, RuntimeError, OSError): continue
+        t0, t1 = pl['t0'], pl['t1']; dur = float(cam.get('seconds') or pl['seconds']); dur = round(min(max(dur, lo), hi), 1); f = pl['facts']; clip = cam['source']['kind'] == 'clip'
+        facts = dict(source=(f"clip {cam['source']['clip']}" if clip else f"street view ({pl['extra']['provider']})"), name=cam.get('name') or '', min_s=lo, max_s=hi, window_s=pl['source_seconds'], min_dist_m=f['min_dist_m'], max_dist_m=f['max_dist_m'], swing_deg=f['swing_deg'], fov_near=cam['fov_near'], fov_far=cam['fov_far'], height_m=cam['height_m'], warnings=f['warnings'])
+        d = dict(label=cam['label'], clip=cam['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=hi, usable=[(lo, hi)], synthetic=True, camera=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note=(notes.get(cam['label']) or '').strip(), lines=[], speech_s=0.0, speech_words=0,
+                 settings=dict(kind=None, mode='set' if cam.get('seconds') else None, seconds=cam.get('seconds'), must=cam.get('use') == 'must'), planned=None, cam_facts=facts)
+        ctx = X.context_at(tr, t0, t1, tz); d['track'] = X.describe(ctx)
+        if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
+        out.append(d)
+    return out
+
+
 def music_facts(folder):
     """What the writer is told about the music, in FILM time (the film starts at the track's first downbeat): its length, tempo, the sections with their energy, and the lyrics (lyrics.py): where it is sung and the words heard
     (rough: the times are right, the words are often wrong). None when there is no track."""
@@ -210,7 +233,7 @@ def build(folder, tz=None):
             if pj.get('covered') and pj.get('summary'): d['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '')
         d['look'] = look_of(cdir, scale); d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
         d['speech_s'] = round(sum(l['t1'] - l['t0'] for l in d['lines']), 1); d['speech_words'] = sum(l['words'] for l in d['lines']); out.append(d)
-    out = sorted(out + gap_clips(folder, tr, tz) + photo_clips(folder, tr, tz) + streetview_clips(folder, tr, tz), key=lambda c: c['start_utc'])
+    out = sorted(out + gap_clips(folder, tr, tz) + photo_clips(folder, tr, tz) + streetview_clips(folder, tr, tz) + camera_clips(folder, tr, tz), key=lambda c: c['start_utc'])
     story = None
     try:
         from strata360.gps import tracks as TKS
@@ -246,7 +269,7 @@ def render(pack, with_usable=False, marks=None):
             L += [f"  [{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') for p in ly['phrases'][:45]]
     L += ['', f"CLIPS (all {len(pack['clips'])}, in shooting order; the film follows this order)"]
     for c in pack['clips']:
-        L.append(f"\n=== {'PHOTO' if c.get('photo') else 'STREET VIEW' if c.get('streetview') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
+        L.append(f"\n=== {'PHOTO' if c.get('photo') else 'STREET VIEW' if c.get('streetview') else 'POINT CAMERA' if c.get('camera') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
         if c.get('photo'):
             f = c.get('photo_facts') or {}; L.append(f"A PHOTO the runner took (a still: no footage and no words); show it with a photo item of {MIN_PHOTO_S:g} to {MAX_PHOTO_S:g} s (the editor pans and zooms on it), or put a vo item over it. Use the ones that add to the story; leave the rest." + (' THE RUNNER WANTS THIS PHOTO IN THE FILM (MUST INCLUDE): give it a photo item.' if (c.get('settings') or {}).get('must') else ''))
             bits = [f.get('description'), ('place: ' + f['place']) if f.get('place') else '', ('setting: ' + f['setting'] + (', ' + f['weather'] if f.get('weather') and f['weather'] != 'unknown' else '')) if f.get('setting') else '', ('scenery ' + format(f['scenery'], 'g') + '/10') if f.get('scenery') is not None else '',
@@ -258,6 +281,11 @@ def render(pack, with_usable=False, marks=None):
             L.append(f"NO FOOTAGE: a steady view along the road, made from street-level pictures ({f.get('source')}, {f.get('camera')}, taken {f.get('captured') or 'at an unknown time'}). It covers km {f.get('km0')} to {f.get('km1')} ({f.get('length_m')} m, {f.get('pictures')} pictures, one every {f.get('spacing_m')} m): the runner's {c['race_s'] / 60:.0f} minutes there are shown in a few seconds, with the clock running on screen. "
                      f"Show it with a streetview item of {f.get('min_s'):g} to {f.get('max_s'):g} s (the whole stretch always plays through; a shorter item is faster), or put a vo item over it. It has no sound and no words."
                      + (f" It covers the same road as {', '.join(same)}: use at most one of them." if same else '') + (' THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE): give it a streetview item.' if (c.get('settings') or {}).get('must') else ''))
+        elif c.get('camera'):
+            f = c.get('cam_facts') or {}
+            L.append(f"NO FOOTAGE OF ITS OWN: a shot that keeps one place{(' (' + f['name'] + ')') if f.get('name') else ''} in frame, turning and zooming as {f.get('source')} goes past it (from {f.get('max_dist_m')} m away down to {f.get('min_dist_m')} m, the view turning about {f.get('swing_deg'):.0f} degrees), made from the runner's own pictures. "
+                     f"It covers the runner's {c['race_s'] / 60:.1f} minutes there. Show it with a camera item of {f.get('min_s'):g} to {f.get('max_s'):g} s (a shorter item is the part nearest the place), or put a vo item over it. It has no sound and no words."
+                     + (' THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE): give it a camera item.' if (c.get('settings') or {}).get('must') else ''))
         elif c.get('synthetic'):
             g = c.get('gap') or {}; pl = c.get('planned'); st = c.get('stop')
             if st: L.append(f"THE RUNNER STOPPED HERE: about {st['stopped_s'] / 60:.0f} min in one small place (within {st['radius_m']} m) at km {st['km']:g}; the clip shows the arriving and the leaving too. Say what the stop was if the notes or the transcript do (a rest, food, sleep, a problem), otherwise just that the runner stopped.")
@@ -278,5 +306,5 @@ def render(pack, with_usable=False, marks=None):
         if c['lines']:
             L.append(f"the runner says ({c['speech_s']} s of speech, {c['speech_words']} words):")
             for l in c['lines']: L.append(f"  [{l['id']}] {l['t0']:.1f}-{l['t1']:.1f} s ({l['t1'] - l['t0']:.1f} s): {l['text']}" + ('' if l['lang'] == 'en' else f" (translated from {l['lang']})") + {'must': '   <<< MUST INCLUDE', 'never': '   <<< DO NOT USE'}.get(marks.get(l['id']), ''))
-        elif not c.get('photo') and not c.get('streetview'): L.append('the runner says nothing in this clip.')
+        elif not c.get('photo') and not c.get('streetview') and not c.get('camera'): L.append('the runner says nothing in this clip.')
     return '\n'.join(L)

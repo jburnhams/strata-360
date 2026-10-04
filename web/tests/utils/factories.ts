@@ -91,3 +91,12 @@ export const makeNearItem = (o: Partial<import('../../src/api').SvNearItem> = {}
   usable: false, ruled_out: ['Filmed with the sun 6° above the horizon (golden-hour light), but the runner passes here with the sun 10° below the horizon (dark): it would look wrong in the film.'], ...o })
 export const makeNearResult = (o: Partial<import('../../src/api').SvNearResult> = {}): import('../../src/api').SvNearResult => ({
   lat: 50.0, lon: 5.0, n: 5, providers: { mapillary: { items: [makeNearItem()], radius_m: 100 }, panoramax: { items: [], radius_m: 500 }, google: { items: [], radius_m: null, error: 'no GOOGLE_MAPS_API_KEY in secrets.env' } }, ...o })
+
+export const makePointCam = (o: Partial<import('../../src/api').PointCam> = {}): import('../../src/api').PointCam => ({
+  id: 'C1', label: 'C1', source: { kind: 'clip', clip: 'CAM_1_0001_D' }, lat: 50.01, lon: 5.01, height_m: 0, before_m: 40, after_m: 40, fov_near: 95, fov_far: 55, smooth_s: 0.8, use: '', t_pass: 1_771_700_100, seconds: null, name: null, script: [], ok: true,
+  facts: { seconds: 26.7, min_dist_m: 30, max_dist_m: 62, max_pan_deg_s: 24, swing_deg: 140, fov_min: 70, fov_max: 95, warnings: [] }, source_seconds: 26.7, range: [2, 26.7], window: [1_771_700_087, 1_771_700_114],
+  geometry: { line: [[50.0, 5.0], [50.01, 5.0], [50.02, 5.0]], sights: [{ at: [50.0, 5.0], bearing: 20, fov: 55, dist: 60, t: 1_771_700_087 }, { at: [50.02, 5.0], bearing: 200, fov: 95, dist: 30, t: 1_771_700_114 }], at: [50.01, 5.0] }, ...o,
+})
+export const makePointCams = (cams: import('../../src/api').PointCam[] = [], o: Partial<import('../../src/api').PointCams> = {}): import('../../src/api').PointCams => ({
+  cams, limits: { height_m: [0, 300], before_m: [5, 400], after_m: [5, 400], fov_near: [30, 130], fov_far: [20, 130], smooth_s: [0, 4] }, defaults: { height_m: 0, before_m: 40, after_m: 40, fov_near: 95, fov_far: 55, smooth_s: 0.8, use: '' }, ...o,
+})

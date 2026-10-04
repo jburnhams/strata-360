@@ -322,6 +322,25 @@ def render_pano(rd, section, seconds, out, road=None, size=None, log=print, prev
     os.replace(out + '.part.mp4', out); log(f"{section['id']}: 360 video of the {n} original pictures at {fps:g} a second"); return dict(frames=n, fps=fps)
 
 
+def render_point(rd, section, idx, yaw, pitch, fov, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False, grid='std'):
+    """Write the shot of a point camera (edit/pointcam.py) over a 360 section: one output frame for each entry of `idx` (the fractional index of the picture the camera is at: 3.25 is a quarter of the way from picture 3 to picture 4), looking at compass
+    `yaw` and `pitch` degrees with horizontal field of view `fov`, the two pictures it falls between blended along their optical flow as the street view clip does. Only 360 sections can be aimed anywhere (ValueError for a flat camera)."""
+    rig = build(rd, section, road, size, preview, pano=True, grid=grid)
+    if rig.rot is None: raise ValueError(f"{section['id']}: only a 360 section can be aimed at a point (this one is a flat camera)")
+    N, n = len(idx), rig.n; w, h = encode_size or size
+    cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{size[0]}x{size[1]}', '-r', str(fps), '-i', '-'] + (['-vf', f'scale={w}:{h}:flags=lanczos'] if (w, h) != tuple(size) else []) + ['-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    try:
+        for k in range(N):
+            i = int(max(0, min(math.floor(idx[k]), n - 2))); a = float(np.clip(idx[k] - i, 0.0, 1.0)); y, pt, f = float(yaw[k]) % 360, float(pitch[k]), float(fov[k])
+            A = reproject(rig.img(i), rig.rot(i, y, pt), f, size); p.stdin.write((A if a < 0.02 else flow_blend(A, reproject(rig.img(i + 1), rig.rot(i + 1, y, pt), f, size), a)).tobytes())
+            if k % 15 == 0 or k == N - 1: log(f"rendering {k + 1} of {N} frames")
+        p.stdin.close(); p.wait()
+    except BrokenPipeError: p.wait()
+    if p.returncode: raise RuntimeError('ffmpeg failed to write the point camera video')
+    os.replace(out + '.part.mp4', out); log(f"{section['id']}: {N} frames aimed at the point from {n} pictures"); return dict(frames=N, fps=fps)
+
+
 def ups_path(rd, section, preview=False): return meta_path(rd, section) + ('.preview' if preview else '') + '.ups.npy'
 
 

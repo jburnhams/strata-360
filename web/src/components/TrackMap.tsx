@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api, type Divergence, type EndMarkers, type ExtraLine, type Photo, type Poi, type TileStatus, type TrackClip, type TrackLine } from '../api'
@@ -193,7 +193,7 @@ function FolderMap({ folder, span, point, at, frames, label, tz = 'Europe/Brusse
     if (!folder) return; let live = true; setPart(undefined); if (!span) return
     api.trackLine(folder, undefined, 500, span).then(r => live && setPart(r)).catch(() => {}); return () => { live = false }
   }, [folder, key])         // eslint-disable-line react-hooks/exhaustive-deps
-  const line = part && part.lat.length > 1 ? part.lat.map((la, i) => [la, part.lon[i]] as [number, number]) : undefined
+  const line = useMemo(() => (part && part.lat.length > 1 ? part.lat.map((la, i) => [la, part.lon[i]] as [number, number]) : undefined), [part])         // (the same array until the part of the run changes: a new one every render would send the map back to it each time the page around it changed)
   const [t0, t1] = span ?? (at != null ? [at, at] : [NaN, NaN])
   const here = Number.isFinite(t0) ? pois.filter(p => p.sym === 'stop' && p.stop?.arrived != null && p.stop.left != null && p.stop.arrived <= t1 && p.stop.left >= t0) : []              // the stops this overlaps in time
   if (err) return <p className="text-sm text-amber-700">The map needs the race track: {err}</p>

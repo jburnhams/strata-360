@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, type ClipInfo, type Gap, type Photo, type SvChosen } from '../api'
+import { api, type ClipInfo, type Gap, type Photo, type PointCam, type SvChosen } from '../api'
 import { usePoll } from '../usePoll'
 import ProjectProgress from './ProjectProgress'
 import TrackPanel from './TrackPanel'
@@ -20,6 +20,7 @@ import PhotosPanel from './PhotosPanel'
 import StreetViewPage from './StreetViewPage'
 import PhotoPage from './PhotoPage'
 import SvItemPage from './SvItemPage'
+import PointCamPage from './PointCamPage'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
@@ -34,6 +35,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   const openPhoto = (p: Photo) => { if (p.use) { setFocus(undefined); setSel(`@photo:${p.id}`) } }
   const gaps = usePoll(() => api.gaps(folder).then(r => r.gaps), 8000, [folder, photoTick])         // a photo ticked to use sits among the footage, so the gaps change with it
   const svChosen = usePoll(() => api.svChosen(folder).then(r => r.sections), 8000, [folder, photoTick])
+  const camData = usePoll(() => api.pointcams(folder), 8000, [folder, photoTick]); const cams = (camData?.cams ?? []).filter(c => c.use && c.ok && c.window)         // a camera offered to the film (possible or must) sits among the clips like a photo
   const [overlay, setOverlay] = useThumbOverlay()
   useEffect(() => { setSel(null); setFocus(undefined) }, [folder])
   return (
@@ -47,9 +49,10 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         </label>
         <ul className="min-h-0 flex-1 space-y-1 overflow-auto md:pr-1">
           {clips === undefined ? Array.from({ length: 8 }, (_, i) => <li key={i} className="flex gap-2 p-1.5"><Skeleton className="h-11 w-20 shrink-0" /><div className="flex-1 space-y-1.5"><Skeleton className="h-3 w-full" /><Skeleton className="h-3 w-1/2" /></div></li>)
-            : timeline(clips, gaps ?? [], (photos ?? []).filter(p => p.use), svChosen ?? []).map(e => e.kind === 'clip' ? <Row key={e.id} folder={folder} c={e.c} overlay={overlay} active={sel === e.id} onClick={() => { setFocus(undefined); setSel(e.id) }} />
+            : timeline(clips, gaps ?? [], (photos ?? []).filter(p => p.use), svChosen ?? [], cams).map(e => e.kind === 'clip' ? <Row key={e.id} folder={folder} c={e.c} overlay={overlay} active={sel === e.id} onClick={() => { setFocus(undefined); setSel(e.id) }} />
               : e.kind === 'gap' ? <GapRow key={e.id} folder={folder} g={e.g} active={sel === `@gap:${e.g.id}`} onClick={() => { setFocus(undefined); setSel(`@gap:${e.g.id}`) }} />
               : e.kind === 'photo' ? <PhotoRow key={e.id} folder={folder} p={e.p} active={sel === `@photo:${e.p.id}`} onClick={() => { setFocus(undefined); setSel(`@photo:${e.p.id}`) }} />
+              : e.kind === 'cam' ? <CamRow key={e.id} folder={folder} c={e.c} active={sel === `@cam:${e.c.id}`} onClick={() => { setFocus(undefined); setSel(`@cam:${e.c.id}`) }} />
               : <SvRow key={e.id} folder={folder} s={e.s} active={sel === `@sv:${e.s.key}`} onClick={() => { setFocus(undefined); setSel(`@sv:${e.s.key}`) }} />)}
         </ul>
       </aside>
@@ -74,6 +77,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
           : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
           : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} tz={tz} />
           : sel.startsWith('@sv:') ? <SvItemPage folder={folder} item={(svChosen ?? []).find(x => x.key === sel.slice(4))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
+          : sel.startsWith('@cam:') ? <PointCamPage folder={folder} cam={(camData?.cams ?? []).find(c => c.id === sel.slice(5))} limits={camData?.limits} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
           : sel.startsWith('@photo:') ? <PhotoPage folder={folder} photo={photos?.find(p => p.id === sel.slice(7))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
           : <ClipView folder={folder} clip={sel} focus={focus} tz={tz} />}
       </div>
@@ -81,12 +85,12 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   )
 }
 
-type Entry = { kind: 'clip'; id: string; t: number; c: ClipInfo } | { kind: 'gap'; id: string; t: number; g: Gap } | { kind: 'photo'; id: string; t: number; p: Photo } | { kind: 'sv'; id: string; t: number; s: SvChosen }
+type Entry = { kind: 'clip'; id: string; t: number; c: ClipInfo } | { kind: 'gap'; id: string; t: number; g: Gap } | { kind: 'photo'; id: string; t: number; p: Photo } | { kind: 'sv'; id: string; t: number; s: SvChosen } | { kind: 'cam'; id: string; t: number; c: PointCam }
 
-/** Everything the film can show, in the order it happened: the clips, the gaps between them, and the photos and street view sections ticked to use (they sit among the clips like clips; a gap is only where the footage is 20 minutes or more apart). */
-export function timeline(clips: ClipInfo[], gaps: Gap[], photos: Photo[], sv: SvChosen[]): Entry[] {
+/** Everything the film can show, in the order it happened: the clips, the gaps between them, and the photos, street view sections and point cameras ticked to use (they sit among the clips like clips; a gap is only where the footage is 20 minutes or more apart). */
+export function timeline(clips: ClipInfo[], gaps: Gap[], photos: Photo[], sv: SvChosen[], cams: PointCam[] = []): Entry[] {
   const out: Entry[] = [...clips.map(c => ({ kind: 'clip' as const, id: c.id, t: Date.parse(c.start_utc) / 1000, c })), ...gaps.map(g => ({ kind: 'gap' as const, id: `@gap:${g.id}`, t: g.t0, g })),
-    ...photos.map(p => ({ kind: 'photo' as const, id: `@photo:${p.id}`, t: p.taken_utc, p })), ...sv.map(s => ({ kind: 'sv' as const, id: `@sv:${s.key}`, t: s.t0, s }))]
+    ...photos.map(p => ({ kind: 'photo' as const, id: `@photo:${p.id}`, t: p.taken_utc, p })), ...sv.map(s => ({ kind: 'sv' as const, id: `@sv:${s.key}`, t: s.t0, s })), ...cams.map(c => ({ kind: 'cam' as const, id: `@cam:${c.id}`, t: c.window![0], c }))]
   return out.sort((a, b) => a.t - b.t || +(a.kind === 'gap') - +(b.kind === 'gap'))          // a gap starts where the footage before it ends (the final gap, at the time of the last photo): it comes after what ends there
 }
 
@@ -104,6 +108,16 @@ function SvRow({ folder, s, active, onClick }: { folder: string; s: SvChosen; ac
     <li onClick={onClick} data-in-film="" data-sv-row={s.label} className={`flex cursor-pointer gap-2 rounded-lg border-2 border-emerald-600 p-1.5 ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
       <div className="relative h-11 w-20 shrink-0"><img loading="lazy" src={api.svThumbUrl(folder, s.key, String(s.seconds ?? '') + (s.hires ? 'h' : ''))} alt="" className="h-11 w-20 rounded bg-sky-200 object-cover dark:bg-sky-900" /><span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-semibold text-white">{s.label}</span></div>
       <div className="min-w-0 flex-1 text-xs"><div className="truncate">Street view · {s.provider}</div><div className="text-stone-500">{s.kind === '360' ? '360°' : '2D'} · {Math.round(s.length_m)} m · {s.choice === 'must' ? 'must use' : 'may use'}{s.quality ? ` · ${s.quality}` : ''}</div></div>
+    </li>
+  )
+}
+
+function CamRow({ folder, c, active, onClick }: { folder: string; c: PointCam; active: boolean; onClick: () => void }) {
+  const [noPic, setNoPic] = useState(false)
+  return (
+    <li onClick={onClick} data-in-film="" data-cam-row={c.label} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-lg border-2 border-emerald-600 p-1.5 ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
+      <div className="relative h-11 w-20 shrink-0">{noPic ? <div className="h-11 w-20 rounded bg-teal-200 dark:bg-teal-900" /> : <img loading="lazy" src={api.pointCamThumbUrl(folder, c.id, [c.before_m, c.after_m, c.fov_near, c.fov_far, c.height_m, c.smooth_s].join('-'))} onError={() => setNoPic(true)} alt="" className="h-11 w-20 rounded bg-teal-200 object-cover dark:bg-teal-900" />}<span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-semibold text-white">{c.label}</span></div>
+      <div className="min-w-0 flex-1 text-xs"><div className="truncate">Point camera{c.name ? ` · ${c.name}` : ''}</div><div className="text-stone-500">{c.facts?.seconds ?? '?'} s · {c.source.kind === 'clip' ? 'clip' : 'street view'} · {c.use === 'must' ? 'must use' : 'may use'}</div></div>
     </li>
   )
 }

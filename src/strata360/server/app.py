@@ -56,6 +56,7 @@ STREETVIEW_NEAR_JOBS = {}     # folder -> the nearest-street-view search being m
 STREETVIEW_NEAR = {}          # (folder, provider, picture id) -> what the near-point search found (so the thumbnails can be fetched, and nothing else)
 STREETVIEW_VIDEO_JOBS = {}    # (folder, section key) -> Popen of a running `strata360 streetview-video`
 STREETVIEW_JOBS = {}          # folder -> Popen of a running `strata360 streetview`
+POINTCAM_JOBS = {}            # (folder, camera id) -> Popen of a running `strata360 pointcam-video`
 PHOTO_JOBS = {}               # folder -> Popen of a running `strata360 photos-analyse`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
@@ -879,7 +880,7 @@ def create_app(roots, token=None):
     @api.get('/api/edit', dependencies=[Depends(auth)])
     def get_edit(folder: str):                                                           # settings, overrides, the saved plan, the technique list and the newest script's lines by segment id
         from strata360.edit import project as PJ, techniques as TQ
-        f = folder_of(folder); e = PJ.load(f); lib = TQ.load(); rd = config.race_dir(f)
+        f = folder_of(folder); e = PJ.load(f); lib = TQ.with_cams(TQ.load(), f); rd = config.race_dir(f)
         files = sorted(glob.glob(os.path.join(rd, 'scripts', 'script-*.json'))); lines = {}
         if files:
             try:
@@ -1176,6 +1177,99 @@ def create_app(roots, token=None):
         auth(request); rd, s = sv_section(folder_of(folder), key); p = SV.video_path(rd, s, pano)
         if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
+
+    # ---- point cameras: a virtual camera that keeps one place in frame while a clip or a street view section passes it (edit/pointcam.py) ----
+    def pointcam_get(f, cid):
+        from strata360.edit import pointcam as PC
+        cam = PC.get(config.race_dir(f), cid)
+        if cam is None: raise HTTPException(404, 'no such point camera')
+        return cam
+
+    def pointcam_said(f):                                                                # what the newest script draft says over each point camera: {label: [{n, type, text, seconds}]}
+        from strata360.edit import script_draft as SD
+        said = {}
+        for n, it in enumerate((SD.load_draft(f) or {}).get('items') or []):
+            lab = norm_label(it.get('clip', ''))
+            if lab.startswith('C') and lab[1:].isdigit(): said.setdefault(lab, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
+        return said
+
+    def pointcam_doc(f, cam, said=None):
+        from strata360.edit import pointcam_clip as PCL
+        try: tr = loaded_track(f)
+        except HTTPException: tr = None
+        said = pointcam_said(f) if said is None else said
+        return dict(cam, script=said.get(cam['label'], []), **(PCL.summary(f, cam, tr) if tr is not None else dict(ok=False, error='there is no race track')))
+
+    @api.get('/api/pointcams', dependencies=[Depends(auth)])
+    def get_pointcams(folder: str, clip: str = '', key: str = ''):                      # the point cameras (all, or those of one clip or street view section), each with its facts, lengths and the geometry the map draws; `ok` false says why a camera cannot give its shot
+        from strata360.edit import pointcam as PC
+        f = folder_of(folder); cams = [c for c in PC.load(config.race_dir(f))['cams'] if (not clip or c['source'].get('clip') == clip) and (not key or c['source'].get('key') == key)]
+        said = pointcam_said(f); return dict(cams=[pointcam_doc(f, c, said) for c in cams], limits={k: list(v) for k, v in PC.LIMITS.items()}, defaults=PC.DEFAULTS)
+
+    @api.post('/api/pointcams', dependencies=[Depends(auth)])
+    def post_pointcam(body: dict):                                                       # {folder, source: {kind: 'clip', clip} | {kind: 'streetview', key}, lat, lon}: a camera looking at that point from the source's path (the click must be within 400 m of it)
+        from strata360.edit import pointcam as PC, pointcam_clip as PCL
+        f = folder_of(body.get('folder')); src = body.get('source') or {}
+        try:
+            lat, lon = float(body['lat']), float(body['lon']); kind = src.get('kind')
+            if kind not in ('clip', 'streetview') or not (src.get('clip') if kind == 'clip' else src.get('key')): raise ValueError('source: {kind: clip, clip} or {kind: streetview, key}')
+            source = dict(kind=kind, **({'clip': str(src['clip'])} if kind == 'clip' else {'key': str(src['key'])}))
+            p, bounds, _extra = PCL.source_poly(f, source, loaded_track(f)); t_pass, off = PCL.approach(p, lat, lon, bounds)
+        except (KeyError, TypeError): raise HTTPException(400, 'folder, source, lat and lon are needed')
+        except ValueError as e: raise HTTPException(400, str(e))
+        cam = PC.create(config.race_dir(f), source, lat, lon, t_pass); return pointcam_doc(f, cam)
+
+    @api.post('/api/pointcams/update', dependencies=[Depends(auth)])
+    def post_pointcam_update(body: dict):                                                # {folder, id, ...settings}: height_m, before_m, after_m, fov_near, fov_far, smooth_s, seconds, use ('' | 'possible' | 'must'), name, lat, lon
+        from strata360.edit import pointcam as PC
+        f = folder_of(body.get('folder')); cam = pointcam_get(f, body.get('id', '')); fields = {k: v for k, v in body.items() if k not in ('folder', 'id')}
+        try: cam = PC.update(config.race_dir(f), cam['id'], **fields)
+        except ValueError as e: raise HTTPException(400, str(e))
+        return pointcam_doc(f, cam)
+
+    @api.post('/api/pointcams/delete', dependencies=[Depends(auth)])
+    def post_pointcam_delete(body: dict):
+        from strata360.edit import pointcam as PC
+        f = folder_of(body.get('folder')); return dict(removed=PC.delete(config.race_dir(f), str(body.get('id', ''))))
+
+    def pointcam_video_state(f, cam):
+        from strata360.edit import pointcam_clip as PCL
+        out = PCL.preview_path(f, cam); job = POINTCAM_JOBS.get((f, cam['id'])); running = bool(job and job.poll() is None); lines = []; logf = os.path.splitext(out)[0] + '.log'
+        try: lines = open(logf, errors='replace').read().strip().splitlines()
+        except OSError: pass
+        if not running and lines and not os.path.exists(out) and time.time() - os.path.getmtime(logf) < STREETVIEW_LOG_STALE_S and not any(l.startswith(('done:', 'pointcam-video:')) for l in lines): running = True         # (a job started outside this server is still writing its log)
+        fail = next((l for l in reversed(lines) if l.startswith('pointcam-video:')), '')
+        sec = PCL.section_of(config.race_dir(f), cam['source']['key']) if cam['source']['kind'] == 'streetview' else None
+        return dict(exists=os.path.exists(out), running=running, log=lines[-8:], progress=PCL.progress(lines, cam['source'], bool(sec and sec['provider'] == 'google')), error='' if running else fail[:400])
+
+    @api.get('/api/pointcams/video', dependencies=[Depends(auth)])
+    def get_pointcam_video(folder: str, id: str):                                       # whether the camera's preview video exists, is being made (with its progress and log) or failed
+        f = folder_of(folder); return pointcam_video_state(f, pointcam_get(f, id))
+
+    @api.post('/api/pointcams/video', dependencies=[Depends(auth)])
+    def post_pointcam_video(body: dict):                                                # {folder, id}: render the preview video in the background at the lowest priority (nothing to do when it exists)
+        from strata360.edit import pointcam_clip as PCL
+        f = folder_of(body.get('folder')); cam = pointcam_get(f, body.get('id', '')); out = PCL.preview_path(f, cam)
+        if os.path.exists(out): return dict(started=False, reason='the video is already made')
+        if pointcam_video_state(f, cam)['running']: return dict(started=False, reason='the video is already being made')
+        if any(p.poll() is None for (ff, _), p in POINTCAM_JOBS.items() if ff == f): return dict(started=False, reason='another point camera video is being made')
+        os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
+        POINTCAM_JOBS[(f, cam['id'])] = subprocess.Popen([*oslib.cli_command(), 'pointcam-video', f, cam['id']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/pointcams/video/file')
+    def get_pointcam_video_file(request: Request, folder: str, id: str):                # the video itself (a <video> cannot send headers: the cookie / query token authenticates)
+        from strata360.edit import pointcam_clip as PCL
+        auth(request); f = folder_of(folder); p = PCL.preview_path(f, pointcam_get(f, id))
+        if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
+        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
+
+    @api.get('/api/pointcams/thumb')
+    def get_pointcam_thumb(request: Request, folder: str, id: str, w: int = 160):       # a picture for the film list: a frame of the shot's video when it is made, else 404 (the list then shows an icon)
+        from strata360.edit import pointcam_clip as PCL, synthetic as SY
+        auth(request); f = folder_of(folder); cam = pointcam_get(f, id); rd = config.race_dir(f); c = next((x for x in SY.load(f)['clips'] if x['id'] == cam['id'] and x.get('file')), None)
+        for src in ([os.path.join(rd, c['file'])] if c else []) + [PCL.preview_path(f, cam)]:
+            if os.path.exists(src): return FileResponse(video_thumb(src, w), media_type='image/jpeg', headers={'Cache-Control': 'max-age=3600'})
+        raise HTTPException(404, 'no picture yet')
 
     def near_register(f, res):
         for prov, block in res['providers'].items():

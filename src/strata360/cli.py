@@ -348,6 +348,19 @@ def cmd_streetview_video(a):
     print(f'done: {out}')
 
 
+def cmd_pointcam_video(a):
+    """Make the preview video of one point camera (edit/pointcam.py, by its id from the clip or street view page); kept, so a second call finishes at once."""
+    from strata360.edit import pointcam as PC, pointcam_clip as PCL
+    if hasattr(sys.stdout, 'reconfigure'): sys.stdout.reconfigure(line_buffering=True)                                                  # (the page reads this job's log while it runs)
+    oslib.lower_priority(); cam = PC.get(config.race_dir(a.name), a.id)
+    if cam is None: sys.exit(f'pointcam-video: no point camera {a.id}')
+    out = PCL.preview_path(a.name, cam)
+    if not os.path.exists(out):
+        try: PCL.render_preview(a.name, cam, out, log=print)
+        except (ValueError, RuntimeError) as e: sys.exit(f'pointcam-video: {e}')
+    print(f'done: {out}')
+
+
 def cmd_gaps(a):
     """The stretches of the race with no clip (the gaps), from the clips' times and the race track; --plan registers a synthetic clip (an animated map) for each, to be rendered later."""
     from strata360.gps import gaps as GP, track
@@ -632,6 +645,7 @@ def main():
     p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
     p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
     p = sub.add_parser('streetview', help='find the road stretches of the run and the street-level imagery (Mapillary, Panoramax, Google) on them'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--stages', help='comma list of roads,mapillary,panoramax,google'); p.add_argument('--force', action='store_true', help='redo even what is up to date'); p.set_defaults(fn=cmd_streetview)
+    p = sub.add_parser('pointcam-video', help='make the preview video of one point camera (its id is on the clip or street view page)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('id'); p.set_defaults(fn=cmd_pointcam_video)
     p = sub.add_parser('streetview-video', help='make the preview video of one street view section (its key is on the Street view page)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('key'); p.add_argument('--pano', action='store_true', help='a 360 video to look around in (360 sections only)'); p.set_defaults(fn=cmd_streetview_video)
     p = sub.add_parser('photos-analyse', help='run the clip stages that make sense for a photo (exposure, quality, places, people, identity, face_view, scenes, thumb_overlay) over the uploaded photos; only what is out of date'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--stages', help='comma list of exposure,quality,places,people,identity,face_view,scenes,thumb_overlay'); p.add_argument('--photo', action='append', help='a photo id (p1 ...); repeat for several'); p.add_argument('--force', action='store_true', help='redo even what is up to date'); p.set_defaults(fn=cmd_photos_analyse)
     p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
