@@ -200,7 +200,7 @@ function FolderMap({ folder, span, point, at, frames, label, tz = 'Europe/Brusse
   if (!run) return <div className={`${height} animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800`} aria-label="Loading the map" />
   return (
     <div aria-label="Where on the route">
-      <MapView {...rest} base={run} height={height} label={label ? 'Map of the route with this picked out' : 'Map of the route'} tz={tz} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} extras={routes} pois={pois} ends={ends}
+      <MapView {...rest} svg base={run} height={height} label={label ? 'Map of the route with this picked out' : 'Map of the route'} tz={tz} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} extras={routes} pois={pois} ends={ends}
         focus={line || point || frames?.length ? { line, point: line || frames?.length ? undefined : point, points: frames, label } : undefined} />
       <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-600 dark:text-stone-400">
         <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f97316' }} />{frames?.length ? `each picture where it was taken (${frames.length}), joined in order` : span ? 'the part of the run this covers' : point ? 'where it was taken' : 'this'}</span>
