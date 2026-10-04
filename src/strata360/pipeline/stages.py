@@ -236,6 +236,24 @@ def scenes(ctx):
     ctx.write('scenes.json', ctx.stamped(analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['scenes_every_s'], px=int(ctx.cfg.get('scenes_px', 512)), fov=float(ctx.cfg.get('scenes_fov', 120.0)), previous=previous, times=times, sun=SUN.load(str(ctx.dir)))))
 
 
+@stage('objects', 1, outputs=('objects.json',), deps=('ingest', 'scenes'), soft_deps=('quality', 'sun', 'exposure', 'identity'), default=False,
+       note='the things passed (animals, signs, buildings, vehicles, structures) with a direction: YOLOE boxes on 26 tiles of the original lens frames at the moments the runner moved or the scene changed, named by the detector where its word is trusted by the statistics, else by the local Qwen on a re-rendered crop; skips night footage, black frames and the wearer; needs .venv-vision and models/yoloe')
+def objects(ctx):
+    from strata360.analysis import objects as OBJ, sampling, vocab as VOC
+    from strata360.gps import sun as SUN
+    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); local_p = VOC.project_paths(root)['local']
+    local = json.load(open(local_p)) if os.path.exists(local_p) else None; vocab = VOC.load(local=local); scenes_doc = ctx.read('scenes.json')
+    cats = OBJ.categories_of(scenes_doc, vocab); words = VOC.words_for(cats, vocab)
+    try: tp = _track_file(ctx)[1]
+    except RuntimeError: tp = None
+    times = sampling.times_for(str(ctx.dir), tp)
+    if times is None: times = [float(t) for t in range(1, int(ctx.clip_json['video']['source_frames'] / ctx.clip_json['video']['nominal_fps']), 5)]
+    rd = lambda n: ctx.read(n) if os.path.exists(ctx.path(n)) else None
+    doc = OBJ.analyse(ctx.clip.osv, str(ctx.dir), times, words, stats=VOC.stats_for(root), vocab=vocab, categories=cats, sun=SUN.load(str(ctx.dir)), exposure=rd('exposure.json'), focus=(rd('focus.json') or {}).get('samples'),
+                      clip=os.path.basename(str(ctx.dir)), crops_to=ctx.path('objects'), log=ctx.log)
+    ctx.write('objects.json', ctx.stamped(doc))
+
+
 @stage('speakers', 1, outputs=('speakers.json', 'speakers.npy'), deps=('transcribe',), soft_deps=('audio_extract',),
        note='speaker embedding and level of every speech segment; labelled wearer/other once the wearer voice is known (`strata360 voice`)')
 def speakers(ctx):

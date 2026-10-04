@@ -277,9 +277,29 @@ def project_paths(root):
     d = os.path.join(root, 'strata360'); return dict(stats=os.path.join(d, 'vocab_stats.json'), local=os.path.join(d, 'vocab_local.json'))
 
 
+def collect(root, write=True):
+    """The project's StatsBook rebuilt from the repo's seed and the numbers each clip's objects.json recorded (clips are processed in parallel, so each keeps its own; this is the one place they are added up). Written to the
+    project's vocab_stats.json unless `write` is False."""
+    import glob
+    book = StatsBook.read(SEED_FILE); book.sources = list(book.sources)
+    for fn in sorted(glob.glob(os.path.join(root, 'strata360', 'clips', '*', 'objects.json'))):
+        try: doc = json.load(open(fn))
+        except (OSError, ValueError): continue
+        if doc.get('stats'): book.merge(StatsBook(doc['stats'])); book.sources.append(os.path.basename(os.path.dirname(fn)))
+    if write: book.write(project_paths(root)['stats'])
+    return book
+
+
+def stats_for(root):
+    """What the stage routes by: the repo's seed plus the project's own numbers (as last collected)."""
+    book = StatsBook.read(SEED_FILE); mine = project_paths(root)['stats']
+    if os.path.exists(mine): book.merge(StatsBook.read(mine))
+    return book
+
+
 def update(root, ask, vocab=None):
     """Review the project's suggestions with the model, write the accepted words and the demotions to its local list; returns (proposals, demoted)."""
-    pp = project_paths(root); book = StatsBook.read(pp['stats']); local = json.load(open(pp['local'])) if os.path.exists(pp['local']) else {}
+    pp = project_paths(root); book = collect(root); local = json.load(open(pp['local'])) if os.path.exists(pp['local']) else {}
     v = load(local=local) if vocab is None else vocab; props = review(book, ask, v); weak = [w for w in book.weak(v) if w not in (local.get('remove') or [])]
     new = apply(local, props, weak); os.makedirs(os.path.dirname(pp['local']), exist_ok=True); json.dump(new, open(pp['local'], 'w'), indent=1); return props, weak
 

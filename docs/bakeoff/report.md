@@ -7,7 +7,7 @@ Goal: find what is in a clip and roughly where (a bearing, ideally a box), for m
 - **Clips (9, chosen from their `scenes.json` tags to differ):** 0002 village/church/dusk, 0004 town road/aid station, 0006 night trail, 0009 river/bridge/dam, 0013 farm animals, 0014 rural village, 0016 snow + wooden platform, 0018 forest river in fog, 0023 foggy muddy trail. No coastal or big-city clip exists in this project, so those are untested.
 - **Frames:** 8 times per clip (evenly spaced, from the proxy), each cut into 6 flat 100-degree views (yaw 0, 60 ... 300 in the proxy's frame): 432 images. A hit's bearing is its view yaw plus the box centre's angle in the view.
 - **Detectors** (text-prompted, one fixed list of 50 run-relevant terms: `scripts/terms.py`) and **YOLOE prompt-free** (built-in vocabulary, no list). **VLMs** with one open JSON prompt (animals, vehicles, structures, water, terrain, weather, other; `scripts/vlm_bake.py`).
-- All on the Mac GPU (MPS / MLX), one job at a time. Raw outputs are in `results/`.
+- All on the Mac GPU (MPS / MLX), one job at a time. Raw outputs (pictures and JSON, 19 MB) are not kept in the repository; where the text names a `results/...` file it was one of those.
 - **There is no labelled ground truth.** What I know by eye: animals only on 0013 (pigs, chickens, ducks, goats in a pen, left-rear of the runner); a river on 0018 and a river/weir/bridge on 0009; a wooden viewing platform on 0016; a portable toilet and cabin on 0002. Precision was judged by looking at 16 random hits per detector (`results/audit_*.jpg`), so the percentages below are rough (plus or minus 15 points).
 
 ## Results: box detectors (432 images, 50 terms)
