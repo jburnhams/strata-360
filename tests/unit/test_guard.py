@@ -43,9 +43,14 @@ def test_the_watchdog_stops_a_job_when_load_or_memory_or_its_own_size_goes_over(
 
 def test_heavy_runs_the_watchdog_and_cleans_up(monkeypatch):
     monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS', raising=False); monkeypatch.setattr(RS, 'mem_available_gb', lambda: 50.0); monkeypatch.setattr(G, 'load_per_cpu', lambda: 0.0); monkeypatch.setattr(G, 'processes', lambda: [])
+    monkeypatch.setattr(G, 'swap_used_gb', lambda: 0.0); monkeypatch.setattr(G, 'pressure_level', lambda: 0)                    # (the start check must not depend on this machine's own swap and memory pressure)
     monkeypatch.setattr(G, 'POLL_S', 0.05); why = []; monkeypatch.setattr(G, 'verdict', lambda cap=None, **k: 'because')
     import time
-    with G.heavy('job', 1.0, on_abort=why.append): p = G.popen(['sleep', '30']); time.sleep(0.4)
+    with G.heavy('job', 1.0, on_abort=why.append):
+        p = G.popen(['sleep', '30'])
+        for _ in range(200):                                                                              # (the watchdog polls every 0.05 s: give it up to 10 s on a busy machine instead of a fixed wait)
+            if why and p.poll() is not None: break
+            time.sleep(0.05)
     assert why and why[0] == 'because' and p.poll() is not None                                      # the watchdog fired, the child is dead
 
 
