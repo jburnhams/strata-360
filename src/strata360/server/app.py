@@ -758,14 +758,14 @@ def create_app(roots, token=None):
         return GS.series(loaded_track(folder_of(folder)), max(100, min(points, 6000)))
 
     @api.get('/api/track/line', dependencies=[Depends(auth)])
-    def get_track_line(folder: str, bbox: str = '', limit: int = 3000):                  # the line of the track inside bbox=lat0,lon0,lat1,lon1 (or all of it), at most `limit` points: the map asks for more detail as it zooms in
+    def get_track_line(folder: str, bbox: str = '', limit: int = 3000, t0: float | None = None, t1: float | None = None):                  # the line of the track inside bbox=lat0,lon0,lat1,lon1 (or all of it), at most `limit` points: the map asks for more detail as it zooms in
         from strata360.gps import series as GS
         box = None
         if bbox:
             try: box = tuple(float(x) for x in bbox.split(','))
             except ValueError: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
             if len(box) != 4: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
-        return GS.line(loaded_track(folder_of(folder)), box, max(200, min(limit, 20000)))
+        return GS.line(loaded_track(folder_of(folder)), box, max(200, min(limit, 20000)), None if t0 is None or t1 is None else (min(t0, t1), max(t0, t1)))
 
     @api.get('/api/track/clips', dependencies=[Depends(auth)])
     def get_track_clips(folder: str):                                                    # every clip placed on the track (middle, the stretch it covers, facts for the hover card), with whether the newest script draft plays it

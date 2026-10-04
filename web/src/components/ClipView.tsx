@@ -10,6 +10,7 @@ import { PanelSkeleton, Skeleton } from './Skeleton'
 import WordMarker from './WordMarker'
 import { usedSet } from '../marks'
 import { usePoll } from '../usePoll'
+import TrackMap from './TrackMap'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -17,7 +18,7 @@ const Card = ({ title, children }: { title: string; children: React.ReactNode })
 )
 const Kv = ({ k, v }: { k: string; v: React.ReactNode }) => v == null || v === '' ? null : <div className="flex justify-between gap-3 py-0.5 text-sm"><span className="text-stone-500">{k}</span><span className="text-right">{v}</span></div>
 
-export default function ClipView({ folder, clip, focus }: { folder: string; clip: string; focus?: number }) {
+export default function ClipView({ folder, clip, focus, tz }: { folder: string; clip: string; focus?: number; tz?: string }) {
   const [c, setC] = useState<ClipDetail>()
   const [err, setErr] = useState<string>()
   const [redo, setRedo] = useState(false)
@@ -34,6 +35,7 @@ export default function ClipView({ folder, clip, focus }: { folder: string; clip
     <div className="space-y-4">
       <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} person={c.person} clarity={c.clarity} scenic={c.scenic} sounds={c.audio_files} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} />
       <div className="-mt-2 flex items-center justify-between px-1 text-xs text-stone-500"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : 'no thumbnail yet'}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
+      {Number.isFinite(Date.parse(utc)) && <Card title="Where on the route"><TrackMap folder={folder} tz={tz} span={[Date.parse(utc) / 1000, Date.parse(utc) / 1000 + c.video.source_frames / c.video.nominal_fps]} label={`Clip ${clip.replace(/^CAM_/, '').replace(/_D$/, '')}`} /></Card>}
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="When and where">
           <Kv k="Start (UTC)" v={utc.replace('T', ' ').replace('Z', '')} /><Kv k="Length" v={fmt(c.video.source_frames / c.video.nominal_fps)} /><Kv k="Time status" v={String(c.time.utc_status)} />

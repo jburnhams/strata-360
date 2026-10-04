@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, type Gap, type GapClip, type GapKind, type GapSettings } from '../api'
 import { usePoll } from '../usePoll'
 import ItemPage, { LengthField } from './ItemPage'
+import TrackMap from './TrackMap'
 import { PanelSkeleton } from './Skeleton'
 import StepVideo from './FrameStep'
 
@@ -11,7 +12,7 @@ const KIND: Record<GapKind, string> = { map: '2D map', flyover: '3D flyover (4K)
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900"><h3 className="mb-2 text-sm font-semibold">{title}</h3>{children}</section>
 )
-export default function GapView({ folder, gap }: { folder: string; gap: string }) {
+export default function GapView({ folder, gap, tz }: { folder: string; gap: string; tz?: string }) {
   const [tick, setTick] = useState(0)
   const data = usePoll(() => api.gaps(folder), 4000, [folder, gap, tick])
   const [err, setErr] = useState<string>()
@@ -34,6 +35,7 @@ export default function GapView({ folder, gap }: { folder: string; gap: string }
     <ItemPage folder={folder} noun="gap" must={s.must} script={g.script ?? []} err={err} noteClip={g.id} noteTitle="Notes for this gap" notePlaceholder="What was this stretch? Where were you, how did it feel, what to mention or avoid…"
       heading={<>Gap {g.id} <span className="text-sm font-normal text-stone-500">{g.local_start} → {g.local_end}</span></>}
       sub={`${(g.duration_s / 3600).toFixed(1)} h · km ${g.km_start}–${g.km_end} · +${g.ascent_m} m${g.daylight ? ` · ${g.daylight}` : ''} · ${Math.round(100 * g.moving_share)}% moving`}
+      where={<TrackMap folder={folder} tz={tz} span={[g.t0, g.t1]} label={`Gap ${g.id}`} />}
       preview={<>
         {c?.exists ? <StepVideo aria-label={`${g.id} ${c.kind === 'flyover' ? 'flyover' : 'map clip'}`} className="w-full max-w-3xl rounded" src={api.gapVideoUrl(folder, c.id)} />
           : <div className="flex aspect-video w-full max-w-3xl items-center justify-center rounded bg-stone-200 text-sm text-stone-500 dark:bg-stone-800">{c?.rendering ? (c.progress || 'rendering…') : 'No clip rendered yet'}</div>}

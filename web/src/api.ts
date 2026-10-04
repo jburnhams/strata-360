@@ -163,7 +163,7 @@ export const api = {
   coverage: (folder: string) => call<Coverage>('/api/coverage?' + q({ folder })),
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
   trackSeries: (folder: string, points = 2000) => call<TrackSeries>('/api/track/series?' + q({ folder, points: String(points) })),
-  trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000) => call<TrackLine>('/api/track/line?' + q(bbox ? { folder, bbox: bbox.join(','), limit: String(limit) } : { folder, limit: String(limit) })),
+  trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000, span?: [number, number]) => call<TrackLine>('/api/track/line?' + q({ folder, limit: String(limit), ...(bbox ? { bbox: bbox.join(',') } : {}), ...(span ? { t0: String(span[0]), t1: String(span[1]) } : {}) })),
   tilesStatus: (style = 'tf-landscape') => call<TileStatus>('/api/tiles/status?' + q({ style })),
   tileUrl: (style = 'tf-landscape') => `/api/tiles/${style}/{z}/{x}/{y}`,
   trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),

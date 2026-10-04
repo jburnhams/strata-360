@@ -22,7 +22,7 @@ describe('GapView', () => {
     expect(await screen.findByRole('heading', { name: /Gap G01/ })).toBeInTheDocument()
     expect(screen.getByLabelText('State')).toHaveTextContent('ready · 2D · 14 s'); expect(document.querySelector('video')).not.toBeNull()
     expect(screen.getByText('Hours of nothing but road.')).toBeInTheDocument(); expect(screen.getByText(/Narration you want spoken inside this gap/)).toBeInTheDocument()
-    expect(await screen.findByText('Notes for this gap')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Notes for this gap')).toBeInTheDocument())
   })
 
   it('says when the script does not use the gap, and that must-use adds it', async () => {

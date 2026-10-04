@@ -246,7 +246,7 @@ describe('the run and the route tracks on the map', () => {
     const seen = recordRequests('/api/tracks/line'); setup(<StreetViewPage folder="/data" initialFilters={SHOW_ALL} />); await waitFor(() => expect(paths('#2563eb').length).toBeGreaterThan(0))
     expect(paths('#dc2626').some(p => p.getAttribute('stroke-width') === '4')).toBe(true); expect(paths('#2563eb')[0].getAttribute('stroke-width')).toBe('5'); expect(paths('#78716c')).toHaveLength(0)         // (the grey line is gone)
     expect(seen.map(r => r.url.searchParams.get('id'))).toEqual(['r1'])                                                                           // only the route without an error
-    const all = [...document.querySelectorAll('path')]; const idx = (c: string) => all.findIndex(p => p.getAttribute('stroke') === c); expect(idx('#2563eb')).toBeLessThan(idx('#f59e0b')); expect(idx('#f59e0b')).toBeLessThan(idx('#dc2626'))                    // routes, then the road parts, then the run on top
+    const all = [...document.querySelectorAll('path')]; const idx = (c: string) => all.findIndex(p => p.getAttribute('stroke') === c), last = (c: string) => all.map(p => p.getAttribute('stroke')).lastIndexOf(c); expect(idx('#2563eb')).toBeLessThan(idx('#f59e0b')); expect(idx('#f59e0b')).toBeLessThan(last('#dc2626'))                    // routes, then the road parts, then the run on top
     expect(screen.getByText('the run')).toBeInTheDocument(); expect(screen.getByText('route tracks')).toBeInTheDocument()
   })
 

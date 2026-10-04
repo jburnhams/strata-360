@@ -793,3 +793,4 @@ class TestVideoStartedElsewhere(TestStreetViewVideoApi):
         assert client.post('/api/streetview/video', json=dict(q)).json()['started'] is False
         old = time.time() - 1000; os.utime(lf, (old, old)); assert client.get('/api/streetview/video', params=q).json()['running'] is False          # a log nobody has written to for minutes: it stopped
         open(lf, 'w').write('fetching picture 2 of 10\nstreetview-video: boom\n'); assert client.get('/api/streetview/video', params=q).json()['running'] is False
+

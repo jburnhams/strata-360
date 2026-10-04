@@ -72,10 +72,10 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
           </div>
         ) : sel === '@streetview' ? <StreetViewPage folder={folder} tz={tz} />
           : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
-          : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} />
+          : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} tz={tz} />
           : sel.startsWith('@sv:') ? <SvItemPage folder={folder} item={(svChosen ?? []).find(x => x.key === sel.slice(4))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
           : sel.startsWith('@photo:') ? <PhotoPage folder={folder} photo={photos?.find(p => p.id === sel.slice(7))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
-          : <ClipView folder={folder} clip={sel} focus={focus} />}
+          : <ClipView folder={folder} clip={sel} focus={focus} tz={tz} />}
       </div>
     </div>
   )
