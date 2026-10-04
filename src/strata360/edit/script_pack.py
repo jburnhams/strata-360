@@ -75,7 +75,7 @@ def look_of(cdir, scale):
 def scene_summary(cdir):
     p = os.path.join(cdir, 'scenes.json')
     if not os.path.exists(p): return {}
-    items = [i for i in json.load(open(p)).get('items') or [] if i.get('ok')]
+    items = [i for i in json.load(open(p)).get('items') or [] if i.get('ok') and i.get('view') == 'front']          # what is ahead (the rear answers are in scenes.json under summary.rear)
     if not items: return {}
     from collections import Counter
     def top(k, n=3): return [v for v, _ in Counter(i[k] for i in items if i.get(k) and i[k] != 'unknown').most_common(n)]

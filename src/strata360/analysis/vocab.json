@@ -1,0 +1,896 @@
+{
+ "schema": 1,
+ "note": "Wordlists for the object detector (YOLOE text prompts) by category. The scene labels choose the categories of a clip; the detector gets 'always' plus the union of the chosen categories, at most `cap` words (a longer list names things worse: 35 to 75 words worked, 1,100 did not). Judge a word by its numbers in vocab_stats*.json, not by feel; change this file only with a reason.",
+ "cap": 80,
+ "always": {
+  "people_gear": [
+   "person",
+   "backpack",
+   "helmet",
+   "hat",
+   "glove",
+   "jacket"
+  ],
+  "core": [
+   "tree",
+   "bush",
+   "grass",
+   "rock",
+   "path",
+   "road",
+   "sign",
+   "pole",
+   "wall",
+   "fence",
+   "gate",
+   "building",
+   "house",
+   "car"
+  ],
+  "course_markers": [
+   "signpost",
+   "flag",
+   "tape",
+   "arrow sign",
+   "marker post"
+  ]
+ },
+ "categories": {
+  "race_event": {
+   "about": "the start, finish or general bustle of a race: banners, barriers, tents, spectators, support vehicles",
+   "words": [
+    "banner",
+    "tent",
+    "barrier",
+    "table",
+    "portable toilet",
+    "van",
+    "trailer",
+    "gazebo",
+    "speaker"
+   ]
+  },
+  "aid_station": {
+   "about": "an aid station or checkpoint: food tables, tents, chairs, crates, cups",
+   "words": [
+    "table",
+    "tent",
+    "bench",
+    "chair",
+    "crate",
+    "bag",
+    "cup",
+    "gazebo",
+    "trash can",
+    "portable toilet"
+   ]
+  },
+  "forest_trail": {
+   "about": "forest, woodland or a trail through the countryside, snowy or not",
+   "words": [
+    "log",
+    "tree stump",
+    "boulder",
+    "stairs",
+    "bridge",
+    "railing",
+    "bench",
+    "hut",
+    "stile",
+    "fallen tree",
+    "cabin"
+   ]
+  },
+  "snow": {
+   "about": "snow-covered ground",
+   "words": [
+    "snowy ground"
+   ]
+  },
+  "moor": {
+   "about": "open moorland or heath: boardwalks, wooden platforms, fence posts, huts",
+   "words": [
+    "boardwalk",
+    "platform",
+    "cairn",
+    "hut",
+    "cabin",
+    "bench",
+    "pond"
+   ]
+  },
+  "water": {
+   "about": "a river, stream, lake, weir or dam",
+   "words": [
+    "bridge",
+    "footbridge",
+    "weir",
+    "dam",
+    "railing",
+    "boat",
+    "kayak",
+    "puddle",
+    "stepping stones",
+    "jetty"
+   ]
+  },
+  "infrastructure": {
+   "about": "infrastructure along the way: power lines, pylons, wind turbines, dams, water towers, railways",
+   "words": [
+    "power line",
+    "pylon",
+    "wind turbine",
+    "water tower",
+    "dam",
+    "weir",
+    "silo",
+    "railway",
+    "tunnel",
+    "bollard"
+   ]
+  },
+  "town_village": {
+   "about": "a village or small town: streets, houses, a church, parked cars",
+   "words": [
+    "church",
+    "steeple",
+    "chimney",
+    "van",
+    "bus",
+    "bicycle",
+    "motorcycle",
+    "street light",
+    "road sign",
+    "traffic light",
+    "trash can",
+    "bench",
+    "statue",
+    "power line",
+    "tower",
+    "portable toilet",
+    "scaffolding"
+   ]
+  },
+  "urban": {
+   "about": "a city: busy streets, shops, trams, traffic lights, building sites",
+   "words": [
+    "traffic light",
+    "tram",
+    "bus",
+    "bus stop",
+    "crosswalk",
+    "shop",
+    "scaffolding",
+    "crane",
+    "graffiti",
+    "trash can",
+    "bicycle",
+    "scooter",
+    "bollard"
+   ]
+  },
+  "farm_rural": {
+   "about": "farmland, fields, a farmyard or pen, farm animals",
+   "words": [
+    "chicken",
+    "duck",
+    "goat",
+    "pig",
+    "cow",
+    "horse",
+    "bird",
+    "barn",
+    "shed",
+    "tractor",
+    "container",
+    "hedge",
+    "trough",
+    "hay bale"
+   ]
+  },
+  "wildlife": {
+   "about": "wild animals in the woods and fields",
+   "words": [
+    "deer",
+    "bird",
+    "squirrel",
+    "fox",
+    "rabbit",
+    "boar",
+    "heron"
+   ]
+  },
+  "road_traffic": {
+   "about": "roads with traffic",
+   "words": [
+    "van",
+    "bus",
+    "bicycle",
+    "motorcycle",
+    "traffic light",
+    "road sign",
+    "power line",
+    "bollard"
+   ]
+  },
+  "coast": {
+   "about": "the coast or a harbour",
+   "words": [
+    "boat",
+    "beach hut",
+    "lighthouse",
+    "pier",
+    "buoy"
+   ]
+  },
+  "indoor": {
+   "about": "inside a building (an aid station hall, a canteen)",
+   "words": [
+    "table",
+    "bench",
+    "chair",
+    "cup",
+    "banner"
+   ]
+  }
+ },
+ "retired": {
+  "animal": "fires on hands, heads and shoes (0 of 8 agreed with Qwen)",
+  "waterfall": "fires on snow patches (0 of 7)",
+  "sheep": "the boxes were geese, birds and a pig (1 of 8)",
+  "snow": "does not fire on snow; \"snowy ground\" does",
+  "truck": "fired on portable toilets (0 of 5)",
+  "frost": "fires on every frame",
+  "river": "never fires, even on a river",
+  "lake": "never fires",
+  "ice": "never fires"
+ },
+ "accepts": {
+  "house": [
+   "house",
+   "building",
+   "barn",
+   "cottage",
+   "home",
+   "shed",
+   "roof",
+   "brick"
+  ],
+  "building": [
+   "house",
+   "building",
+   "barn",
+   "cottage",
+   "home",
+   "shed",
+   "roof",
+   "wall"
+  ],
+  "tree": [
+   "tree",
+   "trunk",
+   "branch",
+   "conifer",
+   "pine"
+  ],
+  "cow": [
+   "cow",
+   "cattle",
+   "calf",
+   "bull",
+   "goat",
+   "pig",
+   "boar"
+  ],
+  "chicken": [
+   "chicken",
+   "hen",
+   "rooster",
+   "bird",
+   "fowl",
+   "duck",
+   "goose",
+   "turkey"
+  ],
+  "duck": [
+   "duck",
+   "goose",
+   "bird",
+   "swan"
+  ],
+  "bird": [
+   "bird",
+   "chicken",
+   "duck",
+   "hen",
+   "goose",
+   "pigeon",
+   "turkey"
+  ],
+  "goat": [
+   "goat",
+   "sheep",
+   "pig",
+   "boar"
+  ],
+  "pig": [
+   "pig",
+   "boar",
+   "goat"
+  ],
+  "horse": [
+   "horse",
+   "pony"
+  ],
+  "sign": [
+   "sign",
+   "notice",
+   "board",
+   "tag"
+  ],
+  "pole": [
+   "pole",
+   "post",
+   "lamp",
+   "light",
+   "pillar"
+  ],
+  "wall": [
+   "wall",
+   "stone",
+   "brick",
+   "hedge"
+  ],
+  "fence": [
+   "fence",
+   "gate",
+   "railing",
+   "wire",
+   "mesh",
+   "post"
+  ],
+  "gate": [
+   "gate",
+   "fence",
+   "door"
+  ],
+  "bush": [
+   "bush",
+   "shrub",
+   "hedge",
+   "plant"
+  ],
+  "road": [
+   "road",
+   "asphalt",
+   "street",
+   "lane"
+  ],
+  "path": [
+   "path",
+   "trail",
+   "road",
+   "track",
+   "walkway",
+   "gravel"
+  ],
+  "car": [
+   "car",
+   "vehicle",
+   "suv"
+  ],
+  "van": [
+   "van",
+   "vehicle",
+   "car"
+  ],
+  "bus": [
+   "bus",
+   "coach"
+  ],
+  "bicycle": [
+   "bicycle",
+   "bike"
+  ],
+  "motorcycle": [
+   "motorcycle",
+   "motorbike",
+   "scooter"
+  ],
+  "container": [
+   "container",
+   "tank",
+   "box",
+   "cabin",
+   "bin",
+   "toilet"
+  ],
+  "shed": [
+   "shed",
+   "container",
+   "hut",
+   "cabin",
+   "tank",
+   "barn"
+  ],
+  "barn": [
+   "barn",
+   "shed",
+   "house",
+   "building"
+  ],
+  "flag": [
+   "flag",
+   "banner",
+   "sign",
+   "tag"
+  ],
+  "banner": [
+   "banner",
+   "flag",
+   "sign"
+  ],
+  "tent": [
+   "tent",
+   "canopy",
+   "gazebo"
+  ],
+  "bench": [
+   "bench",
+   "seat",
+   "table"
+  ],
+  "rock": [
+   "rock",
+   "stone",
+   "boulder"
+  ],
+  "boulder": [
+   "rock",
+   "stone",
+   "boulder"
+  ],
+  "grass": [
+   "grass",
+   "field",
+   "lawn",
+   "meadow"
+  ],
+  "snowy ground": [
+   "snow",
+   "snowy",
+   "ice"
+  ],
+  "bridge": [
+   "bridge",
+   "boardwalk",
+   "walkway",
+   "deck",
+   "platform",
+   "railing"
+  ],
+  "tower": [
+   "tower",
+   "steeple",
+   "spire",
+   "chimney",
+   "church"
+  ],
+  "church": [
+   "church",
+   "steeple",
+   "chapel",
+   "tower"
+  ],
+  "steeple": [
+   "steeple",
+   "church",
+   "spire",
+   "tower",
+   "weather vane"
+  ],
+  "chimney": [
+   "chimney",
+   "chimney stack"
+  ],
+  "hedge": [
+   "hedge",
+   "bush",
+   "shrub",
+   "wall"
+  ],
+  "stairs": [
+   "stair",
+   "step",
+   "staircase"
+  ],
+  "statue": [
+   "statue",
+   "sculpture"
+  ],
+  "log": [
+   "log",
+   "wood",
+   "trunk",
+   "branch"
+  ],
+  "portable toilet": [
+   "toilet",
+   "portable",
+   "booth",
+   "cabin"
+  ],
+  "table": [
+   "table",
+   "desk"
+  ],
+  "hut": [
+   "hut",
+   "cabin",
+   "shed"
+  ],
+  "cabin": [
+   "cabin",
+   "hut",
+   "shed",
+   "container"
+  ],
+  "platform": [
+   "platform",
+   "deck",
+   "stage",
+   "bridge",
+   "bench"
+  ],
+  "railing": [
+   "railing",
+   "rail",
+   "fence",
+   "balustrade"
+  ],
+  "street light": [
+   "street light",
+   "lamp",
+   "light",
+   "pole"
+  ],
+  "road sign": [
+   "sign"
+  ],
+  "traffic light": [
+   "traffic light",
+   "signal"
+  ],
+  "power line": [
+   "wire",
+   "cable",
+   "line",
+   "pole",
+   "pylon"
+  ],
+  "trash can": [
+   "bin",
+   "trash",
+   "garbage",
+   "rubbish"
+  ],
+  "tree stump": [
+   "stump",
+   "log",
+   "trunk"
+  ],
+  "signpost": [
+   "sign",
+   "post",
+   "waymarker",
+   "marker"
+  ],
+  "boat": [
+   "boat",
+   "kayak",
+   "canoe",
+   "ship"
+  ],
+  "kayak": [
+   "kayak",
+   "canoe",
+   "boat"
+  ],
+  "puddle": [
+   "puddle",
+   "water"
+  ],
+  "weir": [
+   "weir",
+   "dam",
+   "waterfall"
+  ],
+  "dam": [
+   "dam",
+   "weir"
+  ],
+  "cairn": [
+   "cairn",
+   "stones",
+   "marker"
+  ],
+  "bollard": [
+   "bollard",
+   "post"
+  ],
+  "scaffolding": [
+   "scaffold"
+  ],
+  "barrier": [
+   "barrier",
+   "fence",
+   "barricade"
+  ],
+  "tape": [
+   "tape",
+   "ribbon",
+   "cord",
+   "line"
+  ],
+  "arrow sign": [
+   "arrow",
+   "sign",
+   "marker"
+  ],
+  "marker post": [
+   "post",
+   "marker",
+   "pole",
+   "sign"
+  ],
+  "boardwalk": [
+   "boardwalk",
+   "walkway",
+   "deck",
+   "platform",
+   "path",
+   "bridge"
+  ],
+  "footbridge": [
+   "bridge",
+   "footbridge",
+   "walkway",
+   "boardwalk"
+  ],
+  "stepping stones": [
+   "stone",
+   "stepping",
+   "rock"
+  ],
+  "jetty": [
+   "jetty",
+   "pier",
+   "dock",
+   "platform"
+  ],
+  "pylon": [
+   "pylon",
+   "tower",
+   "pole",
+   "mast"
+  ],
+  "wind turbine": [
+   "turbine",
+   "windmill",
+   "wind"
+  ],
+  "water tower": [
+   "tower",
+   "water tower",
+   "tank",
+   "silo"
+  ],
+  "silo": [
+   "silo",
+   "tower",
+   "tank"
+  ],
+  "railway": [
+   "rail",
+   "track",
+   "train"
+  ],
+  "tunnel": [
+   "tunnel",
+   "underpass",
+   "arch"
+  ],
+  "tram": [
+   "tram",
+   "train",
+   "bus"
+  ],
+  "bus stop": [
+   "bus stop",
+   "shelter",
+   "stop"
+  ],
+  "crosswalk": [
+   "crosswalk",
+   "crossing",
+   "zebra"
+  ],
+  "shop": [
+   "shop",
+   "store",
+   "window"
+  ],
+  "crane": [
+   "crane",
+   "machine",
+   "excavator"
+  ],
+  "graffiti": [
+   "graffiti",
+   "mural",
+   "art"
+  ],
+  "scooter": [
+   "scooter",
+   "bike",
+   "moped"
+  ],
+  "crate": [
+   "crate",
+   "box",
+   "container"
+  ],
+  "bag": [
+   "bag",
+   "backpack",
+   "sack"
+  ],
+  "cup": [
+   "cup",
+   "mug",
+   "glass"
+  ],
+  "chair": [
+   "chair",
+   "seat"
+  ],
+  "gazebo": [
+   "gazebo",
+   "tent",
+   "canopy",
+   "shelter"
+  ],
+  "speaker": [
+   "speaker",
+   "loudspeaker"
+  ],
+  "trailer": [
+   "trailer",
+   "van",
+   "caravan",
+   "vehicle"
+  ],
+  "stile": [
+   "stile",
+   "gate",
+   "fence",
+   "steps"
+  ],
+  "fallen tree": [
+   "tree",
+   "log",
+   "trunk"
+  ],
+  "pond": [
+   "pond",
+   "water",
+   "puddle",
+   "lake"
+  ],
+  "trough": [
+   "trough",
+   "tub",
+   "bin"
+  ],
+  "hay bale": [
+   "hay",
+   "bale",
+   "straw"
+  ],
+  "deer": [
+   "deer",
+   "roe",
+   "stag"
+  ],
+  "squirrel": [
+   "squirrel"
+  ],
+  "fox": [
+   "fox"
+  ],
+  "rabbit": [
+   "rabbit",
+   "hare"
+  ],
+  "boar": [
+   "boar",
+   "pig"
+  ],
+  "heron": [
+   "heron",
+   "bird",
+   "stork"
+  ]
+ },
+ "stoplist": [
+  "person",
+  "man",
+  "woman",
+  "people",
+  "leg",
+  "hand",
+  "foot",
+  "feet",
+  "shoe",
+  "boot",
+  "jacket",
+  "hood",
+  "headlamp",
+  "bottle",
+  "backpack",
+  "glove",
+  "hat",
+  "sleeve",
+  "arm",
+  "finger",
+  "face",
+  "road",
+  "asphalt",
+  "path",
+  "ground",
+  "grass",
+  "snow",
+  "sky",
+  "cloud",
+  "water",
+  "fog",
+  "dirt",
+  "gravel",
+  "mud",
+  "track",
+  "lichen",
+  "moss",
+  "unclear",
+  "leaves",
+  "leaf",
+  "fungus",
+  "mushroom",
+  "insect",
+  "caterpillar",
+  "running pole",
+  "ski pole",
+  "trekking pole",
+  "hiking pole",
+  "trail running pole",
+  "object",
+  "thing",
+  "item",
+  "stuff"
+ ],
+ "scenery": [
+  "tree trunk",
+  "trunk",
+  "branches",
+  "bare tree",
+  "evergreen",
+  "pine tree",
+  "forest",
+  "hills",
+  "hill",
+  "mountain",
+  "woods",
+  "branch",
+  "twig",
+  "stick"
+ ]
+}

@@ -29,7 +29,7 @@ def _at(tr, key, t):
 
 def facts(tr, t0, t1, tz='Europe/Brussels'):
     """What the track says about [t0, t1]: distance travelled and where, time spent moving, climb, daylight at both ends, local times."""
-    from strata360.gps import context as X
+    from strata360.gps import context as X, sun as SUN
     from strata360.gps.overview import ascent_descent
     T = tr['t']; i = np.flatnonzero((T >= t0) & (T <= t1)); d0, d1 = _at(tr, 'dist', t0), _at(tr, 'dist', t1)
     dts = np.diff(T); sp = tr['speed'][i[:-1]] if len(i) > 1 else np.array([]); mv = np.isfinite(sp) & (sp > MOVING_MS); step = dts[i[:-1]] if len(i) > 1 else np.array([])
@@ -38,7 +38,7 @@ def facts(tr, t0, t1, tz='Europe/Brussels'):
                moving_s=round(moving_s), moving_share=round(moving_s / max(t1 - t0, 1.0), 2), ascent_m=round(up), descent_m=round(down))
     for name, t in (('start', t0), ('end', t1)):
         lat, lon = _at(tr, 'lat', t), _at(tr, 'lon', t)
-        out['daylight_' + name] = X.daylight(X.sun_elevation_deg(lat, lon, t)) if lat is not None and lon is not None else None
+        out['daylight_' + name] = SUN.daylight_at(lat, lon, t)
         out['local_' + name] = X._local(t, tz).strftime('%a %d %b %H:%M')
     return out
 

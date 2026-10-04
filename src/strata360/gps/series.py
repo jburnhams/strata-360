@@ -86,12 +86,15 @@ def _interp(tr, key, t):
     return float(np.interp(t, tr['t'][ok], v[ok])) if ok.any() else None
 
 
-def clips(tr, spans, tz='Europe/Brussels', stretch_points=60):
-    """Where each clip is on the track. `covered` is False for a clip with no track under it (before the start, after the finish)."""
+def clips(tr, spans, tz='Europe/Brussels', stretch_points=60, sun_of=None):
+    """Where each clip is on the track. `covered` is False for a clip with no track under it (before the start, after the finish). `sun_of(clip id)` gives the clip's stored sun field (gps/sun.py, the `sun` stage) or None;
+    when it does, the clip's daylight and sun elevation are that field, not worked out again."""
     from strata360.gps import context as X
     T = tr['t']; out = []
     for s in spans:
-        mid = 0.5 * (s['t0'] + s['t1']); ctx = X.context_at(tr, s['t0'], s['t1'], tz); item = dict(id=s['id'], start_utc=_iso(s['t0']), end_utc=_iso(s['t1']), duration_s=round(s['t1'] - s['t0'], 1), covered=bool(ctx.get('covered')))
+        mid = 0.5 * (s['t0'] + s['t1']); ctx = X.context_at(tr, s['t0'], s['t1'], tz); sun = sun_of(s['id']) if sun_of else None
+        if ctx.get('covered') and sun and sun.get('covered'): ctx = dict(ctx, daylight=sun['daylight'], sun_elevation_deg=sun['elevation_deg'])
+        item = dict(id=s['id'], start_utc=_iso(s['t0']), end_utc=_iso(s['t1']), duration_s=round(s['t1'] - s['t0'], 1), covered=bool(ctx.get('covered')))
         if item['covered'] and T[0] <= mid <= T[-1]:
             i = np.flatnonzero((T >= s['t0']) & (T <= s['t1'])); i = i[np.isfinite(tr['lat'][i]) & np.isfinite(tr['lon'][i])]
             if len(i) > stretch_points: i = i[np.unique(np.linspace(0, len(i) - 1, stretch_points).astype(int))]

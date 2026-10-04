@@ -18,13 +18,16 @@ DEFAULTS = {
     'people_every_frames': 50,
     'profile': 'me',
     'scenes_every_s': 5.0,
+    'scenes_px': 512,                        # the side of the front and rear pictures the scene model is shown (on 12 judged pictures: 120 degrees at 512 px 58 of 60 fields, 100 degrees at 768 px 54; the model reads a 512 picture as well and is 15% faster)
+    'scenes_fov': 120.0,                     # their field of view in degrees (130 degrees at 640 px also scored 58)
+    'scenes_sampling': 'adaptive',           # 'adaptive': look at the clip when the runner has moved or the scene has changed (analysis/sampling.py); 'fixed': every scenes_every_s seconds
     'transcript_check': {'mode': 'pro', 'pool': ['gemini:gemini-3.1-pro-preview'], 'pair': True, 'transcriber': False, 'min_votes': 2, 'accept': 0.5, 'thinking': 'low',
                          'patience': 3},          # Gemini Pro (paid key) checks each 60-120 s speech-only excerpt twice, a third time only when the two differ; a fix needs 2 votes (analysis/transcript_fix.py). mode 'transcribe': the transcription model alone; give a Flash 'pool' without 'pair' for the adaptive mixture. Opt-in stage `transcript_check`: paid API calls, every reply cached
     'llm': {'provider': 'gemini', 'model': 'gemini-3.1-pro-preview'},           # the voice-over script writer: Gemini Pro through a Google Cloud (Vertex AI) key in secrets.env; or 'gemini' (AI Studio key), 'anthropic', 'local' (mlx-lm)
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
     'overlay': {'enabled': True},           # the race overlay on the final film and the thumbnails (overlay/layout.py: elements, layout, map styles, zoom, scale, fonts); map key THUNDERFOREST_API_KEY in secrets.env
     'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '16M', 'encoder': 'h264'},
-    'stages': ['ingest', 'audio_extract', 'audio_clean', 'audio_events', 'motion', 'proxy', 'thumb', 'places', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best', 'thumb_overlay'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
+    'stages': ['ingest', 'audio_extract', 'audio_clean', 'audio_events', 'motion', 'proxy', 'thumb', 'places', 'sun', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best', 'thumb_overlay'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
 }
 
 
@@ -57,7 +60,7 @@ def track_path(name, cfg=None):
     return g if g and os.path.exists(g) else None
 
 
-ADDED_STAGES = [('audio_extract', 'ingest'), ('audio_clean', 'audio_extract'), ('audio_events', 'audio_clean'), ('thumb_overlay', 'thumb_best')]
+ADDED_STAGES = [('audio_extract', 'ingest'), ('audio_clean', 'audio_extract'), ('audio_events', 'audio_clean'), ('thumb_overlay', 'thumb_best'), ('sun', 'places')]
 
 
 def load(name):

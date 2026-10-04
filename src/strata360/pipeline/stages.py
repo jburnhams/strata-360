@@ -186,6 +186,14 @@ def places(ctx):
     rebuild_locations(root)                                                        # the race-wide locations.json in the project folder
 
 
+@stage('sun', 1, keys=('timezone',), outputs=('sun.json',), deps=('ingest',), needs_track=True,
+       note='how high the sun was at the start, middle and end of the clip (day, golden hour, twilight or night), from the clip time and where the race track says it was; no network. The clip card and the scene labels read this field')
+def sun(ctx):
+    from strata360.gps import sun as SUN, track
+    root, tp = _track_file(ctx)
+    ctx.write('sun.json', ctx.stamped(SUN.analyse(ctx.read('clip.json'), track.load(tp), ctx.cfg.get('timezone') or 'Europe/Brussels')))
+
+
 @stage('people', 2, keys=('people_every_frames',), outputs=('people.json', 'faces.npy', 'faces_thumbs.npy'), deps=('ingest',), soft_deps=('proxy',), default=False,
        note='persons and faces on body-frame views (YOLO11 pose + InsightFace), deduplicated across views (slow: minutes per clip; needs .venv-vision and models/)')
 def people(ctx):
@@ -212,13 +220,20 @@ def face_view(ctx):
     ctx.write('face_view.json', ctx.stamped(FV.analyse(str(ctx.dir), ctx.clip.osv, ctx.log)))
 
 
-@stage('scenes', 3, keys=('scenes_every_s',), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy',), default=False,
-       note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags; and a scenery-only score with clarity that ignores people) from a local VLM on front and rear views every few seconds (slow: minutes per clip)')
+@stage('scenes', 4, keys=('scenes_every_s', 'scenes_sampling', 'scenes_px', 'scenes_fov'), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy', 'quality', 'sun'), default=False,
+       note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags; and a scenery-only score with clarity that ignores people) from a local VLM on a wide front view and a wide rear view, labelled separately (each label has a direction), at the moments the runner has moved or the scene has changed (a fixed interval without the quality grid and the track; slow: minutes per clip)')
 def scenes(ctx):
     from strata360.analysis.scenes import analyse
     try: previous = ctx.read('scenes.json')
     except (OSError, ValueError): previous = None
-    ctx.write('scenes.json', ctx.stamped(analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['scenes_every_s'], previous=previous)))
+    from strata360.gps import sun as SUN
+    times = None
+    if ctx.cfg.get('scenes_sampling', 'adaptive') == 'adaptive':                    # when the runner moved or the scene changed (the race track and the quality grid are used when there are any)
+        from strata360.analysis import sampling
+        try: tp = _track_file(ctx)[1]
+        except RuntimeError: tp = None
+        times = sampling.times_for(str(ctx.dir), tp)
+    ctx.write('scenes.json', ctx.stamped(analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['scenes_every_s'], px=int(ctx.cfg.get('scenes_px', 512)), fov=float(ctx.cfg.get('scenes_fov', 120.0)), previous=previous, times=times, sun=SUN.load(str(ctx.dir)))))
 
 
 @stage('speakers', 1, outputs=('speakers.json', 'speakers.npy'), deps=('transcribe',), soft_deps=('audio_extract',),

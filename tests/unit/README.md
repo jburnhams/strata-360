@@ -23,6 +23,11 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |
 | `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network. `overlay/flyover.py`: camera, style and frames with `mbgl-render` faked (`test_overlay_flyover.py`) |
 | `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
+| `gps/sun.py` (the `sun` stage), `analysis/scenes.apply_sun` / `patch_sun` | n/a | done: the label boundaries, a clip's start/middle/end sun, clips outside the track, reading the stored field, the clip card taking it, dusk from the sun in the scene labels |
+| `analysis/vocab.py`, `vocab.json`, `vocab_stats_seed.json` | n/a | done: the shipped wordlists are checked for consistency; word union and cap, label simplifying, stop/scenery/feature, the stats book (record, merge, round trip, weak words, suggestions), category matching and word review with a fake model, project-local additions and removals |
+| `analysis/sampling.py` | n/a | done: the moments chosen by distance moved, scene change and sharpness, the fallbacks, reading the inputs from a clip folder and the track |
+| `analysis/scenes.py` | n/a | done: first run, reuse of front and rear answers, asking again only for missing ones, front and rear summaries, adaptive times |
+| `analysis/views.py` (crops) | n/a | `crop_plan`, `crop_rays`, `lens_choice`, `CropRenderer` with fake lenses and frames done (`test_views_crop.py`); the rest of the module needs lens frames |
 | `pipeline/ingest.py` | 98% | done |
 | `audio/speech.py` | 86% | partial: 101-112 (CLI) todo |
 | `audio/wordtimes.py` | 96% | done: pure math and logic covered |

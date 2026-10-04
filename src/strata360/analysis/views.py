@@ -99,9 +99,9 @@ class StabViews:
         return out
 
 
-def write_stab_views(osv, out_dir, every=25, first=None, quality=93, yaws=STAB_YAWS, px=VIEW_PX):
+def write_stab_views(osv, out_dir, every=25, first=None, quality=93, yaws=STAB_YAWS, px=VIEW_PX, fov=VIEW_FOV):
     """Like write_views but upright and heading-relative; files s{frame}_v{yaw}.jpg (yaw from the heading)."""
-    os.makedirs(out_dir, exist_ok=True); V = StabViews(osv, yaws=yaws, px=px); ks = []
+    os.makedirs(out_dir, exist_ok=True); V = StabViews(osv, yaws=yaws, px=px, fov=fov); ks = []
     for (k, m), (k2, s) in zip(decode(osv, 1, every), decode(osv, 0, every)):
         for y, img in zip(V.yaws, V.render(k, m, s)):
             cv2.imwrite(f'{out_dir}/s{k:05d}_v{y:03d}.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality])
@@ -137,6 +137,66 @@ def render_thumb(osv, t, yaw=0.0, pitch=0.0, hfov=95.0, w=960, h=540, stab=None,
     img = (a * wt + b * (1 - wt)).astype(np.uint8); ok, buf = cv2.imencode('.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality]); return buf.tobytes()
 
 
+# ---- crops: a small detector box re-rendered at lens resolution ---------------------------------------------------------------------------------------------------------------
+# A box found in a 1024 px analysis view can be too small for a labelling model to tell what it is. It is then cut straight from the full-size lens frame (about twice the detail of the proxy or
+# of the views). One moment's lens frames are decoded once and every box of that moment is cut from them; a crop wholly in front of or behind the seam comes from one lens (no blending, and the
+# other lens is not decoded).
+
+CROP_PX = 448
+CROP_WANT_PX = 96            # an object this many pixels long in the picture given to the labelling model can be identified
+LENS_FULL = 3840             # the lens video's own size
+NATIVE_PPD = 20.0            # lens pixels per degree at the middle of a lens (3840 px over about 190 degrees)
+SEAM = math.sin(math.radians(6.0))
+
+
+def crop_plan(box, view_px=VIEW_PX, fov=VIEW_FOV, want_px=CROP_WANT_PX, native_ppd=NATIVE_PPD):
+    """How to get a picture of a detector box [x0, y0, x1, y1] found in an analysis view: ('view', deg) when it already has `want_px` pixels on its long side (cut it from the view or the proxy),
+    ('native', deg) when it is smaller and the lens frame holds clearly more detail, ('tiny', deg) when even the lens frame cannot give it a third of `want_px` pixels. deg is its long side in degrees."""
+    f = (view_px / 2) / math.tan(math.radians(fov / 2)); long_px = max(box[2] - box[0], box[3] - box[1]); deg = math.degrees(long_px / f)
+    if long_px >= want_px: return 'view', deg
+    if deg * native_ppd < want_px / 3: return 'tiny', deg
+    return ('native' if deg * native_ppd > long_px * 1.3 else 'view'), deg
+
+
+def crop_rays(lon, lat, fov, px=CROP_PX):
+    """Unit rays (px, px, 3) in the upright world frame (X right, Y forward, Z up) of a square flat view centred on longitude `lon` and latitude `lat` (radians; lon 0 is the middle column of the proxy)
+    with a field of view of `fov` degrees."""
+    f = np.array([math.sin(lon) * math.cos(lat), math.cos(lon) * math.cos(lat), math.sin(lat)]); r = np.array([math.cos(lon), -math.sin(lon), 0.0]) if abs(math.cos(lat)) > 1e-6 else np.array([1.0, 0, 0]); u = np.cross(r, f)
+    g = ((np.arange(px) + 0.5) / px * 2 - 1) * math.tan(math.radians(fov) / 2); X, Y = np.meshgrid(g, -g)
+    d = f[None, None] + X[..., None] * r[None, None] + Y[..., None] * u[None, None]
+    return d / np.linalg.norm(d, axis=-1, keepdims=True)
+
+
+def lens_choice(y):
+    """Which lens a set of body-frame rays needs, from their forward components `y`: 'master' (the front lens) when all are ahead of the 6 degree seam, 'slave' when all are behind it, else 'both'."""
+    if np.all(y > SEAM): return 'master'
+    if np.all(y < -SEAM): return 'slave'
+    return 'both'
+
+
+class CropRenderer:
+    """Flat crops of one clip, cut from the full-size lens frames. `crop(t, lon, lat, fov)` returns an RGB uint8 picture; ask for all the boxes of a moment in a row and its lens frames are decoded once."""
+    def __init__(self, osv, stab=None):
+        from strata360.osv.mp4 import video_sample_times
+        self.osv = osv; self.stab = stab or StabViews(osv, yaws=(0,)); self.pts = video_sample_times(osv); self._k = None; self._frames = {}
+
+    def _frame(self, stream, k):
+        if k != self._k: self._k, self._frames = k, {}
+        if stream not in self._frames: self._frames[stream] = grab_frame(self.osv, stream, self.pts[k], size=LENS_FULL)
+        return self._frames[stream]
+
+    def crop(self, t, lon, lat, fov, px=CROP_PX):
+        k = int(np.clip(np.searchsorted(self.pts, self.pts[0] + t), 0, len(self.pts) - 1)); M = self.stab.Ms[min(k, len(self.stab.Ms) - 1)]
+        db = np.einsum('nj,ij->ni', crop_rays(lon, lat, fov, px).reshape(-1, 3), M); f = lambda a: a.astype(np.float32).reshape(px, px)       # d_body = M d_E
+        def cut(lens, stream):
+            u, v, _ = lens.project(db, LENS_FULL / 3840.0); return cv2.remap(self._frame(stream, k), f(u), f(v), cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT)
+        c = lens_choice(db[:, 1])
+        if c == 'master': return cut(self.stab.master, 1)
+        if c == 'slave': return cut(self.stab.slave, 0)
+        w = np.clip(0.5 + db[:, 1] / SEAM, 0, 1).reshape(px, px, 1).astype(np.float32)
+        return (cut(self.stab.master, 1) * w + cut(self.stab.slave, 0) * (1 - w)).astype(np.uint8)
+
+
 # ---- views cut from the clip's proxy (one early render that the other stages share) ------------------------------------------------------------------------------------------
 # The `proxy` stage renders the clip once as an upright, world-locked equirect (3840x1920, 25 fps, HEVC). Detectors, the scene model and thumbnails then cut their flat views from that
 # file: no repeated decoding of the two huge lens streams. The equirect is world-locked, so a heading-relative view is just a rotation of the sampling rays (same heading track as StabViews).
@@ -161,9 +221,10 @@ def _equirect_view(eq, dE, w, h):
     return cv2.remap(eq, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 
 
-def write_stab_views_proxy(proxy_path, osv, out_dir, every=25, yaws=STAB_YAWS, px=VIEW_PX, fov=VIEW_FOV, quality=93):
-    """Like write_stab_views, but decoded from the clip's proxy (every `every` SOURCE frames; the proxy keeps every 2nd or 4th). Files s{source_frame:05d}_v{yaw:03d}.jpg."""
+def write_stab_views_proxy(proxy_path, osv, out_dir, every=25, yaws=STAB_YAWS, px=VIEW_PX, fov=VIEW_FOV, quality=93, times=None):
+    """Like write_stab_views, but decoded from the clip's proxy (every `every` SOURCE frames; the proxy keeps every 2nd or 4th), or at the clip times `times` (seconds) when given. Files s{source_frame:05d}_v{yaw:03d}.jpg."""
     side = json.load(open(os.path.splitext(proxy_path)[0] + '.json')); frames = side['frames']; heading, _ = heading_track(osv); os.makedirs(out_dir, exist_ok=True)
+    if times is not None: return _write_stab_views_at(proxy_path, side, heading, out_dir, times, yaws, px, fov, quality)
     step = max(int(round(every / side['every_n_source_frames'])), 1); W, H = side['size']
     cmd = ['ffmpeg', '-v', 'error', '-i', proxy_path, '-fps_mode', 'passthrough', '-vf', f"select='not(mod(n\\,{step}))'", '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=W * H * 3 * 2); n = W * H * 3; j = 0; ks = []
@@ -175,6 +236,21 @@ def write_stab_views_proxy(proxy_path, osv, out_dir, every=25, yaws=STAB_YAWS, p
             img = _equirect_view(eq, stab_view_rays(y, h, px, fov), px, px); cv2.imwrite(f'{out_dir}/s{k:05d}_v{y:03d}.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality])
         ks.append(int(k)); j += 1
     p.wait(); return ks
+
+
+def _write_stab_views_at(proxy_path, side, heading, out_dir, times, yaws, px, fov, quality):
+    """The views of write_stab_views_proxy at the proxy frames nearest the clip times `times` (one frame decoded at a time); returns the source frame of each."""
+    W, H = side['size']; ft = np.array([f['t_s'] for f in side['frames']]); ks = []
+    for t in times:
+        j = int(np.argmin(np.abs(ft - t))); k = side['frames'][j]['source_frame']
+        if k in ks: continue
+        raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{ft[j]:.3f}', '-i', proxy_path, '-frames:v', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, check=True).stdout
+        if len(raw) < W * H * 3: continue
+        eq = np.frombuffer(raw, np.uint8).reshape(H, W, 3); h = heading[min(k, len(heading) - 1)]
+        for y in yaws:
+            img = _equirect_view(eq, stab_view_rays(y, h, px, fov), px, px); cv2.imwrite(f'{out_dir}/s{k:05d}_v{y:03d}.jpg', img[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, quality])
+        ks.append(int(k))
+    return ks
 
 
 def render_thumb_proxy(proxy_path, osv, t, yaw=0.0, pitch=0.0, hfov=100.0, w=960, h=540, quality=90, heading=None):

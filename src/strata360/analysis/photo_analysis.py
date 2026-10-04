@@ -110,10 +110,9 @@ def face_view(det, ident):
 
 
 def scenes_summary(log, scenery):
-    """A photo's scene answers (the `log` and `scenery` prompts of analysis/scenes_vlm.py) as one record, like a clip's scenes.json item."""
-    from strata360.analysis.scenes import LOG_KEYS
-    a = log or {}; sc = scenery or {}; score, clar = sc.get('score'), sc.get('clarity')
-    return dict(ok=bool(log), **{k: a.get(k) for k in LOG_KEYS}, scenery=float(score) if isinstance(score, (int, float)) else None, clarity=float(clar) if isinstance(clar, (int, float)) else None, scenery_why=sc.get('reason'))
+    """A photo's scene answers (the `log` and `scenery` prompts of analysis/scenes_vlm.py) as one record: the same builder as a clip's scenes.json items (analysis/scenes.item)."""
+    from strata360.analysis.scenes import item
+    return item(log, scenery)
 
 
 # ---- the model runs (subprocesses in .venv-vision) ---------------------------------------------------------------------------------------------------------------------------------------------------------

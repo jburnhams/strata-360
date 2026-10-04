@@ -365,9 +365,9 @@ BRIGHT, DARK = {'day', 'golden hour'}, {'twilight', 'night'}
 
 def light(sec, tr):
     """The light a section was filmed in against the light the runner had there: {captured, race, warning}. The warning says so when a daytime view would be shown for a stretch run in the dark (or the other way round); None when they fit or are unknown. `tr` is the race track."""
-    from strata360.gps import context as X, clock as CK
+    from strata360.gps import sun as SUN
     d, t = track_dist(tr); mid = sec['items'][len(sec['items']) // 2]; caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap_t = caps[len(caps) // 2] if caps else None
-    race_t = float(np.interp((sec['km0'] + sec['km1']) / 2 * 1000, d, t)); day = lambda tt: X.daylight(CK.sun_elevation_deg(mid['lat'], mid['lon'], tt)) if tt else None; cap, race = day(cap_t), day(race_t); warn = None
+    race_t = float(np.interp((sec['km0'] + sec['km1']) / 2 * 1000, d, t)); day = lambda tt: SUN.daylight_at(mid['lat'], mid['lon'], tt) if tt else None; cap, race = day(cap_t), day(race_t); warn = None
     said = {'day': 'in daylight', 'golden hour': 'in golden-hour light', 'twilight': 'at twilight', 'night': 'at night'}
     if (cap in BRIGHT and race in DARK) or (cap in DARK and race in BRIGHT): warn = f'Filmed {said[cap]}, but the runner passes here {said[race]}: it would look wrong in the film.'
     return dict(captured=cap, race=race, warning=warn)

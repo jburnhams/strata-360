@@ -1,0 +1,739 @@
+{
+ "schema": 1,
+ "sources": [
+  "experiment 2026-10-04: 127 named boxes labelled by Qwen3.5-9B (6 frames of 4 clips, 26 tiles each, agreement by the wordlist accepts) and 252 leftover boxes from clips 0013, 0018, 0021 (labels simplified by Qwen3.5-9B)"
+ ],
+ "updated": "2026-10-04T12:00:17",
+ "categories": {},
+ "words": {
+  "animal": {
+   "fired": 8,
+   "agreed": 0,
+   "false_positive": 4,
+   "mislabels": {
+    "running shoe": 1,
+    "railing": 1,
+    "substance": 1,
+    "sign": 1
+   }
+  },
+  "banner": {
+   "fired": 1,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "portable toilet": 1
+   }
+  },
+  "bench": {
+   "fired": 2,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "fence": 1,
+    "wall": 1
+   }
+  },
+  "bird": {
+   "fired": 1,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "bush": 1
+   }
+  },
+  "boat": {
+   "fired": 1,
+   "agreed": 0,
+   "false_positive": 1,
+   "mislabels": {}
+  },
+  "boulder": {
+   "fired": 1,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "paw print": 1
+   }
+  },
+  "bridge": {
+   "fired": 2,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "fence": 2
+   }
+  },
+  "bush": {
+   "fired": 4,
+   "agreed": 2,
+   "false_positive": 0,
+   "mislabels": {
+    "car": 1,
+    "sign": 1
+   }
+  },
+  "car": {
+   "fired": 8,
+   "agreed": 8,
+   "false_positive": 0,
+   "mislabels": {}
+  },
+  "chicken": {
+   "fired": 9,
+   "agreed": 6,
+   "false_positive": 0,
+   "mislabels": {
+    "animal": 3
+   }
+  },
+  "chimney": {
+   "fired": 1,
+   "agreed": 1,
+   "false_positive": 0,
+   "mislabels": {}
+  },
+  "cow": {
+   "fired": 10,
+   "agreed": 5,
+   "false_positive": 0,
+   "mislabels": {
+    "animal": 3,
+    "bird": 1,
+    "log": 1
+   }
+  },
+  "duck": {
+   "fired": 8,
+   "agreed": 4,
+   "false_positive": 1,
+   "mislabels": {
+    "animal": 2,
+    "chicken": 1
+   }
+  },
+  "fence": {
+   "fired": 1,
+   "agreed": 1,
+   "false_positive": 0,
+   "mislabels": {}
+  },
+  "flag": {
+   "fired": 2,
+   "agreed": 1,
+   "false_positive": 1,
+   "mislabels": {}
+  },
+  "hill": {
+   "fired": 3,
+   "agreed": 0,
+   "false_positive": 1,
+   "mislabels": {
+    "tree": 2
+   }
+  },
+  "house": {
+   "fired": 8,
+   "agreed": 1,
+   "false_positive": 1,
+   "mislabels": {
+    "wall": 3,
+    "sign": 2,
+    "sheep": 1
+   }
+  },
+  "mountain": {
+   "fired": 2,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "tree": 1,
+    "hill": 1
+   }
+  },
+  "overhead wire": {
+   "fired": 2,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "fence": 2
+   }
+  },
+  "path": {
+   "fired": 3,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "gate": 2,
+    "sign": 1
+   }
+  },
+  "pole": {
+   "fired": 4,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "tree trunk": 2,
+    "gate": 1,
+    "house": 1
+   }
+  },
+  "shed": {
+   "fired": 2,
+   "agreed": 1,
+   "false_positive": 1,
+   "mislabels": {}
+  },
+  "sheep": {
+   "fired": 13,
+   "agreed": 0,
+   "false_positive": 5,
+   "mislabels": {
+    "animal": 3,
+    "goose": 2,
+    "bird": 2,
+    "pigeon": 1
+   }
+  },
+  "snow": {
+   "fired": 6,
+   "agreed": 1,
+   "false_positive": 1,
+   "mislabels": {
+    "tree": 2,
+    "forest": 1,
+    "hill": 1
+   }
+  },
+  "steeple": {
+   "fired": 2,
+   "agreed": 2,
+   "false_positive": 0,
+   "mislabels": {}
+  },
+  "street light": {
+   "fired": 2,
+   "agreed": 1,
+   "false_positive": 0,
+   "mislabels": {
+    "house": 1
+   }
+  },
+  "tent": {
+   "fired": 2,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "cloth": 1,
+    "tarp": 1
+   }
+  },
+  "tower": {
+   "fired": 1,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "roof edge": 1
+   }
+  },
+  "tree": {
+   "fired": 3,
+   "agreed": 2,
+   "false_positive": 1,
+   "mislabels": {}
+  },
+  "tree stump": {
+   "fired": 2,
+   "agreed": 0,
+   "false_positive": 1,
+   "mislabels": {
+    "gate post": 1
+   }
+  },
+  "truck": {
+   "fired": 5,
+   "agreed": 0,
+   "false_positive": 0,
+   "mislabels": {
+    "portable toilet": 5
+   }
+  },
+  "van": {
+   "fired": 1,
+   "agreed": 1,
+   "false_positive": 0,
+   "mislabels": {}
+  },
+  "waterfall": {
+   "fired": 7,
+   "agreed": 0,
+   "false_positive": 5,
+   "mislabels": {
+    "substance": 1,
+    "barrier": 1
+   }
+  }
+ },
+ "suggest": {
+  "tree": {
+   "count": 19,
+   "clips": {
+    "0013": 3,
+    "0018": 12,
+    "0021": 4
+   },
+   "examples": [
+    "bare tree",
+    "large tree",
+    "tree"
+   ]
+  },
+  "sign": {
+   "count": 8,
+   "clips": {
+    "0013": 5,
+    "0021": 3
+   },
+   "examples": [
+    "yellow sign",
+    "sign on fence post",
+    "white sign"
+   ]
+  },
+  "bird": {
+   "count": 7,
+   "clips": {
+    "0013": 5,
+    "0018": 2
+   },
+   "examples": [
+    "brown bird",
+    "white bird",
+    "bird"
+   ]
+  },
+  "rock": {
+   "count": 6,
+   "clips": {
+    "0018": 3,
+    "0021": 3
+   },
+   "examples": [
+    "white rock",
+    "rock",
+    "dirt and rocks"
+   ]
+  },
+  "animal": {
+   "count": 5,
+   "clips": {
+    "0013": 3,
+    "0018": 2
+   },
+   "examples": [
+    "running animal",
+    "small white animal",
+    "small animal"
+   ]
+  },
+  "leave": {
+   "count": 5,
+   "clips": {
+    "0013": 1,
+    "0018": 2,
+    "0021": 2
+   },
+   "examples": [
+    "brown leaves"
+   ]
+  },
+  "plant": {
+   "count": 5,
+   "clips": {
+    "0021": 5
+   },
+   "examples": [
+    "small green plant"
+   ]
+  },
+  "street light": {
+   "count": 4,
+   "clips": {
+    "0013": 4
+   },
+   "examples": [
+    "street light"
+   ]
+  },
+  "car": {
+   "count": 4,
+   "clips": {
+    "0013": 1,
+    "0018": 3
+   },
+   "examples": [
+    "grey car",
+    "white car"
+   ]
+  },
+  "duck": {
+   "count": 3,
+   "clips": {
+    "0013": 3
+   },
+   "examples": [
+    "two ducks",
+    "white duck"
+   ]
+  },
+  "bag": {
+   "count": 3,
+   "clips": {
+    "0018": 3
+   },
+   "examples": [
+    "white plastic bag"
+   ]
+  },
+  "log": {
+   "count": 2,
+   "clips": {
+    "0013": 2
+   },
+   "examples": [
+    "wooden log",
+    "logs"
+   ]
+  },
+  "chicken": {
+   "count": 2,
+   "clips": {
+    "0013": 2
+   },
+   "examples": [
+    "black chicken",
+    "brown chicken"
+   ]
+  },
+  "bush": {
+   "count": 2,
+   "clips": {
+    "0013": 1,
+    "0021": 1
+   },
+   "examples": [
+    "green bush"
+   ]
+  },
+  "portable toilet": {
+   "count": 2,
+   "clips": {
+    "0013": 2
+   },
+   "examples": [
+    "white portable toilet"
+   ]
+  },
+  "fence": {
+   "count": 2,
+   "clips": {
+    "0013": 2
+   },
+   "examples": [
+    "wire fence",
+    "fence"
+   ]
+  },
+  "house": {
+   "count": 2,
+   "clips": {
+    "0013": 2
+   },
+   "examples": [
+    "stone house",
+    "brick house"
+   ]
+  },
+  "pole": {
+   "count": 2,
+   "clips": {
+    "0013": 2
+   },
+   "examples": [
+    "concrete pole",
+    "utility pole"
+   ]
+  },
+  "tree stump": {
+   "count": 2,
+   "clips": {
+    "0021": 2
+   },
+   "examples": [
+    "fallen tree stump",
+    "small tree stump"
+   ]
+  },
+  "marker post": {
+   "count": 2,
+   "clips": {
+    "0021": 2
+   },
+   "examples": [
+    "trail marker"
+   ]
+  },
+  "bench": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "green bench"
+   ]
+  },
+  "steeple": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "church steeple"
+   ]
+  },
+  "mossy roof": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "mossy roof"
+   ]
+  },
+  "building": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "stone building"
+   ]
+  },
+  "cable": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "black cable"
+   ]
+  },
+  "bear": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "black bear"
+   ]
+  },
+  "dog": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "black and white dog"
+   ]
+  },
+  "fence post": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "wooden fence post"
+   ]
+  },
+  "running shoe": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "running shoes"
+   ]
+  },
+  "tire track": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "tire tracks"
+   ]
+  },
+  "gate": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "rusty metal gate"
+   ]
+  },
+  "jug": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "white plastic jug"
+   ]
+  },
+  "hole": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "hole in wall"
+   ]
+  },
+  "curb": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "concrete curb"
+   ]
+  },
+  "cloud": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "clouds"
+   ]
+  },
+  "church": {
+   "count": 1,
+   "clips": {
+    "0013": 1
+   },
+   "examples": [
+    "church"
+   ]
+  },
+  "sun": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "sun"
+   ]
+  },
+  "fallen leave": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "fallen leaves"
+   ]
+  },
+  "butterfly": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "white butterfly"
+   ]
+  },
+  "patch": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "white patch"
+   ]
+  },
+  "waterfall": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "small waterfall"
+   ]
+  },
+  "bird nest": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "bird nest"
+   ]
+  },
+  "cross": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "white cross"
+   ]
+  },
+  "stream": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "small stream"
+   ]
+  },
+  "rock formation": {
+   "count": 1,
+   "clips": {
+    "0018": 1
+   },
+   "examples": [
+    "white rock formation"
+   ]
+  },
+  "tree base": {
+   "count": 1,
+   "clips": {
+    "0021": 1
+   },
+   "examples": [
+    "mossy tree base"
+   ]
+  },
+  "lizard": {
+   "count": 1,
+   "clips": {
+    "0021": 1
+   },
+   "examples": [
+    "small lizard"
+   ]
+  },
+  "flower": {
+   "count": 1,
+   "clips": {
+    "0021": 1
+   },
+   "examples": [
+    "yellow flower"
+   ]
+  }
+ }
+}

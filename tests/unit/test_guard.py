@@ -3,6 +3,12 @@ import pytest
 from strata360.pipeline import guard as G, resources as RS
 
 
+@pytest.fixture(autouse=True)
+def calm_machine(monkeypatch):
+    """The verdict also reads the real machine's memory pressure, swap and size: pin them, or a test fails whenever the machine that runs it has swap in use."""
+    monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 0.0); monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0)
+
+
 def rows(*specs):   # (pid, ppid, cpu, rss_mb, command)
     return [(p, pp, c, m, '01:00', cmd) for p, pp, c, m, cmd in specs]
 
@@ -55,7 +61,7 @@ def test_memory_pressure_and_swap_stop_a_job_and_block_a_start(monkeypatch):
     assert 'memory pressure' in G.verdict(rows=[])
     with pytest.raises(G.ResourceBusy) as e: G.check('x', 1.0)
     assert 'memory pressure' in str(e.value)
-    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 4.0); assert 'swap is filling up' in G.verdict(rows=[])
+    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 5.0); assert 'swap is filling up' in G.verdict(rows=[])
     with pytest.raises(G.ResourceBusy): G.check('x', 1.0)
     monkeypatch.setattr(G, 'swap_used_gb', lambda: 0.0); assert G.verdict(rows=[]) is None
 
@@ -77,18 +83,18 @@ def test_kill_tree_and_panic_stop_leftovers_but_not_the_server(monkeypatch):
 
 def test_the_swap_limits_are_shares_of_the_machines_memory(monkeypatch):
     for k in ('STRATA_START_SWAP_PCT', 'STRATA_KILL_SWAP_PCT', 'STRATA_KILL_SWAP_GB'): monkeypatch.delenv(k, raising=False)
-    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); assert G.swap_limit_gb('start') == pytest.approx(2.4) and G.swap_limit_gb('kill') == pytest.approx(3.2)
-    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 64.0); assert G.swap_limit_gb('start') == pytest.approx(9.6)                                    # the same share on a bigger machine
+    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); assert G.swap_limit_gb('start') == pytest.approx(4.0) and G.swap_limit_gb('kill') == pytest.approx(4.8)
+    monkeypatch.setattr(RS, 'mem_total_gb', lambda: 64.0); assert G.swap_limit_gb('start') == pytest.approx(16.0)                                    # the same share on a bigger machine
     monkeypatch.setenv('STRATA_START_SWAP_PCT', '10'); assert G.swap_limit_gb('start') == pytest.approx(6.4)
     monkeypatch.setenv('STRATA_KILL_SWAP_GB', '5'); assert G.swap_limit_gb('kill') == 5.0
 
 
 def test_a_start_is_blocked_only_above_the_start_share(monkeypatch):
     monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS', raising=False); monkeypatch.delenv('STRATA_START_SWAP_PCT', raising=False); monkeypatch.setattr(RS, 'mem_total_gb', lambda: 16.0); monkeypatch.setattr(RS, 'mem_available_gb', lambda: 8.0)
-    monkeypatch.setattr(G, 'load_per_cpu', lambda: 0.1); monkeypatch.setattr(G, 'processes', lambda: []); monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 1.9)
-    G.check('x', 1.0)                                                                                                                                  # 1.9 GB of 16 GB is under 15 percent
-    monkeypatch.setattr(G, 'swap_used_gb', lambda: 2.6)
-    with pytest.raises(G.ResourceBusy, match=r'limit 2\.4 GB, 15% of memory'): G.check('x', 1.0)
+    monkeypatch.setattr(G, 'load_per_cpu', lambda: 0.1); monkeypatch.setattr(G, 'processes', lambda: []); monkeypatch.setattr(G, 'pressure_level', lambda: 1); monkeypatch.setattr(G, 'swap_used_gb', lambda: 3.5)
+    G.check('x', 1.0)                                                                                                                                  # 3.5 GB of 16 GB is under 25 percent
+    monkeypatch.setattr(G, 'swap_used_gb', lambda: 4.4)
+    with pytest.raises(G.ResourceBusy, match=r'limit 4\.0 GB, 25% of memory'): G.check('x', 1.0)
 
 
 def test_the_machines_memory_is_read_in_gb():
