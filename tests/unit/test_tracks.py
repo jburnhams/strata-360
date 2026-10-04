@@ -273,3 +273,25 @@ def test_the_race_story_mentions_an_off_course_stage_only_when_the_distance_run_
     st = TK.race_story(rd); s = st['stages'][0]; assert s['off_course'] and s['off_course']['ran_km'] > s['off_course']['route_km'] * 1.1
     assert 'against' in '\n'.join(TK.story_text(st)); late = TK.story_at(st, t0 + 800); assert late['off_course'] and late['off_course']['ran_km'] > late['off_course']['route_km'] * 1.1
     assert TK.story_at(st, t0 + 300)['off_course'] is None                                                                   # on the route at that time: nothing to say
+
+
+def _run_with_pause(pause_s, drift_m=5.0, pause_at_m=3000.0, area=None):
+    """A run at 3 m/s north along a meridian that stands (drifting a little) for `pause_s` seconds at `pause_at_m` metres; one point a second."""
+    pts = []; m = 0.0; t = 0
+    while m < pause_at_m: pts.append((50.0 + m / 110540.0, 5.0)); m += 3.0; t += 1
+    for k in range(pause_s): pts.append((50.0 + (m + drift_m * np.sin(k / 30.0)) / 110540.0, 5.0)); t += 1
+    for _ in range(600): pts.append((50.0 + m / 110540.0, 5.0)); m += 3.0
+    return pts
+
+
+def test_a_stop_of_ten_minutes_in_one_small_place_away_from_the_checkpoints_is_found_with_when_and_how_long(tmp_path):
+    rd = str(tmp_path / 'proj'); os.makedirs(rd); TK.add(rd, 'race.gpx', gpx(_run_with_pause(15 * 60))); s, = TK.other_stops(rd)
+    assert 880 <= s['stopped_s'] <= 970 and s['arrived'] < s['left'] and 2.5 < s['km'] < 3.6 and s['radius_m'] == 60 and abs(s['lat'] - (50.0 + 3000 / 110540.0)) < 0.002
+    pois = [p for p in TK.listing(rd)['pois'] if p['sym'] == 'stop']; assert len(pois) == 1 and pois[0]['name'] == 'Stop 1' and pois[0]['stop']['stopped_s'] == s['stopped_s'] and 'km' in pois[0]['desc']
+
+
+def test_a_shorter_stop_or_one_that_wanders_off_or_is_at_the_start_or_end_is_not_another_stop(tmp_path):
+    rd = str(tmp_path / 'a'); os.makedirs(rd); TK.add(rd, 'race.gpx', gpx(_run_with_pause(8 * 60))); assert TK.other_stops(rd) == []                                     # 8 minutes: too short
+    rd = str(tmp_path / 'b'); os.makedirs(rd); TK.add(rd, 'race.gpx', gpx(_run_with_pause(15 * 60, drift_m=150.0))); assert TK.other_stops(rd) == []                      # wanders 150 m about: not one small place
+    rd = str(tmp_path / 'c'); os.makedirs(rd); TK.add(rd, 'race.gpx', gpx(_run_with_pause(15 * 60, pause_at_m=30.0))); assert TK.other_stops(rd) == []                    # at the start: that is the start's
+    rd = str(tmp_path / 'd'); os.makedirs(rd); assert TK.other_stops(rd) == []                                                                                            # no track

@@ -307,6 +307,9 @@ def listing(rd, tz='Europe/Brussels'):
     name = {x['id']: x['name'] for x in items}
     try: stops = checkpoint_stops(rd)
     except Exception: stops = {}                                                    # (the map is not worth failing the list over)
+    try: others = other_stops(rd)
+    except Exception: others = []                                                   # (the map is not worth failing the list over)
+    for k, s in enumerate(others, 1): points.append(dict(name=f"Stop {k}", lat=s['lat'], lon=s['lon'], ele=None, sym='stop', desc=f"km {s['km']:g} of the run", track='', stop=dict(arrived=s['arrived'], left=s['left'], stopped_s=s['stopped_s'], radius_m=s['radius_m'])))
     for c in marks: points.append(dict(name=f"Checkpoint {c['n']}", lat=c['lat'], lon=c['lon'], ele=None, sym='checkpoint', desc=f"{name.get(c['before'], '')} → {name.get(c['after'], '')}" + (f" (their ends are {c['gap_m']} m apart)" if c['gap_m'] >= 20 else ''), track='checkpoint', n=c['n'], **({'stop': stops[c['n']]} if c['n'] in stops else {})))
     merged = None
     if len(runs(rd)) >= 2:
@@ -463,6 +466,45 @@ def checkpoint_stops(rd, radius_m=ZONE_M, window_s=15.0):
         speed = np.hypot(b[0] - a[0], b[1] - a[1]) / (2 * window_s); slow = np.flatnonzero(speed < STOP_MS)
         arrived, left = (float(tv[slow[0]]), float(tv[slow[-1]])) if len(slow) else (None, None)
         out[c['n']] = dict(passed=float(tv[int(np.argmin(np.hypot(*(P[v] - cp).T)))]), arrived=arrived, left=left, stopped_s=round(left - arrived) if arrived is not None else 0, radius_m=round(radius_m))
+    return out
+
+
+STOP_MIN_S = 600.0             # a stop worth a mark on the map: the run stayed in one small place for at least this long (10 minutes)
+STOP_AREA_M = 60.0             # ... "one small place": every sample within this far of where it began (so slowly shuffling about counts, a slow climb does not)
+STOP_NEAR_M = 300.0            # a stop this close to a checkpoint, the start, the finish line or where the run ended is that one's, not another stop
+
+
+def other_stops(rd, min_s=STOP_MIN_S, area_m=STOP_AREA_M, near_m=STOP_NEAR_M):
+    """The stops of the run away from the checkpoints, the start and the finish: [{lat, lon, arrived, left, stopped_s, radius_m, km}] in order. A stop is a stretch of the race track of at least `min_s` seconds in which every sample stays within `area_m` of the first one (the
+    runner may be moving about a little, not making progress); stretches close together (the watch drifting about) are one stop. [] when there is no run track."""
+    cur = current_path(rd)
+    if not cur: return []
+    run = read(cur); ok = np.isfinite(run['lat']) & np.isfinite(run['lon']) & np.isfinite(run['t']); lat, lon, t = run['lat'][ok], run['lon'][ok], run['t'][ok]
+    if len(t) < 2: return []
+    keep = np.unique(np.clip(np.searchsorted(t, np.arange(t[0], t[-1] + 5.0, 5.0)), 0, len(t) - 1)); lat, lon, t = lat[keep], lon[keep], t[keep]                       # (a sample every 5 s is plenty)
+    lat0 = float(np.median(lat)); kx = 111320.0 * np.cos(np.radians(lat0)); ky = 110540.0; P = np.column_stack([(lon - 5.0) * kx, (lat - lat0) * ky]); cum = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(P, axis=0).T))])
+    found = []; i = 0; n = len(t)
+    while i < n - 1:
+        end = int(np.searchsorted(t, t[i] + min_s, side='left'))
+        if end >= n: break
+        d = np.hypot(*(P[i:end + 1] - P[i]).T)
+        if d.max() > area_m: i += 1; continue
+        out = np.flatnonzero(np.hypot(*(P[end:] - P[i]).T) > area_m); j = n - 1 if not len(out) else end + int(out[0]) - 1
+        found.append([i, j]); i = j + 1
+    merged = []
+    for a, b in found:                                                                                           # stretches a few minutes apart and close together are one stop
+        if merged and t[a] - t[merged[-1][1]] < 300.0 and float(np.hypot(*(P[a] - P[merged[-1][1]]))) < 2 * area_m: merged[-1][1] = b
+        else: merged.append([a, b])
+    try: order, marks = route_order(rd)
+    except Exception: order, marks = [], []
+    try: mk = end_markers(rd)
+    except Exception: mk = None
+    spots = [(c['lat'], c['lon']) for c in marks] + ([(mk['start']['lat'], mk['start']['lon']), (mk['end']['lat'], mk['end']['lon'])] + ([(mk['finish']['lat'], mk['finish']['lon'])] if mk.get('finish') else []) if mk else [])
+    S = [np.array([(lo - 5.0) * kx, (la - lat0) * ky]) for la, lo in spots]; out = []
+    for a, b in merged:
+        c = P[a:b + 1].mean(axis=0)
+        if any(float(np.hypot(*(c - s))) <= near_m for s in S): continue
+        out.append(dict(lat=round(lat0 + float(c[1]) / ky, 6), lon=round(5.0 + float(c[0]) / kx, 6), arrived=float(t[a]), left=float(t[b]), stopped_s=round(float(t[b] - t[a])), radius_m=round(area_m), km=round(float(cum[a]) / 1000.0, 1)))
     return out
 
 
