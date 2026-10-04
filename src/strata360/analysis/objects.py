@@ -117,13 +117,15 @@ def areas_of(named):
 
 
 def merge_moment(cands, people, wearer):
-    """One moment's candidates from all its tiles: the same thing seen in neighbouring tiles once (the most confident), and those in the wearer's direction (or on a person) marked `wearer`."""
+    """One moment's candidates from all its tiles: the same thing seen in neighbouring tiles once (the most confident), and those on a person, or unnamed and within the wearer's own size of where they are, marked `wearer`."""
     kept = []
     for c in sorted(cands, key=lambda c: -c['conf']):
         if any(angdist((c['lon'], c['lat']), (k['lon'], k['lat'])) < max(1.5, 0.4 * max(c['deg'], k['deg'])) for k in kept): continue
         kept.append(c)
     for c in kept:
-        c['wearer'] = any(angdist((c['lon'], c['lat']), (lo, la)) < max(h / 2, 12) + 8 for lo, la, h in wearer) or any(angdist((c['lon'], c['lat']), (p['lon'], p['lat'])) < p['deg'] * 0.6 for p in people)
+        on_person = any(angdist((c['lon'], c['lat']), (p['lon'], p['lat'])) < p['deg'] * 0.6 for p in people)
+        in_cone = c['kind'] == 'other' and any(angdist((c['lon'], c['lat']), (lo, la)) < max(h / 2, 12) for lo, la, h in wearer)           # only a box the detector could not name is judged by the cone: a named dog, sign or car next to the wearer is kept
+        c['wearer'] = on_person or in_cone
     return kept
 
 
@@ -192,7 +194,7 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
     why = clip_is_dark(sun, exposure)
     if why: return dict(doc, skipped=why, objects=[], areas={}, counts={}, stats=VOC.StatsBook().to_json())
     import cv2
-    cr = renderer or V.CropRenderer(osv); mem = Memory(); areas = {}; counts = dict(black=0, tiles=0, wearer=0, tiny=0, ground=0); tmp = tempfile.mkdtemp(prefix='s360obj_', dir=work_dir); crops = os.path.join(tmp, 'crops'); os.makedirs(crops)
+    cr = renderer or V.CropRenderer(osv); mem = Memory(); areas = {}; counts = dict(black=0, tiles=0, wearer=0, tiny=0, ground=0); dropped = []; tmp = tempfile.mkdtemp(prefix='s360obj_', dir=work_dir); crops = os.path.join(tmp, 'crops'); os.makedirs(crops)
     low = {w for c in ('wildlife', 'farm_rural') for w in vocab['categories'].get(c, {}).get('words', [])}; rng = rng or random.Random(0); todo = []
     try:
         use = [t for t in times if not black_at(exposure, t)]; counts['black'] = len(times) - len(use)
@@ -208,7 +210,7 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
                     c, p = tile_candidates(k, named, pf, low); cands += c; people += p
                     for w, cf in areas_of(named).items(): a = areas.setdefault(w, dict(boxes=0, max_conf=0.0)); a['boxes'] += 1; a['max_conf'] = max(a['max_conf'], round(cf, 3))
                 for c in merge_moment(cands, people, wearer_dirs(focus, t)):
-                    if c['wearer']: counts['wearer'] += 1; continue
+                    if c['wearer']: counts['wearer'] += 1; dropped.append(dict(t=t, kind=c['kind'], yoloe=c['yoloe'], conf=round(c['conf'], 2), lon=round(c['lon'], 1), lat=round(c['lat'], 1), deg=round(c['deg'], 1))); continue
                     if c['deg'] < TINY_DEG: counts['tiny'] += 1; continue
                     if c['kind'] == 'other' and c['lat'] < GROUND_LAT and c['deg'] < GROUND_DEG: counts['ground'] += 1; continue
                     o, new = mem.see(c, t)
@@ -234,4 +236,4 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
         for o in mem.objects: o['word'] = o.get('word') or (o['yoloe'] if o['source'] == 'detector' else None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop') and not o.get('scenery')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('scenery')).most_common()), areas=areas, counts=counts, stats=book.to_json())
+    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop') and not o.get('scenery')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('scenery')).most_common()), areas=areas, counts=counts, wearer_dropped=dropped, stats=book.to_json())

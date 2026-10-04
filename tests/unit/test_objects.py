@@ -44,8 +44,10 @@ def test_candidates_leave_out_people_worn_gear_big_scenery_tiny_boxes_and_anythi
 def test_the_same_thing_in_two_tiles_is_one_candidate_and_the_wearers_is_marked():
     c = lambda lo, la, cf: dict(kind='named', yoloe='sign', conf=cf, lon=lo, lat=la, deg=3.0)
     out = O.merge_moment([c(10, 5, 0.5), c(10.5, 5, 0.7), c(120, 0, 0.6), c(-170, -40, 0.6)], [], [(-170, -35, 40)])
-    assert [(x['lon'], x['wearer']) for x in out] == [(10.5, False), (120, False), (-170, True)]
+    assert [(x['lon'], x['wearer']) for x in out] == [(10.5, False), (120, False), (-170, False)]
     assert O.merge_moment([c(0, 0, 0.5)], [dict(lon=2, lat=0, deg=5)], [])[0]['wearer'] is True
+    named, other = c(-170, -40, 0.6), dict(c(-170, -40, 0.6), kind='other'); assert O.merge_moment([named], [], [(-170, -35, 40)])[0]['wearer'] is False and O.merge_moment([other], [], [(-170, -35, 40)])[0]['wearer'] is True     # a named thing next to the wearer is kept
+    assert O.merge_moment([dict(other, lon=-170 + 25)], [], [(-170, -35, 40)])[0]['wearer'] is False                                                                                                                           # outside the wearer's own size
 
 
 def test_an_object_seen_again_is_the_same_object_unless_it_is_elsewhere_or_another_size():
@@ -114,7 +116,9 @@ def test_big_scenery_words_are_counted_per_clip_not_labelled(tmp_path):
 
 def test_the_wearer_tiny_boxes_black_moments_and_night_clips_are_never_looked_at(tmp_path):
     detect, label, seen = fakes({0: [('goat', 0.5, MID)]}, {0: 'goat'}); foc = [dict(t=1.0, yaw=0.0, pitch=15.0, height=40)]
-    doc = run(tmp_path, detect, label, times=(1.0,), focus=foc); assert doc['objects'] == [] and doc['counts']['wearer'] == 1
+    doc = run(tmp_path, detect, label, times=(1.0,), focus=foc); assert doc['objects'] != [] and doc['counts']['wearer'] == 0       # a named goat in the wearer's direction is kept
+    detect, label, seen = fakes({}, {0: 'goat'}, pf_by_moment={0: [('thing', 0.5, MID)]}); doc = run(tmp_path, detect, label, times=(1.0,), focus=foc); assert doc['objects'] == [] and doc['counts']['wearer'] == 1 and doc['wearer_dropped'][0]['yoloe'] == 'thing'
+    detect, label, seen = fakes({0: [('goat', 0.5, MID)]}, {0: 'goat'})
     detect, label, seen = fakes({0: [('goat', 0.5, [500, 500, 510, 509])]}, {0: 'goat'}); doc = run(tmp_path, detect, label, times=(1.0,)); assert doc['counts']['tiny'] == 1 and doc['objects'] == []
     detect, label, seen = fakes({0: [('goat', 0.5, MID)]}, {0: 'goat'}); ex = dict(frames=[dict(t_s=1.0, sphere=dict(mean_lin=0.001))]); doc = run(tmp_path, detect, label, times=(1.0,), exposure=ex)
     assert doc['counts']['black'] == 1 and seen['detect'] == [] and doc['objects'] == []
