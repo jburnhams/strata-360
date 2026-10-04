@@ -272,14 +272,14 @@ class Rig:
     def __init__(self, items, prog, hs, view, rot=None, img=None): self.items, self.prog, self.hs, self.view, self.n, self.rot, self.img = items, prog, hs, view, len(items), rot, img         # rot(i, yaw, pitch): the turn for a level view of picture i (360 sections only); img(i) the picture
 
 
-def headings(rd, section, road=None, pano=False):
-    """The heading (compass degrees) `build` wants at each picture of a section, worked out the same way but without reading a picture (the point camera overlay needs where the video's centre looks). Raises ValueError for a flat camera, and for Google when only the flat views along the road are
-    meant (`pano` false: those need no turning, so the centre is the road's direction and the overlay has nothing to add)."""
+def headings(rd, section, road=None):
+    """The heading (compass degrees) at the middle of each picture of a section's videos, worked out the same way as `build` but without reading a picture (the point camera overlay needs where the video's centre looks). For Google it is the heading its views were asked for (`fetch`) and the
+    stitched panoramas are turned to. Raises ValueError for a flat camera."""
     its = forward_items(section); prov = section['provider']
     if len(its) < 8: raise ValueError(f"{section['id']}: only {len(its)} pictures face the way the runner went")
     km = np.array([it['km'] for it in its]) * 1000.0
-    if prov == 'google' and pano: return smooth_heading([it['b'] for it in its], 3.0)
-    if section['kind'] != '360' or prov == 'google': raise ValueError('only a 360 section has a view that can be aimed at a point')
+    if prov == 'google': return smooth_heading([it['b'] for it in its], 3.0)
+    if section['kind'] != '360': raise ValueError('only a 360 section has a view that can be aimed at a point')
     if prov == 'mapillary':
         meta = json.load(open(meta_path(rd, section))); pos = np.array([meta[it['id']]['computed_geometry']['coordinates'] for it in its]); la0 = pos[:, 1].mean()
         xy = np.stack([(pos[:, 0] - pos[0, 0]) * math.cos(math.radians(la0)) * 111320, (pos[:, 1] - pos[0, 1]) * 111320], 1); xy = np.stack([gaussian_filter1d(xy[:, 0], 1.0, mode='nearest'), gaussian_filter1d(xy[:, 1], 1.0, mode='nearest')], 1)

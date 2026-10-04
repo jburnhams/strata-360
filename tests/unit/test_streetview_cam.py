@@ -154,10 +154,9 @@ class TestHeadings:
     def test_mapillary_headings_are_the_ones_the_camera_uses(self, tmp_path):
         rd, sec = self.mapillary(tmp_path); h = CAM.headings(rd, sec); assert len(h) == 12 and np.allclose(h, CAM.build(rd, sec).hs) and np.all(np.minimum(h, 360 - h) < 12.0)
 
-    def test_google_panoramas_head_along_their_own_bearings_and_the_flat_views_have_none(self, tmp_path):
+    def test_google_views_and_panoramas_head_along_their_own_bearings_and_a_flat_camera_has_none(self, tmp_path):
         items = [dict(id=f'g{i}', km=1.0 + 0.01 * i, lat=50.0, lon=5.0, a=None, b=90.0, c=0.0) for i in range(12)]; sec = dict(id='G1', provider='google', kind='360', seq='g', items=items, frames=12)
-        assert np.allclose(CAM.headings(str(tmp_path), sec, pano=True), 90.0, atol=1.0)
-        with pytest.raises(ValueError, match='only a 360 section'): CAM.headings(str(tmp_path), sec)
+        assert np.allclose(CAM.headings(str(tmp_path), sec), 90.0, atol=1.0)                                   # (the flat views are asked for along these headings, and the panoramas turned to them)
         with pytest.raises(ValueError, match='only a 360 section'): CAM.headings(str(tmp_path), dict(sec, provider='mapillary', kind='2d', items=[dict(it, a=0) for it in items]))
 
     def test_a_panoramax_section_needs_the_road_and_a_short_one_is_refused(self, tmp_path):

@@ -182,7 +182,7 @@ class TestAim:
 
     def sv(self, proj, monkeypatch, hs=None):
         key = sv_section(proj); cam = make_cam(proj.race_dir, source=dict(kind='streetview', key=key), along=450.0, east=25.0, before_m=100.0, after_m=100.0)
-        monkeypatch.setattr(CAM, 'headings', lambda rd, sec, road=None, pano=False: np.zeros(len(CAM.forward_items(sec))) if hs is None else hs); return key, cam
+        monkeypatch.setattr(CAM, 'headings', lambda rd, sec, road=None: np.zeros(len(CAM.forward_items(sec))) if hs is None else hs); return key, cam
 
     def test_the_look_around_aim_is_relative_to_the_middle_of_each_picture_and_only_on_inside_the_stretch(self, proj, monkeypatch):
         key, cam = self.sv(proj, monkeypatch); a = PCL.aim_path(proj.folder, cam, 'pano'); n = 40
@@ -195,6 +195,7 @@ class TestAim:
     def test_the_flat_preview_aim_is_sampled_over_the_videos_time_with_its_fixed_view(self, proj, monkeypatch):
         key, cam = self.sv(proj, monkeypatch); a = PCL.aim_path(proj.folder, cam, 'flat'); sec = PCL.section_of(proj.race_dir, key)
         assert a['viewer'] == dict(yaw=0.0, pitch=CAM.PITCH, fov=CAM.FOV) and a['t'][0] == 0.0 and a['t'][-1] == pytest.approx(SV.default_seconds(sec), abs=0.2) and a['t'][1] == 0.2 and any(a['on']) and not all(a['on'])
-        sec['provider'] = 'google'
-        monkeypatch.setattr(PCL, 'section_of', lambda rd, key: sec)
+        g = dict(sec, provider='google'); monkeypatch.setattr(PCL, 'section_of', lambda rd, key: g); a = PCL.aim_path(proj.folder, cam, 'flat')
+        assert a['viewer'] == dict(yaw=0.0, pitch=0.0, fov=90.0) and any(a['on'])                                           # (Google's flat views are level and 90 degrees across)
+        flat = dict(sec, kind='2d'); monkeypatch.setattr(PCL, 'section_of', lambda rd, key: flat)
         with pytest.raises(ValueError, match='cannot be aimed over'): PCL.aim_path(proj.folder, cam, 'flat')
