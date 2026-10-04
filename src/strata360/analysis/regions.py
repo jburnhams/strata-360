@@ -64,3 +64,27 @@ def to_world(box, lon, lat, fov=FOV, px=PX):
     cx, cy = at((box[0] + box[2]) / 2, (box[1] + box[3]) / 2); poly = [at(box[0], box[1]), at(box[2], box[1]), at(box[2], box[3]), at(box[0], box[3])]
     f = (px / 2) / math.tan(math.radians(fov / 2)); w = math.degrees((box[2] - box[0]) * px / f); h = math.degrees((box[3] - box[1]) * px / f)
     return dict(lon=round(cx, 1), lat=round(cy, 1), w_deg=round(w, 1), h_deg=round(h, 1), polygon=[[round(a, 1), round(b, 1)] for a, b in poly])
+
+
+MIN_DEG, MAX_ASPECT = 2.0, 12.0           # a box narrower than this, or more than this many times longer than wide, is a sliver at the edge of a view, not an area
+
+
+def usable(r):
+    return min(r['w_deg'], r['h_deg']) >= MIN_DEG and max(r['w_deg'], r['h_deg']) / max(min(r['w_deg'], r['h_deg']), 1e-6) <= MAX_ASPECT
+
+
+def _ang(a, b):
+    la, lb, pa, pb = math.radians(a['lon']), math.radians(b['lon']), math.radians(a['lat']), math.radians(b['lat'])
+    return math.degrees(math.acos(float(np.clip(math.sin(pa) * math.sin(pb) + math.cos(pa) * math.cos(pb) * math.cos(la - lb), -1, 1))))
+
+
+def merge(boxes):
+    """The boxes of all views and moments as areas: boxes of the same kind whose centres are within 0.4 of the larger size of each other (and of a similar size) are one area, seen at several moments. Returns [{kind, lon, lat, w_deg, h_deg,
+    polygon, seen: [t, ...], n}] with the position and size of the largest box that was merged in (the others only add the moments)."""
+    out = []
+    for b in sorted((b for b in boxes if usable(b)), key=lambda b: -(b['w_deg'] * b['h_deg'])):
+        for o in out:
+            if o['kind'] == b['kind'] and _ang(o, b) < 0.4 * max(o['w_deg'], o['h_deg'], b['w_deg'], b['h_deg']) and 0.4 <= (b['w_deg'] * b['h_deg']) / max(o['w_deg'] * o['h_deg'], 1e-6) <= 2.5:
+                o['n'] += 1; o['seen'] = sorted(set(o['seen']) | {b['t']}); break
+        else: out.append(dict(kind=b['kind'], lon=b['lon'], lat=b['lat'], w_deg=b['w_deg'], h_deg=b['h_deg'], polygon=b['polygon'], seen=[b['t']], n=1))
+    return sorted(out, key=lambda o: (o['kind'], -o['w_deg'] * o['h_deg']))

@@ -184,6 +184,27 @@ def run_regions(images, out, models=None):
     return json.load(open(out))
 
 
+def analyse_regions(work_dir, times, scenes, renderer, regions_label=run_regions, log=print):
+    """The snow and water areas of a clip: (regions, seconds). Wide views are cut for the moments where the scene labels say there is snow or water (regions.plan), the model boxes only that, and the boxes of all views and moments are merged
+    into areas (regions.merge); `raw` boxes are not kept. Nothing is asked of the model when the scene labels give nothing."""
+    import cv2
+    plan = dict(RG.plan(scenes, times)) if scenes else {}
+    if not plan: return [], 0.0
+    tmp = tempfile.mkdtemp(prefix='s360reg_', dir=work_dir); jobs = {}; meta = {}
+    try:
+        for t, kinds in plan.items():
+            for lon0 in RG.YAWS:
+                name = f'r{len(jobs):04d}.jpg'; cv2.imwrite(os.path.join(tmp, name), renderer.crop(t, math.radians(lon0), math.radians(RG.PITCH), RG.FOV, RG.PX)[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 92]); jobs[name] = kinds; meta[name] = (t, lon0)
+        json.dump(jobs, open(os.path.join(tmp, 'jobs.json'), 'w')); log(f'regions: {len(plan)} moments, {len(jobs)} views')
+        rr = regions_label(tmp, os.path.join(tmp, 'regions.json')); boxes = []
+        for name, text in sorted(rr['answers'].items()):
+            t, lon0 = meta[name]
+            for kind, box in RG.parse(text, jobs[name]): boxes.append(dict(kind=kind, t=t, **RG.to_world(box, lon0, RG.PITCH)))
+        return RG.merge(boxes), rr.get('seconds', 0.0)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ---- the stage ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 def categories_of(scenes_doc, vocab):
     """The wordlist categories of a clip: both directions' scene labels through the plain rules (the stage does not call a model for this; `vocab categorise` does with one)."""
@@ -202,7 +223,6 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
     if why: return dict(doc, skipped=why, objects=[], areas={}, counts={}, regions=[], stats=VOC.StatsBook().to_json())
     import cv2
     cr = renderer or V.CropRenderer(osv); mem = Memory(); areas = {}; counts = dict(black=0, tiles=0, wearer=0, tiny=0, ground=0); dropped = []; tmp = tempfile.mkdtemp(prefix='s360obj_', dir=work_dir); crops = os.path.join(tmp, 'crops'); os.makedirs(crops)
-    rplan = dict(RG.plan(scenes, [t for t in times if not black_at(exposure, t)])) if scenes else {}; rviews = os.path.join(tmp, 'views'); os.makedirs(rviews); rjobs = {}; rmeta = {}
     low = {w for c in ('wildlife', 'farm_rural') for w in vocab['categories'].get(c, {}).get('words', [])}; rng = rng or random.Random(0); todo = []
     try:
         use = [t for t in times if not black_at(exposure, t)]; counts['black'] = len(times) - len(use)
@@ -213,9 +233,6 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
             det = detect(d, list(words), os.path.join(d, 'det.json')); files = det['files'] if 'files' in det else det
             for m, t in enumerate(part):
                 cands, people = [], []
-                if t in rplan:                                                                       # wide views for the snow and water boxes, only of what the scene labels say is there
-                    for lon0 in RG.YAWS:
-                        name = f'r{len(rjobs):04d}.jpg'; cv2.imwrite(os.path.join(rviews, name), cr.crop(t, math.radians(lon0), math.radians(RG.PITCH), RG.FOV, RG.PX)[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 92]); rjobs[name] = rplan[t]; rmeta[name] = (t, lon0)
                 for k in range(len(TILES)):
                     r = files.get(f'm{m:03d}_t{k:02d}.jpg') or {}; named = [tuple(x) for x in r.get('named', [])]; pf = [tuple(x) for x in r.get('pf', [])]; counts['tiles'] += 1
                     c, p = tile_candidates(k, named, pf, low); cands += c; people += p
@@ -234,12 +251,6 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
         secs = 0.0; model = None; labels = {}
         if todo:
             r = label(crops, os.path.join(tmp, 'labels.json')); labels = r['labels']; model = r.get('model'); secs = r.get('seconds', 0.0)
-        regions = []; rsecs = 0.0
-        if rjobs:
-            json.dump(rjobs, open(os.path.join(rviews, 'jobs.json'), 'w')); rr = regions_label(rviews, os.path.join(tmp, 'regions.json')); rsecs = rr.get('seconds', 0.0)
-            for name, text in sorted(rr['answers'].items()):
-                t, lon0 = rmeta[name]
-                for kind, box in RG.parse(text, rjobs[name]): regions.append(dict(kind=kind, t=t, view=lon0, **RG.to_world(box, lon0, RG.PITCH)))
         book = VOC.StatsBook()
         for o in mem.objects:
             lab = labels.get(f"o{o['id']:03d}.jpg"); o['lon'], o['lat'], o['deg'] = round(o['lon'], 1), round(o['lat'], 1), round(o['deg'], 1)
@@ -253,4 +264,5 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
         for o in mem.objects: o['word'] = o.get('word') or (o['yoloe'] if o['source'] == 'detector' else None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    regions, rsecs = analyse_regions(work_dir, [t for t in times if not black_at(exposure, t)], scenes, renderer=cr, regions_label=regions_label)
     return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop') and not o.get('scenery')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('scenery')).most_common()), areas=areas, counts=counts, wearer_dropped=dropped, regions=regions, regions_seconds=rsecs, stats=book.to_json())

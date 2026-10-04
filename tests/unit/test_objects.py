@@ -190,5 +190,12 @@ def test_the_objects_run_adds_the_regions_of_what_the_scene_labels_gave_and_asks
     run = lambda sc: O.analyse('x.osv', str(tmp_path), [1.0, 2.0], words, stats=VOC.StatsBook(), vocab=v, detect=detect, label=label, renderer=Lens(), scenes=sc, regions_label=regions_label)
     doc = run(scenes((1.0, 'front', True, 'none'), (2.0, 'front', True, 'none')))
     assert len(asked) == 1 and len(asked[0]) == 6 and all(k == ['snow'] for k in asked[0].values())                          # one moment (1 s and 2 s are inside the gap), six views, asked about snow only
-    assert [(r['kind'], r['t']) for r in doc['regions']] == [('snow', 1.0)] and doc['regions'][0]['w_deg'] > 50 and doc['regions_seconds'] == 2.0                  # the water box was not asked for, so it is dropped
+    assert [(r['kind'], r['seen']) for r in doc['regions']] == [('snow', [1.0])] and doc['regions'][0]['w_deg'] > 50 and doc['regions_seconds'] == 2.0                  # the water box was not asked for, so it is dropped
     asked.clear(); doc = run(scenes((1.0, 'front', False, 'puddle'))); assert asked == [] and doc['regions'] == []
+
+
+def test_boxes_of_all_views_and_moments_are_merged_into_areas_and_slivers_are_dropped():
+    b = lambda kind, lon, lat, w, h, t: dict(kind=kind, lon=lon, lat=lat, w_deg=w, h_deg=h, polygon=[[lon, lat]] * 4, t=t)
+    got = R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 12, -21, 28, 9, 21.0), b('snow', 100, -20, 30, 10, 1.0), b('water', 10, -20, 30, 10, 1.0), b('snow', 50, -20, 1.0, 40, 1.0), b('snow', 70, 0, 60, 2.5, 1.0)])
+    assert [(o['kind'], o['lon'], o['seen'], o['n']) for o in got] == [('snow', 10, [1.0, 21.0], 2), ('snow', 100, [1.0], 1), ('water', 10, [1.0], 1)]            # the sliver (1 degree wide) and the thin strip (24 times longer than high) are gone
+    assert R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 10, -20, 6, 2.0, 2.0)])[0]['n'] == 1 and len(R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 10, -20, 6, 3.0, 2.0)])) == 2        # a small box in a large one is a different thing
