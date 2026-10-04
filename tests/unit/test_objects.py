@@ -4,7 +4,7 @@ import os
 
 import numpy as np
 import pytest
-from strata360.analysis import objects as O, vocab as VOC
+from strata360.analysis import objects as O, regions as R, vocab as VOC
 
 TILE = O.TILES.index((15, 0.0))               # a tile looking ahead and a little up
 MID = [472, 472, 552, 552]                     # a box in the middle of a tile picture
@@ -152,3 +152,43 @@ def test_small_marks_on_the_ground_are_not_sent_and_scenery_labels_are_counted_a
         return d
     doc = run(tmp_path, lower, label, times=(1.0,)); assert doc['counts']['ground'] == 1 and doc['objects'] == [] and seen['label'] == []
     doc = run(tmp_path, detect, label, times=(1.0,)); assert doc['objects'] == [] and doc['scenery_labels'] == {'tree trunk': 1} and doc['dropped_by_stoplist'] == 0
+
+
+# ---- snow and water regions ----------------------------------------------------------------------------------------------------------------------------------------------------
+def scenes(*items):
+    return dict(items=[dict(ok=True, t_s=t, view=v, ground_snow=sn, water=w) for t, v, sn, w in items])
+
+
+def test_only_what_the_scene_labels_say_is_there_is_asked_for():
+    d = scenes((1.0, 'front', False, 'none'), (1.0, 'rear', True, 'puddle'), (30.0, 'front', False, 'river'))
+    assert R.kinds_at(d, 1.0) == {'snow'} and R.kinds_at(d, 30.0) == {'water'} and R.kinds_at(d, 15.0) == set() and R.kinds_at(None, 1.0) == set()
+    assert R.kinds_at(dict(items=[dict(ok=False, t_s=1.0, ground_snow=True)]), 1.0) == set()                     # a picture the model did not answer says nothing
+    assert R.question(['snow']).count('(1)') == 1 and 'water' not in R.question(['snow']).replace('"snow"', '') and '(2)' in R.question(['snow', 'water'])
+
+
+def test_at_most_one_moment_in_the_gap_is_looked_at_and_only_moments_with_something():
+    d = scenes(*[(float(t), 'front', True, 'none') for t in range(0, 40)])
+    assert R.plan(d, [1.0, 3.0, 11.0, 12.0, 22.0], gap_s=10.0) == [(1.0, ['snow']), (11.0, ['snow']), (22.0, ['snow'])] and R.plan(scenes((1.0, 'front', False, 'none')), [1.0]) == []
+
+
+def test_the_models_answer_is_read_strictly():
+    txt = '```json\n[{"bbox_2d": [0, 345, 998, 781], "label": "snow"}, {"bbox_2d": [10, 10, 5, 5], "label": "snow"}, {"bbox_2d": [1, 2], "label": "water"}, {"bbox_2d": [0, 0, 500, 500], "label": "water"}, {"label": "snow"}]\n```'
+    assert R.parse(txt, ['snow']) == [('snow', [0.0, 0.345, 0.998, 0.781])] and [k for k, _ in R.parse(txt, ['snow', 'water'])] == ['snow', 'water'] and R.parse('nothing', ['snow']) == [] and R.parse('[not json]', ['snow']) == []
+
+
+def test_a_box_in_the_middle_of_a_view_is_where_the_view_looks_and_a_wide_one_is_wide():
+    b = R.to_world([0.4, 0.4, 0.6, 0.6], 120.0, -15.0); assert abs(b['lon'] - 120) < 1 and abs(b['lat'] + 15) < 1 and 20 < b['w_deg'] < 30 and len(b['polygon']) == 4
+    w = R.to_world([0.0, 0.5, 1.0, 1.0], 0.0, -15.0); assert w['w_deg'] > 80 and w['lat'] < -15 and R.to_world([0.2, 0.2, 0.3, 0.3], 0.0, -15.0)['lon'] < 0     # left of the view's middle is west of it
+
+
+def test_the_objects_run_adds_the_regions_of_what_the_scene_labels_gave_and_asks_nothing_when_they_give_nothing(tmp_path):
+    detect, label, seen = fakes({}, {}); asked = []
+    def regions_label(images, out):
+        jobs = json.load(open(os.path.join(images, 'jobs.json'))); asked.append(dict(jobs)); names = sorted(jobs)
+        return dict(model='fake', seconds=2.0, answers={names[0]: '[{"bbox_2d": [100, 500, 900, 900], "label": "snow"}, {"bbox_2d": [0, 0, 100, 100], "label": "water"}]', **{n: '[]' for n in names[1:]}})
+    v = VOC.load(); words = VOC.words_for([], v)
+    run = lambda sc: O.analyse('x.osv', str(tmp_path), [1.0, 2.0], words, stats=VOC.StatsBook(), vocab=v, detect=detect, label=label, renderer=Lens(), scenes=sc, regions_label=regions_label)
+    doc = run(scenes((1.0, 'front', True, 'none'), (2.0, 'front', True, 'none')))
+    assert len(asked) == 1 and len(asked[0]) == 6 and all(k == ['snow'] for k in asked[0].values())                          # one moment (1 s and 2 s are inside the gap), six views, asked about snow only
+    assert [(r['kind'], r['t']) for r in doc['regions']] == [('snow', 1.0)] and doc['regions'][0]['w_deg'] > 50 and doc['regions_seconds'] == 2.0                  # the water box was not asked for, so it is dropped
+    asked.clear(); doc = run(scenes((1.0, 'front', False, 'puddle'))); assert asked == [] and doc['regions'] == []

@@ -251,7 +251,7 @@ def objects(ctx):
     if times is None: times = [float(t) for t in range(1, int(ctx.clip_json['video']['source_frames'] / ctx.clip_json['video']['nominal_fps']), 5)]
     rd = lambda n: ctx.read(n) if os.path.exists(ctx.path(n)) else None
     doc = OBJ.analyse(ctx.clip.osv, str(ctx.dir), times, words, stats=VOC.stats_for(root), vocab=vocab, categories=cats, sun=SUN.load(str(ctx.dir)), exposure=rd('exposure.json'), focus=(rd('focus.json') or {}).get('samples'),
-                      clip=os.path.basename(str(ctx.dir)), crops_to=ctx.path('objects'), log=ctx.log)
+                      clip=os.path.basename(str(ctx.dir)), scenes=scenes_doc, crops_to=ctx.path('objects'), log=ctx.log)
     ctx.write('objects.json', ctx.stamped(doc))
 
 
