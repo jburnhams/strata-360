@@ -33,4 +33,9 @@ describe('SvItemPage', () => {
     mockGet('/api/streetview', sv()); mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_1_0001_D', start_utc: '2026-02-20T10:00:00Z' })] }); mockGet('/api/streetview/chosen', { sections: [item()] })
     const { user } = setup(<Workspace folder="/data" onChange={() => {}} />); await user.click(await screen.findByText('V1')); expect(await screen.findByText('Street view V1')).toBeInTheDocument(); expect(screen.getByText('How it is drawn and how long it is')).toBeInTheDocument()
   })
+
+  it('marks every picture of the section on the map where it was taken, joined by a path', async () => {
+    mockGet('/api/streetview', sv()); setup(<SvItemPage folder="/data" item={item()} tz="UTC" onChanged={() => {}} />)
+    expect(await screen.findByText(/each picture where it was taken \(\d+\), joined in order/)).toBeInTheDocument()
+  })
 })

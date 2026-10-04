@@ -24,7 +24,7 @@ const DETAIL_ZOOM_STEPS = 1.5          // this far in from the first view the ma
 // Every clip has a marker at the middle of its stretch of track (the stretch is drawn thick; green = the newest script draft plays it), hover for its card, click to open it. Zooming in fetches the track for the
 // part in view in more detail. Hovering the track moves the cursor shared with the charts.
 function MapView({ base, clips = [], cursor = null, onCursor = () => {}, onHoverClip = () => {}, onOpenClip = () => {}, fetchDetail, background, focus, height = 'h-[420px]', label = 'Race map', decorate, onMapClick, runColor = '#15803d', runWeight = 2.5, fitTo, svg = false, extras = [], pois = [], divergences = [], highlight = [], onHoverTrack, onToggleTrack, tz = 'Europe/Brussels', ends, highlightCheckpoints = [], ringEnds = false, photos = [], photoThumb, onOpenPhoto }: {
-  /** A stretch of the run (lat, lon) or a place to pick out in orange and zoom to: the map opens on it (the reset button still goes to the whole race). */ focus?: { line?: [number, number][]; point?: { lat: number; lon: number }; label?: string }; height?: string; label?: string
+  /** A stretch of the run (lat, lon) or a place to pick out in orange and zoom to: the map opens on it (the reset button still goes to the whole race). */ focus?: { line?: [number, number][]; point?: { lat: number; lon: number }; points?: { lat: number; lon: number; label?: string }[]; label?: string }; height?: string; label?: string
   /** Extra layers of a page's own, drawn over the race (redrawn when the function changes), a click on the map, the colour of the run, and a place to move the view to when `fitTo.key` changes. */ decorate?: (m: L.Map, g: L.LayerGroup) => void; onMapClick?: (lat: number, lon: number) => void; runColor?: string; runWeight?: number; fitTo?: { pts: [number, number][]; key: string }; svg?: boolean
   photos?: Photo[]; photoThumb?: (id: string) => string; onOpenPhoto?: (p: Photo) => void; ringEnds?: boolean; highlightCheckpoints?: number[]; ends?: EndMarkers | null; tz?: string;   highlight?: ExtraLine[]; onHoverTrack?: (id: string | null) => void; onToggleTrack?: (id: string) => void; divergences?: Divergence[]; extras?: ExtraLine[]; pois?: Poi[]; background?: { url: string; tilePx: number }; base: TrackLine; clips?: TrackClip[]; cursor?: number | null; onCursor?: (t: number | null) => void; onHoverClip?: (c: TrackClip | null, x?: number, y?: number) => void
   onOpenClip?: (id: string) => void; fetchDetail?: (bbox: [number, number, number, number]) => Promise<TrackLine>
@@ -147,11 +147,19 @@ function MapView({ base, clips = [], cursor = null, onCursor = () => {}, onHover
       L.circleMarker([focus.point.lat, focus.point.lon], { radius: 11, color: '#f97316', weight: 3, fillOpacity: 0, interactive: false }).addTo(g)
       const dot = L.circleMarker([focus.point.lat, focus.point.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#f97316', fillOpacity: 1 }).addTo(g); if (focus.label) dot.bindTooltip(focus.label); b = L.latLngBounds([[focus.point.lat, focus.point.lon]])
     }
+    if (focus.points?.length) {                                                                  // every picture of a street view section where it was taken, with a path through them in order (each marked as a photo is)
+      const pts = focus.points.map(p => [p.lat, p.lon] as [number, number]); L.polyline(pts, { color: '#fff', weight: 6, opacity: 0.9, interactive: false }).addTo(g); L.polyline(pts, { color: '#f97316', weight: 3, opacity: 1, interactive: false }).addTo(g)
+      for (const p of focus.points) {
+        L.circleMarker([p.lat, p.lon], { radius: 8, color: '#f97316', weight: 2, fillOpacity: 0, interactive: false }).addTo(g)
+        const dot = L.circleMarker([p.lat, p.lon], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#f97316', fillOpacity: 1 }).addTo(g); if (p.label) dot.bindTooltip(p.label)
+      }
+      b = L.latLngBounds(pts)
+    }
     const go = () => { if (!b || !b.isValid()) return; if (b.getSouthWest().equals(b.getNorthEast())) m.setView(b.getCenter(), 16); else m.fitBounds(b.pad(0.35), { maxZoom: 17 }) }
     const Zoom = L.Control.extend({ onAdd() { const a = L.DomUtil.create('a', 'leaflet-bar leaflet-control') as HTMLAnchorElement; a.href = '#'; a.title = 'Zoom to this'; a.setAttribute('role', 'button'); a.setAttribute('aria-label', 'Zoom to this'); a.style.cssText = 'width:30px;height:30px;line-height:30px;text-align:center;background:white;color:#f97316;font-size:18px;text-decoration:none'; a.textContent = '◎'
       L.DomEvent.on(a, 'click', (ev: Event) => { L.DomEvent.preventDefault(ev); go() }); L.DomEvent.disableClickPropagation(a); return a } })
     const ctl = new Zoom({ position: 'topleft' }).addTo(m); fitFocus.current = go; go(); return () => { g.remove(); ctl.remove(); fitFocus.current = () => {} }
-  }, [focus?.line, focus?.point?.lat, focus?.point?.lon, focus?.label, base])         // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focus?.line, focus?.point?.lat, focus?.point?.lon, focus?.points, focus?.label, base])         // eslint-disable-line react-hooks/exhaustive-deps
 
   return <div ref={el} className={`${height} w-full rounded-lg bg-stone-100 dark:bg-stone-950`} role="application" aria-label={label} data-focus={focus ? '' : undefined} />
 }
@@ -161,12 +169,12 @@ type ViewProps = Parameters<typeof MapView>[0]
 /** The race map, the one map of the app. Given the race track (`base`) and what to draw it is the overview map (or the street view page's, with its own layers in `decorate`). Given only a `folder` it fetches the run, the route tracks, the start, the
  *  finish, the checkpoints and the map behind them itself, and with a `span` (a time range, epoch seconds) or a `point` it picks that part of the run or that place out in orange and zooms to it: the map on the page of a clip, a gap, a photo or a
  *  street view section. The arrows button shows the whole race and the ring button comes back to what was picked out. */
-export default function TrackMap(props: Omit<ViewProps, 'base'> & { base?: TrackLine; folder?: string; span?: [number, number]; point?: { lat: number; lon: number } }) {
+export default function TrackMap(props: Omit<ViewProps, 'base'> & { base?: TrackLine; folder?: string; span?: [number, number]; point?: { lat: number; lon: number }; frames?: { lat: number; lon: number; label?: string }[] }) {
   if (props.base) return <MapView {...(props as ViewProps)} />
   return <FolderMap {...props} />
 }
 
-function FolderMap({ folder, span, point, label, tz = 'Europe/Brussels', height = 'h-72', focus: _focus, ...rest }: Omit<ViewProps, 'base'> & { folder?: string; span?: [number, number]; point?: { lat: number; lon: number } }) {
+function FolderMap({ folder, span, point, frames, label, tz = 'Europe/Brussels', height = 'h-72', focus: _focus, ...rest }: Omit<ViewProps, 'base'> & { folder?: string; span?: [number, number]; point?: { lat: number; lon: number }; frames?: { lat: number; lon: number; label?: string }[] }) {
   const [run, setRun] = useState<TrackLine>(), [part, setPart] = useState<TrackLine>(), [tiles, setTiles] = useState<TileStatus>(), [err, setErr] = useState<string>()
   const [routes, setRoutes] = useState<ExtraLine[]>([]), [pois, setPois] = useState<Poi[]>([]), [ends, setEnds] = useState<EndMarkers | null>(null)
   useEffect(() => {
@@ -191,9 +199,9 @@ function FolderMap({ folder, span, point, label, tz = 'Europe/Brussels', height 
   return (
     <div aria-label="Where on the route">
       <MapView {...rest} base={run} height={height} label={label ? 'Map of the route with this picked out' : 'Map of the route'} tz={tz} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} extras={routes} pois={pois} ends={ends}
-        focus={line || point ? { line, point: line ? undefined : point, label } : undefined} />
+        focus={line || point || frames?.length ? { line, point: line || frames?.length ? undefined : point, points: frames, label } : undefined} />
       <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-600 dark:text-stone-400">
-        <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f97316' }} />{span ? 'the part of the run this covers' : point ? 'where it was taken' : 'this'}</span>
+        <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f97316' }} />{frames?.length ? `each picture where it was taken (${frames.length}), joined in order` : span ? 'the part of the run this covers' : point ? 'where it was taken' : 'this'}</span>
         <span><span className="mr-1 inline-block h-1 w-4 align-middle" style={{ background: '#15803d' }} />the run</span>
         {routes.length > 0 && <span><span className="mr-1 inline-block h-0 w-4 border-t-2 border-dashed align-middle" style={{ borderColor: '#2563eb' }} />route tracks</span>}
         <span>⤢ the whole race · ◎ back to this</span>
