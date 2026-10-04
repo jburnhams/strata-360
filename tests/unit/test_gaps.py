@@ -112,3 +112,22 @@ def test_planned_clips_are_kept_in_time_order_and_a_render_stays_valid_until_the
     kept = SY.upsert(f, SY.make(GAP, seconds=20)); assert kept['status'] == 'rendered' and kept['file'] == 'synthetic/G01.mp4'                       # same key: the render is still right
     changed = SY.upsert(f, SY.make(GAP, seconds=30)); assert changed['status'] == 'planned' and 'file' not in changed                                    # another length: it must be rendered again
     assert SY.remove(f, 'G02') and not SY.remove(f, 'G02') and [c['id'] for c in SY.load(f)['clips']] == ['G01'] and first['key'] != changed['key']
+
+
+def _stop(arrived, left, key='s1'): return dict(key=key, arrived=T0 + arrived, left=T0 + left, lat=50.0, lon=5.0, km=3.0, stopped_s=left - arrived, radius_m=60)
+
+
+def test_a_stop_added_to_the_video_is_a_gap_of_its_own_with_a_little_either_side_and_gaps_before_and_after_when_long_enough():
+    spans = [span('A', 0, 100), span('B', 30000, 30060)]; tr = track(12)
+    g = [x for x in G.find_gaps(spans, tr, stops=[_stop(10000, 11200)]) if not x.get('final')]; assert [x.get('stop') is not None for x in g] == [False, True, False] and [x['id'] for x in g] == ['G01', 'G02', 'G03']
+    s = g[1]; pad = G.STOP_PAD_MIN_S if 0.25 * 1200 < G.STOP_PAD_MIN_S else min(0.25 * 1200, G.STOP_PAD_MAX_S)
+    assert s['t0'] == T0 + 10000 - pad and s['t1'] == T0 + 11200 + pad and s['stop']['key'] == 's1' and s['stop']['pad_s'] == round(pad) and g[0]['t1'] == s['t0'] and g[2]['t0'] == s['t1'] and g[0]['t0'] == T0 + 100 and g[2]['t1'] == T0 + 30000
+    short = [x for x in G.find_gaps(spans, tr, stops=[_stop(1000, 1700)]) if not x.get('final')]; assert [x.get('stop') is not None for x in short] == [True, False]        # (the 15 minutes before it are under the 20 minutes a gap needs: no gap there)
+    assert [(x['before'], x['after']) for x in g] == [('A', 'stop'), ('stop', 'stop'), ('stop', 'B')]
+
+
+def test_a_stop_in_the_footage_makes_no_gap_and_a_stop_is_found_again_by_its_key(tmp_path, project):
+    spans = [span('A', 0, 5000), span('B', 30000, 30060)]; assert not any(x.get('stop') for x in G.find_gaps(spans, track(12), stops=[_stop(1000, 2000)]))              # (the clip covers it)
+    assert G.find_gaps(spans, track(12), stops=[]) == G.find_gaps(spans, track(12)) and len(G.stop_key(_stop(1000, 2000))) == 10
+    G.set_stop(project.folder, dict(_stop(1000, 2000), key='k1'), True); G.set_stop(project.folder, dict(_stop(5000, 6000), key='k2'), True); assert [s['key'] for s in G.added_stops(project.folder)] == ['k1', 'k2']
+    G.set_stop(project.folder, dict(_stop(1000, 2000), key='k1'), False); assert [s['key'] for s in G.added_stops(project.folder)] == ['k2']

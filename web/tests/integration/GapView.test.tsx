@@ -3,6 +3,8 @@ import GapView from '../../src/components/GapView'
 import { screen, setup, waitFor } from '../utils/render'
 import { makeGap, makeGapClip } from '../utils/factories'
 import { mockGet, mockPost, recordRequests } from '../utils/api'
+import { http, HttpResponse } from 'msw'
+import { server } from '../utils/server'
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
@@ -53,5 +55,13 @@ describe('GapView', () => {
     const { user } = setup(<GapView folder="/data" gap="G01" />)
     await user.click(await screen.findByRole('button', { name: 'Generate 3D flyover' }))
     await waitFor(() => expect(render.length).toBeGreaterThan(0)); expect(plan.at(-1)?.body).toMatchObject({ gap: 'G01', seconds: 9, kind: 'flyover' })
+  })
+
+  it('shows the stop facts on the page of a gap that is a stop, and can take the stop out of the video', async () => {
+    mockGet('/api/gaps', { gaps: [makeGap({ id: 'G05', stop: { key: 'k1', arrived: 1_771_600_000, left: 1_771_603_120, stopped_s: 3120, radius_m: 60, km: 114.9, lat: 50, lon: 5, pad_s: 600 } })] })
+    const seen = recordRequests('/api/stops'); server.use(http.post('/api/stops', () => HttpResponse.json({ tracks: [], pois: [], runs: 0, merged: null })))
+    const { user } = setup(<GapView folder="/data" gap="G05" tz="UTC" />); expect(await screen.findByRole('heading', { name: /Stop G05/ })).toBeInTheDocument(); expect(screen.getByText('The stop')).toBeInTheDocument()
+    expect(screen.getByText(/52 min, within 60 m/)).toBeInTheDocument(); expect(screen.getByText(/starts 10 min before the stop and ends 10 min after it/)).toBeInTheDocument(); expect(screen.getByText(/km 114.9 of the run/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Take this stop out of the video' })); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen[0].body).toEqual({ folder: '/data', key: 'k1', add: false })
   })
 })

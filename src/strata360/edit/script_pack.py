@@ -108,14 +108,14 @@ def gap_clips(folder, tr, tz):
     if tr is None: return []
     from strata360.pipeline import notes as N
     planned = {c['id']: c for c in SY.load(folder)['clips']}; out = []; notes = N.load(folder).get('clips') or {}; choices = SY.settings(folder)
-    for g in GP.find_gaps(GP.load_spans(folder), tr, 1200.0, tz):
+    for g in GP.project_gaps(folder, tr, 1200.0, tz):
         c = planned.get(g['id']); sec = round(c['seconds'], 1) if c else SY.default_seconds(g['duration_s']); mine = SY.gap_settings(folder, g['id'])
         if mine['mode'] == 'set': sec = float(mine['seconds'])                                           # a length you set
         elif mine['mode'] == 'min': sec = max(sec, float(mine['seconds']))                               # at least the length you gave
         ctx = X.context_at(tr, g['t0'], g['t1'], tz)
         d = dict(label=norm_label(g['id']), clip=g['id'], start_utc=dt.datetime.fromtimestamp(g['t0'], dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=MAX_GAP_S, usable=[(0.0, MAX_GAP_S)], synthetic=True, race_s=g['duration_s'],
                  speedup=round(g['duration_s'] / sec, 1), scene={}, note=(notes.get(g['id']) or '').strip(), settings=mine, lines=[], speech_s=0.0, speech_words=0, track=X.describe(ctx),
-                 gap={k: g.get(k) for k in ('local_start', 'local_end', 'km_start', 'km_end', 'distance_km', 'ascent_m', 'daylight', 'moving_share')},
+                 stop=g.get('stop'), gap={k: g.get(k) for k in ('local_start', 'local_end', 'km_start', 'km_end', 'distance_km', 'ascent_m', 'daylight', 'moving_share')},
                  options=[dict(kind='map', default_seconds=sec), dict(kind='flyover', default_seconds=sec, note=FLYOVER_NOTE)], planned=dict(kind=c['kind'], seconds=c['seconds'], status=c.get('status'), approved=c.get('approved', True)) if c else None)
         if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
         out.append(d)
@@ -259,7 +259,8 @@ def render(pack, with_usable=False, marks=None):
                      f"Show it with a streetview item of {f.get('min_s'):g} to {f.get('max_s'):g} s (the whole stretch always plays through; a shorter item is faster), or put a vo item over it. It has no sound and no words."
                      + (f" It covers the same road as {', '.join(same)}: use at most one of them." if same else '') + (' THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE): give it a streetview item.' if (c.get('settings') or {}).get('must') else ''))
         elif c.get('synthetic'):
-            g = c.get('gap') or {}; pl = c.get('planned')
+            g = c.get('gap') or {}; pl = c.get('planned'); st = c.get('stop')
+            if st: L.append(f"THE RUNNER STOPPED HERE: about {st['stopped_s'] / 60:.0f} min in one small place (within {st['radius_m']} m) at km {st['km']:g}; the clip shows the arriving and the leaving too. Say what the stop was if the notes or the transcript do (a rest, food, sleep, a problem), otherwise just that the runner stopped.")
             L.append(f"NO FOOTAGE: a gap of {c['race_s'] / 3600:.1f} h between clips ({g.get('local_start')} to {g.get('local_end')}, km {g.get('km_start')} to {g.get('km_end')}, +{g.get('ascent_m')} m{', ' + g['daylight'] if g.get('daylight') else ''}); {int(round(100 * (g.get('moving_share') or 0)))}% of it spent moving. "
                      f"Fill it with a generated clip: a generated clip (the planner draws it as a 2D map or a 3D terrain flyover: you only give its length), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
                      + (f" Already planned: {pl['kind']}, {pl['seconds']} s ({pl['status']})." if pl else ''))

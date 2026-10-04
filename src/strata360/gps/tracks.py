@@ -7,7 +7,7 @@
 
 Merging runs (`merge`): the runs are taken in priority order (the older single file, then the uploads in order); a lower run keeps only the samples outside the stretches that a higher run recorded without a break (more than 30 s without a sample is a break), so two devices recording the same hours do not double the
 track, while a run that fills the gap left by another (a flat battery, a second watch) joins on. Samples are then in time order and the distance is worked out again along the merged line. Points of interest: waypoints of a GPX, course points of a FIT (`pois`)."""
-import datetime as dt, json, os, re
+import datetime as dt, hashlib, json, os, re
 
 import numpy as np
 
@@ -309,7 +309,10 @@ def listing(rd, tz='Europe/Brussels'):
     except Exception: stops = {}                                                    # (the map is not worth failing the list over)
     try: others = other_stops(rd)
     except Exception: others = []                                                   # (the map is not worth failing the list over)
-    for k, s in enumerate(others, 1): points.append(dict(name=f"Stop {k}", lat=s['lat'], lon=s['lon'], ele=None, sym='stop', desc=f"km {s['km']:g} of the run", track='', stop=dict(arrived=s['arrived'], left=s['left'], stopped_s=s['stopped_s'], radius_m=s['radius_m'])))
+    try: added = {x['key'] for x in json.load(open(os.path.join(rd, 'stops.json')))['added']}
+    except (OSError, ValueError, KeyError): added = set()
+    for k, s in enumerate(others, 1):
+        key = hashlib.sha1(f"stop:{round(s['arrived'])}".encode()).hexdigest()[:10]; points.append(dict(name=f"Stop {k}", lat=s['lat'], lon=s['lon'], ele=None, sym='stop', desc=f"km {s['km']:g} of the run", track='', key=key, added=key in added, stop=dict(arrived=s['arrived'], left=s['left'], stopped_s=s['stopped_s'], radius_m=s['radius_m'])))
     for c in marks: points.append(dict(name=f"Checkpoint {c['n']}", lat=c['lat'], lon=c['lon'], ele=None, sym='checkpoint', desc=f"{name.get(c['before'], '')} → {name.get(c['after'], '')}" + (f" (their ends are {c['gap_m']} m apart)" if c['gap_m'] >= 20 else ''), track='checkpoint', n=c['n'], **({'stop': stops[c['n']]} if c['n'] in stops else {})))
     merged = None
     if len(runs(rd)) >= 2:

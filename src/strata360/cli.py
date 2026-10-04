@@ -354,7 +354,7 @@ def cmd_gaps(a):
     from strata360.edit import synthetic as SY
     cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
     if not tp: sys.exit('no race track: add the .fit or .gpx first')
-    tr = track.load(tp); gaps = GP.find_gaps(GP.load_spans(a.name), tr, a.min_minutes * 60.0, cfg.get('timezone', 'Europe/Brussels'))
+    tr = track.load(tp); gaps = GP.project_gaps(a.name, tr, a.min_minutes * 60.0, cfg.get('timezone', 'Europe/Brussels'))
     if a.plan:
         for g in gaps: SY.upsert(a.name, SY.make(g, seconds=a.seconds))
     if a.json: print(json.dumps(gaps, indent=1)); return
@@ -412,7 +412,7 @@ def cmd_gap_clip(a):
         t0, t1 = when(clip['t0']), when(clip['t1'])
     else:
         if not a.gap: sys.exit('--gap (or --clip) is needed')
-        gap = next((g for g in GP.find_gaps(GP.load_spans(a.name), tr, a.min_minutes * 60.0, tz) if g['id'] == a.gap), None)
+        gap = next((g for g in GP.project_gaps(a.name, tr, a.min_minutes * 60.0, tz) if g['id'] == a.gap), None)
         if gap is None: sys.exit(f'no gap {a.gap}: `strata360 gaps` lists them')
         t0, t1 = when(a.t_from), when(a.t_to)
         if (t0 or t1) and not a.id: sys.exit('a stretch of a gap needs --id (the clip is not the gap itself)')

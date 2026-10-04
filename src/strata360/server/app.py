@@ -806,7 +806,26 @@ def create_app(roots, token=None):
     @api.get('/api/tracks', dependencies=[Depends(auth)])
     def get_tracks(folder: str):                                                         # every track with kind and summary, the merged run track, and the points of interest
         from strata360.gps import tracks as TKS
-        f = folder_of(folder); return TKS.listing(config.race_dir(f), tz_of(f))
+        f = folder_of(folder); return with_stop_gaps(f, TKS.listing(config.race_dir(f), tz_of(f)))
+
+    def with_stop_gaps(f, listing):
+        """Each stop in the listing says whether it is in the video and, if so, which gap it is (the gaps are worked out here: the stop's place among the footage decides)."""
+        from strata360.gps import gaps as GP
+        stops = [p for p in listing.get('pois', []) if p.get('sym') == 'stop' and p.get('added')]
+        if stops:
+            try: ids = {g['stop']['key']: g['id'] for g in GP.project_gaps(f, loaded_raw_track(f), GP.MIN_GAP_S, tz_of(f)) if g.get('stop')}
+            except HTTPException: ids = {}
+            for p in stops: p['gap'] = ids.get(p['key'])
+        return listing
+
+    @api.post('/api/stops', dependencies=[Depends(auth)])
+    def post_stops(body: dict):                                                          # {folder, key, add}: put a stop of the run (see /api/tracks, pois with sym stop) in the video as a gap of its own, or take it out
+        from strata360.gps import gaps as GP, tracks as TKS
+        f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd = config.race_dir(f)
+        s = next((x for x in TKS.other_stops(rd) if GP.stop_key(x) == key), None)
+        if s is None and body.get('add', True): raise HTTPException(404, 'no such stop')
+        if s is None: s = dict(key=key, arrived=0, left=0, lat=0, lon=0, km=0, stopped_s=0, radius_m=0)
+        GP.set_stop(f, dict(s, key=key), bool(body.get('add', True))); return with_stop_gaps(f, TKS.listing(rd, tz_of(f)))
 
     @api.post('/api/tracks', dependencies=[Depends(auth)])
     async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
@@ -939,7 +958,7 @@ def create_app(roots, token=None):
         """The gaps between clips on the track with the generated clip planned for each (and for stretches of them), whether it is rendering, and its progress."""
         from strata360.gps import gaps as GP
         from strata360.edit import synthetic as SY
-        cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.find_gaps(GP.load_spans(f), loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
+        cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.project_gaps(f, loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
         job = GAP_JOBS.get(f); running = job[0] if job and job[1].poll() is None else None
         def log_lines(cid):
             try: return open(os.path.join(rd, 'synthetic', cid + '.log'), errors='replace').read().strip().splitlines()
@@ -1021,7 +1040,7 @@ def create_app(roots, token=None):
             clips.append(dict(label=m.group(1) if m else c['clip_id'], t0=t0, t1=t0 + c['video']['source_frames'] / c['video']['nominal_fps']))
         try:
             from strata360.gps import gaps as GP
-            cfg = config.load(f); gaps = [dict(id=g['id'], t0=g['t0'], t1=g['t1']) for g in GP.find_gaps(GP.load_spans(f, used=False), loaded_raw_track(f), GP.MIN_GAP_S, cfg.get('timezone', 'Europe/Brussels'))]          # between the camera clips alone: a section chosen for the film must still show the gap it fills
+            cfg = config.load(f); gaps = [dict(id=g['id'], t0=g['t0'], t1=g['t1']) for g in GP.project_gaps(f, loaded_raw_track(f), GP.MIN_GAP_S, cfg.get('timezone', 'Europe/Brussels'), used=False)]          # between the camera clips alone: a section chosen for the film must still show the gap it fills
         except HTTPException: gaps = []
         return clips, gaps
 

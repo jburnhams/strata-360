@@ -22,7 +22,7 @@ export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
 export type TrackKind = 'run' | 'route'
 export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number; time_s?: number; ran_km?: number; pace_s_km?: number; ascent_m?: number; descent_m?: number; order?: number | null; reversed?: boolean; km_start?: number; km_end?: number }
 export interface Stop { arrived: number | null; left: number | null; stopped_s: number; radius_m: number }
-export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string; n?: number; stop?: Stop }
+export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string; n?: number; stop?: Stop; key?: string; added?: boolean; gap?: string | null }
 export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
 export interface Timing { total_s: number; start: number; end: number; checkpoints: Record<string, number>; sections: Record<string, number>; ran_m?: Record<string, number>; arrivals?: Record<string, { t: number; elapsed_s: number; km: number }>; ascent_m?: number; descent_m?: number; consistent: boolean }
 export interface EndMarkers { start: { lat: number; lon: number; t: number }; end: { lat: number; lon: number; t: number; km: number; elapsed_s: number }; finish: { lat: number; lon: number } | null }
@@ -76,7 +76,7 @@ export interface GapClip { id: string; gap: string; kind: GapKind | string; size
 export interface GapSettings { kind: GapKind | null; mode: 'set' | 'min' | null; seconds: number | null; must: boolean }
 export interface GapScriptItem { n: number; type: string; text: string; seconds: number | null; kind: string | null }
 export interface Gap {
-  final?: boolean; in_film?: boolean; settings?: GapSettings; script?: GapScriptItem[]
+  final?: boolean; stop?: { key: string; arrived: number; left: number; stopped_s: number; radius_m: number; km: number; lat: number; lon: number; pad_s: number }; in_film?: boolean; settings?: GapSettings; script?: GapScriptItem[]
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
@@ -195,6 +195,7 @@ export const api = {
   setStreetviewChoice: (folder: string, key: string, choice: SvChoice | 'none') => call<{ key: string; choice: SvChoice | null }>('/api/streetview/choice', { folder, key, choice }),
   svNear: (folder: string, lat: number, lon: number) => call<SvNearLookup>('/api/streetview/near?' + q({ folder, lat: String(lat), lon: String(lon) })),
   searchSvNear: (folder: string, lat: number, lon: number, n = 5) => call<{ started: boolean; reason?: string }>('/api/streetview/near', { folder, lat, lon, n }),
+  setStop: (folder: string, key: string, add: boolean) => call<TracksListing>('/api/stops', { folder, key, add }),
   svChosen: (folder: string) => call<{ sections: SvChosen[] }>('/api/streetview/chosen?' + q({ folder })),
   setSvLength: (folder: string, key: string, seconds: number | null) => call<{ key: string; seconds: number | null }>('/api/streetview/length', { folder, key, seconds }),
   promoteSv: (folder: string, it: { provider: SvProvider; id: string; sequence: string }, lat: number, lon: number) => call<{ key: string; id: string }>('/api/streetview/promote', { folder, provider: it.provider, id: it.id, sequence: it.sequence, lat, lon }),

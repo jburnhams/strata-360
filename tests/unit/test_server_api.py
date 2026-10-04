@@ -794,3 +794,16 @@ class TestVideoStartedElsewhere(TestStreetViewVideoApi):
         old = time.time() - 1000; os.utime(lf, (old, old)); assert client.get('/api/streetview/video', params=q).json()['running'] is False          # a log nobody has written to for minutes: it stopped
         open(lf, 'w').write('fetching picture 2 of 10\nstreetview-video: boom\n'); assert client.get('/api/streetview/video', params=q).json()['running'] is False
 
+
+
+class TestStopsInTheVideo(TestGapSettings):
+    def test_a_stop_added_to_the_video_becomes_a_gap_with_its_stop_facts_and_goes_again_when_taken_out(self, client, project, monkeypatch):
+        from strata360.gps import tracks as TKS
+        self.with_gap(project); q = dict(folder=project.folder)
+        stop = dict(lat=50.0, lon=5.0, arrived=self.T0 + 2000, left=self.T0 + 2700, stopped_s=700, radius_m=60, km=1.2); monkeypatch.setattr(TKS, 'other_stops', lambda rd, **k: [stop])
+        before = client.get('/api/gaps', params=q).json()['gaps']; pois = [p for p in client.get('/api/tracks', params=q).json()['pois'] if p['sym'] == 'stop']
+        assert len(pois) == 1 and pois[0]['added'] is False and len(before) >= 1 and not any(g.get('stop') for g in before)
+        key = pois[0]['key']; r = client.post('/api/stops', json=dict(q, key=key, add=True)).json(); p = [p for p in r['pois'] if p['sym'] == 'stop'][0]; assert p['added'] is True and p['gap']
+        gaps = client.get('/api/gaps', params=q).json()['gaps']; g = next(x for x in gaps if x.get('stop')); assert g['id'] == p['gap'] and g['stop']['key'] == key and g['stop']['pad_s'] >= 180 and g['t0'] < self.T0 + 2000 and g['t1'] > self.T0 + 2700
+        assert client.post('/api/stops', json=dict(q, key='nope', add=True)).status_code == 404
+        r = client.post('/api/stops', json=dict(q, key=key, add=False)).json(); assert [p for p in r['pois'] if p['sym'] == 'stop'][0]['added'] is False and not any(x.get('stop') for x in client.get('/api/gaps', params=q).json()['gaps'])

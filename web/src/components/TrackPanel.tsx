@@ -10,7 +10,7 @@ import GapsPanel from './GapsPanel'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
 // Hover a marker for the clip's card, click it to open the clip.
-export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, tz = 'Europe/Brussels', photos = [], onOpenPhoto }: { folder: string; onOpenClip?: (clip: string) => void; onOpenGap?: (gap: string) => void; tz?: string; photos?: Photo[]; onOpenPhoto?: (p: Photo) => void }) {
+export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, tz = 'Europe/Brussels', photos = [], onOpenPhoto, onGapsChanged }: { folder: string; onGapsChanged?: () => void; onOpenClip?: (clip: string) => void; onOpenGap?: (gap: string) => void; tz?: string; photos?: Photo[]; onOpenPhoto?: (p: Photo) => void }) {
   const [t, setT] = useState<TrackOverview>()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string>()
@@ -59,14 +59,14 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, t
       </div>
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
       <TracksList folder={folder} listing={listing} onChange={changed} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
-      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} photos={photos} onOpenPhoto={onOpenPhoto} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
+      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} photos={photos} onOpenPhoto={onOpenPhoto} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} onOpenGap={onOpenGap} onStop={async (key, add) => { try { setListing(await api.setStop(folder, key, add)); onGapsChanged?.() } catch (e) { setErr((e as Error).message) } }} />
       <GapsPanel folder={folder} onOpen={onOpenGap} />
     </div>
   )
 }
 
 type Pick = { hot: string | null; setHot: (id: string | null) => void; pinned: string[]; toggle: (id: string) => void }
-function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string; photos: Photo[]; onOpenPhoto?: (p: Photo) => void } & Pick) {
+function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, setHot, pinned, toggle, onOpenGap, onStop }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string; photos: Photo[]; onOpenPhoto?: (p: Photo) => void; onOpenGap?: (gap: string) => void; onStop?: (key: string, add: boolean) => void | Promise<void> } & Pick) {
   const [overlay] = useThumbOverlay()
   const [base, setBase] = useState<TrackLine>(), [series, setSeries] = useState<TrackSeries>(), [clips, setClips] = useState<TrackClip[]>([]), [hasDraft, setHasDraft] = useState(false), [tiles, setTiles] = useState<TileStatus>(), [err, setErr] = useState<string>()
   const [xMode, setXMode] = useState<XMode>('time'), [cursor, setCursor] = useState<number | null>(null), [hover, setHover] = useState<{ clip: TrackClip; x: number; y: number }>()
@@ -121,7 +121,7 @@ function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, s
           <select aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="time">time</option><option value="km">distance</option></select></span>
       </div>
       <TrackCharts series={series} clips={clips} xMode={xMode} tz={tz} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} />
-      <StopsTable pois={listing?.pois ?? []} tz={tz} />
+      <StopsTable pois={listing?.pois ?? []} tz={tz} onOpenGap={onOpenGap} onToggle={onStop} />
       {hover && <div className="pointer-events-none fixed z-40" style={{ left: Math.min(hover.x + 16, window.innerWidth - 280), top: Math.min(hover.y + 16, window.innerHeight - 330) }}><ClipCard folder={folder} clip={hover.clip} overlay={overlay} /></div>}
     </div>
   )
