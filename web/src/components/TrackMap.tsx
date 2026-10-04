@@ -3,7 +3,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { api, type Divergence, type EndMarkers, type ExtraLine, type Photo, type Poi, type TileStatus, type TrackClip, type TrackLine } from '../api'
 import { nearestIndex } from '../trackMath'
-import { addEnds, addPois, addTiles } from '../mapLayers'
+import { addEnds, addPois, addTiles, stopFacts } from '../mapLayers'
 
 const GREEN = '#16a34a', GREY = '#78716c', ROUTE = '#2563eb', RUN = '#a3a3a3'
 const canvasOk = () => { try { return !!document.createElement('canvas').getContext('2d') } catch { return false } }       // the canvas renderer is quicker for a long line; without a 2D context (some test environments) Leaflet draws SVG
@@ -169,12 +169,12 @@ type ViewProps = Parameters<typeof MapView>[0]
 /** The race map, the one map of the app. Given the race track (`base`) and what to draw it is the overview map (or the street view page's, with its own layers in `decorate`). Given only a `folder` it fetches the run, the route tracks, the start, the
  *  finish, the checkpoints and the map behind them itself, and with a `span` (a time range, epoch seconds) or a `point` it picks that part of the run or that place out in orange and zooms to it: the map on the page of a clip, a gap, a photo or a
  *  street view section. The arrows button shows the whole race and the ring button comes back to what was picked out. */
-export default function TrackMap(props: Omit<ViewProps, 'base'> & { base?: TrackLine; folder?: string; span?: [number, number]; point?: { lat: number; lon: number }; frames?: { lat: number; lon: number; label?: string }[] }) {
+export default function TrackMap(props: Omit<ViewProps, 'base'> & { base?: TrackLine; folder?: string; span?: [number, number]; point?: { lat: number; lon: number }; /** when a single thing happened (a photo), to find the stops it falls in */ at?: number; frames?: { lat: number; lon: number; label?: string }[] }) {
   if (props.base) return <MapView {...(props as ViewProps)} />
   return <FolderMap {...props} />
 }
 
-function FolderMap({ folder, span, point, frames, label, tz = 'Europe/Brussels', height = 'h-72', focus: _focus, ...rest }: Omit<ViewProps, 'base'> & { folder?: string; span?: [number, number]; point?: { lat: number; lon: number }; frames?: { lat: number; lon: number; label?: string }[] }) {
+function FolderMap({ folder, span, point, at, frames, label, tz = 'Europe/Brussels', height = 'h-72', focus: _focus, ...rest }: Omit<ViewProps, 'base'> & { folder?: string; span?: [number, number]; point?: { lat: number; lon: number }; at?: number; frames?: { lat: number; lon: number; label?: string }[] }) {
   const [run, setRun] = useState<TrackLine>(), [part, setPart] = useState<TrackLine>(), [tiles, setTiles] = useState<TileStatus>(), [err, setErr] = useState<string>()
   const [routes, setRoutes] = useState<ExtraLine[]>([]), [pois, setPois] = useState<Poi[]>([]), [ends, setEnds] = useState<EndMarkers | null>(null)
   useEffect(() => {
@@ -194,6 +194,8 @@ function FolderMap({ folder, span, point, frames, label, tz = 'Europe/Brussels',
     api.trackLine(folder, undefined, 500, span).then(r => live && setPart(r)).catch(() => {}); return () => { live = false }
   }, [folder, key])         // eslint-disable-line react-hooks/exhaustive-deps
   const line = part && part.lat.length > 1 ? part.lat.map((la, i) => [la, part.lon[i]] as [number, number]) : undefined
+  const [t0, t1] = span ?? (at != null ? [at, at] : [NaN, NaN])
+  const here = Number.isFinite(t0) ? pois.filter(p => p.sym === 'stop' && p.stop?.arrived != null && p.stop.left != null && p.stop.arrived <= t1 && p.stop.left >= t0) : []              // the stops this overlaps in time
   if (err) return <p className="text-sm text-amber-700">The map needs the race track: {err}</p>
   if (!run) return <div className={`${height} animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800`} aria-label="Loading the map" />
   return (
@@ -207,6 +209,12 @@ function FolderMap({ folder, span, point, frames, label, tz = 'Europe/Brussels',
         <span>⤢ the whole race · ◎ back to this</span>
         {tiles && !tiles.ok && <span className="text-amber-700">map background off</span>}
       </div>
+      {here.length > 0 && (
+        <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200" aria-label="Stops here">
+          <div className="text-xs font-semibold uppercase tracking-wide">{here.length === 1 ? 'The runner stopped here' : 'The runner stopped here, twice or more'}</div>
+          <ul className="space-y-0.5">{here.map(p => { const f = stopFacts(p, tz); return <li key={p.name} data-stop-here={p.name}><b>{f.name}</b> · stopped {f.duration} (within {f.area_m} m) · {f.arrived} to {f.left} · km {f.km ?? '?'} of the run{p.added && p.gap ? ` · in the video as ${p.gap}` : ''}</li> })}</ul>
+        </div>
+      )}
     </div>
   )
 }

@@ -29,4 +29,14 @@ describe('the race map on the page of a film item', () => {
     const seen = recordRequests('/api/track/line'); server.use(http.get('/api/track/line', () => HttpResponse.json(line)), http.get('/api/tracks', () => HttpResponse.json(makeTracksListing())), http.get('/api/gaps', () => HttpResponse.json({ gaps: [makeGap({ id: 'G01', t0: 5000, t1: 9000 })], flyover: { available: true, note: '' } })))
     setup(<GapView folder="/data" gap="G01" />); expect(await screen.findByText('Where on the route')).toBeInTheDocument(); await waitFor(() => expect(seen.some(r => r.url.searchParams.get('t0') === '5000' && r.url.searchParams.get('t1') === '9000')).toBe(true))
   })
+
+  it('says on the page of a clip, a gap, a photo or a street view section when the runner stopped during it, with the details', async () => {
+    const pois = [{ name: 'Stop 4', lat: 50, lon: 5, ele: null, sym: 'stop', desc: 'km 114.9 of the run', track: '', key: 'k4', added: true, gap: 'G05', stop: { arrived: 5000, left: 8120, stopped_s: 3120, radius_m: 60 } },
+      { name: 'Stop 5', lat: 50, lon: 5, ele: null, sym: 'stop', desc: 'km 300 of the run', track: '', key: 'k5', added: false, stop: { arrived: 90000, left: 90700, stopped_s: 700, radius_m: 60 } }]
+    server.use(http.get('/api/track/line', () => HttpResponse.json(line)), http.get('/api/tracks', () => HttpResponse.json(makeTracksListing({ pois }))))
+    const { unmount } = setup(<TrackMap folder="/data" tz="UTC" span={[6000, 7000]} label="Clip 0023" />)
+    const box = await screen.findByLabelText('Stops here'); expect(box).toHaveTextContent('The runner stopped here'); expect(box).toHaveTextContent('Stop 4'); expect(box).toHaveTextContent('52 min'); expect(box).toHaveTextContent('km 114.9'); expect(box).toHaveTextContent('in the video as G05'); expect(box).not.toHaveTextContent('Stop 5'); unmount()
+    const { unmount: u2 } = setup(<TrackMap folder="/data" tz="UTC" point={{ lat: 50, lon: 5 }} at={7000} label="Photo P1" />); expect(await screen.findByLabelText('Stops here')).toHaveTextContent('Stop 4'); u2()
+    setup(<TrackMap folder="/data" tz="UTC" span={[20000, 21000]} label="Gap" />); await screen.findByLabelText('Where on the route'); expect(screen.queryByLabelText('Stops here')).toBeNull()
+  })
 })
