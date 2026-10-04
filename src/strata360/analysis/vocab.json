@@ -875,7 +875,8 @@
   "object",
   "thing",
   "item",
-  "stuff"
+  "stuff",
+  "puddle", "patch", "patches", "sheet", "slab"
  ],
  "scenery": [
   "tree trunk",
@@ -891,6 +892,7 @@
   "woods",
   "branch",
   "twig",
-  "stick"
+  "stick",
+  "tree", "rock", "ceiling light", "light fixture", "fluorescent"
  ]
 }

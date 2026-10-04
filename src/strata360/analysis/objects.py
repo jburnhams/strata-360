@@ -37,6 +37,7 @@ CROP_MARGIN, CROP_FOV = 1.8, (10.0, 60.0)
 TINY_DEG = V.CROP_WANT_PX / 3 / V.NATIVE_PPD       # below this even the lens frame gives the box fewer than a third of the pixels the labelling model wants
 DARK_SUN, DARK_EXPOSURE, BLACK_FRAME = -12.0, 0.2, 0.02
 WEARER_NEAR_S = 1.5
+PERSON_NAMED = 0.3                        # how far from a person's middle (in their heights) a named box still counts as part of them
 GROUND_LAT, GROUND_DEG = -40.0, 8.0         # a small prompt-free box this far below the horizon is a mark on the ground (snow patch, puddle, leaves), not something passed: not sent to the labelling model
 SAME_OBJECT_DEG = 2.0                     # two boxes closer than this (or 0.6 of their size) in the world frame are the same object
 BATCH = 8                                 # moments per detector call (their tile pictures are on disk meanwhile)
@@ -123,7 +124,7 @@ def merge_moment(cands, people, wearer):
         if any(angdist((c['lon'], c['lat']), (k['lon'], k['lat'])) < max(1.5, 0.4 * max(c['deg'], k['deg'])) for k in kept): continue
         kept.append(c)
     for c in kept:
-        on_person = any(angdist((c['lon'], c['lat']), (p['lon'], p['lat'])) < p['deg'] * 0.6 for p in people)
+        on_person = any(angdist((c['lon'], c['lat']), (p['lon'], p['lat'])) < p['deg'] * (0.6 if c['kind'] == 'other' else PERSON_NAMED) for p in people)         # an unnamed box near a person is mostly their hands, shoes or gear; a named chair, cup or sign is dropped only when it is on them
         in_cone = c['kind'] == 'other' and any(angdist((c['lon'], c['lat']), (lo, la)) < max(h / 2, 12) for lo, la, h in wearer)           # only a box the detector could not name is judged by the cone: a named dog, sign or car next to the wearer is kept
         c['wearer'] = on_person or in_cone
     return kept

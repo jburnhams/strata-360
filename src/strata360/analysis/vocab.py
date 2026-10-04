@@ -79,7 +79,7 @@ def kind_of_label(label, vocab=None):
     """'stop' (not worth reporting: a body part, the ground, the sky, "unclear"), 'scenery' (trees and hills: real but filler) or 'feature'."""
     v = vocab or load(); words = set(re.findall(r'[a-z]+', str(label).lower())); text = str(label).lower()
     if any((s in text if ' ' in s else s in words) or s == text for s in v.get('stoplist', [])): return 'stop'
-    if any(s in text for s in v.get('scenery', [])): return 'scenery'
+    if any((s in text if ' ' in s else s in words) for s in v.get('scenery', [])): return 'scenery'                  # a one-word entry matches whole words only ("tree" is not in "street light")
     return 'feature'
 
 

@@ -45,7 +45,8 @@ def test_the_same_thing_in_two_tiles_is_one_candidate_and_the_wearers_is_marked(
     c = lambda lo, la, cf: dict(kind='named', yoloe='sign', conf=cf, lon=lo, lat=la, deg=3.0)
     out = O.merge_moment([c(10, 5, 0.5), c(10.5, 5, 0.7), c(120, 0, 0.6), c(-170, -40, 0.6)], [], [(-170, -35, 40)])
     assert [(x['lon'], x['wearer']) for x in out] == [(10.5, False), (120, False), (-170, False)]
-    assert O.merge_moment([c(0, 0, 0.5)], [dict(lon=2, lat=0, deg=5)], [])[0]['wearer'] is True
+    assert O.merge_moment([c(0, 0, 0.5)], [dict(lon=1, lat=0, deg=5)], [])[0]['wearer'] is True and O.merge_moment([c(0, 0, 0.5)], [dict(lon=2.5, lat=0, deg=5)], [])[0]['wearer'] is False       # a named box 2.5 degrees from a 5 degree person is a chair beside them
+    assert O.merge_moment([dict(c(0, 0, 0.5), kind='other')], [dict(lon=2.5, lat=0, deg=5)], [])[0]['wearer'] is True
     named, other = c(-170, -40, 0.6), dict(c(-170, -40, 0.6), kind='other'); assert O.merge_moment([named], [], [(-170, -35, 40)])[0]['wearer'] is False and O.merge_moment([other], [], [(-170, -35, 40)])[0]['wearer'] is True     # a named thing next to the wearer is kept
     assert O.merge_moment([dict(other, lon=-170 + 25)], [], [(-170, -35, 40)])[0]['wearer'] is False                                                                                                                           # outside the wearer's own size
 
