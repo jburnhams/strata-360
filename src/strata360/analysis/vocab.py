@@ -245,9 +245,9 @@ def canonicalise(labels, ask, vocab=None, batch=40):
     return out
 
 
-def review(book, ask, vocab=None, min_count=MIN_SUGGEST, min_clips=MIN_CLIPS):
+def review(book, ask, vocab=None, min_count=MIN_SUGGEST, min_clips=MIN_CLIPS, log=None, judged=None):
     """Ask the model about each suggested word: [dict(word, add, categories, why)] for those it accepts as distinct things a runner can pass."""
-    v = vocab or load(); cands = book.suggestions(v, min_count, min_clips)
+    v = vocab or load(); cands = [w for w in book.suggestions(v, min_count, min_clips) if w not in (judged or {}) or book.suggest[w]['count'] >= 2 * (judged[w].get('count') or 1)]          # a label already judged is asked again only when it has turned up twice as often since
     if not cands: return []
     names = list(v['categories']); menu = ', '.join(names); prompts = []
     for w in cands:
@@ -258,6 +258,7 @@ def review(book, ask, vocab=None, min_count=MIN_SUGGEST, min_clips=MIN_CLIPS):
     out = []
     for w, ans in zip(cands, ask(prompts)):
         a = parse_json(ans)
+        if log is not None: log.append(dict(label=w, count=book.suggest[w]['count'], add=isinstance(a, dict) and a.get('add') is True, word=a.get('word') if isinstance(a, dict) else None, answer=str(ans)[:160]))
         if not isinstance(a, dict) or a.get('add') is not True: continue
         word = normalise_label(a.get('word') or w, v) or w; cats = [c for c in (a.get('categories') or []) if c in names]
         if cats and word not in v.get('retired', {}): out.append(dict(word=word, categories=cats, from_label=w))
@@ -302,8 +303,8 @@ def stats_for(root):
 def update(root, ask, vocab=None):
     """Review the project's suggestions with the model, write the accepted words and the demotions to its local list; returns (proposals, demoted)."""
     pp = project_paths(root); book = collect(root); local = json.load(open(pp['local'])) if os.path.exists(pp['local']) else {}
-    v = load(local=local) if vocab is None else vocab; props = review(book, ask, v); weak = [w for w in book.weak(v) if w not in (local.get('remove') or [])]
-    new = apply(local, props, weak); os.makedirs(os.path.dirname(pp['local']), exist_ok=True); json.dump(new, open(pp['local'], 'w'), indent=1); return props, weak
+    v = load(local=local) if vocab is None else vocab; log = []; props = review(book, ask, v, log=log, judged=local.get('reviewed')); weak = [w for w in book.weak(v) if w not in (local.get('remove') or [])]
+    new = apply(local, props, weak); new['reviewed'] = {**(local.get('reviewed') or {}), **{d['label']: dict(count=d['count'], add=d['add'], answer=d['answer']) for d in log}}; os.makedirs(os.path.dirname(pp['local']), exist_ok=True); json.dump(new, open(pp['local'], 'w'), indent=1); return props, weak
 
 
 def ask_with_runner(prompts, models=None):

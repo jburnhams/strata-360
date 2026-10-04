@@ -78,7 +78,7 @@ class TestRun:
         return objects
 
     def test_all_the_stages_run_once_and_a_second_run_does_nothing(self, project, monkeypatch, tmp_path):
-        ids = self.project_with_photos(project); monkeypatch.chdir(tmp_path); os.makedirs('profiles'); np.savez('profiles/me.npz', centroid=np.array([1.0] + [0] * 511, np.float32), samples=np.array([[1.0] + [0] * 511], np.float32), threshold=0.5)
+        ids = self.project_with_photos(project); os.makedirs(project.path('profiles')); np.savez(project.path('profiles', 'me.npz'), centroid=np.array([1.0] + [0] * 511, np.float32), samples=np.array([[1.0] + [0] * 511], np.float32), threshold=0.5)
         calls = []; detect, vlm = self.fakes(calls); rev = lambda la, lo, d: dict(village='Nadrin'); near = lambda la, lo, d: []
         objects = self.objs(calls); done = PA.run(project.folder, detect=detect, vlm=vlm, reverse=rev, nearby=near, objects=objects)
         assert {s: sorted(v) for s, v in done.items()} == {s: sorted(ids) for s in PA.ORDER} and [c[0] for c in calls] == ['detect', 'objects', 'vlm']                              # the models are loaded once for all the photos

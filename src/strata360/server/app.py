@@ -608,9 +608,9 @@ def create_app(roots, token=None):
     @api.get('/api/who', dependencies=[Depends(auth)])
     def get_who(folder: str, refresh: bool = False):                                     # the face clusters found in the footage, the suggested one for the wearer, and whether a profile is saved
         from strata360.analysis import identity
-        f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f); cj = os.path.join(rd, 'people', 'clusters.json'); prof = os.path.join(ROOT_DIR, 'profiles', cfg.get('profile', 'me') + '.npz')
+        f = folder_of(folder); rd = config.race_dir(f); cfg = config.load(f); cj = os.path.join(rd, 'people', 'clusters.json'); prof = config.profile_path(rd, cfg)
         if refresh or not os.path.exists(cj):
-            try: identity.run(rd, profiles_dir=os.path.join(ROOT_DIR, 'profiles'))
+            try: identity.run(rd, profiles_dir=os.path.join(rd, 'profiles'))
             except SystemExit as e: return dict(ready=False, reason=str(e), profile=os.path.exists(prof))
         d = json.load(open(cj)); return dict(ready=True, clusters=d['clusters'][:30], suggested=d['suggested_wearer'], profile=os.path.exists(prof), sheet=os.path.exists(os.path.join(rd, 'people', 'clusters.png')))
 
@@ -624,7 +624,7 @@ def create_app(roots, token=None):
     def get_who_me(request: Request, folder: str, n: int = 4):                           # a strip of the chosen face (the saved profile's thumbnails)
         auth(request)
         import cv2, numpy as np
-        f = folder_of(folder); p = os.path.join(ROOT_DIR, 'profiles', config.load(f).get('profile', 'me') + '.npz')
+        f = folder_of(folder); p = config.profile_path(config.race_dir(f), config.load(f))
         if not os.path.exists(p): raise HTTPException(404, 'no face chosen yet')
         t = np.load(p)['thumbs']; k = max(1, min(int(n), len(t))); idx = np.argsort(-(t.max(3) > 12).mean((1, 2)), kind='stable')[:k]           # the crops with the least black border (faces near the frame edge are cut off)
         ok, buf = cv2.imencode('.jpg', np.concatenate([t[i] for i in idx], 1)[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90])           # thumbnails are RGB
@@ -637,7 +637,7 @@ def create_app(roots, token=None):
         try: ids = [int(x) for x in body.get('me', [])]
         except (TypeError, ValueError): raise HTTPException(400, 'me: a list of cluster numbers')
         if not ids: raise HTTPException(400, 'choose at least one cluster')
-        try: identity.run(rd, me=','.join(map(str, ids)), profiles_dir=os.path.join(ROOT_DIR, 'profiles'), label=cfg.get('profile', 'me'))
+        try: identity.run(rd, me=','.join(map(str, ids)), profiles_dir=os.path.join(rd, 'profiles'), label=cfg.get('profile', 'me'))
         except SystemExit as e: raise HTTPException(400, str(e))
         start_job(f, ('run',)); return dict(ok=True)
 

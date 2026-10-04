@@ -81,7 +81,9 @@ def test_suggested_words_are_reviewed_by_the_model_and_only_distinct_things_in_k
             elif '"weather vane"' in p: out.append('{"add": true, "word": "weather vane", "categories": []}')
             else: out.append('{"add": false, "word": "", "categories": []}')
         return out
-    got = V.review(b, ask, v); assert [(g['word'], g['categories']) for g in got] == [('lamp post', ['town_village'])] and V.review(V.StatsBook(), ask, v) == []
+    log = []; V.review(b, ask, v, log=log); by = {d['label']: d for d in log}; assert by['lamp post']['add'] is True and by['lamp post']['count'] == 3 and 'add' in by['lamp post']['answer'] and by['weather vane']['add'] is True
+    judged = {k: dict(count=d['count']) for k, d in by.items()}; assert V.review(b, ask, v, judged=judged) == []                                                      # already judged at this count: not asked again
+    assert [g['word'] for g in V.review(b, ask, v, judged=dict(judged, **{'lamp post': dict(count=1)}))] == ['lamp post']; got = V.review(b, ask, v); assert [(g['word'], g['categories']) for g in got] == [('lamp post', ['town_village'])] and V.review(V.StatsBook(), ask, v) == []
 
 
 def test_odd_labels_are_simplified_in_batches_with_skips_and_a_fallback_for_what_the_model_leaves_out():
@@ -100,7 +102,7 @@ def test_update_adds_accepted_words_and_removes_weak_ones_in_the_projects_own_li
     for clip in ('0013', '0016', '0013'): b.record_leftover('lamp post', clip, v)
     pp = V.project_paths(str(tmp_path)); b.write(pp['stats'])
     props, weak = V.update(str(tmp_path), lambda ps: ['{"add": true, "word": "lamp post", "categories": ["town_village"]}'] * len(ps), vocab=v)
-    assert [p['word'] for p in props] == ['lamp post'] and weak == ['sheep']; local = json.load(open(pp['local'])); assert local == dict(add={'town_village': ['lamp post']}, remove=['sheep'])
+    assert [p['word'] for p in props] == ['lamp post'] and weak == ['sheep']; local = json.load(open(pp['local'])); assert local['add'] == {'town_village': ['lamp post']} and local['remove'] == ['sheep'] and local['reviewed']['lamp post']['add'] is True and local['reviewed']['lamp post']['count'] == 3         # what was judged is kept, so it is not asked again
     mine = V.load(local=local); assert 'lamp post' in mine['categories']['town_village']['words'] and 'lamp post' not in v['categories']['town_village']['words'] and 'lamp post' in V.words_for(['town_village'], mine)
     props, weak = V.update(str(tmp_path), lambda ps: [], vocab=None); assert props == [] and weak == []                    # nothing new the second time: the word is a word now, the weak one is already out
 

@@ -208,7 +208,8 @@ def people(ctx):
 def identity(ctx):
     import numpy as np, os
     from strata360.analysis import identity as I
-    path = os.path.join('profiles', ctx.cfg.get('profile', 'me') + '.npz')
+    from strata360.pipeline import config
+    path = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), '..', '..')), ctx.cfg)
     if not os.path.exists(path): raise RuntimeError(f'no wearer profile {path}: run ./strata360 who RACE --me N (or --auto) first')
     ctx.write('identity.json', ctx.stamped(I.analyse_clip(ctx.read('people.json'), np.load(ctx.path('faces.npy')), I.load_profile(path))))
 
@@ -260,7 +261,8 @@ def speakers(ctx):
     import numpy as np, os
     from strata360.analysis import voices
     doc, emb = voices.analyse(audio_src(ctx), ctx.read('transcript.json'), str(ctx.dir))
-    prof = os.path.join('profiles', ctx.cfg.get('profile', 'me') + '_voice.npz')
+    from strata360.pipeline import config
+    prof = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), '..', '..')), ctx.cfg, voice=True)
     if os.path.exists(prof) and len(emb):
         lab, sim = voices.label(emb, prof)
         for s, l, m in zip(doc['segments'], lab, sim): s['label'] = l; s['sim'] = m

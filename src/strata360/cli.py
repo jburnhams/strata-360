@@ -189,7 +189,7 @@ def cmd_fetch_models(a):
 
 def cmd_who(a):
     from strata360.analysis import identity
-    S, sug = identity.run(config.race_dir(a.name), me=a.me, label=a.label, auto=a.auto)
+    S, sug = identity.run(config.race_dir(a.name), me=a.me, label=a.label, auto=a.auto, profiles_dir=os.path.join(config.race_dir(a.name), 'profiles'))
     print(f'{len(S)} face clusters (sheet: {config.race_dir(a.name)}/people/clusters.png)')
     for s in S: print(f"  #{s['cluster']:<3} {s['n']:5d} faces in {s['clips']:2d} clips   rear-lens share {s['rear_fraction']:.0%}   median size {s['median_size_px']:.0f} px")
     ids = ','.join(str(c) for c in sug['clusters'])
@@ -245,7 +245,7 @@ def project_progress(name):
     needs = []
     tr_missing = config.track_path(name, cfg) is None and any(STAGES[n].needs_track for n in names)
     if tr_missing: needs.append('race_track')
-    if 'identity' in names and not os.path.exists(os.path.join('profiles', cfg.get('profile', 'me') + '.npz')): needs.append('wearer_profile')
+    if 'identity' in names and not os.path.exists(config.profile_path(config.race_dir(name), cfg)): needs.append('wearer_profile')
     if not cfg.get('camera_clock', {}).get('verified'): needs.append('camera_clock')
     from strata360.pipeline import resources
     wk = runner.workers(name); resources_ok = resources.may_start_extra_worker(len(wk), cfg); lock = bool(wk); act = runner.active_items(name); by_pid = {p_: (c_, s_) for c_, s_, p_ in act}
@@ -508,7 +508,7 @@ def cmd_voice(a):
     print(f"suggested wearer voice: #{sug['cluster']} ({'confident' if sug.get('confident') else 'NOT confident, check the lines above'}). {sug['why']}")
     me = a.me or (str(sug['cluster']) if (a.auto and sug.get('confident')) else None)
     if me:
-        n = voices.save_profile(E, lab, [int(x) for x in str(me).split(',')], f'profiles/{a.label}_voice.npz'); print(f'saved profiles/{a.label}_voice.npz from {n} segments; re-run speakers to label them: ./strata360 run {a.name} --stages speakers --force')
+        n = voices.save_profile(E, lab, [int(x) for x in str(me).split(',')], os.path.join(rd, 'profiles', f'{a.label}_voice.npz')); print(f'saved {rd}/profiles/{a.label}_voice.npz from {n} segments; re-run speakers to label them: ./strata360 run {a.name} --stages speakers --force')
     else: print(f'confirm with: ./strata360 voice {a.name} --me {sug["cluster"]}')
 
 

@@ -51,6 +51,19 @@ def race_dir(name):
 TRACK_NAMES = ('track.fit', 'track.gpx')      # the race track lives at <project>/track.fit or track.gpx (uploaded in the GUI or copied there)
 
 
+LEGACY_PROFILE_DIRS = [os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'profiles'), 'profiles']       # where profiles were kept before they lived in the project: the repository's folder, the working folder's
+
+
+def profile_path(rd, cfg=None, voice=False):
+    """The wearer's face profile (`<project>/profiles/<profile>.npz`) or voice profile (`..._voice.npz`) of the project whose results folder is `rd` (race_dir): where it is saved, and where it is read from when it exists there. A profile made before they lived
+    in the project (the repository's `profiles/` folder, or the working folder's) is still found, so a project that has none of its own keeps working; copy it into the project to make the project complete on its own."""
+    name = f"{(cfg or {}).get('profile', 'me')}{'_voice' if voice else ''}.npz"; mine = os.path.join(rd, 'profiles', name)
+    if os.path.exists(mine): return mine
+    for d in LEGACY_PROFILE_DIRS:
+        if os.path.exists(os.path.join(d, name)): return os.path.abspath(os.path.join(d, name))
+    return mine
+
+
 def track_path(name, cfg=None):
     """The race track file of a project: the known filename in the project folder, else the (older) `gps` setting, else None."""
     from strata360.gps import tracks                                       # the one track the program uses: the run, or the runs merged (route tracks are for the overview map only)
