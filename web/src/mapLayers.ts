@@ -1,5 +1,5 @@
 import L from 'leaflet'
-import type { EndMarkers, Poi, Stop } from './api'
+import type { EndMarkers, PointCam, Poi, Stop } from './api'
 
 export const ROUTE_BLUE = '#2563eb'
 
@@ -67,4 +67,23 @@ export function addEnds(g: L.LayerGroup, ends: EndMarkers | null | undefined, tz
       if (ends.finish) L.marker([ends.finish.lat, ends.finish.lon], { icon: L.divIcon({ className: '', html: `<div data-end="finish"${ring}style="width:26px;height:26px;border-radius:50%;border:2.5px solid #fff;background:conic-gradient(#000 25%, #fff 0 50%, #000 0 75%, #fff 0);box-shadow:${glow}"></div>`, iconSize: [26, 26], iconAnchor: [13, 13] }), title: 'Finish line', keyboard: false, zIndexOffset: 650 + (ringEnds ? 300 : 0) }).bindTooltip('Finish line (the end of the last route)', { direction: 'top', offset: [0, -12] }).addTo(g)
       dot('end', '■', '#dc2626', `End of the run · km ${ends.end.km} · ${when(ends.end.t)}`, [ends.end.lat, ends.end.lon], 'End of the run', 680)
     }
+}
+
+
+// Point cameras (a virtual camera that keeps one place in frame while the path passes it): the stretch of path the shot covers in teal, the place as a bullseye, and, for the camera picked, what the camera sees from seven places along the path (a wedge as wide as the view, pointing at the place).
+export const CAM_COLOR = '#0d9488'
+/** The point `metres` from (lat, lon) in the compass direction `bearing` (degrees). */
+export const destination = (lat: number, lon: number, bearing: number, metres: number): [number, number] => { const r = (bearing * Math.PI) / 180; return [lat + (metres * Math.cos(r)) / 111320, lon + (metres * Math.sin(r)) / (111320 * Math.cos((lat * Math.PI) / 180))] }
+export function addPointCams(g: L.LayerGroup, cams: PointCam[], picked: string | undefined, onPick: (id: string) => void) {
+  for (const c of cams) {
+    const on = c.id === picked, geo = c.ok ? c.geometry : undefined
+    if (geo && geo.line.length > 1) { L.polyline(geo.line, { color: '#fff', weight: on ? 10 : 8, opacity: 0.9, interactive: false }).addTo(g); L.polyline(geo.line, { color: CAM_COLOR, weight: on ? 6 : 4, opacity: 1, interactive: false }).addTo(g) }
+    if (geo && on) for (const s of geo.sights) {
+      const [la, lo] = s.at, len = Math.max(Math.min(s.dist, 400), 4)
+      L.polygon([[la, lo], destination(la, lo, s.bearing - s.fov / 2, len), destination(la, lo, s.bearing + s.fov / 2, len)], { color: CAM_COLOR, weight: 1, fillColor: CAM_COLOR, fillOpacity: 0.12, interactive: false }).addTo(g)
+      L.polyline([[la, lo], [c.lat, c.lon]], { color: CAM_COLOR, weight: 1, dashArray: '3 4', interactive: false }).addTo(g)
+    }
+    const icon = L.divIcon({ className: '', html: `<div data-pointcam-marker="${c.id}" style="width:26px;height:26px;border-radius:50%;background:#fff;border:3px solid ${CAM_COLOR};box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font:700 9px/1 ui-monospace,monospace;color:${CAM_COLOR}">${c.label}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] })
+    L.marker([c.lat, c.lon], { icon, title: `Point camera ${c.label}${c.name ? ` · ${c.name}` : ''}`, keyboard: false, zIndexOffset: on ? 800 : 600 }).on('click', () => onPick(c.id)).addTo(g)
+  }
 }

@@ -16,6 +16,7 @@ FEATURES = {'steady', 'clear_nadir', 'open_ground', 'canopy', 'subject', 'speech
 class Technique:
     id: str; family: str; dur: tuple; energy: float; hero: bool; max_share: float; cooldown: int; max_consecutive: int; max_uses: int
     beats: str; dialogue_ok: bool; scale: str; needs: dict = field(default_factory=dict)
+    cam: dict = None                      # a point camera (edit/pointcam.py): the clip it is on and its path over the clip's seconds; the technique is only for windows inside that stretch
 
     @property
     def dmin(self): return self.dur[0]
@@ -32,6 +33,23 @@ def load(path=None):
         t = dict(t); t['dur'] = tuple(t['dur']); t['needs'] = {k: tuple(v) for k, v in t.get('needs', {}).items()}
         out[t['id']] = Technique(**t)
     validate(out)
+    return out
+
+
+CAM_MIN_S, CAM_IDEAL_S, CAM_MAX_S = 2.0, 5.0, 16.0       # how long a window of a point camera may be (the stretch itself is the other limit)
+
+
+def with_cams(lib, folder):
+    """The library plus a technique `cam:C1` for each point camera on a clip that is offered as possible (edit/pointcam_clip.cutins): the planner may cut to it in a window that lies inside the stretch the camera covers, and the framing gives the window the camera's path.
+    The library itself is not changed; a project with no cameras (or none that work) gets it back as it is."""
+    from strata360.edit import pointcam_clip as PCL
+    try: cams = PCL.cutins(folder)
+    except (OSError, ValueError, KeyError): return lib
+    out = dict(lib)
+    for c in cams:
+        span = c['t1'] - c['t0']
+        if span < CAM_MIN_S: continue
+        tid = f"cam:{c['id']}"; out[tid] = Technique(id=tid, family='pointcam', dur=(CAM_MIN_S, min(CAM_IDEAL_S, span), min(CAM_MAX_S, span)), energy=0.5, hero=False, max_share=0.3, cooldown=0, max_consecutive=1, max_uses=2, beats='beat', dialogue_ok=False, scale='medium', needs={}, cam=c)
     return out
 
 

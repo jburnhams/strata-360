@@ -141,3 +141,26 @@ class TestGoogleHighResolution:
     def test_the_logo_strip_of_a_view_is_not_used(self):
         a = np.full((100, 100, 3), 200, np.uint8); b = a.copy(); b[-5:, :] = (0, 0, 255)                     # a red strip where the logo is
         one = CAM.stitch_pano({(0, 0): b}, (100, 50), 'std'); two = CAM.stitch_pano({(0, 0): a}, (100, 50), 'std'); assert np.array_equal(one, two)
+
+
+class TestHeadings:
+    """`headings` is what `build` wants at each picture, without reading a picture."""
+    def mapillary(self, tmp_path, n=12):
+        rd = str(tmp_path); items = [dict(id=f'x{i}', km=1.0 + 6 * i / 1000.0, lat=50.0 + 6 * i / 111320.0, lon=5.0 + 2e-6 * i, a=None, b=0, c=0.0) for i in range(n)]
+        sec = dict(id='M1', provider='mapillary', stretch='R1', kind='360', km0=1.0, km1=1.066, length_m=66, frames=n, spacing_m=6.0, years=[2024], camera='x', size=[720, 360], seq='s1', angles=None, items=items)
+        os.makedirs(CAM.src_dir(rd, sec), exist_ok=True); meta = {it['id']: dict(computed_rotation=[0, 0, 0], computed_geometry=dict(coordinates=[it['lon'], it['lat']]), compass_angle=0.0) for it in items}
+        import json; json.dump(meta, open(CAM.meta_path(rd, sec), 'w')); return rd, sec
+
+    def test_mapillary_headings_are_the_ones_the_camera_uses(self, tmp_path):
+        rd, sec = self.mapillary(tmp_path); h = CAM.headings(rd, sec); assert len(h) == 12 and np.allclose(h, CAM.build(rd, sec).hs) and np.all(np.minimum(h, 360 - h) < 12.0)
+
+    def test_google_views_and_panoramas_head_along_their_own_bearings_and_a_flat_camera_has_none(self, tmp_path):
+        items = [dict(id=f'g{i}', km=1.0 + 0.01 * i, lat=50.0, lon=5.0, a=None, b=90.0, c=0.0) for i in range(12)]; sec = dict(id='G1', provider='google', kind='360', seq='g', items=items, frames=12)
+        assert np.allclose(CAM.headings(str(tmp_path), sec), 90.0, atol=1.0)                                   # (the flat views are asked for along these headings, and the panoramas turned to them)
+        with pytest.raises(ValueError, match='only a 360 section'): CAM.headings(str(tmp_path), dict(sec, provider='mapillary', kind='2d', items=[dict(it, a=0) for it in items]))
+
+    def test_a_panoramax_section_needs_the_road_and_a_short_one_is_refused(self, tmp_path):
+        items = [dict(id=f'p{i}', km=1.0 + 0.01 * i, lat=50.0 + 0.0001 * i, lon=5.0, a=None, b=0, c=0.0) for i in range(12)]; sec = dict(id='P1', provider='panoramax', kind='360', seq='p', items=items, frames=12)
+        with pytest.raises(ValueError, match='needs the road'): CAM.headings(str(tmp_path), sec)
+        road = dict(line=[[50.0 + i * 1e-4, 5.0] for i in range(14)], km0=0.99); h = CAM.headings(str(tmp_path), sec, road); assert len(h) == 12 and np.all(np.minimum(h, 360 - h) < 12.0)
+        with pytest.raises(ValueError, match='only 3 pictures'): CAM.headings(str(tmp_path), dict(sec, items=items[:3]))

@@ -52,6 +52,20 @@ export interface SvNear { before: SvNearClip | null; after: SvNearClip | null; o
 export type SvChoice = 'possible' | 'must'
 /** A section with what the page needs: a key that survives the stage being run again, whether it could make a clip (and why not), how long it plays at 15 pictures a second and how fast that looks, the sections over the same road, and your choice. */
 export interface SvSectionInfo extends SvSection { hires?: boolean; key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; near: SvNear | null; filmed: [number, number] | null; passed: [number, number] | null; has_video: boolean; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
+export type PointCamUse = '' | 'possible' | 'must'
+export interface PointCamSource { kind: 'clip' | 'streetview'; clip?: string; key?: string }
+export interface PointCamSight { at: [number, number]; bearing: number; fov: number; dist: number; t: number }
+export interface PointCamGeometry { line: [number, number][]; sights: PointCamSight[]; at: [number, number] }
+export interface PointCamFacts { seconds: number; min_dist_m: number; max_dist_m: number; max_pan_deg_s: number; swing_deg: number; fov_min: number; fov_max: number; warnings: string[] }
+export interface PointCamSettings { height_m: number; before_m: number; after_m: number; fov_near: number; fov_far: number; smooth_s: number }
+/** A virtual camera that keeps one place in frame while a clip or a street view section passes it (src/strata360/edit/pointcam.py). `ok` false: its source cannot give the shot (`error` says why). */
+export interface PointCam extends PointCamSettings {
+  id: string; label: string; source: PointCamSource; lat: number; lon: number; use: PointCamUse; t_pass: number; seconds?: number | null; name?: string | null; script: GapScriptItem[]
+  ok: boolean; error?: string; facts?: PointCamFacts; source_seconds?: number; range?: [number, number]; window?: [number, number]; geometry?: PointCamGeometry; north_offset?: number
+}
+export interface AimPath { kind: 'world' | 'rel'; t: number[]; yaw: number[]; pitch: number[]; fov: number[]; on: boolean[]; viewer?: { yaw: number; pitch: number; fov: number } }
+export interface PointCams { cams: PointCam[]; limits: Record<keyof PointCamSettings, [number, number]>; defaults: PointCamSettings & { use: PointCamUse } }
+export interface PointCamVideo { exists: boolean; running: boolean; log: string[]; error: string; progress?: { pct: number; phase: string; done: number; total: number } | null }
 export interface SvVideo { exists: boolean; running: boolean; log: string[]; error: string; seconds: number; fps?: number; hires?: boolean; progress?: { pct: number; phase: string; done: number; total: number } | null }
 export interface StreetView {
   status: Record<'roads' | SvProvider | 'quality', SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { frames: number; km: number } | null>; sections: SvSectionInfo[]
@@ -196,6 +210,15 @@ export const api = {
   svNear: (folder: string, lat: number, lon: number) => call<SvNearLookup>('/api/streetview/near?' + q({ folder, lat: String(lat), lon: String(lon) })),
   searchSvNear: (folder: string, lat: number, lon: number, n = 5) => call<{ started: boolean; reason?: string }>('/api/streetview/near', { folder, lat, lon, n }),
   setStop: (folder: string, key: string, add: boolean) => call<TracksListing>('/api/stops', { folder, key, add }),
+  pointcams: (folder: string, of: { clip?: string; key?: string } = {}) => call<PointCams>('/api/pointcams?' + q({ folder, ...(of.clip ? { clip: of.clip } : {}), ...(of.key ? { key: of.key } : {}) })),
+  addPointCam: (folder: string, source: PointCamSource, lat: number, lon: number) => call<PointCam>('/api/pointcams', { folder, source, lat, lon }),
+  updatePointCam: (folder: string, id: string, fields: Partial<PointCamSettings> & { use?: PointCamUse; name?: string | null; seconds?: number | null }) => call<PointCam>('/api/pointcams/update', { folder, id, ...fields }),
+  deletePointCam: (folder: string, id: string) => call<{ removed: boolean }>('/api/pointcams/delete', { folder, id }),
+  pointCamPath: (folder: string, id: string, view: 'clip' | 'pano' | 'flat') => call<AimPath>('/api/pointcams/path?' + q({ folder, id, view })),
+  pointCamVideo: (folder: string, id: string) => call<PointCamVideo>('/api/pointcams/video?' + q({ folder, id })),
+  makePointCamVideo: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/pointcams/video', { folder, id }),
+  pointCamVideoUrl: (folder: string, id: string, v = '') => '/api/pointcams/video/file?' + q({ folder, id, ...(v ? { v } : {}) }),
+  pointCamThumbUrl: (folder: string, id: string, v = '') => '/api/pointcams/thumb?' + q({ folder, id, ...(v ? { v } : {}) }),
   svChosen: (folder: string) => call<{ sections: SvChosen[] }>('/api/streetview/chosen?' + q({ folder })),
   setSvLength: (folder: string, key: string, seconds: number | null) => call<{ key: string; seconds: number | null }>('/api/streetview/length', { folder, key, seconds }),
   promoteSv: (folder: string, it: { provider: SvProvider; id: string; sequence: string }, lat: number, lon: number) => call<{ key: string; id: string }>('/api/streetview/promote', { folder, provider: it.provider, id: it.id, sequence: it.sequence, lat, lon }),

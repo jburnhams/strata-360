@@ -272,6 +272,22 @@ class Rig:
     def __init__(self, items, prog, hs, view, rot=None, img=None): self.items, self.prog, self.hs, self.view, self.n, self.rot, self.img = items, prog, hs, view, len(items), rot, img         # rot(i, yaw, pitch): the turn for a level view of picture i (360 sections only); img(i) the picture
 
 
+def headings(rd, section, road=None):
+    """The heading (compass degrees) at the middle of each picture of a section's videos, worked out the same way as `build` but without reading a picture (the point camera overlay needs where the video's centre looks). For Google it is the heading its views were asked for (`fetch`) and the
+    stitched panoramas are turned to. Raises ValueError for a flat camera."""
+    its = forward_items(section); prov = section['provider']
+    if len(its) < 8: raise ValueError(f"{section['id']}: only {len(its)} pictures face the way the runner went")
+    km = np.array([it['km'] for it in its]) * 1000.0
+    if prov == 'google': return smooth_heading([it['b'] for it in its], 3.0)
+    if section['kind'] != '360': raise ValueError('only a 360 section has a view that can be aimed at a point')
+    if prov == 'mapillary':
+        meta = json.load(open(meta_path(rd, section))); pos = np.array([meta[it['id']]['computed_geometry']['coordinates'] for it in its]); la0 = pos[:, 1].mean()
+        xy = np.stack([(pos[:, 0] - pos[0, 0]) * math.cos(math.radians(la0)) * 111320, (pos[:, 1] - pos[0, 1]) * 111320], 1); xy = np.stack([gaussian_filter1d(xy[:, 0], 1.0, mode='nearest'), gaussian_filter1d(xy[:, 1], 1.0, mode='nearest')], 1)
+        prog = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]) + km[0]; return smooth_heading([heading_along(prog, xy, p, LOOK_M) for p in prog], SIGMA_HEADING['mapillary'])
+    if not road: raise ValueError('a Panoramax 360 section needs the road (its line and where it starts) to aim along')
+    rp, rxy = road_xy(road['line']); rp = rp + road['km0'] * 1000.0; return smooth_heading([heading_along(rp, rxy, p, LOOK_M) for p in km], SIGMA_HEADING['panoramax'])
+
+
 def build(rd, section, road=None, size=OUT, preview=False, pano=False, grid='std'):
     """The camera rig for a section (see Rig); the maths depends on the kind of picture (module notes). Raises ValueError when there are too few pictures, RuntimeError when one has not been fetched."""
     its = forward_items(section)
@@ -320,6 +336,25 @@ def render_pano(rd, section, seconds, out, road=None, size=None, log=print, prev
     except BrokenPipeError: p.wait()
     if p.returncode: raise RuntimeError('ffmpeg failed to write the 360 street view video')
     os.replace(out + '.part.mp4', out); log(f"{section['id']}: 360 video of the {n} original pictures at {fps:g} a second"); return dict(frames=n, fps=fps)
+
+
+def render_point(rd, section, idx, yaw, pitch, fov, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False, grid='std'):
+    """Write the shot of a point camera (edit/pointcam.py) over a 360 section: one output frame for each entry of `idx` (the fractional index of the picture the camera is at: 3.25 is a quarter of the way from picture 3 to picture 4), looking at compass
+    `yaw` and `pitch` degrees with horizontal field of view `fov`, the two pictures it falls between blended along their optical flow as the street view clip does. Only 360 sections can be aimed anywhere (ValueError for a flat camera)."""
+    rig = build(rd, section, road, size, preview, pano=True, grid=grid)
+    if rig.rot is None: raise ValueError(f"{section['id']}: only a 360 section can be aimed at a point (this one is a flat camera)")
+    N, n = len(idx), rig.n; w, h = encode_size or size
+    cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{size[0]}x{size[1]}', '-r', str(fps), '-i', '-'] + (['-vf', f'scale={w}:{h}:flags=lanczos'] if (w, h) != tuple(size) else []) + ['-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-f', 'mp4', out + '.part.mp4']
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    try:
+        for k in range(N):
+            i = int(max(0, min(math.floor(idx[k]), n - 2))); a = float(np.clip(idx[k] - i, 0.0, 1.0)); y, pt, f = float(yaw[k]) % 360, float(pitch[k]), float(fov[k])
+            A = reproject(rig.img(i), rig.rot(i, y, pt), f, size); p.stdin.write((A if a < 0.02 else flow_blend(A, reproject(rig.img(i + 1), rig.rot(i + 1, y, pt), f, size), a)).tobytes())
+            if k % 15 == 0 or k == N - 1: log(f"rendering {k + 1} of {N} frames")
+        p.stdin.close(); p.wait()
+    except BrokenPipeError: p.wait()
+    if p.returncode: raise RuntimeError('ffmpeg failed to write the point camera video')
+    os.replace(out + '.part.mp4', out); log(f"{section['id']}: {N} frames aimed at the point from {n} pictures"); return dict(frames=N, fps=fps)
 
 
 def ups_path(rd, section, preview=False): return meta_path(rd, section) + ('.preview' if preview else '') + '.ups.npy'
