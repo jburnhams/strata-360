@@ -138,7 +138,7 @@ def make_streetview(sec, seconds, t0, t1, fps=30.0):
     if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
     a, b = float(t0), float(t1); c = dict(id=sec['label'], kind='streetview', photo=None, gap=None, t0=_iso(a), t1=_iso(b), duration_s=round(b - a, 1), seconds=round(float(seconds), 2), speedup=round((b - a) / float(seconds), 1), fps=float(fps),
                                       style=dict(section=sec['key'], provider=sec['provider'], pictures=sec['frames'], camera=sec['kind'], hires=bool(sec.get('hires'))), status='planned', size=STREETVIEW_SIZE, approved=True, by='planner')
-    c['key'] = hashlib.sha1(json.dumps([c['kind'], sec['key'], sec['frames'], round(c['seconds'], 2), c['fps'], STREETVIEW_SIZE, STREETVIEW_VERSION, round(a), round(b)] + (['hires'] if sec.get('hires') else []), sort_keys=True).encode()).hexdigest()[:12]; return c
+    c['key'] = hashlib.sha1(json.dumps([c['kind'], sec['key'], sec['frames'], round(c['seconds'], 2), c['fps'], STREETVIEW_SIZE, STREETVIEW_VERSION, round(a), round(b)] + (['hires', 'dolly1'] if sec.get('hires') else []), sort_keys=True).encode()).hexdigest()[:12]; return c
 
 
 POINTCAM_SIZE = '2560x1440'      # a point camera clip is made at 1440p from the clip's proxy or the street view pictures (the film scales it)
