@@ -105,7 +105,7 @@ def project_gaps(folder, tr, min_s=MIN_GAP_S, tz='Europe/Brussels', used=True):
 
 def find_gaps(spans, tr, min_s=MIN_GAP_S, tz='Europe/Brussels', stops=()):
     """The gaps between clips that lie on the track, in time order, numbered G01, G02, ... in that order. A stop added to the video (`stops`: see added_stops) inside a gap is a gap of its own, with `stop` facts: the stop and a little either side
-    (stop_window), even when that is shorter than `min_s`; what is left of the gap before and after it is a gap of its own when it is `min_s` or more. A stop that no gap holds (the footage covers it) makes no gap."""
+    (stop_window), even when that is shorter than `min_s`; what is left of the gap before and after it is a gap of its own when it is `min_s` or more. A stop partly covered by footage is a gap for the part outside the footage only (`covered_before` / `covered_after` say which end the footage cut off); one the footage covers entirely makes no gap."""
     T = tr['t']; start, end = float(T[0]), float(T[-1]); out = []; runs = merged(spans); raw = []
     for a, b in zip(runs, runs[1:]): raw.append((max(a['t1'], start), min(b['t0'], end), a['last'], b['first'], False))
     if runs: raw.append((max(runs[-1]['t1'], start), end, runs[-1]['last'], 'finish', True))
@@ -116,15 +116,15 @@ def find_gaps(spans, tr, min_s=MIN_GAP_S, tz='Europe/Brussels', stops=()):
         if g1 <= g0: continue
         mine = []
         for s in sorted(stops or [], key=lambda x: x['arrived']):
-            w0, w1 = stop_window(s); w0, w1 = max(w0, g0), min(w1, g1)
-            if w1 - w0 >= 60.0 and (not mine or w0 >= mine[-1][1]): mine.append((w0, w1, s))
+            f0, f1 = stop_window(s); w0, w1 = max(f0, g0), min(f1, g1)                                          # (only the time outside the footage: what a clip already covers is not drawn again)
+            if w1 - w0 >= 60.0 and (not mine or w0 >= mine[-1][1]): mine.append((w0, w1, s, w0 > f0 + 1.0, w1 < f1 - 1.0))
         if not mine:
             if g1 - g0 >= (FINAL_MIN_S if final else min_s): add(g0, g1, before, after, final=final)
             continue
         cur, prev = g0, before
-        for w0, w1, s in mine:
+        for w0, w1, s, cut0, cut1 in mine:
             if w0 - cur >= min_s: add(cur, w0, prev, 'stop'); prev = 'stop'
-            add(w0, w1, prev, 'stop', stop=dict(s, pad_s=round(s['arrived'] - stop_window(s)[0]))); cur, prev = w1, 'stop'
+            add(w0, w1, prev, 'stop', stop=dict(s, pad_s=round(s['arrived'] - stop_window(s)[0]), covered_before=cut0, covered_after=cut1)); cur, prev = w1, 'stop'
         if g1 - cur >= (FINAL_MIN_S if final else min_s): add(cur, g1, prev, after, final=final)
     for n, g in enumerate(out, 1): g['id'] = f'G{n:02d}'
     return out

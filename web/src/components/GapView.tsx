@@ -68,6 +68,7 @@ function StopCard({ folder, stop, tz, onChanged }: { folder: string; stop: NonNu
         <dt className="text-stone-500">From</dt><dd>{clock(stop.arrived, tz)}</dd><dt className="text-stone-500">To</dt><dd>{clock(stop.left, tz)}</dd>
         <dt className="text-stone-500">Where</dt><dd>km {stop.km} of the run</dd>
         <dt className="text-stone-500">The clip</dt><dd>starts {mins(stop.pad_s)} before the stop and ends {mins(stop.pad_s)} after it, to show arriving and leaving</dd>
+        {(stop.covered_before || stop.covered_after) && <><dt className="text-stone-500">Footage</dt><dd>already covers the {stop.covered_before && stop.covered_after ? 'start and the end' : stop.covered_before ? 'start' : 'end'} of this stop, so this clip is only the time outside it</dd></>}
       </dl>
       <button type="button" className="mt-2 text-xs text-stone-500 underline" onClick={async () => { await api.setStop(folder, stop.key, false).catch(() => {}); onChanged() }}>Take this stop out of the video</button>
     </Card>

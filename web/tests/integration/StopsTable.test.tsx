@@ -27,4 +27,8 @@ describe('the other stops', () => {
     rerender(<StopsTable tz="UTC" onToggle={toggle} onOpenGap={open} pois={[stop(1, { key: 'k1', added: true, gap: 'G05' })]} />)
     await user.click(screen.getByRole('button', { name: 'as G05' })); expect(open).toHaveBeenCalledWith('G05'); await user.click(screen.getByRole('button', { name: 'Take Stop 1 out of the video' })); expect(toggle).toHaveBeenCalledWith('k1', false)
   })
+
+  it('says when a stop was added but the footage covers all of it', () => {
+    setup(<StopsTable tz="UTC" onToggle={() => {}} pois={[stop(1, { key: 'k1', added: true, gap: null })]} />); expect(screen.getByText('covered by footage')).toBeInTheDocument()
+  })
 })

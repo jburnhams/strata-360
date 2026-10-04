@@ -76,7 +76,7 @@ export interface GapClip { id: string; gap: string; kind: GapKind | string; size
 export interface GapSettings { kind: GapKind | null; mode: 'set' | 'min' | null; seconds: number | null; must: boolean }
 export interface GapScriptItem { n: number; type: string; text: string; seconds: number | null; kind: string | null }
 export interface Gap {
-  final?: boolean; stop?: { key: string; arrived: number; left: number; stopped_s: number; radius_m: number; km: number; lat: number; lon: number; pad_s: number }; in_film?: boolean; settings?: GapSettings; script?: GapScriptItem[]
+  final?: boolean; stop?: { key: string; arrived: number; left: number; stopped_s: number; radius_m: number; km: number; lat: number; lon: number; pad_s: number; covered_before?: boolean; covered_after?: boolean }; in_film?: boolean; settings?: GapSettings; script?: GapScriptItem[]
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
