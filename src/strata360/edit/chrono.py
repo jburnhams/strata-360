@@ -28,6 +28,7 @@ class Settings:
     beam: int = 30
     temperature: float = 0.15
     w_quality: float = 1.0; w_fit: float = 0.8; w_dur: float = 0.5; w_energy: float = 0.6; w_first: float = 0.4; w_glide: float = 0.3
+    w_cam: float = 0.6                                   # a point camera you set up is favoured where a window lies inside it (per second of the window, like the other scores)
     w_establish: float = 0.6; pen_talk: float = 0.3          # the talking shot (dialogue_hold) is favoured where someone starts speaking in a clip, to show who it is, and is a little discouraged after that so the other views of you are cut in
     dur_power: float = 0.6
     pen_recent: float = 0.8; recent_decay: float = 0.7; pen_family: float = 0.25; pen_scale: float = 0.15; pen_share: float = 6.0
@@ -291,6 +292,14 @@ def view_blocked(tid, lib, w, c, d, st, music):
     return None
 
 
+CAM_SLACK_S = 0.5            # a window may run this far past the end of a point camera's stretch (windows are whole beats): the camera holds its last pose
+
+
+def cam_fits(t, clip_id, start_s, d):
+    """Does a window of `d` seconds from `start_s` in clip `clip_id` lie inside the stretch the point camera technique `t` covers?"""
+    c = t.cam; return c['clip'] == clip_id and start_s >= c['t0'] - CAM_SLACK_S and start_s + d <= c['t1'] + CAM_SLACK_S
+
+
 def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
     """The beam search over an ordered list of windows for each window's technique; shared by the beat planner (`plan`) and the script planner (edit/script_plan.py). `windows` are in film order (their
     beats add up to `B`, default the music's); returns the ordered list of Seg."""
@@ -310,6 +319,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             if t.id == 'selfie_close' and not w.speech and st.tech_force.get(wids[k]) != 'selfie_close' and getattr(w, 'view', None) != 'close': continue            # the close view of you is for the best of the dialogue (or when asked for)
             if t.id == 'selfie_close' and st.tech_force.get(wids[k]) != 'selfie_close' and d > CLOSE_MAX_BUSY + (CLOSE_MAX_CALM - CLOSE_MAX_BUSY) * calm((getattr(c, 'features', None) or {}).get('steady')) + 1e-9: continue         # the busier the footage the shorter a close view may last: quick cuts, glided between
             if t.id == 'selfie_close' and getattr(w, 'face', None) is not None and w.face < FACE_MIN_SHARE and st.tech_force.get(wids[k]) != 'selfie_close': continue         # ... and only where the face is clear (not the top of the head): analysis/face_view.py
+            if t.cam is not None and not cam_fits(t, clips[w.clip_index]['id'], w.abs_start, d): continue                 # a point camera is for windows inside the stretch it covers
             if not (t.dmin - 1e-9 <= d <= t.dmax + 1e-9): continue
             if t.beats == 'bar' and w.beats % music.bar_beats: continue
             f = O.fit(c, t)
@@ -317,7 +327,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             if f is None and w.speech and tid in ('dialogue_hold', 'selfie_hold'): f = 0.2                    # the script plays these lines: a dialogue shot is allowed whatever the footage's own features say
             if f is None: continue
             sig = max((t.dmax - t.dmin) / 3.0, 0.4); durfit = math.exp(-0.5 * ((d - t.dideal) / sig) ** 2); scale = d ** st.dur_power
-            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en)) + st.tech_bias.get(tid, 0.0) * scale
+            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en)) + st.tech_bias.get(tid, 0.0) * scale + (st.w_cam * scale if t.cam is not None else 0.0)
             opts.append((tid, base))
         options.append(sorted(opts, key=lambda x: -x[1])[:8])
         want = w.tech_id if w.fixed else st.tech_force.get(wids[k])

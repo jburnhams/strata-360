@@ -22,7 +22,7 @@ export interface TrackLine { lat: number[]; lon: number[]; t: number[] }
 export type TrackKind = 'run' | 'route'
 export interface TrackEntry { id: string; name: string; kind: TrackKind; error?: string; samples?: number; timed?: boolean; start_utc?: string | null; end_utc?: string | null; distance_km?: number; pois?: number; time_s?: number; ran_km?: number; pace_s_km?: number; ascent_m?: number; descent_m?: number; order?: number | null; reversed?: boolean; km_start?: number; km_end?: number }
 export interface Stop { arrived: number | null; left: number | null; stopped_s: number; radius_m: number }
-export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string; n?: number; stop?: Stop }
+export interface Poi { name: string; lat: number; lon: number; ele: number | null; sym: string; desc: string; track: string; n?: number; stop?: Stop; key?: string; added?: boolean; gap?: string | null }
 export interface Divergence { lat: number; lon: number; peak_m: number; length_m: number; km: number; t: number; line: [number, number][] }
 export interface Timing { total_s: number; start: number; end: number; checkpoints: Record<string, number>; sections: Record<string, number>; ran_m?: Record<string, number>; arrivals?: Record<string, { t: number; elapsed_s: number; km: number }>; ascent_m?: number; descent_m?: number; consistent: boolean }
 export interface EndMarkers { start: { lat: number; lon: number; t: number }; end: { lat: number; lon: number; t: number; km: number; elapsed_s: number }; finish: { lat: number; lon: number } | null }
@@ -38,15 +38,41 @@ export interface SvSection { id: string; provider: SvProvider; stretch: string; 
 export interface SvStretch { id: string; km0: number; km1: number; length_m: number; highways: string[]; names: string[]; line: [number, number][] }
 export interface SvRoads { id: string; total_km: number; stretches: SvStretch[]; run: [number, number][] }
 export interface SvStageStatus { done: boolean; stale?: boolean; stretches?: number; sections?: number; scored?: number; frames?: number; km: number }
+export interface SvRule { key: string; ok: boolean | null; text: string }
+/** One capture run found near a clicked point, with the rules that would rule it out. */
+export interface SvNearItem { provider: SvProvider; id: string; sequence: string; lat: number; lon: number; distance_m: number; kind: '360' | '2d'; camera: string | null; size: number[] | null; captured: number | null; compass: number | null; pictures: number; spacing_m: number | null
+  section: string | null; section_key?: string | null; run_distance_m: number | null; run_km: number | null; passed: number | null; rules: SvRule[]; usable: boolean; ruled_out: string[] }
+export interface SvChosen { key: string; label: string; id: string; provider: SvProvider; kind: '360' | '2d'; choice: SvChoice; t0: number; t1: number; length_m: number; quality: string | null; min_s: number; max_s: number; seconds: number | null; default_s: number; hires?: boolean; script: GapScriptItem[] }
+/** What a click on the map finds without fetching anything: an earlier search within 100 m (cached), and how a search being made now is going (its point, the end of its log, why it failed). */
+export interface SvNearLookup { cached: boolean; result: SvNearResult | null; job: { lat: number; lon: number; running: boolean; log: string[]; error: string } | null }
+export interface SvNearResult { lat: number; lon: number; n: number; providers: Record<SvProvider, { items: SvNearItem[]; radius_m: number | null; error?: string }> }
+export interface SvNearClip { label: string; seconds: number; km: number }
+/** Where a section sits among the camera clips along the run: the nearest clip each way (time and distance between), the clips it overlaps, and the gap in the footage that holds it. */
+export interface SvNear { before: SvNearClip | null; after: SvNearClip | null; overlaps: string[]; in_gap: string | null }
 export type SvChoice = 'possible' | 'must'
 /** A section with what the page needs: a key that survives the stage being run again, whether it could make a clip (and why not), how long it plays at 15 pictures a second and how fast that looks, the sections over the same road, and your choice. */
-export interface SvSectionInfo extends SvSection { key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
+export interface SvSectionInfo extends SvSection { hires?: boolean; key: string; plausible: boolean; why_not: string; play_s: number; min_s: number; max_s: number; speed_ms: number | null; label: string | null; overlaps: string[]; choice: SvChoice | null; near: SvNear | null; filmed: [number, number] | null; passed: [number, number] | null; has_video: boolean; quality: { score: number | null; grade: 'good' | 'fair' | 'poor' | null; psnr?: number; jerk?: number | null; roll?: number | null; error?: string } | null; light: { captured: string | null; race: string | null; warning: string | null } | null; steadied: 'exact' | 'estimated' | 'by matching only' }
+export type PointCamUse = '' | 'possible' | 'must'
+export interface PointCamSource { kind: 'clip' | 'streetview'; clip?: string; key?: string }
+export interface PointCamSight { at: [number, number]; bearing: number; fov: number; dist: number; t: number }
+export interface PointCamGeometry { line: [number, number][]; sights: PointCamSight[]; at: [number, number] }
+export interface PointCamFacts { seconds: number; min_dist_m: number; max_dist_m: number; max_pan_deg_s: number; swing_deg: number; fov_min: number; fov_max: number; warnings: string[] }
+export interface PointCamSettings { height_m: number; before_m: number; after_m: number; fov_near: number; fov_far: number; smooth_s: number }
+/** A virtual camera that keeps one place in frame while a clip or a street view section passes it (src/strata360/edit/pointcam.py). `ok` false: its source cannot give the shot (`error` says why). */
+export interface PointCam extends PointCamSettings {
+  id: string; label: string; source: PointCamSource; lat: number; lon: number; use: PointCamUse; t_pass: number; seconds?: number | null; name?: string | null; script: GapScriptItem[]
+  ok: boolean; error?: string; facts?: PointCamFacts; source_seconds?: number; range?: [number, number]; window?: [number, number]; geometry?: PointCamGeometry; north_offset?: number
+}
+export interface AimPath { kind: 'world' | 'rel'; t: number[]; yaw: number[]; pitch: number[]; fov: number[]; on: boolean[]; viewer?: { yaw: number; pitch: number; fov: number } }
+export interface PointCams { cams: PointCam[]; limits: Record<keyof PointCamSettings, [number, number]>; defaults: PointCamSettings & { use: PointCamUse } }
+export interface PointCamVideo { exists: boolean; running: boolean; log: string[]; error: string; progress?: { pct: number; phase: string; done: number; total: number } | null }
+export interface SvVideo { exists: boolean; running: boolean; log: string[]; error: string; seconds: number; fps?: number; hires?: boolean; progress?: { pct: number; phase: string; done: number; total: number } | null }
 export interface StreetView {
   status: Record<'roads' | SvProvider | 'quality', SvStageStatus>; roads: SvRoads | null; providers: Record<SvProvider, { frames: number; km: number } | null>; sections: SvSectionInfo[]
   job: PhotoJob; keys: { mapillary: boolean; google: boolean }
 }
 export interface Photo {
-  must?: boolean; motion?: MotionSettings; analysis?: PhotoAnalysis
+  use?: boolean; must?: boolean; motion?: MotionSettings; analysis?: PhotoAnalysis; script?: GapScriptItem[]
   id: string; name: string; taken_utc: number; time_source: string; width: number; height: number; camera: string; gps: { lat: number; lon: number } | null; track: { lat: number; lon: number; elapsed_s: number; km: number } | null
   loc: { lat: number; lon: number; source: 'photo gps' | 'run track' } | null; apart_m: number | null; flag: string | null; where: { kind: 'clip' | 'gap'; id: string } | null
 }
@@ -64,7 +90,7 @@ export interface GapClip { id: string; gap: string; kind: GapKind | string; size
 export interface GapSettings { kind: GapKind | null; mode: 'set' | 'min' | null; seconds: number | null; must: boolean }
 export interface GapScriptItem { n: number; type: string; text: string; seconds: number | null; kind: string | null }
 export interface Gap {
-  settings?: GapSettings; script?: GapScriptItem[]
+  final?: boolean; stop?: { key: string; arrived: number; left: number; stopped_s: number; radius_m: number; km: number; lat: number; lon: number; pad_s: number; covered_before?: boolean; covered_after?: boolean }; in_film?: boolean; settings?: GapSettings; script?: GapScriptItem[]
   id: string; t0: number; t1: number; duration_s: number; local_start: string; local_end: string; km_start: number | null; km_end: number | null; distance_km: number | null; moving_share: number; ascent_m: number
   daylight: string | null; before: string; after: string; default_seconds: number; clips: GapClip[]
 }
@@ -82,7 +108,7 @@ export interface Meta {
 }
 export interface ScriptItem { type: 'vo' | 'clip' | 'broll' | 'gap'; kind?: GapKind | string; anchor?: { film_s: number; why?: string }; view?: 'mid' | 'close' | 'far'; clip: string; text?: string; basis?: string[]; why?: string; seconds?: number; from?: string; to?: string; lines?: string[]; refs?: { clip: string; si: number; w0: number; w1: number }[] }
 export interface ScriptDraft {
-  title: string | null; story: string | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
+  title: string | null; story: string | null; length_note?: { verdict: 'fits' | 'too_long' | 'too_short'; ideal_s: number | null; why: string } | null; items: ScriptItem[]; skipped: { clip: string; why: string }[]; report: { total_s?: number; target_s?: number; vo_s?: number; clip_s?: number; broll_s?: number; vo_words?: number; clips_used?: number; clips_skipped?: number }
   problems: string[]; warnings: string[]; created: string; target_s: number; target_source?: string; wpm: number; model: string; revised: boolean; draft_of?: string | null
 }
 export interface PlanInfo { source: 'script' | 'beats'; script: string | null; windows: number; length_s: number | null; warnings: string[]; generated_at: string | null }
@@ -114,7 +140,7 @@ export interface MusicState { file: string | null; name?: string | null; analysi
 export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
 export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
-export interface ClipInfo { audio_original?: boolean; audio_clean?: boolean; id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; thumb_overlay?: boolean; steady: number | null; candidates: number | null }
+export interface ClipInfo { in_film?: boolean; audio_original?: boolean; audio_clean?: boolean; id: string; start_utc: string; duration_s: number; has_note: boolean; thumb: 'best' | 'quick' | null; thumb_overlay?: boolean; steady: number | null; candidates: number | null }
 export interface Near { name: string; kind: string; distance_m: number }
 export interface PlacePoint { label: string; lat: number; lon: number; address: { display_name?: string; road?: string; county?: string; country?: string } | null; nearby: Near[] | null }
 export interface Places { covered: boolean; note?: string; points: PlacePoint[]; summary?: { places: string[]; road?: string; county?: string; country?: string; text: string } }
@@ -151,7 +177,7 @@ export const api = {
   coverage: (folder: string) => call<Coverage>('/api/coverage?' + q({ folder })),
   log: (folder: string) => call<{ lines: string[] }>('/api/log?' + q({ folder })),
   trackSeries: (folder: string, points = 2000) => call<TrackSeries>('/api/track/series?' + q({ folder, points: String(points) })),
-  trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000) => call<TrackLine>('/api/track/line?' + q(bbox ? { folder, bbox: bbox.join(','), limit: String(limit) } : { folder, limit: String(limit) })),
+  trackLine: (folder: string, bbox?: [number, number, number, number], limit = 3000, span?: [number, number]) => call<TrackLine>('/api/track/line?' + q({ folder, limit: String(limit), ...(bbox ? { bbox: bbox.join(',') } : {}), ...(span ? { t0: String(span[0]), t1: String(span[1]) } : {}) })),
   tilesStatus: (style = 'tf-landscape') => call<TileStatus>('/api/tiles/status?' + q({ style })),
   tileUrl: (style = 'tf-landscape') => `/api/tiles/${style}/{z}/{x}/{y}`,
   trackClips: (folder: string) => call<{ clips: TrackClip[]; has_draft: boolean }>('/api/track/clips?' + q({ folder })),
@@ -161,6 +187,8 @@ export const api = {
   renderGapClip: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/gaps/render', { folder, id }),
   deleteGapClip: (folder: string, id: string) => fetch('/api/gaps/clip?' + q({ folder, id }), { method: 'DELETE' }),
   approveGapClip: (folder: string, id: string) => call<GapClip>('/api/gaps/approve', { folder, id }),
+  gapThumbUrl: (folder: string, id: string, v = '') => '/api/gaps/thumb?' + q({ folder, id, ...(v ? { v } : {}) }),
+  svThumbUrl: (folder: string, key: string, v = '') => '/api/streetview/thumb?' + q({ folder, key, ...(v ? { v } : {}) }),
   gapVideoUrl: (folder: string, id: string) => '/api/gaps/video?' + q({ folder, id }),
   track: (folder: string) => call<TrackOverview>('/api/track?' + q({ folder })),
   uploadTrack: async (folder: string, file: File) => {
@@ -179,6 +207,27 @@ export const api = {
   streetview: (folder: string) => call<StreetView>('/api/streetview?' + q({ folder })),
   runStreetview: (folder: string, body: { stages?: string[]; force?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/streetview/run', { folder, ...body }),
   setStreetviewChoice: (folder: string, key: string, choice: SvChoice | 'none') => call<{ key: string; choice: SvChoice | null }>('/api/streetview/choice', { folder, key, choice }),
+  svNear: (folder: string, lat: number, lon: number) => call<SvNearLookup>('/api/streetview/near?' + q({ folder, lat: String(lat), lon: String(lon) })),
+  searchSvNear: (folder: string, lat: number, lon: number, n = 5) => call<{ started: boolean; reason?: string }>('/api/streetview/near', { folder, lat, lon, n }),
+  setStop: (folder: string, key: string, add: boolean) => call<TracksListing>('/api/stops', { folder, key, add }),
+  pointcams: (folder: string, of: { clip?: string; key?: string } = {}) => call<PointCams>('/api/pointcams?' + q({ folder, ...(of.clip ? { clip: of.clip } : {}), ...(of.key ? { key: of.key } : {}) })),
+  addPointCam: (folder: string, source: PointCamSource, lat: number, lon: number) => call<PointCam>('/api/pointcams', { folder, source, lat, lon }),
+  updatePointCam: (folder: string, id: string, fields: Partial<PointCamSettings> & { use?: PointCamUse; name?: string | null; seconds?: number | null }) => call<PointCam>('/api/pointcams/update', { folder, id, ...fields }),
+  deletePointCam: (folder: string, id: string) => call<{ removed: boolean }>('/api/pointcams/delete', { folder, id }),
+  pointCamPath: (folder: string, id: string, view: 'clip' | 'pano' | 'flat') => call<AimPath>('/api/pointcams/path?' + q({ folder, id, view })),
+  pointCamVideo: (folder: string, id: string) => call<PointCamVideo>('/api/pointcams/video?' + q({ folder, id })),
+  makePointCamVideo: (folder: string, id: string) => call<{ started: boolean; reason?: string }>('/api/pointcams/video', { folder, id }),
+  pointCamVideoUrl: (folder: string, id: string, v = '') => '/api/pointcams/video/file?' + q({ folder, id, ...(v ? { v } : {}) }),
+  pointCamThumbUrl: (folder: string, id: string, v = '') => '/api/pointcams/thumb?' + q({ folder, id, ...(v ? { v } : {}) }),
+  svChosen: (folder: string) => call<{ sections: SvChosen[] }>('/api/streetview/chosen?' + q({ folder })),
+  setSvLength: (folder: string, key: string, seconds: number | null) => call<{ key: string; seconds: number | null }>('/api/streetview/length', { folder, key, seconds }),
+  promoteSv: (folder: string, it: { provider: SvProvider; id: string; sequence: string }, lat: number, lon: number) => call<{ key: string; id: string }>('/api/streetview/promote', { folder, provider: it.provider, id: it.id, sequence: it.sequence, lat, lon }),
+  unpromoteSv: (folder: string, key: string) => call<{ removed: boolean }>('/api/streetview/unpromote', { folder, key }),
+  svNearImage: (folder: string, provider: SvProvider, id: string, w = 256) => '/api/streetview/near/image?' + q({ folder, provider, id, w: String(w) }),
+  svVideo: (folder: string, key: string, pano = false) => call<SvVideo>('/api/streetview/video?' + q({ folder, key, ...(pano ? { pano: 'true' } : {}) })),
+  setSvHires: (folder: string, key: string, hires: boolean) => call<{ key: string; hires: boolean }>('/api/streetview/hires', { folder, key, hires }),
+  makeSvVideo: (folder: string, key: string, pano = false) => call<{ started: boolean; reason?: string }>('/api/streetview/video', { folder, key, ...(pano ? { pano: true } : {}) }),
+  svVideoUrl: (folder: string, key: string, pano = false, hi = false) => '/api/streetview/video/file?' + q({ folder, key, ...(pano ? { pano: 'true' } : {}) }) + (hi ? '&r=hi' : ''),         // (the server finds the file from the section's setting; `r` only tells the browser it is another picture)
   streetviewImage: (folder: string, provider: SvProvider, id: string, w = 256) => '/api/streetview/image?' + q({ folder, provider, id, w: String(w) }),
   photos: (folder: string) => call<{ photos: Photo[]; tz: string; job?: PhotoJob }>('/api/photos?' + q({ folder })),
   photoMotion: (folder: string, id: string, p: Partial<MotionSettings> = {}) => call<MotionPlan>('/api/photos/motion?' + q({ folder, id, ...(p.style ? { style: p.style } : {}), ...(p.seconds != null ? { seconds: String(p.seconds) } : {}), ...(p.seed != null ? { seed: String(p.seed) } : {}) })),
@@ -192,7 +241,8 @@ export const api = {
     return j as Photo
   },
   deletePhoto: async (folder: string, id: string) => { const r = await fetch('/api/photos?' + q({ folder, id }), { method: 'DELETE' }); if (!r.ok) throw new Error(`HTTP ${r.status}`) },
-  setPhotoMust: (folder: string, id: string, must: boolean) => call<{ id: string; must: boolean }>('/api/photos/settings', { folder, id, must }),
+  setPhotoMust: (folder: string, id: string, must: boolean) => call<{ id: string; use: boolean; must: boolean }>('/api/photos/settings', { folder, id, must }),
+  setPhotoUse: (folder: string, id: string, use: boolean) => call<{ id: string; use: boolean; must: boolean }>('/api/photos/settings', { folder, id, use }),
   photoThumb: (folder: string, id: string, w = 480) => '/api/photos/thumb?' + q({ folder, id, w: String(w) }),
   photoOverlay: (folder: string, id: string) => '/api/photos/thumb?' + q({ folder, id, overlay: '1' }),
   photoFile: (folder: string, id: string) => '/api/photos/file?' + q({ folder, id }),

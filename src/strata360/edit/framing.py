@@ -192,9 +192,20 @@ def free_path(g, T, t0, rng, v):
     return dict(ref='world', keyframes=[kf(0.0, yaw, pitch, hfov), kf(T, yaw, pitch, hfov)], subject='free', why=f'a fixed view chosen for its detail and exposure (score {sc:.2f})')
 
 
+def cam_path(cam, t0, T, step=0.2):
+    """The framing of a window of a point camera (edit/pointcam.py): its path over the clip's seconds `cam['t']` read from `t0` for `T` seconds, in the world frame (a pan between shots can glide to or from it like any other)."""
+    times = np.arange(0.0, T + 1e-9, step); abs_t = t0 + times
+    yaw, pitch, fov = (np.interp(abs_t, cam['t'], cam[k]) for k in ('yaw', 'pitch', 'fov'))
+    kf = [dict(t=round(float(t), 3), yaw=round(float(y), 2), pitch=round(float(p), 2), fov=round(float(f), 1), ease='linear') for t, y, p, f in zip(times, yaw, pitch, fov)]
+    return dict(ref='world', keyframes=kf, subject='camera', why=f"point camera {cam['id']}" + (f" ({cam['name']})" if cam.get('name') else '') + f": keeps the place in frame, {cam['min_dist_m']:.0f} m from the path at the closest")
+
+
 def resolve_segment(g, lib, data):
     """The framing of one plan segment: dict(subject, why, path). Deterministic for the same plan and analysis (the window's variant seed drives the technique's choices)."""
-    tech = lib[g['technique']]; subject, why = choose_subject(g, tech, data); T = float(g['dur_s']); t0 = float(g['clip_start_s'])
+    tid = g['technique']; tech = lib.get(tid) or (lib['hold_wide'] if tid.startswith('cam:') else lib[tid])                                   # (a point camera taken away since the plan was made: a plain wide shot)
+    T = float(g['dur_s']); t0 = float(g['clip_start_s'])
+    if tech.cam is not None: return cam_path(tech.cam, t0, T)
+    subject, why = choose_subject(g, tech, data)
     rng = np.random.default_rng(int(g.get('variant_seed') or 0)); heading = data['heading']
     if tech.id in ('scenery', 'free_view'):
         made = (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
@@ -256,7 +267,7 @@ def resolve_segment(g, lib, data):
 
 def resolve(folder, plan, lib=None, head=False):
     """Framing for every segment of a saved plan: {segment id: dict(subject, why, path)}."""
-    lib = lib or TQ.load(); cache = {}; out = {}
+    lib = lib or TQ.with_cams(TQ.load(), folder); cache = {}; out = {}
     for g in plan['segments']:
         if g.get('synthetic'): continue                                                                 # a generated clip has no camera to frame
         if g['clip'] not in cache: cache[g['clip']] = clip_data(folder, g['clip'], head)

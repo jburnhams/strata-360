@@ -7,7 +7,7 @@
 When: the photo's EXIF. The GPS time stamp (UTC) is the most exact; else the camera's local time with its UTC offset (OffsetTimeOriginal) when it has one; else the local time taken to be in the race's own time zone.
 Where: first the GPS position in the EXIF; second where the run was at that time (the race track at the time stamp). `located()` gives both, the one used (the photo's own GPS first), and how far apart they are: a gap of more than `FAR_M` is flagged, since it means the camera's clock is
 wrong, the photo was taken away from the run, or the position is poor. A photo outside the time of the run has no position from the track."""
-import datetime as dt, json, os, re, shutil, subprocess, sys
+import datetime as dt, json, os, re, shutil, subprocess, sys, time
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -100,6 +100,7 @@ def add(rd, filename, data, tz='Europe/Brussels'):
     if ext not in EXTS: raise ValueError(f'a photo, please ({", ".join(EXTS)})')
     if len(data) < 200 or len(data) > MAX_BYTES: raise ValueError('the file is empty or too large')
     doc = load(rd); pid = f"p{doc['next']}"; d = os.path.join(rd, 'photos'); os.makedirs(d, exist_ok=True); dest = os.path.join(d, f'{pid}-{_safe(filename)}')
+    while os.path.exists(dest): dest = os.path.join(d, f'{pid}-{int(time.time() * 1000)}-{_safe(filename)}')                  # an upload never overwrites a file (the counter could be lost with photos.json)
     with open(dest, 'wb') as f: f.write(data)
     work = dest
     try:
@@ -127,11 +128,25 @@ def label_of(entry_or_id):
     return str(entry_or_id['id'] if isinstance(entry_or_id, dict) else entry_or_id).upper()
 
 
-def set_must(rd, pid, must):
-    """Mark a photo to be used in the film (the plan adds it where its time falls if the script leaves it out), or not. Raises KeyError for an unknown photo."""
+def is_used(e):
+    """Whether the photo is an option for the film (ticked "Use in the film"): the script writer may show it, it sits among the clips in the sidebar and counts as footage when gaps are found. A photo marked `must` is used too."""
+    return bool(e.get('use') or e.get('must'))
+
+
+def set_use(rd, pid, use):
+    """Make a photo an option for the film, or not (taking it out also clears `must`). Raises KeyError for an unknown photo."""
     doc = load(rd); e = next((p for p in doc['photos'] if p['id'] == pid), None)
     if e is None: raise KeyError(pid)
-    if must: e['must'] = True
+    if use: e['use'] = True
+    else: e.pop('use', None); e.pop('must', None)
+    _save(rd, doc); return bool(use)
+
+
+def set_must(rd, pid, must):
+    """Mark a photo MUST be used in the film (the plan adds it where its time falls if the script leaves it out; it is used too), or not. Raises KeyError for an unknown photo."""
+    doc = load(rd); e = next((p for p in doc['photos'] if p['id'] == pid), None)
+    if e is None: raise KeyError(pid)
+    if must: e['must'] = True; e['use'] = True
     else: e.pop('must', None)
     _save(rd, doc); return bool(must)
 

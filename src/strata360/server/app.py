@@ -11,7 +11,7 @@ import argparse, glob, io, json, os, re, secrets, subprocess, sys, threading, ti
 from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
-from strata360.pipeline import config, clips as clipmod
+from strata360.pipeline import backup as Backup, config, clips as clipmod
 from strata360.analysis import thumbs as TH, transcript_edits as TE, transcript_fix as TF, transcript_marks as TM
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
@@ -51,7 +51,12 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+STREETVIEW_LOG_STALE_S = 180.0    # a street view video whose log was written to this recently, with no end line, is taken to be still being made (even by a job this server did not start)
+STREETVIEW_NEAR_JOBS = {}     # folder -> the nearest-street-view search being made (lat, lon, log, error, thread)
+STREETVIEW_NEAR = {}          # (folder, provider, picture id) -> what the near-point search found (so the thumbnails can be fetched, and nothing else)
+STREETVIEW_VIDEO_JOBS = {}    # (folder, section key) -> Popen of a running `strata360 streetview-video`
 STREETVIEW_JOBS = {}          # folder -> Popen of a running `strata360 streetview`
+POINTCAM_JOBS = {}            # (folder, camera id) -> Popen of a running `strata360 pointcam-video`
 PHOTO_JOBS = {}               # folder -> Popen of a running `strata360 photos-analyse`
 MIX_JOBS = {}                 # folder -> Popen of a running `strata360 rough-mix`
 GAP_JOBS = {}                 # folder -> (clip id, Popen) of a running `strata360 gap-clip`
@@ -165,8 +170,10 @@ def create_app(roots, token=None):
         if request.query_params.get('token') == token or request.headers.get('authorization') == f'Bearer {token}' or request.cookies.get('strata360_token') == token: return
         raise HTTPException(401, 'token required')
 
+    watched = set(); Backup.Ticker(lambda: watched).start()                                # project metadata backups (pipeline/backup.py) for every project opened through this server
+
     def folder_of(path):
-        try: return safe_path(roots, path)
+        try: f = safe_path(roots, path); f in watched or not os.path.exists(os.path.join(config.race_dir(f), 'race.json')) or watched.add(f); return f
         except Forbidden as e: raise HTTPException(403, str(e))
 
     @api.middleware('http')
@@ -222,17 +229,23 @@ def create_app(roots, token=None):
         try: return json.load(open(p)) if os.path.exists(p) else None
         except ValueError: return None
 
+    def in_film(f):
+        """The ids of the clips and gaps the film's plan plays now (empty when there is no plan)."""
+        from strata360.edit import project as PJ
+        try: return {g['clip'] for g in (PJ.load(f).get('plan') or {}).get('segments') or []}
+        except (OSError, ValueError, KeyError): return set()
+
     @api.get('/api/clips', dependencies=[Depends(auth)])
     def get_clips(folder: str):                                                          # the clip list: id, time, length, a note flag, whether a thumbnail exists and a few facts
         from strata360.pipeline import notes as N
-        f = folder_of(folder); rd = config.race_dir(f); out = []; nt = N.load(f)
+        f = folder_of(folder); rd = config.race_dir(f); out = []; nt = N.load(f); used = in_film(f)
         for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
             c = _j(d, 'clip.json')
             if not c: continue
             mo = _j(d, 'motion.json'); cd = _j(d, 'candidates.json'); thumb = 'best' if os.path.exists(d + 'thumb.jpg') else 'quick' if os.path.exists(d + 'thumb_quick.jpg') else None
             if thumb and TH.overlay_fresh(d): thumb += '+overlay'                                                     # the version also busts the browser cache when the overlay one appears
             out.append(dict(id=c['clip_id'], start_utc=c['time']['start_utc'], duration_s=round(c['video']['source_frames'] / c['video']['nominal_fps'], 1), has_note=bool(nt['clips'].get(c['clip_id'])),
-                            thumb=thumb and thumb.split('+')[0], thumb_overlay=bool(thumb and thumb.endswith('+overlay')), audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], candidates=None if not cd else cd['summary']['n']))
+                            thumb=thumb and thumb.split('+')[0], thumb_overlay=bool(thumb and thumb.endswith('+overlay')), audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], in_film=c['clip_id'] in used, candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
     def effective(d):                                                                    # the transcript with the user's corrections and marks applied (None when there is none)
@@ -748,14 +761,14 @@ def create_app(roots, token=None):
         return GS.series(loaded_track(folder_of(folder)), max(100, min(points, 6000)))
 
     @api.get('/api/track/line', dependencies=[Depends(auth)])
-    def get_track_line(folder: str, bbox: str = '', limit: int = 3000):                  # the line of the track inside bbox=lat0,lon0,lat1,lon1 (or all of it), at most `limit` points: the map asks for more detail as it zooms in
+    def get_track_line(folder: str, bbox: str = '', limit: int = 3000, t0: float | None = None, t1: float | None = None):                  # the line of the track inside bbox=lat0,lon0,lat1,lon1 (or all of it), at most `limit` points: the map asks for more detail as it zooms in
         from strata360.gps import series as GS
         box = None
         if bbox:
             try: box = tuple(float(x) for x in bbox.split(','))
             except ValueError: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
             if len(box) != 4: raise HTTPException(400, 'bbox: lat0,lon0,lat1,lon1')
-        return GS.line(loaded_track(folder_of(folder)), box, max(200, min(limit, 20000)))
+        return GS.line(loaded_track(folder_of(folder)), box, max(200, min(limit, 20000)), None if t0 is None or t1 is None else (min(t0, t1), max(t0, t1)))
 
     @api.get('/api/track/clips', dependencies=[Depends(auth)])
     def get_track_clips(folder: str):                                                    # every clip placed on the track (middle, the stretch it covers, facts for the hover card), with whether the newest script draft plays it
@@ -781,7 +794,7 @@ def create_app(roots, token=None):
         for n in config.TRACK_NAMES:
             for suffix in ('', '.npz'):
                 q = os.path.join(rd, n + suffix)
-                if os.path.exists(q): os.replace(q, q + '.replaced')                       # keep the previous file next to it, never silently lose it
+                if os.path.exists(q): os.replace(q, q + __import__('datetime').datetime.now().strftime('.%Y%m%dT%H%M%S%f') + '.replaced')                       # keep the previous file next to it, never silently lose it
         dest = os.path.join(rd, 'track' + ext); open(dest, 'wb').write(data)
         from strata360.gps.overview import overview
         from strata360.gps import tracks as TKS
@@ -797,7 +810,26 @@ def create_app(roots, token=None):
     @api.get('/api/tracks', dependencies=[Depends(auth)])
     def get_tracks(folder: str):                                                         # every track with kind and summary, the merged run track, and the points of interest
         from strata360.gps import tracks as TKS
-        f = folder_of(folder); return TKS.listing(config.race_dir(f), tz_of(f))
+        f = folder_of(folder); return with_stop_gaps(f, TKS.listing(config.race_dir(f), tz_of(f)))
+
+    def with_stop_gaps(f, listing):
+        """Each stop in the listing says whether it is in the video and, if so, which gap it is (the gaps are worked out here: the stop's place among the footage decides)."""
+        from strata360.gps import gaps as GP
+        stops = [p for p in listing.get('pois', []) if p.get('sym') == 'stop' and p.get('added')]
+        if stops:
+            try: ids = {g['stop']['key']: g['id'] for g in GP.project_gaps(f, loaded_raw_track(f), GP.MIN_GAP_S, tz_of(f)) if g.get('stop')}
+            except HTTPException: ids = {}
+            for p in stops: p['gap'] = ids.get(p['key'])
+        return listing
+
+    @api.post('/api/stops', dependencies=[Depends(auth)])
+    def post_stops(body: dict):                                                          # {folder, key, add}: put a stop of the run (see /api/tracks, pois with sym stop) in the video as a gap of its own, or take it out
+        from strata360.gps import gaps as GP, tracks as TKS
+        f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd = config.race_dir(f)
+        s = next((x for x in TKS.other_stops(rd) if GP.stop_key(x) == key), None)
+        if s is None and body.get('add', True): raise HTTPException(404, 'no such stop')
+        if s is None: s = dict(key=key, arrived=0, left=0, lat=0, lon=0, km=0, stopped_s=0, radius_m=0)
+        GP.set_stop(f, dict(s, key=key), bool(body.get('add', True))); return with_stop_gaps(f, TKS.listing(rd, tz_of(f)))
 
     @api.post('/api/tracks', dependencies=[Depends(auth)])
     async def post_tracks(request: Request, folder: str, filename: str, kind: str = ''):  # one more track (raw request body); the first run defaults to run, later ones to route
@@ -851,7 +883,7 @@ def create_app(roots, token=None):
     @api.get('/api/edit', dependencies=[Depends(auth)])
     def get_edit(folder: str):                                                           # settings, overrides, the saved plan, the technique list and the newest script's lines by segment id
         from strata360.edit import project as PJ, techniques as TQ
-        f = folder_of(folder); e = PJ.load(f); lib = TQ.load(); rd = config.race_dir(f)
+        f = folder_of(folder); e = PJ.load(f); lib = TQ.with_cams(TQ.load(), f); rd = config.race_dir(f)
         files = sorted(glob.glob(os.path.join(rd, 'scripts', 'script-*.json'))); lines = {}
         if files:
             try:
@@ -930,7 +962,7 @@ def create_app(roots, token=None):
         """The gaps between clips on the track with the generated clip planned for each (and for stretches of them), whether it is rendering, and its progress."""
         from strata360.gps import gaps as GP
         from strata360.edit import synthetic as SY
-        cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.find_gaps(GP.load_spans(f), loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
+        cfg = config.load(f); tz = cfg.get('timezone', 'Europe/Brussels'); gaps = GP.project_gaps(f, loaded_raw_track(f), 1200.0, tz); docs = SY.load(f)['clips']; rd = config.race_dir(f)
         job = GAP_JOBS.get(f); running = job[0] if job and job[1].poll() is None else None
         def log_lines(cid):
             try: return open(os.path.join(rd, 'synthetic', cid + '.log'), errors='replace').read().strip().splitlines()
@@ -951,7 +983,8 @@ def create_app(roots, token=None):
         for n, it in enumerate(draft.get('items') or []):                                   # what the newest script draft does with each gap: the narration over it and its length
             gid = norm_label(it.get('clip', ''))
             if gid.startswith('G'): said.setdefault(gid, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
-        for g in gaps: g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]; g['settings'] = SY.gap_settings(f, g['id']); g['script'] = said.get(g['id'], [])
+        used = in_film(f)
+        for g in gaps: g['in_film'] = g['id'] in used; g['default_seconds'] = SY.default_seconds(g['duration_s']); g['clips'] = [c for c in docs if c.get('gap') == g['id']]; g['settings'] = SY.gap_settings(f, g['id']); g['script'] = said.get(g['id'], [])
         return gaps
 
     def loaded_raw_track(f):
@@ -971,9 +1004,14 @@ def create_app(roots, token=None):
         try: gaps = gap_rows(f) if run is not None else []
         except HTTPException: gaps = []
         from strata360.analysis import photo_analysis as PA
+        from strata360.edit import script_draft as SD
+        said = {}
+        for n, it in enumerate((SD.load_draft(f) or {}).get('items') or []):                  # what the newest script draft does with each photo: the narration over it and its length
+            lab = norm_label(it.get('clip', ''))
+            if lab.startswith('P'): said.setdefault(lab, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
         out = []
         for e in PH.load(rd)['photos']:
-            r = PH.located(e, run); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); r['motion'] = PH.motion_of(e); out.append(r)
+            r = PH.located(e, run); r['use'] = PH.is_used(e); r['script'] = said.get(PH.label_of(e), []); r['where'] = PH.assign(e['taken_utc'], clips, gaps); r['analysis'] = PA.summary(PA.load_doc(rd, e['id'])); r['motion'] = PH.motion_of(e); out.append(r)
         return sorted(out, key=lambda x: x['taken_utc'])
 
     def photo_job(f):
@@ -995,6 +1033,21 @@ def create_app(roots, token=None):
         fail = next((l for l in reversed(lines) if l.startswith('streetview:')), '')
         return dict(running=running, log=lines[-6:], error='' if running else fail[:400])
 
+    def sv_footage(f):
+        """(clips, gaps) for placing a street view section among the footage: [{label, t0, t1}] of the camera clips and [{id, t0, t1}] of the gaps in them (empty lists when there is no track yet)."""
+        import datetime as dt
+        rd = config.race_dir(f); clips = []
+        for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))):
+            c = _j(d, 'clip.json')
+            if not c: continue
+            t0 = dt.datetime.fromisoformat(c['time']['start_utc'].replace('Z', '+00:00')).timestamp(); m = re.search(r'_(\d{4})_D$', c['clip_id'])
+            clips.append(dict(label=m.group(1) if m else c['clip_id'], t0=t0, t1=t0 + c['video']['source_frames'] / c['video']['nominal_fps']))
+        try:
+            from strata360.gps import gaps as GP
+            cfg = config.load(f); gaps = [dict(id=g['id'], t0=g['t0'], t1=g['t1']) for g in GP.project_gaps(f, loaded_raw_track(f), GP.MIN_GAP_S, cfg.get('timezone', 'Europe/Brussels'), used=False)]          # between the camera clips alone: a section chosen for the film must still show the gap it fills
+        except HTTPException: gaps = []
+        return clips, gaps
+
     def sv_track(f):
         """The race track for working out the light at a section, or None when there is none."""
         try: return loaded_raw_track(f)
@@ -1005,7 +1058,7 @@ def create_app(roots, token=None):
         from strata360 import streetview as SV
         from strata360.edit import llm_remote as LR
         f = folder_of(folder); rd = config.race_dir(f); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}
-        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs, sv_track(f)), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
+        return dict(status=SV.status(rd), roads=SV.load(rd, 'roads'), providers={p: (dict(frames=d['frames'], km=d['km']) if d else None) for p, d in docs.items()}, sections=SV.annotate(rd, docs, sv_track(f), *sv_footage(f)), job=streetview_job(f), keys=dict(mapillary=bool(LR.secret('MAPILLARY_TOKEN')), google=bool(LR.secret('GOOGLE_MAPS_API_KEY'))))
 
     @api.post('/api/streetview/run', dependencies=[Depends(auth)])
     def post_streetview_run(body: dict):                                                 # {folder, stages?: [..], force?}: make the stages in the background at the lowest priority
@@ -1028,6 +1081,246 @@ def create_app(roots, token=None):
         except ValueError as ex: raise HTTPException(400, str(ex))
         return dict(key=key, choice=None if choice == 'none' else choice)
 
+    @api.get('/api/streetview/thumb')
+    def get_streetview_thumb(request: Request, folder: str, key: str, w: int = 160):      # a picture for the film list: a frame of the section's clip in the film if it is made, else of its preview video, else its middle picture
+        from strata360 import streetview as SV
+        from strata360.edit import synthetic as SY
+        auth(request); f = folder_of(folder); rd, s = sv_section(f, key)
+        film = next((c for c in SY.load(f)['clips'] if c['id'] == s.get('label')), None); cands = [os.path.join(rd, film['file'])] if film and film.get('file') else []
+        for p in cands + [SV.video_path(rd, s)]:
+            if os.path.exists(p):
+                try: return FileResponse(video_thumb(p, w), media_type='image/jpeg', headers={'Cache-Control': 'max-age=600'})
+                except HTTPException: pass
+        it = s['items'][len(s['items']) // 2]
+        try: data = SV.image(rd, s['provider'], {'sections': [s]}, it['id'], w)
+        except (KeyError, RuntimeError) as ex: raise HTTPException(404, str(ex))
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'max-age=600'})
+
+    @api.get('/api/streetview/chosen', dependencies=[Depends(auth)])
+    def get_streetview_chosen(folder: str):                                              # the street view sections chosen for the film (possible or must), each with when the runner passed it, its length setting and what the newest script draft says over it: they sit among the clips in the sidebar and have a page like a gap
+        from strata360 import streetview as SV
+        from strata360.edit import script_draft as SD
+        f = folder_of(folder); rd = config.race_dir(f); tr = sv_track(f); out = []
+        if tr is None: return dict(sections=out)
+        said = {}
+        for n, it in enumerate((SD.load_draft(f) or {}).get('items') or []):
+            lab = norm_label(it.get('clip', ''))
+            if lab.startswith('V'): said.setdefault(lab, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
+        for s in SV.chosen(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}):
+            a, b = SV.passed(s, tr); out.append(dict(key=s['key'], label=s['label'], id=s['id'], provider=s['provider'], kind=s['kind'], choice=s['choice'], t0=a, t1=b, length_m=s['length_m'], quality=(s.get('quality') or {}).get('grade'), min_s=s['min_s'], max_s=s['max_s'], seconds=s.get('seconds'), default_s=SV.default_seconds(s), hires=bool(s.get('hires')), script=said.get(s['label'], [])))
+        return dict(sections=sorted(out, key=lambda x: x['t0']))
+
+    @api.post('/api/streetview/hires', dependencies=[Depends(auth)])
+    def post_streetview_hires(body: dict):                                               # {folder, key, hires}: a Google section's look-around video, preview and film clip are made from the higher resolution pictures (about 4 times the requests to Google, asked for when they are made)
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); rd, s = sv_section(f, str(body.get('key') or ''))
+        try: return dict(key=s['key'], hires=SV.set_hires(rd, s, bool(body.get('hires'))))
+        except ValueError as ex: raise HTTPException(400, str(ex))
+
+    @api.post('/api/streetview/length', dependencies=[Depends(auth)])
+    def post_streetview_length(body: dict):                                              # {folder, key, seconds | null}: fix how long the film shows this section (within what it can play), or leave it to the plan
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); rd, s = sv_section(f, str(body.get('key') or ''))
+        try: return dict(key=s['key'], seconds=SV.set_length(rd, s, body.get('seconds')))
+        except ValueError as ex: raise HTTPException(400, str(ex))
+
+    @api.post('/api/streetview/promote', dependencies=[Depends(auth)])
+    def post_streetview_promote(body: dict):                                             # {folder, provider, id, sequence, lat, lon}: make a capture run found by the nearest-street-view search a section like the others
+        from strata360 import streetview as SV
+        from strata360.edit import llm_remote as LR
+        f = folder_of(body.get('folder')); rd = config.race_dir(f); prov = str(body.get('provider') or '')
+        if prov not in SV.PROVIDERS: raise HTTPException(400, f'provider is one of {", ".join(SV.PROVIDERS)}')
+        try: lat, lon = float(body['lat']), float(body['lon'])
+        except (KeyError, TypeError, ValueError): raise HTTPException(400, 'lat and lon are needed')
+        try: s = SV.promote(rd, prov, str(body.get('id') or ''), str(body.get('sequence') or ''), lat, lon, sv_track(f), token=LR.secret('MAPILLARY_TOKEN'), gkey=LR.secret('GOOGLE_MAPS_API_KEY'))
+        except ValueError as ex: raise HTTPException(400, str(ex))
+        return dict(key=SV.section_key(s), id=s['id'])
+
+    @api.post('/api/streetview/unpromote', dependencies=[Depends(auth)])
+    def post_streetview_unpromote(body: dict):                                           # {folder, key}: take a section made that way out again
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder'))
+        if not SV.unpromote(config.race_dir(f), str(body.get('key') or '')): raise HTTPException(404, 'no such promoted section')
+        return dict(removed=True)
+
+    def sv_section(f, key):
+        """The annotated street view section with this key, or a 404."""
+        from strata360 import streetview as SV
+        rd = config.race_dir(f); s = next((x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key), None)
+        if s is None: raise HTTPException(404, 'no such street view section')
+        return rd, s
+
+    def sv_video_state(f, key, pano=False):
+        from strata360 import streetview as SV
+        rd, s = sv_section(f, key); job = STREETVIEW_VIDEO_JOBS.get((f, key, pano, bool(s.get('hires')))); running = bool(job and job.poll() is None); lines = []; logf = os.path.splitext(SV.video_path(rd, s, pano))[0] + '.log'
+        try: lines = open(logf, errors='replace').read().strip().splitlines()
+        except OSError: pass
+        if not running and lines and not os.path.exists(SV.video_path(rd, s, pano)) and time.time() - os.path.getmtime(logf) < STREETVIEW_LOG_STALE_S and not any(l.startswith(('done:', 'streetview-video:')) for l in lines): running = True         # (a job started outside this server, or before it was restarted, is still writing its log)
+        fail = next((l for l in reversed(lines) if l.startswith('streetview-video:')), '')
+        return dict(exists=os.path.exists(SV.video_path(rd, s, pano)), running=running, log=lines[-8:], progress=SV.video_progress(lines, pano and s['provider'] == 'google'), error='' if running else fail[:400], seconds=SV.default_seconds(s), hires=bool(s.get('hires')), **(dict(fps=round(min(max(s['frames'] / max(SV.default_seconds(s), 0.5), 1.0), 15.0), 2)) if pano else {}))
+
+    @api.get('/api/streetview/video', dependencies=[Depends(auth)])
+    def get_streetview_video(folder: str, key: str, pano: bool = False):                  # whether the section's preview video (pano: the 360 one to look around in) exists, is being made, or failed
+        return sv_video_state(folder_of(folder), key, pano)
+
+    @api.post('/api/streetview/video', dependencies=[Depends(auth)])
+    def post_streetview_video(body: dict):                                                # {folder, key, pano?}: make the preview video (pano: the 360 one to look around in, 360 sections only) in the background (nothing to do when it exists)
+        from strata360 import streetview as SV
+        f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd, s = sv_section(f, key); pano = bool(body.get('pano')); hires = bool(s.get('hires'))
+        if pano and s['kind'] != '360': raise HTTPException(400, 'only a 360 section can be looked around in')
+        if os.path.exists(SV.video_path(rd, s, pano)): return dict(started=False, reason='the video is already made')
+        if sv_video_state(f, key, pano)['running']: return dict(started=False, reason='the video is already being made')
+        if any(p.poll() is None for (ff, _, _p, _h), p in STREETVIEW_VIDEO_JOBS.items() if ff == f): return dict(started=False, reason='another preview video is being made')
+        out = SV.video_path(rd, s, pano); os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
+        STREETVIEW_VIDEO_JOBS[(f, key, pano, hires)] = subprocess.Popen([*oslib.cli_command(), 'streetview-video', f, key] + (['--pano'] if pano else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/streetview/video/file')
+    def get_streetview_video_file(request: Request, folder: str, key: str, pano: bool = False):               # the video itself (a <video> cannot send headers: the cookie / query token authenticates)
+        from strata360 import streetview as SV
+        auth(request); rd, s = sv_section(folder_of(folder), key); p = SV.video_path(rd, s, pano)
+        if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
+        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
+
+    # ---- point cameras: a virtual camera that keeps one place in frame while a clip or a street view section passes it (edit/pointcam.py) ----
+    def pointcam_get(f, cid):
+        from strata360.edit import pointcam as PC
+        cam = PC.get(config.race_dir(f), cid)
+        if cam is None: raise HTTPException(404, 'no such point camera')
+        return cam
+
+    def pointcam_said(f):                                                                # what the newest script draft says over each point camera: {label: [{n, type, text, seconds}]}
+        from strata360.edit import script_draft as SD
+        said = {}
+        for n, it in enumerate((SD.load_draft(f) or {}).get('items') or []):
+            lab = norm_label(it.get('clip', ''))
+            if lab.startswith('C') and lab[1:].isdigit(): said.setdefault(lab, []).append(dict(n=n + 1, type=it.get('type'), text=(it.get('text') or '').strip(), seconds=it.get('seconds'), kind=it.get('kind')))
+        return said
+
+    def pointcam_doc(f, cam, said=None):
+        from strata360.edit import pointcam_clip as PCL
+        try: tr = loaded_track(f)
+        except HTTPException: tr = None
+        said = pointcam_said(f) if said is None else said
+        return dict(cam, script=said.get(cam['label'], []), **(PCL.summary(f, cam, tr) if tr is not None else dict(ok=False, error='there is no race track')))
+
+    @api.get('/api/pointcams', dependencies=[Depends(auth)])
+    def get_pointcams(folder: str, clip: str = '', key: str = ''):                      # the point cameras (all, or those of one clip or street view section), each with its facts, lengths and the geometry the map draws; `ok` false says why a camera cannot give its shot
+        from strata360.edit import pointcam as PC
+        f = folder_of(folder); cams = [c for c in PC.load(config.race_dir(f))['cams'] if (not clip or c['source'].get('clip') == clip) and (not key or c['source'].get('key') == key)]
+        said = pointcam_said(f); return dict(cams=[pointcam_doc(f, c, said) for c in cams], limits={k: list(v) for k, v in PC.LIMITS.items()}, defaults=PC.DEFAULTS)
+
+    @api.post('/api/pointcams', dependencies=[Depends(auth)])
+    def post_pointcam(body: dict):                                                       # {folder, source: {kind: 'clip', clip} | {kind: 'streetview', key}, lat, lon}: a camera looking at that point from the source's path (the click must be within 400 m of it)
+        from strata360.edit import pointcam as PC, pointcam_clip as PCL
+        f = folder_of(body.get('folder')); src = body.get('source') or {}
+        try:
+            lat, lon = float(body['lat']), float(body['lon']); kind = src.get('kind')
+            if kind not in ('clip', 'streetview') or not (src.get('clip') if kind == 'clip' else src.get('key')): raise ValueError('source: {kind: clip, clip} or {kind: streetview, key}')
+            source = dict(kind=kind, **({'clip': str(src['clip'])} if kind == 'clip' else {'key': str(src['key'])}))
+            p, bounds, _extra = PCL.source_poly(f, source, loaded_track(f)); t_pass, off = PCL.approach(p, lat, lon, bounds)
+        except (KeyError, TypeError): raise HTTPException(400, 'folder, source, lat and lon are needed')
+        except ValueError as e: raise HTTPException(400, str(e))
+        cam = PC.create(config.race_dir(f), source, lat, lon, t_pass); return pointcam_doc(f, cam)
+
+    @api.post('/api/pointcams/update', dependencies=[Depends(auth)])
+    def post_pointcam_update(body: dict):                                                # {folder, id, ...settings}: height_m, before_m, after_m, fov_near, fov_far, smooth_s, seconds, use ('' | 'possible' | 'must'), name, lat, lon
+        from strata360.edit import pointcam as PC
+        f = folder_of(body.get('folder')); cam = pointcam_get(f, body.get('id', '')); fields = {k: v for k, v in body.items() if k not in ('folder', 'id')}
+        try: cam = PC.update(config.race_dir(f), cam['id'], **fields)
+        except ValueError as e: raise HTTPException(400, str(e))
+        return pointcam_doc(f, cam)
+
+    @api.post('/api/pointcams/delete', dependencies=[Depends(auth)])
+    def post_pointcam_delete(body: dict):
+        from strata360.edit import pointcam as PC
+        f = folder_of(body.get('folder')); return dict(removed=PC.delete(config.race_dir(f), str(body.get('id', ''))))
+
+    def pointcam_video_state(f, cam):
+        from strata360.edit import pointcam_clip as PCL
+        out = PCL.preview_path(f, cam); job = POINTCAM_JOBS.get((f, cam['id'])); running = bool(job and job.poll() is None); lines = []; logf = os.path.splitext(out)[0] + '.log'
+        try: lines = open(logf, errors='replace').read().strip().splitlines()
+        except OSError: pass
+        if not running and lines and not os.path.exists(out) and time.time() - os.path.getmtime(logf) < STREETVIEW_LOG_STALE_S and not any(l.startswith(('done:', 'pointcam-video:')) for l in lines): running = True         # (a job started outside this server is still writing its log)
+        fail = next((l for l in reversed(lines) if l.startswith('pointcam-video:')), '')
+        sec = PCL.section_of(config.race_dir(f), cam['source']['key']) if cam['source']['kind'] == 'streetview' else None
+        return dict(exists=os.path.exists(out), running=running, log=lines[-8:], progress=PCL.progress(lines, cam['source'], bool(sec and sec['provider'] == 'google')), error='' if running else fail[:400])
+
+    @api.get('/api/pointcams/video', dependencies=[Depends(auth)])
+    def get_pointcam_video(folder: str, id: str):                                       # whether the camera's preview video exists, is being made (with its progress and log) or failed
+        f = folder_of(folder); return pointcam_video_state(f, pointcam_get(f, id))
+
+    @api.post('/api/pointcams/video', dependencies=[Depends(auth)])
+    def post_pointcam_video(body: dict):                                                # {folder, id}: render the preview video in the background at the lowest priority (nothing to do when it exists)
+        from strata360.edit import pointcam_clip as PCL
+        f = folder_of(body.get('folder')); cam = pointcam_get(f, body.get('id', '')); out = PCL.preview_path(f, cam)
+        if os.path.exists(out): return dict(started=False, reason='the video is already made')
+        if pointcam_video_state(f, cam)['running']: return dict(started=False, reason='the video is already being made')
+        if any(p.poll() is None for (ff, _), p in POINTCAM_JOBS.items() if ff == f): return dict(started=False, reason='another point camera video is being made')
+        os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
+        POINTCAM_JOBS[(f, cam['id'])] = subprocess.Popen([*oslib.cli_command(), 'pointcam-video', f, cam['id']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/pointcams/video/file')
+    def get_pointcam_video_file(request: Request, folder: str, id: str):                # the video itself (a <video> cannot send headers: the cookie / query token authenticates)
+        from strata360.edit import pointcam_clip as PCL
+        auth(request); f = folder_of(folder); p = PCL.preview_path(f, pointcam_get(f, id))
+        if not os.path.exists(p): raise HTTPException(404, 'the video is not made yet')
+        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'max-age=3600'})
+
+    @api.get('/api/pointcams/path', dependencies=[Depends(auth)])
+    def get_pointcam_path(folder: str, id: str, view: str = 'clip'):                    # where the camera looks over time, for the page to draw the aim point and the edge of its frame over a playing video: view = clip | pano | flat (edit/pointcam_clip.aim_path)
+        from strata360.edit import pointcam_clip as PCL
+        f = folder_of(folder); cam = pointcam_get(f, id)
+        if view not in ('clip', 'pano', 'flat'): raise HTTPException(400, 'view: clip, pano or flat')
+        try: tr = loaded_track(f)
+        except HTTPException: tr = None
+        try: return PCL.aim_path(f, cam, view, tr)
+        except (ValueError, RuntimeError, OSError) as e: raise HTTPException(400, str(e))
+
+    @api.get('/api/pointcams/thumb')
+    def get_pointcam_thumb(request: Request, folder: str, id: str, w: int = 160):       # a picture for the film list: a frame of the shot's video when it is made, else 404 (the list then shows an icon)
+        from strata360.edit import pointcam_clip as PCL, synthetic as SY
+        auth(request); f = folder_of(folder); cam = pointcam_get(f, id); rd = config.race_dir(f); c = next((x for x in SY.load(f)['clips'] if x['id'] == cam['id'] and x.get('file')), None)
+        for src in ([os.path.join(rd, c['file'])] if c else []) + [PCL.preview_path(f, cam)]:
+            if os.path.exists(src): return FileResponse(video_thumb(src, w), media_type='image/jpeg', headers={'Cache-Control': 'max-age=3600'})
+        raise HTTPException(404, 'no picture yet')
+
+    def near_register(f, res):
+        for prov, block in res['providers'].items():
+            for it in block['items']: STREETVIEW_NEAR[(f, prov, it['id'])] = dict(id=it['id'], url=it.get('url'), compass=it.get('compass'))        # only pictures found here can be asked for (the page's thumbnails)
+
+    @api.get('/api/streetview/near', dependencies=[Depends(auth)])
+    def get_streetview_near(folder: str, lat: float, lon: float):                          # what an earlier search within 100 m of this point found ({cached, result}), and how a search being made now is going ({job}); nothing is fetched
+        from strata360 import streetview as SV
+        f = folder_of(folder); res = SV.near_cached(config.race_dir(f), lat, lon); job = STREETVIEW_NEAR_JOBS.get(f)
+        if res is not None: near_register(f, res)
+        return dict(cached=res is not None, result=res, job=None if not job else dict(lat=job['lat'], lon=job['lon'], running=job['thread'].is_alive(), log=job['log'][-8:], error=job['error']))
+
+    @api.post('/api/streetview/near', dependencies=[Depends(auth)])
+    def post_streetview_near(body: dict):                                                 # {folder, lat, lon, n?}: search for the nearest street view in the background (one at a time per project); the log is in the GET
+        import threading
+        from strata360 import streetview as SV
+        from strata360.edit import llm_remote as LR
+        f = folder_of(body.get('folder')); rd = config.race_dir(f)
+        try: lat, lon = float(body['lat']), float(body['lon'])
+        except (KeyError, TypeError, ValueError): raise HTTPException(400, 'lat and lon are needed')
+        n = max(1, min(int(body.get('n') or 5), 12)); old = STREETVIEW_NEAR_JOBS.get(f)
+        if old and old['thread'].is_alive(): return dict(started=False, reason='a search is already running')
+        clips, gaps = sv_footage(f); tr = sv_track(f); token, gkey = LR.secret('MAPILLARY_TOKEN'), LR.secret('GOOGLE_MAPS_API_KEY'); job = dict(lat=lat, lon=lon, log=[], error='')
+        def work():
+            try:
+                res = SV.near_point(rd, lat, lon, n, tr, clips, gaps, token=token, gkey=gkey, log=job['log'].append); SV.near_store(rd, res); near_register(f, res)
+            except Exception as ex: job['error'] = f'{type(ex).__name__}: {ex}'[:300]
+        job['thread'] = threading.Thread(target=work, daemon=True); STREETVIEW_NEAR_JOBS[f] = job; job['thread'].start(); return dict(started=True)
+
+    @api.get('/api/streetview/near/image')
+    def get_streetview_near_image(request: Request, folder: str, provider: str, id: str, w: int = 256):   # the picture of one of those (an <img> cannot send headers: the cookie / query token authenticates)
+        from strata360 import streetview as SV
+        auth(request); f = folder_of(folder); item = STREETVIEW_NEAR.get((f, provider, id))
+        if item is None: raise HTTPException(404, 'no such picture: click the map again')
+        try: data = SV.image_near(config.race_dir(f), provider, item, w)
+        except RuntimeError as ex: raise HTTPException(502, str(ex))
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
+
     @api.get('/api/streetview/image')
     def get_streetview_image(request: Request, folder: str, provider: str, id: str, w: int = 640):   # one frame as a JPEG (an <img> cannot send headers: the cookie / query token authenticates); only frames the stage found can be asked for
         from strata360 import streetview as SV
@@ -1036,7 +1329,7 @@ def create_app(roots, token=None):
         try: data = SV.image(rd, provider, SV.load(rd, provider), id, w)
         except KeyError: raise HTTPException(404, 'no such frame')
         except RuntimeError as ex: raise HTTPException(502, str(ex))
-        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store' if provider == 'google' else 'max-age=86400'})
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'max-age=86400'})
 
     def start_photo_job(f, stages=(), photo=(), force=False):
         """Start `photos-analyse` in the background (one at a time per project); {started, reason?}."""
@@ -1115,11 +1408,15 @@ def create_app(roots, token=None):
         return FileResponse(out, media_type='video/mp4', headers={'Cache-Control': 'max-age=86400'})
 
     @api.post('/api/photos/settings', dependencies=[Depends(auth)])
-    def post_photo_settings(body: dict):                                                 # {folder, id, must}: use this photo in the film (the plan adds it where its time falls if the script leaves it out)
+    def post_photo_settings(body: dict):                                                 # {folder, id, use?, must?}: use: the photo is an option for the film (the writer may show it, it is in the film list); must: the plan adds it where its time falls if the script leaves it out
         from strata360 import photos as PH
-        f = folder_of(body.get('folder')); pid = str(body.get('id') or '')
-        try: return dict(id=pid, must=PH.set_must(config.race_dir(f), pid, bool(body.get('must'))))
-        except KeyError: raise HTTPException(404, 'no such photo')
+        f = folder_of(body.get('folder')); pid = str(body.get('id') or ''); rd = config.race_dir(f)
+        try:
+            if 'use' in body: PH.set_use(rd, pid, bool(body['use']))
+            if 'must' in body: PH.set_must(rd, pid, bool(body['must']))
+            e = next(p for p in PH.load(rd)['photos'] if p['id'] == pid)
+        except (KeyError, StopIteration): raise HTTPException(404, 'no such photo')
+        return dict(id=pid, use=PH.is_used(e), must=bool(e.get('must')))
 
     @api.post('/api/photos/analyse', dependencies=[Depends(auth)])
     def post_photos_analyse(body: dict):                                                 # {folder, stages?: [..], photo?: [ids], force?}: run the clip stages that make sense for a photo over the photos, in the background at the lowest priority (`strata360 photos-analyse`)
@@ -1219,6 +1516,24 @@ def create_app(roots, token=None):
         SY.remove(f, id); p = os.path.join(config.race_dir(f), c.get('file') or '-')
         if c.get('file') and os.path.exists(p): os.remove(p)
         return dict(removed=True)
+
+    def video_thumb(video, w):
+        """A small JPEG of a frame from a video (a second in, else the first frame), kept beside it under thumbs/ and made again when the video changes. Raises HTTPException 404 when the video is not there, 500 when ffmpeg cannot read it."""
+        if not os.path.exists(video): raise HTTPException(404, 'no video yet')
+        w = max(64, min(int(w), 640)); st = os.stat(video); d = os.path.join(os.path.dirname(video), 'thumbs'); os.makedirs(d, exist_ok=True)
+        out = os.path.join(d, f"{os.path.splitext(os.path.basename(video))[0]}-{int(st.st_mtime)}-{st.st_size}-{w}.jpg")
+        if not os.path.exists(out):
+            for ss in ('1', '0'):
+                r = subprocess.run(['ffmpeg', '-y', '-v', 'error', '-ss', ss, '-i', video, '-frames:v', '1', '-vf', f'scale={w}:-2', out + '.part.jpg'], capture_output=True)
+                if r.returncode == 0 and os.path.exists(out + '.part.jpg'): os.replace(out + '.part.jpg', out); break
+            else: raise HTTPException(500, 'could not take a frame from the video')
+        return out
+
+    @api.get('/api/gaps/thumb')
+    def get_gap_thumb(request: Request, folder: str, id: str, w: int = 160):             # a frame of the gap's rendered clip, for the film list (404 when it has not been rendered)
+        from strata360.edit import synthetic as SY
+        auth(request); f = folder_of(folder); c = next((c for c in SY.load(f)['clips'] if c['id'] == id), None); p = os.path.join(config.race_dir(f), (c or {}).get('file') or '-')
+        return FileResponse(video_thumb(p, w), media_type='image/jpeg', headers={'Cache-Control': 'max-age=3600'})
 
     @api.get('/api/gaps/video')
     def get_gap_video(request: Request, folder: str, id: str):                           # the rendered video (Range requests are handled; <video> cannot send headers, so the cookie authenticates)

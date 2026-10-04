@@ -207,4 +207,14 @@ describe('ScriptDraftPanel film plan', () => {
     mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft(), plan_exit: 1, plan_log: ['no candidates yet'] })); setup(<ScriptDraftPanel folder="/data" />)
     expect(await screen.findByText(/Planning failed: no candidates yet/)).toBeInTheDocument()
   })
+
+  it('says when the writer thinks the length is too long or too short, with its estimate, and when it fits', async () => {
+    mockGet('/api/script2', makeScript2State({ drafts: ['d1.json'], draft: makeScriptDraft({ length_note: { verdict: 'too_long', ideal_s: 215, why: 'The middle repeats itself.' } }) }))
+    const { unmount } = setup(<ScriptDraftPanel folder="/data" />)
+    const note = await screen.findByRole('note'); expect(note).toHaveTextContent('length is too long'); expect(note).toHaveTextContent('about 3:35 would suit it better'); expect(note).toHaveTextContent('The middle repeats itself.'); unmount()
+    mockGet('/api/script2', makeScript2State({ drafts: ['d1.json'], draft: makeScriptDraft({ length_note: { verdict: 'too_short', ideal_s: null, why: '' } }) })); const b = setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByRole('note')).toHaveTextContent('length is too short'); b.unmount()
+    mockGet('/api/script2', makeScript2State({ drafts: ['d1.json'], draft: makeScriptDraft({ length_note: { verdict: 'fits', ideal_s: 240, why: '' } }) })); setup(<ScriptDraftPanel folder="/data" />)
+    expect(await screen.findByText(/thinks this length suits/)).toBeInTheDocument(); expect(screen.queryByRole('note')).toBeNull()
+  })
 })

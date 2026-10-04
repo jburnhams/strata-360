@@ -16,35 +16,60 @@ def track(hours=12, step=10.0):
 def span(i, a, b): return dict(id=i, t0=T0 + a, t1=T0 + b)
 
 
+def between(spans, tr, *a, **k):
+    """The gaps between footage (not the final one that stands in for a finish clip)."""
+    out = [g for g in G.find_gaps(spans, tr, *a, **k) if not g.get('final')]
+    for n, g in enumerate(out, 1): g['id'] = f'G{n:02d}'
+    return out
+
+
 def test_a_gap_is_the_time_between_clips_that_lasts_long_enough_and_lies_on_the_track():
     spans = [span('A', 600, 700), span('B', 4000, 4100), span('C', 4500, 4600), span('D', 30000, 30060)]
-    g = G.find_gaps(spans, track(12))
+    g = between(spans, track(12))
     assert [x['id'] for x in g] == ['G01', 'G02'] and (g[0]['before'], g[0]['after']) == ('A', 'B') and (g[1]['before'], g[1]['after']) == ('C', 'D')                  # B to C is 400 s: too short
     assert g[0]['t0'] == T0 + 700 and g[0]['t1'] == T0 + 4000 and g[0]['duration_s'] == 3300.0
 
 
 def test_overlapping_clips_are_one_stretch_of_footage_and_spans_off_the_track_are_not_gaps():
     spans = [span('A', 600, 2000), span('B', 1500, 2600), span('C', 9000, 9100), span('Z', 50 * 3600, 50 * 3600 + 60)]                  # A and B overlap; Z is long after the track ends
-    g = G.find_gaps(spans, track(12)); assert [(x['before'], x['after']) for x in g] == [('B', 'C'), ('C', 'Z')] and g[0]['t0'] == T0 + 2600
+    g = between(spans, track(12)); assert [(x['before'], x['after']) for x in g] == [('B', 'C'), ('C', 'Z')] and g[0]['t0'] == T0 + 2600
     assert g[1]['t1'] == pytest.approx(T0 + 12 * 3600 - 10, abs=11)                                                                              # cut at the end of the track
-    assert G.find_gaps([span('A', 100, 200)], track(12)) == [] and G.find_gaps([], track(12)) == []                                             # nothing before the first clip or after the last
+    assert between([span('A', 100, 200)], track(12)) == [] and G.find_gaps([], track(12)) == []                                             # nothing before the first clip or after the last
 
 
 def test_a_gap_says_how_far_how_long_moving_how_much_climb_and_what_light():
-    g, = G.find_gaps([span('A', 600, 700), span('B', 8 * 3600, 8 * 3600 + 60)], track(12))               # 700 s to 8 h: includes the hour standing still
+    g, = between([span('A', 600, 700), span('B', 8 * 3600, 8 * 3600 + 60)], track(12))               # 700 s to 8 h: includes the hour standing still
     assert g['km_start'] == pytest.approx(2.1, abs=0.1) and g['km_end'] == pytest.approx(7 * 3600 * 3 / 1000, abs=0.2) and g['distance_km'] == pytest.approx(g['km_end'] - g['km_start'], abs=0.11)
     assert g['moving_share'] == pytest.approx(1 - 3600 / (8 * 3600 - 700), abs=0.02) and g['ascent_m'] == pytest.approx(100 * (8 * 3600 - 700) / 3600, abs=10) and g['daylight_start'] in ('day', 'golden hour', 'twilight', 'night') and g['local_start'][:3] in ('Sat', 'Fri')
 
 
 def test_gap_ids_and_keys_are_the_same_for_the_same_footage_and_change_with_the_span():
-    spans = [span('A', 600, 700), span('B', 4000, 4100)]; a, b = G.find_gaps(spans, track(12)), G.find_gaps(spans, track(12)); assert a[0]['key'] == b[0]['key']
-    assert G.find_gaps([span('A', 600, 700), span('B', 5000, 5100)], track(12))[0]['key'] != a[0]['key']
-    assert [x['id'] for x in G.find_gaps(spans, track(12), min_s=60)] == ['G01']
+    spans = [span('A', 600, 700), span('B', 4000, 4100)]; a, b = between(spans, track(12)), between(spans, track(12)); assert a[0]['key'] == b[0]['key']
+    assert between([span('A', 600, 700), span('B', 5000, 5100)], track(12))[0]['key'] != a[0]['key']
+    assert [x['id'] for x in between(spans, track(12), min_s=60)] == ['G01']
 
 
 def test_the_spans_of_a_project_come_from_the_clips_files(project):
     project.add_clip('CAM_20260221190000_0001_D', start_utc='2026-02-21T19:00:00+00:00', source_frames=3000, fps=30.0); project.add_clip('CAM_20260221180000_0002_D', start_utc='2026-02-21T18:00:00+00:00', source_frames=900, fps=30.0)
     s = G.load_spans(project.folder); assert [x['id'][-6:-2] for x in s][-2:] == ['0002', '0001'] and s[-1]['t1'] - s[-1]['t0'] == pytest.approx(100.0) and [x['t0'] for x in s] == sorted(x['t0'] for x in s)
+
+
+def test_photos_ticked_for_the_film_count_as_footage_so_no_gap_is_made_within_twenty_minutes_of_one(project, monkeypatch):
+    from strata360 import photos as PH
+    project.add_clip('CAM_20260221190000_0001_D', start_utc='2026-02-21T19:00:00+00:00', source_frames=3000, fps=30.0); rd = project.race_dir
+    doc = PH.load(rd); doc['photos'] = [dict(id='p1', taken_utc=T0 + 1800.0, must=True), dict(id='p2', taken_utc=T0 + 9000.0)]; PH._save(rd, doc)
+    s = G.load_spans(project.folder); assert 'P1' in [x['id'] for x in s] and 'P2' not in [x['id'] for x in s] and [x for x in s if x['id'] == 'P1'][0]['t0'] == T0 + 1800.0
+    assert 'P1' not in [x['id'] for x in G.load_spans(project.folder, used=False)]
+    assert [(x['before'], x['after']) for x in between([span('A', 0, 100), span('B', 6000, 6100)], track(12))] == [('A', 'B')]
+    assert between([span('A', 0, 100), span('P1', 1000, 1000), span('B', 2000, 2100)], track(12)) == []                                          # photo 900 s from each side: no gap
+
+
+def test_the_race_ends_with_a_final_gap_unless_footage_reaches_the_end_of_the_track():
+    tr = track(12); end = float(tr['t'][-1])
+    g = G.find_gaps([span('A', 600, 700)], tr); assert [(x['before'], x['after'], x.get('final')) for x in g] == [('A', 'finish', True)] and g[0]['t0'] == T0 + 700 and g[0]['t1'] == end
+    assert not any(x.get('final') for x in G.find_gaps([span('A', 600, 700), dict(id='F', t0=end - 60, t1=end)], tr))                                 # a finish clip: no final gap
+    assert not any(x.get('final') for x in G.find_gaps([span('A', 600, 700), dict(id='F', t0=end - 200, t1=end - 30)], tr))              # 30 s short of the end is still the finish
+    assert [x.get('final') for x in G.find_gaps([span('A', 600, 700), dict(id='F', t0=end - 400, t1=end - 300)], tr)] == [None, True]    # 300 s short: a short final gap
 
 
 GAP = dict(id='G01', t0=T0, t1=T0 + 7200)
@@ -87,3 +112,31 @@ def test_planned_clips_are_kept_in_time_order_and_a_render_stays_valid_until_the
     kept = SY.upsert(f, SY.make(GAP, seconds=20)); assert kept['status'] == 'rendered' and kept['file'] == 'synthetic/G01.mp4'                       # same key: the render is still right
     changed = SY.upsert(f, SY.make(GAP, seconds=30)); assert changed['status'] == 'planned' and 'file' not in changed                                    # another length: it must be rendered again
     assert SY.remove(f, 'G02') and not SY.remove(f, 'G02') and [c['id'] for c in SY.load(f)['clips']] == ['G01'] and first['key'] != changed['key']
+
+
+def _stop(arrived, left, key='s1'): return dict(key=key, arrived=T0 + arrived, left=T0 + left, lat=50.0, lon=5.0, km=3.0, stopped_s=left - arrived, radius_m=60)
+
+
+def test_a_stop_added_to_the_video_is_a_gap_of_its_own_with_a_little_either_side_and_gaps_before_and_after_when_long_enough():
+    spans = [span('A', 0, 100), span('B', 30000, 30060)]; tr = track(12)
+    g = [x for x in G.find_gaps(spans, tr, stops=[_stop(10000, 11200)]) if not x.get('final')]; assert [x.get('stop') is not None for x in g] == [False, True, False] and [x['id'] for x in g] == ['G01', 'G02', 'G03']
+    s = g[1]; pad = G.STOP_PAD_MIN_S if 0.25 * 1200 < G.STOP_PAD_MIN_S else min(0.25 * 1200, G.STOP_PAD_MAX_S)
+    assert s['t0'] == T0 + 10000 - pad and s['t1'] == T0 + 11200 + pad and s['stop']['key'] == 's1' and s['stop']['pad_s'] == round(pad) and g[0]['t1'] == s['t0'] and g[2]['t0'] == s['t1'] and g[0]['t0'] == T0 + 100 and g[2]['t1'] == T0 + 30000
+    short = [x for x in G.find_gaps(spans, tr, stops=[_stop(1000, 1700)]) if not x.get('final')]; assert [x.get('stop') is not None for x in short] == [True, False]        # (the 15 minutes before it are under the 20 minutes a gap needs: no gap there)
+    assert [(x['before'], x['after']) for x in g] == [('A', 'stop'), ('stop', 'stop'), ('stop', 'B')]
+
+
+def test_a_stop_in_the_footage_makes_no_gap_and_a_stop_is_found_again_by_its_key(tmp_path, project):
+    spans = [span('A', 0, 5000), span('B', 30000, 30060)]; assert not any(x.get('stop') for x in G.find_gaps(spans, track(12), stops=[_stop(1000, 2000)]))              # (the clip covers it)
+    assert G.find_gaps(spans, track(12), stops=[]) == G.find_gaps(spans, track(12)) and len(G.stop_key(_stop(1000, 2000))) == 10
+    G.set_stop(project.folder, dict(_stop(1000, 2000), key='k1'), True); G.set_stop(project.folder, dict(_stop(5000, 6000), key='k2'), True); assert [s['key'] for s in G.added_stops(project.folder)] == ['k1', 'k2']
+    G.set_stop(project.folder, dict(_stop(1000, 2000), key='k1'), False); assert [s['key'] for s in G.added_stops(project.folder)] == ['k2']
+
+
+def test_a_stop_partly_covered_by_a_clip_is_a_gap_for_the_time_outside_the_clip_only():
+    tr = track(12); spans = [span('A', 0, 100), span('C', 10200, 10800), span('B', 30000, 30060)]
+    g = [x for x in G.find_gaps(spans, tr, stops=[_stop(10000, 11200)]) if x.get('stop')]; assert len(g) == 2 and all(x['stop']['key'] == 's1' for x in g)               # the clip sits inside the stop: the time before it and the time after it
+    assert g[0]['t1'] == T0 + 10200 and g[0]['stop']['covered_after'] is True and g[0]['stop']['covered_before'] is False and g[1]['t0'] == T0 + 10800 and g[1]['stop']['covered_before'] is True and g[1]['stop']['covered_after'] is False
+    assert all(not (x['t0'] < T0 + 10800 and x['t1'] > T0 + 10200) for x in G.find_gaps(spans, tr, stops=[_stop(10000, 11200)]))                      # no gap over the clip
+    tail = [x for x in G.find_gaps([span('A', 0, 100), span('C', 9900, 11100), span('B', 30000, 30060)], tr, stops=[_stop(10200, 10800)]) if x.get('stop')]; assert tail == []          # the clip covers the stop and its lead-in and lead-out: nothing to add
+    some = [x for x in G.find_gaps([span('A', 0, 100), span('C', 10000, 10900), span('B', 30000, 30060)], tr, stops=[_stop(10200, 10800)]) if x.get('stop')]; assert len(some) == 1 and some[0]['t0'] == T0 + 10900 and some[0]['stop']['covered_before'] is True      # only what is left after the clip

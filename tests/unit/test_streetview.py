@@ -117,7 +117,7 @@ def test_run_makes_missing_stages_redoes_stale_ones_and_needs_the_keys(tmp_path,
 def sec_doc(item): return dict(sections=[dict(items=[item])])
 
 
-def test_pictures_are_kept_for_mapillary_and_panoramax_but_never_for_google(tmp_path, monkeypatch):
+def test_pictures_are_kept_for_every_provider(tmp_path, monkeypatch):
     rd = str(tmp_path); fetched = []
     monkeypatch.setattr(SV, '_key', lambda n: 'KEY')
     fetch = lambda url, params=None: fetched.append((url, params)) or b'JPEG:' + url.encode()
@@ -128,7 +128,7 @@ def test_pictures_are_kept_for_mapillary_and_panoramax_but_never_for_google(tmp_
     pd = sec_doc(dict(id='p1', km=1, lat=1, lon=1, b=0, u='https://pmx/p1.jpg')); assert SV.image(rd, 'panoramax', pd, 'p1', 100, fetch, get) == b'JPEG:https://pmx/p1.jpg' and (tmp_path / 'streetview' / 'img' / 'p-p1-256.jpg').exists()
     gd = sec_doc(dict(id='g1', km=1, lat=1, lon=1, b=45))
     SV.image(rd, 'google', gd, 'g1', 640, fetch, get); SV.image(rd, 'google', gd, 'g1', 640, fetch, get)
-    assert fetched[-1][1] == dict(size='640x400', pano='g1', heading=45, fov=90, pitch=0, key='KEY') and len(fetched) == 4 and not list((tmp_path / 'streetview' / 'img').glob('g-*'))
+    assert fetched[-1][1] == dict(size='640x400', pano='g1', heading=45, fov=90, pitch=0, key='KEY') and len(fetched) == 3 and list((tmp_path / 'streetview' / 'img').glob('g-*'))
     with pytest.raises(KeyError): SV.image(rd, 'mapillary', doc, 'other', 640, fetch, get)
     with pytest.raises(RuntimeError, match='no picture address'): SV.image(rd, 'panoramax', sec_doc(dict(id='x', b=0)), 'x', 640, fetch, get)
 
@@ -168,3 +168,23 @@ class TestWeb:
         with pytest.raises(RuntimeError, match='x.example answered 404'): SV._bytes('https://x.example/a.jpg')
         self.reply(monkeypatch, OSError('down'))
         with pytest.raises(RuntimeError, match='answered None'): SV._bytes('https://x.example/a.jpg')
+
+
+def _gframe(i, t, cr='© Google', km=None):
+    return dict(seq='g', km=0.1 + 0.01 * i if km is None else km, lat=50.0 + 0.0001 * i, lon=5.0, a=None, b=0.0, t=t, id=f'g{i}', pano=True, camera='Google Street View car', size=None, cr=cr)
+
+
+def test_google_panoramas_of_other_dates_or_photographers_are_not_part_of_the_newest_drive():
+    new, old = 1_725_000_000, 1_650_000_000; stretch = dict(id='R1', km0=0.0, line=[[50.0, 5.0], [50.01, 5.0]])
+    frames = [_gframe(0, old)] + [_gframe(i, new) for i in range(1, 41)] + [_gframe(41, new, '© Some Person')]
+    secs = SV.sections_of('google', stretch, frames); main = [s for s in secs if s['seq'] == 'g']
+    assert len(main) == 1 and main[0]['frames'] == 40 and main[0]['years'] == [2024] and 'g0' not in [i['id'] for i in main[0]['items']]
+    assert {s['seq'] for s in secs} >= {'g'} and len(secs) >= 1 and all(s['seq'] == 'g' or s['frames'] < 30 for s in secs)               # the others are runs of their own (too short to be candidates)
+    assert SV.sections_of('google', stretch, [])  == []
+
+
+def test_a_promoted_google_section_made_before_is_cut_back_to_the_newest_drive(tmp_path):
+    new, old = 1_725_000_000, 1_650_000_000; rd = str(tmp_path); fs = [_gframe(0, old)] + [_gframe(i, new) for i in range(1, 41)]
+    stretch = dict(id='manual', km0=0.0, line=[[50.0, 5.0], [50.01, 5.0]]); big = SV.sections_of('google', stretch, [dict(f, seq='g') for f in fs])
+    sec = dict(big[0], seq='g'); sec['items'] = [{**i, 'id': i['id']} for i in sorted((i for s in big for i in s['items']), key=lambda i: i['km'])]; sec.update(manual=True, id='G+1', stretch='manual', road=dict(line=stretch['line'], km0=0.0), frames=41, years=[2022, 2024])
+    SV._save_manual(rd, [sec]); out = SV.manual_sections(rd)[0]; assert out['frames'] == 40 and out['years'] == [2024] and out['id'] == 'G+1' and out['manual']

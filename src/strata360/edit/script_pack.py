@@ -108,14 +108,14 @@ def gap_clips(folder, tr, tz):
     if tr is None: return []
     from strata360.pipeline import notes as N
     planned = {c['id']: c for c in SY.load(folder)['clips']}; out = []; notes = N.load(folder).get('clips') or {}; choices = SY.settings(folder)
-    for g in GP.find_gaps(GP.load_spans(folder), tr, 1200.0, tz):
+    for g in GP.project_gaps(folder, tr, 1200.0, tz):
         c = planned.get(g['id']); sec = round(c['seconds'], 1) if c else SY.default_seconds(g['duration_s']); mine = SY.gap_settings(folder, g['id'])
         if mine['mode'] == 'set': sec = float(mine['seconds'])                                           # a length you set
         elif mine['mode'] == 'min': sec = max(sec, float(mine['seconds']))                               # at least the length you gave
         ctx = X.context_at(tr, g['t0'], g['t1'], tz)
         d = dict(label=norm_label(g['id']), clip=g['id'], start_utc=dt.datetime.fromtimestamp(g['t0'], dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=MAX_GAP_S, usable=[(0.0, MAX_GAP_S)], synthetic=True, race_s=g['duration_s'],
                  speedup=round(g['duration_s'] / sec, 1), scene={}, note=(notes.get(g['id']) or '').strip(), settings=mine, lines=[], speech_s=0.0, speech_words=0, track=X.describe(ctx),
-                 gap={k: g.get(k) for k in ('local_start', 'local_end', 'km_start', 'km_end', 'distance_km', 'ascent_m', 'daylight', 'moving_share')},
+                 stop=g.get('stop'), gap={k: g.get(k) for k in ('local_start', 'local_end', 'km_start', 'km_end', 'distance_km', 'ascent_m', 'daylight', 'moving_share')},
                  options=[dict(kind='map', default_seconds=sec), dict(kind='flyover', default_seconds=sec, note=FLYOVER_NOTE)], planned=dict(kind=c['kind'], seconds=c['seconds'], status=c.get('status'), approved=c.get('approved', True)) if c else None)
         if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
         out.append(d)
@@ -134,12 +134,13 @@ def photo_clips(folder, tr, tz):
     from strata360.analysis import photo_analysis as PA
     from strata360.gps import context as X
     from strata360.pipeline import config
-    rd = config.race_dir(folder); rows = PH.load(rd)['photos']
+    from strata360.pipeline import notes as N
+    rd = config.race_dir(folder); rows = [e for e in PH.load(rd)['photos'] if PH.is_used(e)]; notes = N.load(folder).get('clips') or {}                 # only the photos ticked to use are options
     if not rows: return []
     out = []
     for e in rows:
         lab = PH.label_of(e); mo = PH.motion_of(e); doc = PA.load_doc(rd, e['id']); a = PA.summary(doc); explicit = mo['seconds'] is not None; sec = float(mo['seconds']) if explicit else PA.auto_seconds(doc); t = e['taken_utc']          # a length you set on the photo is kept; else 2 to 3 s by how busy it is
-        d = dict(label=lab, clip=lab, start_utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=max(sec, MAX_PHOTO_S), usable=[(0.0, max(sec, MAX_PHOTO_S))], synthetic=True, photo=True, race_s=0.0, speedup=1.0, scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
+        d = dict(label=lab, clip=lab, start_utc=dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=sec, usable_s=max(sec, MAX_PHOTO_S), usable=[(0.0, max(sec, MAX_PHOTO_S))], synthetic=True, photo=True, race_s=0.0, speedup=1.0, scene={}, note=(notes.get(lab) or '').strip(), lines=[], speech_s=0.0, speech_words=0,
                  settings=dict(kind=None, mode='set' if explicit else None, seconds=sec if explicit else None, must=bool(e.get('must'))), planned=None, photo_facts=dict(name=e['name'], camera=e.get('camera') or '', **{k: v for k, v in a.items() if k != 'stages'}))
         if tr is not None:
             ctx = X.context_at(tr, t, t, tz); d['track'] = X.describe(ctx)
@@ -156,16 +157,40 @@ def streetview_clips(folder, tr, tz):
     from strata360 import streetview as SV
     from strata360.gps import context as X
     from strata360.pipeline import config
-    rd = config.race_dir(folder); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; ch = SV.chosen(rd, docs)
+    from strata360.pipeline import notes as N
+    rd = config.race_dir(folder); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; ch = SV.chosen(rd, docs); notes = N.load(folder).get('clips') or {}
     if not ch or tr is None: return []
     dist, ts = SV.track_dist(tr); by_id = {c['id']: c for c in ch}; out = []
     for sec in ch:
-        t0 = float(np.interp(sec['km0'] * 1000, dist, ts)); t1 = float(np.interp(sec['km1'] * 1000, dist, ts)); tm = (t0 + t1) / 2; mid = sec['items'][len(sec['items']) // 2]; dur = round(min(max(sec['frames'] / SV.PLAY_FPS, sec['min_s']), sec['max_s']), 1)
+        t0 = float(np.interp(sec['km0'] * 1000, dist, ts)); t1 = float(np.interp(sec['km1'] * 1000, dist, ts)); tm = (t0 + t1) / 2; mid = sec['items'][len(sec['items']) // 2]; dur = sec['seconds'] if sec.get('seconds') else round(min(max(sec['frames'] / SV.PLAY_FPS, sec['min_s']), sec['max_s']), 1)
         caps = sorted(i['t'] for i in sec['items'] if i.get('t')); cap = caps[len(caps) // 2] if caps else None
         f = dict(source=sec['provider'], camera='a 360 camera' if sec['kind'] == '360' else 'a flat camera facing ' + ', '.join(k for k, v in (sec.get('angles') or {}).items() if v), km0=sec['km0'], km1=sec['km1'], length_m=sec['length_m'], pictures=sec['frames'], spacing_m=sec['spacing_m'],
                  min_s=sec['min_s'], max_s=sec['max_s'], years=sec['years'], captured=X._local(cap, tz).strftime('%a %d %b %Y %H:%M') if cap else None, same_road=[c['label'] for c in ch if c['id'] in sec['overlaps'] and c['id'] in by_id])
-        d = dict(label=sec['label'], clip=sec['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=sec['max_s'], usable=[(sec['min_s'], sec['max_s'])], synthetic=True, streetview=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note='', lines=[], speech_s=0.0, speech_words=0,
-                 settings=dict(kind=None, mode=None, seconds=None, must=sec['choice'] == 'must'), planned=None, sv_facts=f)
+        d = dict(label=sec['label'], clip=sec['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=sec['max_s'], usable=[(sec['min_s'], sec['max_s'])], synthetic=True, streetview=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note=(notes.get(sec['label']) or '').strip(), lines=[], speech_s=0.0, speech_words=0,
+                 settings=dict(kind=None, mode='set' if sec.get('seconds') else None, seconds=sec.get('seconds'), must=sec['choice'] == 'must'), planned=None, sv_facts=f)
+        ctx = X.context_at(tr, t0, t1, tz); d['track'] = X.describe(ctx)
+        if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
+        out.append(d)
+    return out
+
+
+def camera_clips(folder, tr, tz):
+    """Every point camera you offered (edit/pointcam.py, the Point camera section of a clip or street view page; possible or must include) as a pack clip `C1`...: no footage and no words, a shot that keeps one place in frame while the clip or the street view passes it, with
+    where and when that is on the course, what it looks at and from where, and how long it can play (a `camera` item). A camera whose source cannot give the shot (no track, no proxy needed here) is left out."""
+    import datetime as dt
+    from strata360.edit import pointcam as PC, pointcam_clip as PCL
+    from strata360.gps import context as X
+    from strata360.pipeline import config
+    from strata360.pipeline import notes as N
+    rd = config.race_dir(folder); notes = N.load(folder).get('clips') or {}; out = []
+    for cam in PC.load(rd)['cams']:
+        if cam.get('use') not in ('possible', 'must') or tr is None: continue
+        try: pl = PCL.plan(folder, cam, tr=tr); lo, hi = PCL.range_s(folder, cam, tr=tr)
+        except (ValueError, RuntimeError, OSError): continue
+        t0, t1 = pl['t0'], pl['t1']; dur = float(cam.get('seconds') or pl['seconds']); dur = round(min(max(dur, lo), hi), 1); f = pl['facts']; clip = cam['source']['kind'] == 'clip'
+        facts = dict(source=(f"clip {cam['source']['clip']}" if clip else f"street view ({pl['extra']['provider']})"), name=cam.get('name') or '', min_s=lo, max_s=hi, window_s=pl['source_seconds'], min_dist_m=f['min_dist_m'], max_dist_m=f['max_dist_m'], swing_deg=f['swing_deg'], fov_near=cam['fov_near'], fov_far=cam['fov_far'], height_m=cam['height_m'], warnings=f['warnings'])
+        d = dict(label=cam['label'], clip=cam['label'], start_utc=dt.datetime.fromtimestamp(t0, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), duration_s=dur, usable_s=hi, usable=[(lo, hi)], synthetic=True, camera=True, race_s=round(t1 - t0, 1), speedup=round((t1 - t0) / dur, 1), scene={}, note=(notes.get(cam['label']) or '').strip(), lines=[], speech_s=0.0, speech_words=0,
+                 settings=dict(kind=None, mode='set' if cam.get('seconds') else None, seconds=cam.get('seconds'), must=cam.get('use') == 'must'), planned=None, cam_facts=facts)
         ctx = X.context_at(tr, t0, t1, tz); d['track'] = X.describe(ctx)
         if ctx.get('covered'): d['km'] = ctx.get('distance_km'); d['elapsed_h'] = ctx.get('elapsed_h'); d['local'] = f"{ctx['local_date']} {ctx['local_time']}"
         out.append(d)
@@ -208,7 +233,7 @@ def build(folder, tz=None):
             if pj.get('covered') and pj.get('summary'): d['place'] = pj['summary']['text'] + (f", on {pj['summary']['road']}" if pj['summary'].get('road') else '')
         d['look'] = look_of(cdir, scale); d['scene'] = scene_summary(cdir); d['note'] = (notes.get('clips', {}).get(c['id']) or '').strip(); d['lines'] = transcript_lines(cdir, label)
         d['speech_s'] = round(sum(l['t1'] - l['t0'] for l in d['lines']), 1); d['speech_words'] = sum(l['words'] for l in d['lines']); out.append(d)
-    out = sorted(out + gap_clips(folder, tr, tz) + photo_clips(folder, tr, tz) + streetview_clips(folder, tr, tz), key=lambda c: c['start_utc'])
+    out = sorted(out + gap_clips(folder, tr, tz) + photo_clips(folder, tr, tz) + streetview_clips(folder, tr, tz) + camera_clips(folder, tr, tz), key=lambda c: c['start_utc'])
     story = None
     try:
         from strata360.gps import tracks as TKS
@@ -244,7 +269,7 @@ def render(pack, with_usable=False, marks=None):
             L += [f"  [{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') for p in ly['phrases'][:45]]
     L += ['', f"CLIPS (all {len(pack['clips'])}, in shooting order; the film follows this order)"]
     for c in pack['clips']:
-        L.append(f"\n=== {'PHOTO' if c.get('photo') else 'STREET VIEW' if c.get('streetview') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
+        L.append(f"\n=== {'PHOTO' if c.get('photo') else 'STREET VIEW' if c.get('streetview') else 'POINT CAMERA' if c.get('camera') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')
         if c.get('photo'):
             f = c.get('photo_facts') or {}; L.append(f"A PHOTO the runner took (a still: no footage and no words); show it with a photo item of {MIN_PHOTO_S:g} to {MAX_PHOTO_S:g} s (the editor pans and zooms on it), or put a vo item over it. Use the ones that add to the story; leave the rest." + (' THE RUNNER WANTS THIS PHOTO IN THE FILM (MUST INCLUDE): give it a photo item.' if (c.get('settings') or {}).get('must') else ''))
             bits = [f.get('description'), ('place: ' + f['place']) if f.get('place') else '', ('setting: ' + f['setting'] + (', ' + f['weather'] if f.get('weather') and f['weather'] != 'unknown' else '')) if f.get('setting') else '', ('scenery ' + format(f['scenery'], 'g') + '/10') if f.get('scenery') is not None else '',
@@ -256,8 +281,14 @@ def render(pack, with_usable=False, marks=None):
             L.append(f"NO FOOTAGE: a steady view along the road, made from street-level pictures ({f.get('source')}, {f.get('camera')}, taken {f.get('captured') or 'at an unknown time'}). It covers km {f.get('km0')} to {f.get('km1')} ({f.get('length_m')} m, {f.get('pictures')} pictures, one every {f.get('spacing_m')} m): the runner's {c['race_s'] / 60:.0f} minutes there are shown in a few seconds, with the clock running on screen. "
                      f"Show it with a streetview item of {f.get('min_s'):g} to {f.get('max_s'):g} s (the whole stretch always plays through; a shorter item is faster), or put a vo item over it. It has no sound and no words."
                      + (f" It covers the same road as {', '.join(same)}: use at most one of them." if same else '') + (' THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE): give it a streetview item.' if (c.get('settings') or {}).get('must') else ''))
+        elif c.get('camera'):
+            f = c.get('cam_facts') or {}
+            L.append(f"NO FOOTAGE OF ITS OWN: a shot that keeps one place{(' (' + f['name'] + ')') if f.get('name') else ''} in frame, turning and zooming as {f.get('source')} goes past it (from {f.get('max_dist_m')} m away down to {f.get('min_dist_m')} m, the view turning about {f.get('swing_deg'):.0f} degrees), made from the runner's own pictures. "
+                     f"It covers the runner's {c['race_s'] / 60:.1f} minutes there. Show it with a camera item of {f.get('min_s'):g} to {f.get('max_s'):g} s (a shorter item is the part nearest the place), or put a vo item over it. It has no sound and no words."
+                     + (' THE RUNNER WANTS THIS IN THE FILM (MUST INCLUDE): give it a camera item.' if (c.get('settings') or {}).get('must') else ''))
         elif c.get('synthetic'):
-            g = c.get('gap') or {}; pl = c.get('planned')
+            g = c.get('gap') or {}; pl = c.get('planned'); st = c.get('stop')
+            if st: L.append(f"THE RUNNER STOPPED HERE: about {st['stopped_s'] / 60:.0f} min in one small place (within {st['radius_m']} m) at km {st['km']:g}; the clip shows the arriving and the leaving too. Say what the stop was if the notes or the transcript do (a rest, food, sleep, a problem), otherwise just that the runner stopped.")
             L.append(f"NO FOOTAGE: a gap of {c['race_s'] / 3600:.1f} h between clips ({g.get('local_start')} to {g.get('local_end')}, km {g.get('km_start')} to {g.get('km_end')}, +{g.get('ascent_m')} m{', ' + g['daylight'] if g.get('daylight') else ''}); {int(round(100 * (g.get('moving_share') or 0)))}% of it spent moving. "
                      f"Fill it with a generated clip: a generated clip (the planner draws it as a 2D map or a 3D terrain flyover: you only give its length), each with the clock, distance, pace and altitude on screen; {c['duration_s']} s shows it at about x{c['speedup']:g}. Use a gap item (kind and seconds, 2 to {MAX_GAP_S:g}) or narration over it; it has no sound and no words."
                      + (f" Already planned: {pl['kind']}, {pl['seconds']} s ({pl['status']})." if pl else ''))
@@ -275,5 +306,5 @@ def render(pack, with_usable=False, marks=None):
         if c['lines']:
             L.append(f"the runner says ({c['speech_s']} s of speech, {c['speech_words']} words):")
             for l in c['lines']: L.append(f"  [{l['id']}] {l['t0']:.1f}-{l['t1']:.1f} s ({l['t1'] - l['t0']:.1f} s): {l['text']}" + ('' if l['lang'] == 'en' else f" (translated from {l['lang']})") + {'must': '   <<< MUST INCLUDE', 'never': '   <<< DO NOT USE'}.get(marks.get(l['id']), ''))
-        elif not c.get('photo') and not c.get('streetview'): L.append('the runner says nothing in this clip.')
+        elif not c.get('photo') and not c.get('streetview') and not c.get('camera'): L.append('the runner says nothing in this clip.')
     return '\n'.join(L)

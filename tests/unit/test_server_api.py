@@ -133,12 +133,20 @@ class TestLogAndClips:
         lines = client.get('/api/log', params={'folder': project.folder}).json()['lines']
         assert len(lines) == 40 and lines[0] == 'line 60' and lines[-1] == 'line 99'
 
+    def test_a_clip_the_film_plays_is_marked_in_film(self, client, make_project):
+        from strata360.edit import project as PJ
+        p = make_project(config=True); p.add_clip(CLIP_ID, source_frames=300, fps=30.0)
+        assert client.get('/api/clips', params={'folder': p.folder}).json()['clips'][0]['in_film'] is False                                  # no plan yet
+        edit = PJ.load(p.folder); edit['plan'] = dict(segments=[dict(clip=CLIP_ID), dict(clip='G01')]); PJ.save(p.folder, edit)
+        assert client.get('/api/clips', params={'folder': p.folder}).json()['clips'][0]['in_film'] is True
+        edit['plan'] = dict(segments=[dict(clip='G01')]); PJ.save(p.folder, edit); assert client.get('/api/clips', params={'folder': p.folder}).json()['clips'][0]['in_film'] is False
+
     def test_clips_summarise_each_clip(self, client, make_project):
         p = make_project(config=True)
         p.add_clip(CLIP_ID, source_frames=300, fps=30.0, motion={'summary': {'steady': 0.8}}, candidates={'summary': {'n': 3}})
         open(os.path.join(p.clip_dir(), 'thumb.jpg'), 'wb').write(b'x')
         [c] = client.get('/api/clips', params={'folder': p.folder}).json()['clips']
-        assert c == dict(id=CLIP_ID, start_utc='2026-02-21T12:00:07+00:00', duration_s=10.0, has_note=False, thumb='best', thumb_overlay=False, audio_original=False, audio_clean=False, steady=0.8, candidates=3)
+        assert c == dict(id=CLIP_ID, start_utc='2026-02-21T12:00:07+00:00', duration_s=10.0, has_note=False, thumb='best', thumb_overlay=False, audio_original=False, audio_clean=False, in_film=False, steady=0.8, candidates=3)
 
     def test_overlay_thumbnail_when_it_matches_the_current_one(self, client, make_project):
         p = make_project(config=True); p.add_clip(CLIP_ID); d = p.clip_dir(); open(os.path.join(d, 'thumb.jpg'), 'wb').write(b'plain'); open(os.path.join(d, 'thumb_overlay.jpg'), 'wb').write(b'over')
@@ -250,7 +258,7 @@ class TestGapClipsApi(TestRaceMapData):
 
     def test_the_gaps_are_listed_with_their_default_length_and_no_clips_yet(self, client, project):
         self.with_gap(project); g = client.get('/api/gaps', params=dict(folder=project.folder)).json()['gaps']
-        assert [x['id'] for x in g] == ['G01'] and 4000 < g[0]['duration_s'] < 4800 and g[0]['clips'] == [] and 6 <= g[0]['default_seconds'] <= 45
+        assert [x['id'] for x in g if not x.get('final')] == ['G01'] and 4000 < g[0]['duration_s'] < 4800 and g[0]['clips'] == [] and 6 <= g[0]['default_seconds'] <= 45
 
     def test_a_flyover_can_be_planned_in_4k_and_the_list_says_whether_it_can_be_rendered(self, client, project, monkeypatch, tmp_path):
         from strata360.overlay import flyover as FO
@@ -712,7 +720,7 @@ class TestPhotoUse(TestPhotosApi):
     def test_a_photo_can_be_marked_for_the_film_and_its_clip_goes_when_it_is_removed(self, client, project):
         from strata360.edit import synthetic as SY
         self.with_gap(project); q = dict(folder=project.folder); client.post('/api/photos', params=dict(q, filename='a.jpg'), content=self.jpeg(60))
-        assert client.post('/api/photos/settings', json=dict(q, id='p1', must=True)).json() == dict(id='p1', must=True) and client.get('/api/photos', params=q).json()['photos'][0]['must'] is True
+        assert client.post('/api/photos/settings', json=dict(q, id='p1', must=True)).json() == dict(id='p1', use=True, must=True) and client.get('/api/photos', params=q).json()['photos'][0]['must'] is True
         assert client.post('/api/photos/settings', json=dict(q, id='p9', must=True)).status_code == 404
         SY.upsert(project.folder, SY.make_photo(dict(id='p1', taken_utc=self.T0 + 60, file='x'), 5.0, dict(style='auto', seed=0))); assert [c['id'] for c in SY.load(project.folder)['clips']] == ['P1']
         client.delete('/api/photos', params=dict(q, id='p1')); assert SY.load(project.folder)['clips'] == []
@@ -805,3 +813,173 @@ class TestOverlaysAreMadeAgain(TestTracksCollection):
         os.makedirs(PA.adir(project.race_dir), exist_ok=True); o = os.path.join(PA.adir(project.race_dir), 'p1-overlay.jpg'); open(o, 'wb').write(b'x'); q = dict(folder=project.folder)
         client.post('/api/tracks', params=dict(q, filename='a.gpx'), content=self.gpx()); assert not os.path.exists(o)
         assert any('photos-analyse' in i.cmd and 'thumb_overlay' in i.cmd for i in fake_popen.instances)
+
+
+class TestStreetViewVideoApi(TestStreetViewApi):
+    def key(self, project):
+        self.make_docs(project); return 'mapillary:s:1.00'
+
+    def test_the_state_of_a_sections_video_and_making_it_in_the_background(self, client, project, fake_popen):
+        key = self.key(project); q = dict(folder=project.folder, key=key)
+        s = client.get('/api/streetview/video', params=q).json(); assert s['exists'] is False and s['running'] is False and s['error'] == '' and s['seconds'] >= 2
+        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key=key)).json() == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert 'streetview-video' in cmd and cmd[-1] == key
+        assert client.get('/api/streetview/video', params=q).json()['running'] is True
+        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key=key)).json()['started'] is False
+
+    def test_a_finished_video_is_served_and_not_made_again_and_a_failure_is_shown(self, client, project, fake_popen):
+        from strata360 import streetview as SV
+        key = self.key(project); q = dict(folder=project.folder, key=key); rd = project.race_dir
+        assert client.get('/api/streetview/video/file', params=q).status_code == 404
+        s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); p = SV.video_path(rd, s); os.makedirs(os.path.dirname(p)); open(p, 'wb').write(b'MP4DATA')
+        r = client.get('/api/streetview/video/file', params=q); assert r.status_code == 200 and r.content == b'MP4DATA' and r.headers['content-type'] == 'video/mp4'
+        assert client.get('/api/streetview/video', params=q).json()['exists'] is True and client.post('/api/streetview/video', json=dict(folder=project.folder, key=key)).json() == dict(started=False, reason='the video is already made')
+        os.remove(p); open(os.path.splitext(p)[0] + '.log', 'w').write('fetching\nstreetview-video: mapillary answered 500\n')
+        assert 'answered 500' in client.get('/api/streetview/video', params=q).json()['error']
+
+    def test_unknown_sections_are_refused(self, client, project):
+        assert client.get('/api/streetview/video', params=dict(folder=project.folder, key='nope')).status_code == 404
+        assert client.post('/api/streetview/video', json=dict(folder=project.folder, key='nope')).status_code == 404
+
+    def test_the_command_makes_the_video_or_says_why_not(self, project, monkeypatch, capsys):
+        import argparse
+        from strata360 import cli, streetview as SV
+        key = self.key(project); made = []; monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False, hires=False: made.append((s['key'], pano)) or '/x.mp4')
+        cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key)); assert made == [(key, False)] and 'done: /x.mp4' in capsys.readouterr().out
+        with pytest.raises(SystemExit, match='no section nope'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key='nope'))
+        monkeypatch.setattr(SV, 'make_video', lambda rd, s, log=print, pano=False, hires=False: (_ for _ in ()).throw(RuntimeError('boom')))
+        with pytest.raises(SystemExit, match='streetview-video: boom'): cli.cmd_streetview_video(argparse.Namespace(name=project.folder, key=key))
+
+
+class TestStreetViewNearClips(TestStreetViewApi):
+    def test_each_section_says_how_far_the_nearest_clips_are_along_the_run(self, client, project):
+        import datetime as dt
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir
+        sec = SV.load(rd, 'mapillary')['sections'][0]; sec['items'] = [dict(i, t=1_700_000_000) for i in sec['items']]; SV._save(rd, 'mapillary', SV.provider_doc('mapillary', [sec], SV.load(rd, 'roads')))
+        j = client.get('/api/streetview', params=dict(folder=project.folder)).json()['sections'][0]
+        assert 'near' in j and (j['near'] is None or set(j['near']) == {'before', 'after', 'overlaps', 'in_gap'})                                  # (None without a race track in this project)
+
+
+class TestStreetViewNearApi(TestStreetViewApi):
+    def test_a_click_is_only_looked_up_in_the_cache_until_a_search_is_asked_for_and_its_pictures_can_then_be_fetched(self, client, project, monkeypatch):
+        import time
+        from strata360 import streetview as SV
+        self.make_docs(project); seen = {}
+        def fake(rd, lat, lon, n, tr, clips, gaps, log=None, **kw): seen.update(lat=lat, lon=lon, n=n, kw=kw, clips=clips); log('asking mapillary…'); return dict(lat=lat, lon=lon, n=n, providers=dict(mapillary=dict(items=[dict(id='m1', url=None, compass=10)], radius_m=100.0), panoramax=dict(items=[dict(id='p1', url='https://x/p1.jpg', compass=None)], radius_m=100.0), google=dict(items=[], radius_m=110.0)))
+        monkeypatch.setattr(SV, 'near_point', fake); q = dict(folder=project.folder)
+        j = client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2)).json(); assert j['cached'] is False and j['result'] is None and seen == {}                       # nothing fetched by a click
+        assert client.post('/api/streetview/near', json=dict(q, lat=50.1, lon=5.2, n=99)).json() == dict(started=True)
+        for _ in range(100):
+            j = client.get('/api/streetview/near', params=dict(q, lat=50.1, lon=5.2)).json()
+            if j['cached']: break
+            time.sleep(0.05)
+        assert j['cached'] and j['result']['providers']['mapillary']['items'][0]['id'] == 'm1' and seen['n'] == 12 and seen['kw'].keys() >= {'token', 'gkey'} and j['job']['log'] == ['asking mapillary…']
+        near = client.get('/api/streetview/near', params=dict(q, lat=50.1005, lon=5.2)).json(); assert near['cached'] and near['result']['lat'] == 50.1                    # 55 m away: the same search
+        assert client.get('/api/streetview/near', params=dict(q, lat=50.103, lon=5.2)).json()['cached'] is False                                                          # 330 m away: not
+        monkeypatch.setattr(SV, 'image_near', lambda rd, provider, item, w, **k: b'\xff\xd8' + provider.encode() + item['id'].encode())
+        r = client.get('/api/streetview/near/image', params=dict(q, provider='panoramax', id='p1')); assert r.status_code == 200 and r.content == b'\xff\xd8panoramaxp1' and r.headers['content-type'] == 'image/jpeg'
+        assert client.get('/api/streetview/near/image', params=dict(q, provider='mapillary', id='other')).status_code == 404 and client.get('/api/streetview/near/image', params=dict(q, provider='bing', id='m1')).status_code == 404
+        monkeypatch.setattr(SV, 'image_near', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('mapillary answered 500'))); assert client.get('/api/streetview/near/image', params=dict(q, provider='mapillary', id='m1')).status_code == 502
+
+
+class TestStreetViewPromote:
+    def test_a_nearby_capture_is_made_a_section_or_refused_with_the_reason(self, client, project, monkeypatch):
+        from strata360 import streetview as SV
+        body = dict(folder=project.folder, provider='mapillary', id='m1', sequence='s1', lat=50.0, lon=5.0)
+        assert client.post('/api/streetview/promote', json=dict(body, provider='bing')).status_code == 400
+        assert client.post('/api/streetview/promote', json={k: v for k, v in body.items() if k != 'lat'}).status_code == 400
+        monkeypatch.setattr(SV, 'promote', lambda *a, **k: (_ for _ in ()).throw(ValueError('none of its 3 pictures lies within 30 m of the run track')))
+        r = client.post('/api/streetview/promote', json=body); assert r.status_code == 400 and 'within 30 m' in r.json()['detail']
+        monkeypatch.setattr(SV, 'promote', lambda rd, prov, i, seq, lat, lon, tr, **k: dict(provider=prov, seq=seq, km0=1.0, id='M+1'))
+        assert client.post('/api/streetview/promote', json=body).json() == dict(key='mapillary:s1:1.00', id='M+1')
+
+    def test_a_promoted_section_can_be_taken_out(self, client, project, monkeypatch):
+        from strata360 import streetview as SV
+        monkeypatch.setattr(SV, 'unpromote', lambda rd, key: key == 'k')
+        assert client.post('/api/streetview/unpromote', json=dict(folder=project.folder, key='k')).json() == dict(removed=True)
+        assert client.post('/api/streetview/unpromote', json=dict(folder=project.folder, key='x')).status_code == 404
+
+
+class TestStreetViewChosen:
+    def test_the_chosen_sections_come_with_when_the_runner_passed_them(self, client, project):
+        r = client.get('/api/streetview/chosen', params=dict(folder=project.folder)); assert r.status_code == 200 and isinstance(r.json()['sections'], list)
+
+
+class TestStreetViewLength(TestStreetViewApi):
+    def test_a_length_is_set_refused_outside_what_the_section_plays_and_cleared(self, client, project):
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir; s = SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})[0]; key = s['key']; q = dict(folder=project.folder, key=key)
+        assert client.post('/api/streetview/length', json=dict(q, seconds=9999)).status_code == 400 and client.post('/api/streetview/length', json=dict(folder=project.folder, key='nope', seconds=5)).status_code == 404
+        assert client.post('/api/streetview/length', json=dict(q, seconds=None)).json() == dict(key=key, seconds=None)
+
+
+class TestStreetViewPanoVideo(TestStreetViewVideoApi):
+    def test_the_360_video_is_its_own_file_started_only_for_a_360_section(self, client, project, fake_popen):
+        from strata360 import streetview as SV
+        key = self.key(project); rd = project.race_dir; s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key)
+        assert SV.video_path(rd, s, True) != SV.video_path(rd, s) and SV.video_path(rd, s, True).endswith('-360.mp4')
+        q = dict(folder=project.folder, key=key, pano='true'); assert client.get('/api/streetview/video', params=q).json()['exists'] is False and client.get('/api/streetview/video/file', params=q).status_code == 404
+        r = client.post('/api/streetview/video', json=dict(folder=project.folder, key=key, pano=True))
+        if s['kind'] == '360' and s['provider'] != 'google': assert r.json() == dict(started=True) and '--pano' in fake_popen.instances[-1].cmd
+        else: assert r.status_code == 400
+
+
+class TestStreetViewHires(TestStreetViewApi):
+    def test_the_higher_resolution_is_a_setting_of_a_google_section_that_changes_its_videos(self, client, project, fake_popen):
+        from strata360 import streetview as SV
+        self.make_docs(project); rd = project.race_dir; g = dict(SV.load(rd, 'mapillary')['sections'][0], id='G1', provider='google', seq='g', kind='360'); SV._save(rd, 'google', SV.provider_doc('google', [g], SV.load(rd, 'roads'))); key = SV.section_key(g); q = dict(folder=project.folder)
+        before = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); assert before['hires'] is False
+        assert client.post('/api/streetview/hires', json=dict(q, key=key, hires=True)).json() == dict(key=key, hires=True)
+        after = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); assert after['hires'] is True and len({SV.video_path(rd, before, True), SV.video_path(rd, after, True), SV.video_path(rd, after), SV.video_path(rd, before)}) == 4
+        assert client.get('/api/streetview/video', params=dict(q, key=key, pano='true')).json()['hires'] is True
+        assert client.post('/api/streetview/hires', json=dict(q, key=key, hires=False)).json() == dict(key=key, hires=False)
+        m = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['provider'] == 'mapillary'); assert client.post('/api/streetview/hires', json=dict(q, key=m['key'], hires=True)).status_code == 400 and client.post('/api/streetview/hires', json=dict(q, key='nope', hires=True)).status_code == 404
+
+    def test_a_chosen_google_section_in_the_film_is_made_from_the_higher_resolution_pictures_when_ticked(self, project, monkeypatch):
+        from strata360.edit import streetview_clip as SC, streetview_cam as CAM
+        from strata360 import streetview as SV
+        calls = []; monkeypatch.setattr(CAM, 'fetch_google_pano', lambda *a, **k: calls.append(('pano', k.get('grid')))); monkeypatch.setattr(CAM, 'fetch', lambda *a, **k: calls.append(('flat', None))); monkeypatch.setattr(CAM, 'render', lambda *a, **k: calls.append(('render', k.get('grid'))) or {})
+        sec = dict(provider='google', id='G1', key='k', seq='g', km0=0.0, hires=True); SC.render(project.folder, sec, 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('pano', 'hi'), ('render', 'hi')]
+        calls.clear(); SC.render(project.folder, dict(sec, hires=False), 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('flat', None), ('render', None)]
+
+
+class TestSidebarThumbs(TestStreetViewApi):
+    def test_a_gap_clip_and_a_street_view_section_have_a_thumbnail_made_from_a_frame_of_their_video(self, client, project, monkeypatch):
+        import subprocess
+        from strata360 import streetview as SV
+        from strata360.edit import synthetic as SY
+        self.make_docs(project); rd = project.race_dir; q = dict(folder=project.folder); made = []
+        def fake_run(cmd, **k): made.append(cmd); open(cmd[-1], 'wb').write(b'\xff\xd8JPEG'); return subprocess.CompletedProcess(cmd, 0)
+        monkeypatch.setattr(subprocess, 'run', fake_run)
+        assert client.get('/api/gaps/thumb', params=dict(q, id='G99')).status_code == 404
+        s = SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})[0]; v = SV.video_path(rd, s); os.makedirs(os.path.dirname(v), exist_ok=True); open(v, 'wb').write(b'MP4')
+        r = client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)); assert r.status_code == 200 and r.content == b'\xff\xd8JPEG' and r.headers['content-type'] == 'image/jpeg' and any('scale=100:-2' in ' '.join(c) for c in made)
+        n = len(made); assert client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)).status_code == 200 and len(made) == n                      # kept
+        assert client.get('/api/streetview/thumb', params=dict(q, key='nope')).status_code == 404
+
+
+class TestVideoStartedElsewhere(TestStreetViewVideoApi):
+    def test_a_video_whose_log_is_being_written_is_shown_as_being_made_even_by_a_job_this_server_did_not_start(self, client, project, fake_popen):
+        import time
+        from strata360 import streetview as SV
+        key = self.key(project); rd = project.race_dir; s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); lf = os.path.splitext(SV.video_path(rd, s))[0] + '.log'
+        os.makedirs(os.path.dirname(lf), exist_ok=True); open(lf, 'w').write('fetching picture 2 of 10\n'); q = dict(folder=project.folder, key=key)
+        j = client.get('/api/streetview/video', params=q).json(); assert j['running'] is True and j['progress']['done'] == 2
+        assert client.post('/api/streetview/video', json=dict(q)).json()['started'] is False
+        old = time.time() - 1000; os.utime(lf, (old, old)); assert client.get('/api/streetview/video', params=q).json()['running'] is False          # a log nobody has written to for minutes: it stopped
+        open(lf, 'w').write('fetching picture 2 of 10\nstreetview-video: boom\n'); assert client.get('/api/streetview/video', params=q).json()['running'] is False
+
+
+
+class TestStopsInTheVideo(TestGapSettings):
+    def test_a_stop_added_to_the_video_becomes_a_gap_with_its_stop_facts_and_goes_again_when_taken_out(self, client, project, monkeypatch):
+        from strata360.gps import tracks as TKS
+        self.with_gap(project); q = dict(folder=project.folder)
+        stop = dict(lat=50.0, lon=5.0, arrived=self.T0 + 2000, left=self.T0 + 2700, stopped_s=700, radius_m=60, km=1.2); monkeypatch.setattr(TKS, 'other_stops', lambda rd, **k: [stop])
+        before = client.get('/api/gaps', params=q).json()['gaps']; pois = [p for p in client.get('/api/tracks', params=q).json()['pois'] if p['sym'] == 'stop']
+        assert len(pois) == 1 and pois[0]['added'] is False and len(before) >= 1 and not any(g.get('stop') for g in before)
+        key = pois[0]['key']; r = client.post('/api/stops', json=dict(q, key=key, add=True)).json(); p = [p for p in r['pois'] if p['sym'] == 'stop'][0]; assert p['added'] is True and p['gap']
+        gaps = client.get('/api/gaps', params=q).json()['gaps']; g = next(x for x in gaps if x.get('stop')); assert g['id'] == p['gap'] and g['stop']['key'] == key and g['stop']['pad_s'] >= 180 and g['t0'] < self.T0 + 2000 and g['t1'] > self.T0 + 2700
+        assert client.post('/api/stops', json=dict(q, key='nope', add=True)).status_code == 404
+        r = client.post('/api/stops', json=dict(q, key=key, add=False)).json(); assert [p for p in r['pois'] if p['sym'] == 'stop'][0]['added'] is False and not any(x.get('stop') for x in client.get('/api/gaps', params=q).json()['gaps'])

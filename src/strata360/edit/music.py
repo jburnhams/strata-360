@@ -8,7 +8,7 @@ The tempo is assumed constant (most dance and pop tracks); a track with tempo ch
 
 The project's track is recorded in <race dir>/music.json: {version, file (relative to the race dir), name (as uploaded), sig, analysis, waveform (peaks 0..1), spectrogram (file under music/)}.
 store() saves an upload; info() reads the record and redoes the analysis only when the file or the format changed."""
-import json, os, subprocess
+import json, os, subprocess, time
 import numpy as np
 
 VERSION = 2; PEAKS = 1000; SPEC_BANDS = 96; SPEC_COLS = 1600
@@ -103,13 +103,18 @@ def _record_with(rd, rel, name, x, S, analysis=None):
 
 
 def store(rd, data, ext, name):
-    """Save an uploaded track as music/track<ext> and record it in music.json. The track is analysed first, so one that cannot be read (RuntimeError) leaves the current one alone; the old file is kept as track.<ext>.replaced."""
+    """Save an uploaded track as music/track<ext> and record it in music.json. The track is analysed first, so one that cannot be read (RuntimeError) leaves the current one alone; the old file is kept as track.<ext>.<UTC time>.replaced (every replaced track is kept)."""
     d = os.path.join(rd, 'music'); os.makedirs(d, exist_ok=True); tmp = os.path.join(d, 'incoming' + ext); open(tmp, 'wb').write(data)
     try: x, S = _measure(tmp); an = analyse_samples(x, S=S)
     except Exception:
         os.remove(tmp); raise
     for old in os.listdir(d):
-        if old.startswith('track.') and not old.endswith('.replaced'): os.replace(os.path.join(d, old), os.path.join(d, old + '.replaced'))
+        if old.startswith('track.') and not old.endswith('.replaced'):
+            while True:                                                                  # UTC millisecond time stamp; a clash waits for the next millisecond
+                t = time.time(); dest = os.path.join(d, f"{old}.{time.strftime('%Y%m%dT%H%M%S', time.gmtime(t))}{int(t * 1000) % 1000:03d}Z.replaced")
+                if not os.path.exists(dest): break
+                time.sleep(0.002)
+            os.replace(os.path.join(d, old), dest)                                       # every earlier track stays, time stamped
     rel = 'music/track' + ext; os.replace(tmp, os.path.join(rd, rel)); return _record_with(rd, rel, name, x, S, an)
 
 

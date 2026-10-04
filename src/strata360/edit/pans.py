@@ -35,7 +35,7 @@ GLIDE_FOV = dict(hold_wide=(100, 100), scenery=(95, 95), free_view=(90, 90), sel
 
 def glide_pair(ta, tb, limit=80.0):
     """Could a shot of technique `ta` glide into one of `tb` (same clip, back to back)? A guess from the techniques alone (the real test is `plan`, on the framing): both must be glideable and the field of view at the end of the first close to the start of the second."""
-    a, b = GLIDE_FOV.get(ta, 'no'), GLIDE_FOV.get(tb, 'no')
+    a, b = (None if ta.startswith('cam:') else GLIDE_FOV.get(ta, 'no')), (None if tb.startswith('cam:') else GLIDE_FOV.get(tb, 'no'))        # (a point camera moves to wherever the point is: its ends are tested on the real path)
     if a == 'no' or b == 'no' or ta == tb: return False                                    # the same technique twice is the same shot again, not a move
     return a is None or b is None or abs(a[1] - b[0]) <= limit
 

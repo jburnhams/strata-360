@@ -137,5 +137,18 @@ def make_streetview(sec, seconds, t0, t1, fps=30.0):
     film's overlay runs through those minutes as the view moves along the road."""
     if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
     a, b = float(t0), float(t1); c = dict(id=sec['label'], kind='streetview', photo=None, gap=None, t0=_iso(a), t1=_iso(b), duration_s=round(b - a, 1), seconds=round(float(seconds), 2), speedup=round((b - a) / float(seconds), 1), fps=float(fps),
-                                      style=dict(section=sec['key'], provider=sec['provider'], pictures=sec['frames'], camera=sec['kind']), status='planned', size=STREETVIEW_SIZE, approved=True, by='planner')
-    c['key'] = hashlib.sha1(json.dumps([c['kind'], sec['key'], sec['frames'], round(c['seconds'], 2), c['fps'], STREETVIEW_SIZE, STREETVIEW_VERSION, round(a), round(b)], sort_keys=True).encode()).hexdigest()[:12]; return c
+                                      style=dict(section=sec['key'], provider=sec['provider'], pictures=sec['frames'], camera=sec['kind'], hires=bool(sec.get('hires'))), status='planned', size=STREETVIEW_SIZE, approved=True, by='planner')
+    c['key'] = hashlib.sha1(json.dumps([c['kind'], sec['key'], sec['frames'], round(c['seconds'], 2), c['fps'], STREETVIEW_SIZE, STREETVIEW_VERSION, round(a), round(b)] + (['hires'] if sec.get('hires') else []), sort_keys=True).encode()).hexdigest()[:12]; return c
+
+
+POINTCAM_SIZE = '2560x1440'      # a point camera clip is made at 1440p from the clip's proxy or the street view pictures (the film scales it)
+POINTCAM_VERSION = 1             # bumped when the camera changes so the clips are made again
+
+
+def make_pointcam(cam, seconds, t0, t1, fps=25.0, provider=None):
+    """The clip for a point camera (edit/pointcam.py, id C1..) shown for `seconds`: kind `pointcam`, covering [t0, t1] (epoch seconds) of the race, the time its shot covers, so the film's overlay runs through those minutes. `provider` is the street view
+    provider when it looks from a street view section (for the credits)."""
+    if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
+    a, b = float(t0), float(t1); look = {k: cam[k] for k in ('lat', 'lon', 'height_m', 'before_m', 'after_m', 'fov_near', 'fov_far', 'smooth_s')}
+    c = dict(id=cam['id'], kind='pointcam', photo=None, gap=None, t0=_iso(a), t1=_iso(b), duration_s=round(b - a, 1), seconds=round(float(seconds), 2), speedup=round((b - a) / float(seconds), 1), fps=float(fps), style=dict(source=cam['source'], provider=provider, **look), status='planned', size=POINTCAM_SIZE, approved=True, by='planner')
+    c['key'] = hashlib.sha1(json.dumps([c['kind'], cam['id'], cam['source'], look, round(cam['t_pass'], 1), round(c['seconds'], 2), c['fps'], POINTCAM_SIZE, POINTCAM_VERSION, round(a), round(b)], sort_keys=True).encode()).hexdigest()[:12]; return c

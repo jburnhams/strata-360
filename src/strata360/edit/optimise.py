@@ -107,7 +107,7 @@ def option_table(cands, lib, music, st):
     for ci, c in enumerate(cands):
         if c.id in st.bans_cands: continue
         for t in lib.values():
-            if t.id in st.bans_techs: continue
+            if t.id in st.bans_techs or getattr(t, 'cam', None) is not None: continue                  # (a point camera needs a window inside its stretch: only the window planner knows)
             if c.speech and not t.dialogue_ok: continue                     # dialogue: only steady dialogue-safe framing (README 16.4)
             f = fit(c, t)
             if f is None: continue

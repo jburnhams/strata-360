@@ -74,7 +74,7 @@ export const makeLyricPhrase = (o: Partial<LyricPhrase> = {}): LyricPhrase => ({
 export const makeLyrics = (o: Partial<Lyrics> = {}): Lyrics => ({ has_track: true, exists: false, stale: false, instrumental: false, phrases: 0, sung_s: null, duration_s: null, made_at: null, language: null, building: false, error: '', log: '', phrases_list: [], vocal_spans: [], ...o })
 
 export const makeSvSection = (o: Partial<import('../../src/api').SvSectionInfo> = {}): import('../../src/api').SvSectionInfo => ({
-  id: 'M1', key: 'mapillary:s1:1.20', plausible: true, why_not: '', play_s: 2.7, min_s: 2, max_s: 1, speed_ms: 100, label: null, overlaps: [], choice: null, quality: null, light: null, steadied: 'by matching only',
+  id: 'M1', key: 'mapillary:s1:1.20', plausible: true, why_not: '', play_s: 2.7, min_s: 2, max_s: 1, speed_ms: 100, label: null, overlaps: [], choice: null, near: null, filmed: [1_709_812_800, 1_709_812_830], passed: [1_771_754_460, 1_771_754_520], has_video: false, quality: null, light: null, steadied: 'by matching only',
   provider: 'mapillary', stretch: 'R1', kind: '2d', km0: 1.2, km1: 1.5, length_m: 300, frames: 4, spacing_m: 100, years: [2024], camera: 'GoPro HERO7 Black', size: [4000, 3000], seq: 's1', angles: { forward: 3, back: 1 },
   items: [{ id: 'm1', km: 1.2, lat: 50.001, lon: 5.001, a: 0, b: 90 }, { id: 'm2', km: 1.3, lat: 50.001, lon: 5.002, a: 10, b: 90 }, { id: 'm3', km: 1.4, lat: 50.001, lon: 5.003, a: -20, b: 90 }, { id: 'm4', km: 1.5, lat: 50.001, lon: 5.004, a: 170, b: 90 }], ...o })
 export const makeStreetView = (o: Partial<import('../../src/api').StreetView> = {}): import('../../src/api').StreetView => ({
@@ -84,3 +84,19 @@ export const makeStreetView = (o: Partial<import('../../src/api').StreetView> = 
   sections: [makeSvSection(), makeSvSection({ id: 'M2', key: 'mapillary:s2:2.10', kind: '360', angles: null, km0: 2.1, km1: 2.3, length_m: 200, frames: 5, spacing_m: 8, size: [5760, 2880], camera: 'GoPro Max', stretch: 'R2', plausible: false, why_not: 'only 5 pictures (needs 30)',
     items: [{ id: 'q1', km: 2.1, lat: 50.002, lon: 5.001, b: 90 }, { id: 'q2', km: 2.2, lat: 50.002, lon: 5.002, b: 90 }] })],
   job: { running: false, log: [], error: '' }, keys: { mapillary: true, google: false }, ...o })
+
+export const makeNearItem = (o: Partial<import('../../src/api').SvNearItem> = {}): import('../../src/api').SvNearItem => ({
+  provider: 'mapillary', id: 'm9', sequence: 's9', lat: 50.0015, lon: 5.0015, distance_m: 12.5, kind: '360', camera: 'GoPro Max', size: [5760, 2880], captured: 1_709_812_800, compass: 10, pictures: 27, spacing_m: 4.7, section: null, run_distance_m: 12, run_km: 140.08, passed: 1_771_754_460,
+  rules: [{ key: 'near_run', ok: true, text: "12 m from the run's track (pictures count within 12 m)" }, { key: 'light', ok: false, text: 'Filmed with the sun 6° above the horizon (golden-hour light), but the runner passes here with the sun 10° below the horizon (dark): it would look wrong in the film.' }, { key: 'direction', ok: null, text: 'the way the camera faced is not known' }],
+  usable: false, ruled_out: ['Filmed with the sun 6° above the horizon (golden-hour light), but the runner passes here with the sun 10° below the horizon (dark): it would look wrong in the film.'], ...o })
+export const makeNearResult = (o: Partial<import('../../src/api').SvNearResult> = {}): import('../../src/api').SvNearResult => ({
+  lat: 50.0, lon: 5.0, n: 5, providers: { mapillary: { items: [makeNearItem()], radius_m: 100 }, panoramax: { items: [], radius_m: 500 }, google: { items: [], radius_m: null, error: 'no GOOGLE_MAPS_API_KEY in secrets.env' } }, ...o })
+
+export const makePointCam = (o: Partial<import('../../src/api').PointCam> = {}): import('../../src/api').PointCam => ({
+  id: 'C1', label: 'C1', source: { kind: 'clip', clip: 'CAM_1_0001_D' }, lat: 50.01, lon: 5.01, height_m: 0, before_m: 40, after_m: 40, fov_near: 95, fov_far: 55, smooth_s: 0.8, use: '', t_pass: 1_771_700_100, seconds: null, name: null, script: [], ok: true,
+  facts: { seconds: 26.7, min_dist_m: 30, max_dist_m: 62, max_pan_deg_s: 24, swing_deg: 140, fov_min: 70, fov_max: 95, warnings: [] }, source_seconds: 26.7, range: [2, 26.7], window: [1_771_700_087, 1_771_700_114],
+  geometry: { line: [[50.0, 5.0], [50.01, 5.0], [50.02, 5.0]], sights: [{ at: [50.0, 5.0], bearing: 20, fov: 55, dist: 60, t: 1_771_700_087 }, { at: [50.02, 5.0], bearing: 200, fov: 95, dist: 30, t: 1_771_700_114 }], at: [50.01, 5.0] }, ...o,
+})
+export const makePointCams = (cams: import('../../src/api').PointCam[] = [], o: Partial<import('../../src/api').PointCams> = {}): import('../../src/api').PointCams => ({
+  cams, limits: { height_m: [0, 300], before_m: [5, 400], after_m: [5, 400], fov_near: [30, 130], fov_far: [20, 130], smooth_s: [0, 4] }, defaults: { height_m: 0, before_m: 40, after_m: 40, fov_near: 95, fov_far: 55, smooth_s: 0.8, use: '' }, ...o,
+})

@@ -124,7 +124,7 @@ def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
     if not items: return []
     cfg = config.load(folder); tp = config.track_path(folder, cfg); tz = cfg.get('timezone', 'Europe/Brussels')
     if not tp: raise O.Infeasible('the script uses gaps but there is no race track')
-    gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}; last = None
+    gaps = {g['id']: g for g in GP.project_gaps(folder, track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}; last = None
     def kind_of(old, gap, sec):
         """A rendered clip and one you made keep their kind; otherwise the planner chooses (and remembers the last choice for the variety)."""
         nonlocal last
@@ -156,7 +156,7 @@ def sync_gap_clips(folder, specs, log=print):
     from strata360.pipeline import config
     docs = {c['id']: c for c in SY.load(folder)['clips']}; todo = [sp for sp in specs if sp['clip'] not in docs or abs(docs[sp['clip']]['seconds'] - sp['seconds']) > 0.05]
     if not todo: return []
-    cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []; last = None
+    cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.project_gaps(folder, track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []; last = None
     for sp in todo:
         old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
         kind = SY.gap_settings(folder, sp['clip'])['kind'] or (old['kind'] if old and (old.get('by') == 'user' or old.get('file')) else SY.choose_kind(gaps[sp['clip']], sec, last))           # the planner chooses again for the new length (a clip shortened to 4 s is a map), unless it is rendered or yours
@@ -187,7 +187,7 @@ def plan_from_script(folder, draft_name=None, log=print):
     edit = load(folder); clips, missing = load_clips(folder); names = SD.list_drafts(folder); name = draft_name or (names[-1] if names else None); draft = SD.load_draft(folder, name)
     if not draft: raise O.Infeasible('there is no script draft yet: write one first (strata360 script-draft)')
     if not clips: raise O.Infeasible('no candidates yet: the candidates stage has to finish for at least one clip')
-    lib = TQ.load(); mus = music_info(folder, edit['settings']); bpm = float(mus['bpm']) if mus else float(edit['settings']['bpm']); bar = int(mus['bar_beats']) if mus else int(edit['settings']['bar_beats'])
+    lib = TQ.with_cams(TQ.load(), folder); mus = music_info(folder, edit['settings']); bpm = float(mus['bpm']) if mus else float(edit['settings']['bpm']); bar = int(mus['bar_beats']) if mus else int(edit['settings']['bar_beats'])
     music = O.Music(bpm=bpm, beats=1, bar_beats=bar, sections=[tuple(x) for x in mus['sections']] if mus else [(0, 10 ** 9, 0.5)])
     pack = SP.build(folder); vo_items = [(n, it) for n, it in enumerate(draft['items']) if it.get('type') == 'vo' and (it.get('text') or '').strip()]
     by_label = {c['label']: c['clip'] for c in pack['clips']}; seg_of = {n: SPL.seg_id(by_label.get(norm_label(it.get('clip', '')), ''), it['text']) for n, it in vo_items}
@@ -197,8 +197,8 @@ def plan_from_script(folder, draft_name=None, log=print):
     res = SPL.build(draft, pack, clips, lib, music, voice_s, wpm=float(draft.get('wpm') or 150.0), st=st, target_s=((pack.get('music') or {}).get('length_s')))
     music = O.Music(bpm=bpm, beats=res['beats'], bar_beats=bar, sections=music.sections); ser = serialise(res['segs'], clips, music, lib)
     for g, role, k in zip(ser, res['roles'], res['piece_of']): g['role'] = role; g['item'] = res['pieces'][k]['n']; g['energy_hi'] = g['energy'] >= 0.6
-    from strata360.edit import photo_clip as PCL, streetview_clip as SVC
-    specs = res.get('synthetic') or []; sync_gap_clips(folder, [sp for sp in specs if not PCL.is_photo_label(sp['clip']) and not SVC.is_streetview_label(sp['clip'])], log); PCL.sync(folder, specs, log); SVC.sync(folder, specs, log)                     # the plan's gap clips planned, the photos' moves rendered to their lengths
+    from strata360.edit import photo_clip as PCL, pointcam as PCM, pointcam_clip as PCC, streetview_clip as SVC
+    specs = res.get('synthetic') or []; sync_gap_clips(folder, [sp for sp in specs if not PCL.is_photo_label(sp['clip']) and not SVC.is_streetview_label(sp['clip']) and not PCM.is_camera_label(sp['clip'])], log); PCL.sync(folder, specs, log); SVC.sync(folder, specs, log); PCC.sync(folder, specs, log)                     # the plan's gap clips planned, the photos' moves rendered to their lengths
     ser = insert_synthetic(folder, ser, specs, music.beat_s)
     for g in ser:
         if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
@@ -221,7 +221,7 @@ def propose(folder, settings=None, overrides=None, keep=True):
     if overrides: edit['overrides'].update(overrides)
     clips, missing = load_clips(folder)
     if not clips: raise O.Infeasible('no candidates yet: the candidates stage has to finish for at least one clip')
-    lib = TQ.load(); mus = music_info(folder, edit['settings']); music, st = _planner(edit, lib, prev, mus)
+    lib = TQ.with_cams(TQ.load(), folder); mus = music_info(folder, edit['settings']); music, st = _planner(edit, lib, prev, mus)
     segs = CH.plan(clips, lib, music, st); bad = CH.violations(segs, lib, music, clips)
     if bad: raise O.Infeasible('the plan broke its own rules: ' + '; '.join(bad[:4]))
     locked_w = {g['wid'] for g in edit['overrides']['locked']}; ser = serialise(segs, clips, music, lib, locked_w); wids = {g['id'] for g in ser}

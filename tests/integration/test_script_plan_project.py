@@ -128,7 +128,7 @@ def test_a_photo_item_becomes_a_planned_clip_with_its_move_rendered_to_the_plann
     from strata360 import photos as PH
     from strata360.edit import synthetic as SY
     rd = os.path.join(folder, 'strata360'); ex = Image.Exif(); ex.get_ifd(0x8769)[0x9003] = '2026:02:22 10:01:30'; ex.get_ifd(0x8769)[0x9011] = '+00:00'; b = io.BytesIO(); Image.new('RGB', (1600, 900), (60, 130, 90)).save(b, 'JPEG', exif=ex)
-    PH.add(rd, 'view.jpg', b.getvalue() + b'\0' * 200); monkeypatch.setattr(SY, 'PHOTO_SIZE', '640x360')                                             # (a small render: this tests the wiring, not the 4K)
+    PH.add(rd, 'view.jpg', b.getvalue() + b'\0' * 200); PH.set_use(rd, 'p1', True); monkeypatch.setattr(SY, 'PHOTO_SIZE', '640x360')                                             # (a small render: this tests the wiring, not the 4K)
     draft = draft_for(folder); draft['items'].insert(2, dict(type='photo', clip='P1', seconds=4.0)); SD.save_draft(folder, draft)
     monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.5 for l in lines}); edit = PJ.plan_from_script(folder); segs = edit['plan']['segments']
     ph = [g for g in segs if g['clip'] == 'P1']; assert len(ph) == 1 and ph[0]['role'] == 'broll' and ph[0]['utc_start'] == ph[0]['utc_end'] == '2026-02-22T10:01:30Z' and ph[0]['synthetic'].endswith(os.path.join('synthetic', 'P1.mp4')) and os.path.exists(ph[0]['synthetic'])

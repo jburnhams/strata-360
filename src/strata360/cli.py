@@ -328,6 +328,7 @@ def cmd_streetview(a):
     """Street view: the stretches of the run on a road (stage roads) and the street-level imagery on them from Mapillary, Panoramax and Google (one stage each); only what is missing or out of date unless --force. Details: streetview.py."""
     from strata360 import streetview as SV
     from strata360.gps import track
+    sys.stdout.reconfigure(line_buffering=True)                                                  # (the page reads this job's log while it runs: lines must not wait in a buffer)
     oslib.lower_priority(); cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
     if not tp: sys.exit('streetview: no race track: add the .fit or .gpx first')
     tr = track.load(tp); d, _ = SV.track_dist(tr); ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon']) & np.isfinite(tr['t']); tr = dict(lat=tr['lat'][ok], lon=tr['lon'][ok], dist=d, t=tr['t'][ok])
@@ -336,13 +337,37 @@ def cmd_streetview(a):
     print('done: ' + (', '.join(done) or 'nothing to do'))
 
 
+def cmd_streetview_video(a):
+    """Make the preview video of one street view section (by its key, from the Street view page) with the app's own camera; kept, so a second call finishes at once."""
+    from strata360 import streetview as SV
+    sys.stdout.reconfigure(line_buffering=True)                                                  # (the page reads this job's log while it runs)
+    oslib.lower_priority(); rd = config.race_dir(a.name); docs = {p: SV.load(rd, p) for p in SV.PROVIDERS}; sec = next((s for s in SV.annotate(rd, docs) if s['key'] == a.key), None)
+    if sec is None: sys.exit(f'streetview-video: no section {a.key}')
+    try: out = SV.make_video(rd, sec, pano=getattr(a, 'pano', False))
+    except (ValueError, RuntimeError) as e: sys.exit(f'streetview-video: {e}')
+    print(f'done: {out}')
+
+
+def cmd_pointcam_video(a):
+    """Make the preview video of one point camera (edit/pointcam.py, by its id from the clip or street view page); kept, so a second call finishes at once."""
+    from strata360.edit import pointcam as PC, pointcam_clip as PCL
+    if hasattr(sys.stdout, 'reconfigure'): sys.stdout.reconfigure(line_buffering=True)                                                  # (the page reads this job's log while it runs)
+    oslib.lower_priority(); cam = PC.get(config.race_dir(a.name), a.id)
+    if cam is None: sys.exit(f'pointcam-video: no point camera {a.id}')
+    out = PCL.preview_path(a.name, cam)
+    if not os.path.exists(out):
+        try: PCL.render_preview(a.name, cam, out, log=print)
+        except (ValueError, RuntimeError) as e: sys.exit(f'pointcam-video: {e}')
+    print(f'done: {out}')
+
+
 def cmd_gaps(a):
     """The stretches of the race with no clip (the gaps), from the clips' times and the race track; --plan registers a synthetic clip (an animated map) for each, to be rendered later."""
     from strata360.gps import gaps as GP, track
     from strata360.edit import synthetic as SY
     cfg = config.load(a.name); tp = config.track_path(a.name, cfg)
     if not tp: sys.exit('no race track: add the .fit or .gpx first')
-    tr = track.load(tp); gaps = GP.find_gaps(GP.load_spans(a.name), tr, a.min_minutes * 60.0, cfg.get('timezone', 'Europe/Brussels'))
+    tr = track.load(tp); gaps = GP.project_gaps(a.name, tr, a.min_minutes * 60.0, cfg.get('timezone', 'Europe/Brussels'))
     if a.plan:
         for g in gaps: SY.upsert(a.name, SY.make(g, seconds=a.seconds))
     if a.json: print(json.dumps(gaps, indent=1)); return
@@ -400,7 +425,7 @@ def cmd_gap_clip(a):
         t0, t1 = when(clip['t0']), when(clip['t1'])
     else:
         if not a.gap: sys.exit('--gap (or --clip) is needed')
-        gap = next((g for g in GP.find_gaps(GP.load_spans(a.name), tr, a.min_minutes * 60.0, tz) if g['id'] == a.gap), None)
+        gap = next((g for g in GP.project_gaps(a.name, tr, a.min_minutes * 60.0, tz) if g['id'] == a.gap), None)
         if gap is None: sys.exit(f'no gap {a.gap}: `strata360 gaps` lists them')
         t0, t1 = when(a.t_from), when(a.t_to)
         if (t0 or t1) and not a.id: sys.exit('a stretch of a gap needs --id (the clip is not the gap itself)')
@@ -588,6 +613,17 @@ def cmd_render(a):
     sys.argv = ['render'] + a.args; flat.main()
 
 
+def cmd_backup(a):
+    """Metadata backups (pipeline/backup.py): make one now, list them, or unpack one into a folder (the project itself is never overwritten)."""
+    from strata360.pipeline import backup
+    if a.restore:
+        dest = a.to or os.path.join(backup.backup_dir(a.name), 'restored-' + a.restore.replace('.tar.gz', '')); print(f'{backup.restore(a.name, a.restore, dest)} files restored to {dest}'); return
+    if a.list:
+        for n, t, size in backup.list_backups(a.name): print(f'{n}  {size / 1e3:.0f} kB')
+        print('changes since the last backup' if backup.is_dirty(a.name) else 'no changes since the last backup'); return
+    path = backup.backup(a.name, force=True); print(f'saved {path}' if path else 'nothing changed since the last backup')
+
+
 def cmd_stop_all(a):
     from strata360.pipeline import guard
     killed = guard.panic(); print(f'killed {len(killed)} processes' + (f': {killed[:20]}' if killed else '')); print(f'memory pressure level {guard.pressure_level()}, swap {guard.swap_used_gb():.1f} GB, load {os.getloadavg()[0]:.1f}')
@@ -605,6 +641,8 @@ def main():
     p = sub.add_parser('show', help='summarise one clip'); p.add_argument('name'); p.add_argument('clip'); p.set_defaults(fn=cmd_show)
     p = sub.add_parser('report', help='race-level summary (report.json and report.md)'); p.add_argument('name'); p.set_defaults(fn=cmd_report)
     p = sub.add_parser('doctor', help='check the environment'); p.set_defaults(fn=cmd_doctor)
+    p = sub.add_parser('backup', help='back up the project metadata now (also done every 30 min while changed), list the backups, or unpack one'); p.add_argument('name'); p.add_argument('--list', action='store_true')
+    p.add_argument('--restore', metavar='ARCHIVE', help='unpack this backup (name from --list)'); p.add_argument('--to', help='folder to unpack into (default: backups/restored-<name>)'); p.set_defaults(fn=cmd_backup)
     p = sub.add_parser('stop-all', help='emergency stop: kill every ffmpeg, ffprobe, pytest and strata360 process of this user (not the web server)'); p.set_defaults(fn=cmd_stop_all)
     p = sub.add_parser('fetch-models', help='download the models the default stages need'); p.add_argument('race', nargs='?'); p.set_defaults(fn=cmd_fetch_models)
     p = sub.add_parser('who', help='cluster the faces, show them, and save which one is you'); p.add_argument('name'); p.add_argument('--me', help='cluster number(s) that are you, comma separated: 101 or 101,103'); p.add_argument('--label', default='me'); p.add_argument('--auto', action='store_true', help='save the suggested wearer as the profile if the suggestion is confident'); p.set_defaults(fn=cmd_who)
@@ -620,6 +658,8 @@ def main():
     p.add_argument('--target-s', type=float, help='film length in seconds (else the music track, else automatic)'); p.add_argument('--auto', action='store_true', help='ignore the music track'); p.add_argument('--wpm', type=float); p.add_argument('--revise', action='store_true'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--retries', type=int, default=2); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_script_draft)
     p = sub.add_parser('script-plan', help="make the film's plan from the newest whole-race script draft (dialogue, narration, b-roll in order, on the beat); --voice also speaks the narration"); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--draft', help='a draft file name (default: the newest)'); p.add_argument('--voice', action='store_true'); p.set_defaults(fn=cmd_script_plan)
     p = sub.add_parser('streetview', help='find the road stretches of the run and the street-level imagery (Mapillary, Panoramax, Google) on them'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--stages', help='comma list of roads,mapillary,panoramax,google'); p.add_argument('--force', action='store_true', help='redo even what is up to date'); p.set_defaults(fn=cmd_streetview)
+    p = sub.add_parser('pointcam-video', help='make the preview video of one point camera (its id is on the clip or street view page)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('id'); p.set_defaults(fn=cmd_pointcam_video)
+    p = sub.add_parser('streetview-video', help='make the preview video of one street view section (its key is on the Street view page)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('key'); p.add_argument('--pano', action='store_true', help='a 360 video to look around in (360 sections only)'); p.set_defaults(fn=cmd_streetview_video)
     p = sub.add_parser('photos-analyse', help='run the clip stages that make sense for a photo (exposure, quality, places, people, identity, face_view, scenes, thumb_overlay) over the uploaded photos; only what is out of date'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--stages', help='comma list of exposure,quality,places,people,identity,face_view,scenes,thumb_overlay'); p.add_argument('--photo', action='append', help='a photo id (p1 ...); repeat for several'); p.add_argument('--force', action='store_true', help='redo even what is up to date'); p.set_defaults(fn=cmd_photos_analyse)
     p = sub.add_parser('gaps', help='the stretches of the race with no clip, between clips on the race track (--plan registers an animated map clip for each)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--min-minutes', type=float, default=20.0); p.add_argument('--plan', action='store_true'); p.add_argument('--seconds', type=float, help='with --plan: seconds of film for each gap (default by length)'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_gaps)
     p = sub.add_parser('gap-clip', help='render the animated map clip or 3D flyover for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--kind', choices=['map', 'flyover'], default='map', help='the animated 2D map, or the 3D terrain flyover (4K)'); p.add_argument('--size', help='WIDTHxHEIGHT (default 1920x1080 for the map, 3840x2160 for the flyover)'); p.add_argument('--style', help='map style (default tf-landscape, which needs a Thunderforest key; osm needs none)'); p.add_argument('--imagery', choices=['esri', 'eox', 'osm', 'topo'], help='flyover imagery (default esri)'); p.add_argument('--no-sharp', action='store_true', help='flyover: enlarge the 720p map tiles at larger sizes (faster, softer) instead of fetching finer ones'); p.set_defaults(fn=cmd_gap_clip)

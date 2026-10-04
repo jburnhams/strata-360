@@ -4,7 +4,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src'))
 from strata360.pipeline import runner, config, retry, stages
 
-retry.BASE_WAIT_S = 0.05; retry.MAX_WAIT_S = 0.2
+retry.BASE_WAIT_S = 0.05; retry.MAX_WAIT_S = 0.2; retry.PROGRESS_WAIT_S = 0.05
 
 
 @pytest.fixture(autouse=True)

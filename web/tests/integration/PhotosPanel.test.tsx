@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import PhotosPanel from '../../src/components/PhotosPanel'
-import PhotoStrip from '../../src/components/PhotoStrip'
 import { screen, setup, waitFor } from '../utils/render'
 import { makePhoto } from '../utils/factories'
 import { recordRequests } from '../utils/api'
@@ -22,13 +21,12 @@ describe('PhotosPanel', () => {
     expect(screen.getByText('Photos')).toBeInTheDocument(); expect(screen.getByText(/\(3, 1 to check\)/)).toBeInTheDocument()
     const first = document.querySelector('[data-photo="p1"]')!; expect(first).toHaveTextContent('Sat 21 Feb 19:53:20'); expect(first).toHaveTextContent('1:12:05 into the race · km 12.1 · gps clock'); expect(first).toHaveTextContent('50.1000, 5.1000 (photo gps) · 25 m from the run')
     expect(first.querySelector('img')!.getAttribute('src')).toContain('/api/photos/thumb?'); expect(first.querySelector('a')!.getAttribute('href')).toContain('/api/photos/file?')
-    expect(screen.getByRole('alert', { name: '' })).toHaveTextContent('6.2 km apart'); expect(document.querySelector('[data-photo="p3"]')).toHaveTextContent('(run track)'); expect(document.querySelector('[data-photo="p3"]')).toHaveTextContent('between clips')
+    expect(screen.getByRole('alert', { name: '' })).toHaveTextContent('6.2 km apart'); expect(document.querySelector('[data-photo="p3"]')).toHaveTextContent('(run track)');
   })
 
-  it('opens the clip or gap a photo falls in', async () => {
-    const open = vi.fn(); const { user } = setup(<PhotosPanel folder="/data" photos={[makePhoto(), makePhoto({ id: 'p2', where: { kind: 'gap', id: 'G03' } })]} tz="Europe/Brussels" onChanged={() => {}} onOpen={open} />)
-    await user.click(screen.getByRole('button', { name: 'clip 0023' })); expect(open).toHaveBeenCalledWith({ kind: 'clip', id: 'CAM_20260222190000_0023_D' })
-    await user.click(screen.getByRole('button', { name: 'gap G03' })); expect(open).toHaveBeenCalledWith({ kind: 'gap', id: 'G03' })
+  it('offers to open only the photos ticked for the film (they are in the film list)', async () => {
+    const open = vi.fn(); const { user } = setup(<PhotosPanel folder="/data" photos={[makePhoto(), makePhoto({ id: 'p2', use: true })]} tz="Europe/Brussels" onChanged={() => {}} onOpen={open} />)
+    expect(screen.getAllByRole('button', { name: 'Open in the film list' })).toHaveLength(1); await user.click(screen.getByRole('button', { name: 'Open in the film list' })); expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'p2' }))
   })
 
   it('adds several photos one after the other, lists the ones refused, and asks for the list again', async () => {
@@ -74,23 +72,11 @@ describe('PhotosPanel analysis', () => {
 })
 
 describe('Use in the film', () => {
-  it('marks a photo to be used in the film, and shows it ticked once it is', async () => {
-    const seen = recordRequests('/api/photos/settings'); server.use(http.post('/api/photos/settings', () => HttpResponse.json({ id: 'p1', must: true }))); const changed = vi.fn()
+  it('makes a photo an option for the film, and shows it ticked once it is', async () => {
+    const seen = recordRequests('/api/photos/settings'); server.use(http.post('/api/photos/settings', () => HttpResponse.json({ id: 'p1', use: true, must: false }))); const changed = vi.fn()
     const { user, rerender } = setup(<PhotosPanel folder="/data" photos={[makePhoto()]} tz="UTC" onChanged={changed} onOpen={() => {}} />)
     const box = screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' }); expect(box).not.toBeChecked(); await user.click(box)
-    await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', id: 'p1', must: true })); await waitFor(() => expect(changed).toHaveBeenCalled())
-    rerender(<PhotosPanel folder="/data" photos={[makePhoto({ must: true })]} tz="UTC" onChanged={changed} onOpen={() => {}} />); expect(screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' })).toBeChecked()
-  })
-})
-
-describe('PhotoStrip', () => {
-  const photos = [makePhoto(), makePhoto({ id: 'p2', where: { kind: 'gap', id: 'G03' } }), makePhoto({ id: 'p3', where: null })]
-  it('shows only the photos whose time falls in the clip or gap', () => {
-    const { rerender } = setup(<PhotoStrip folder="/data" photos={photos} tz="UTC" kind="clip" id="CAM_20260222190000_0023_D" />)
-    expect(screen.getByText(/Photos taken during this clip/)).toBeInTheDocument(); expect(document.querySelectorAll('[data-photo]')).toHaveLength(1)
-    rerender(<PhotoStrip folder="/data" photos={photos} tz="UTC" kind="gap" id="G03" />); expect(screen.getByText(/Photos taken in this gap/)).toBeInTheDocument(); expect(document.querySelector('[data-photo="p2"]')).not.toBeNull()
-  })
-  it('shows nothing when there are none', () => {
-    const { container } = setup(<PhotoStrip folder="/data" photos={photos} tz="UTC" kind="clip" id="CAM_X" />); expect(container).toBeEmptyDOMElement()
+    await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ folder: '/data', id: 'p1', use: true })); await waitFor(() => expect(changed).toHaveBeenCalled())
+    rerender(<PhotosPanel folder="/data" photos={[makePhoto({ use: true })]} tz="UTC" onChanged={changed} onOpen={() => {}} />); expect(screen.getByRole('checkbox', { name: 'Use IMG_0001.jpg in the film' })).toBeChecked()
   })
 })

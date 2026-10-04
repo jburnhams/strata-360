@@ -106,6 +106,12 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
         <div className="mt-3">
           <div className="text-base font-medium">{draft.title ?? '(untitled)'}</div>
           {draft.story && <p className="text-sm italic text-stone-500">{draft.story}</p>}
+          {draft.length_note && draft.length_note.verdict !== 'fits' && (
+            <p role="note" data-length-note={draft.length_note.verdict} className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+              The writer says the {draft.length_note.verdict === 'too_long' ? 'length is too long' : 'length is too short'} for this material and music{draft.length_note.ideal_s ? `: about ${Math.floor(draft.length_note.ideal_s / 60)}:${String(Math.round(draft.length_note.ideal_s % 60)).padStart(2, '0')} would suit it better` : ''}. {draft.length_note.why}
+            </p>
+          )}
+          {draft.length_note?.verdict === 'fits' && <p data-length-note="fits" className="text-xs text-stone-500">The writer thinks this length suits the material and the music.{draft.length_note.why ? ` ${draft.length_note.why}` : ''}</p>}
           <p className="mt-1 text-xs text-stone-500">{r?.total_s} s of {draft.target_s} s{draft.target_source ? ` (${draft.target_source})` : ''} · you {r?.clip_s} s · narration {r?.vo_s} s ({r?.vo_words} words at {draft.wpm} wpm) · b-roll {r?.broll_s} s · {r?.clips_used} clips used, {r?.clips_skipped} skipped · {draft.revised ? 'revised' : 'first draft'} {draft.created.replace('T', ' ')}{diff.added.size ? ` · ${diff.added.size} new, ${diff.removed.length} removed` : ''}</p>
         </div>
         <div ref={list}>
