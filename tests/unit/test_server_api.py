@@ -781,3 +781,15 @@ class TestSidebarThumbs(TestStreetViewApi):
         r = client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)); assert r.status_code == 200 and r.content == b'\xff\xd8JPEG' and r.headers['content-type'] == 'image/jpeg' and any('scale=100:-2' in ' '.join(c) for c in made)
         n = len(made); assert client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)).status_code == 200 and len(made) == n                      # kept
         assert client.get('/api/streetview/thumb', params=dict(q, key='nope')).status_code == 404
+
+
+class TestVideoStartedElsewhere(TestStreetViewVideoApi):
+    def test_a_video_whose_log_is_being_written_is_shown_as_being_made_even_by_a_job_this_server_did_not_start(self, client, project, fake_popen):
+        import time
+        from strata360 import streetview as SV
+        key = self.key(project); rd = project.race_dir; s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); lf = os.path.splitext(SV.video_path(rd, s))[0] + '.log'
+        os.makedirs(os.path.dirname(lf), exist_ok=True); open(lf, 'w').write('fetching picture 2 of 10\n'); q = dict(folder=project.folder, key=key)
+        j = client.get('/api/streetview/video', params=q).json(); assert j['running'] is True and j['progress']['done'] == 2
+        assert client.post('/api/streetview/video', json=dict(q)).json()['started'] is False
+        old = time.time() - 1000; os.utime(lf, (old, old)); assert client.get('/api/streetview/video', params=q).json()['running'] is False          # a log nobody has written to for minutes: it stopped
+        open(lf, 'w').write('fetching picture 2 of 10\nstreetview-video: boom\n'); assert client.get('/api/streetview/video', params=q).json()['running'] is False

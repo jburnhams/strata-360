@@ -51,6 +51,7 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+STREETVIEW_LOG_STALE_S = 180.0    # a street view video whose log was written to this recently, with no end line, is taken to be still being made (even by a job this server did not start)
 STREETVIEW_NEAR_JOBS = {}     # folder -> the nearest-street-view search being made (lat, lon, log, error, thread)
 STREETVIEW_NEAR = {}          # (folder, provider, picture id) -> what the near-point search found (so the thumbnails can be fetched, and nothing else)
 STREETVIEW_VIDEO_JOBS = {}    # (folder, section key) -> Popen of a running `strata360 streetview-video`
@@ -1128,9 +1129,10 @@ def create_app(roots, token=None):
 
     def sv_video_state(f, key, pano=False):
         from strata360 import streetview as SV
-        rd, s = sv_section(f, key); job = STREETVIEW_VIDEO_JOBS.get((f, key, pano, bool(s.get('hires')))); running = bool(job and job.poll() is None); lines = []
-        try: lines = open(os.path.splitext(SV.video_path(rd, s, pano))[0] + '.log', errors='replace').read().strip().splitlines()
+        rd, s = sv_section(f, key); job = STREETVIEW_VIDEO_JOBS.get((f, key, pano, bool(s.get('hires')))); running = bool(job and job.poll() is None); lines = []; logf = os.path.splitext(SV.video_path(rd, s, pano))[0] + '.log'
+        try: lines = open(logf, errors='replace').read().strip().splitlines()
         except OSError: pass
+        if not running and lines and not os.path.exists(SV.video_path(rd, s, pano)) and time.time() - os.path.getmtime(logf) < STREETVIEW_LOG_STALE_S and not any(l.startswith(('done:', 'streetview-video:')) for l in lines): running = True         # (a job started outside this server, or before it was restarted, is still writing its log)
         fail = next((l for l in reversed(lines) if l.startswith('streetview-video:')), '')
         return dict(exists=os.path.exists(SV.video_path(rd, s, pano)), running=running, log=lines[-8:], progress=SV.video_progress(lines, pano and s['provider'] == 'google'), error='' if running else fail[:400], seconds=SV.default_seconds(s), hires=bool(s.get('hires')), **(dict(fps=round(min(max(s['frames'] / max(SV.default_seconds(s), 0.5), 1.0), 15.0), 2)) if pano else {}))
 
@@ -1144,6 +1146,7 @@ def create_app(roots, token=None):
         f = folder_of(body.get('folder')); key = str(body.get('key') or ''); rd, s = sv_section(f, key); pano = bool(body.get('pano')); hires = bool(s.get('hires'))
         if pano and s['kind'] != '360': raise HTTPException(400, 'only a 360 section can be looked around in')
         if os.path.exists(SV.video_path(rd, s, pano)): return dict(started=False, reason='the video is already made')
+        if sv_video_state(f, key, pano)['running']: return dict(started=False, reason='the video is already being made')
         if any(p.poll() is None for (ff, _, _p, _h), p in STREETVIEW_VIDEO_JOBS.items() if ff == f): return dict(started=False, reason='another preview video is being made')
         out = SV.video_path(rd, s, pano); os.makedirs(os.path.dirname(out), exist_ok=True); log = open(os.path.splitext(out)[0] + '.log', 'wb')
         STREETVIEW_VIDEO_JOBS[(f, key, pano, hires)] = subprocess.Popen([*oslib.cli_command(), 'streetview-video', f, key] + (['--pano'] if pano else []), stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
