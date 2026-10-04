@@ -188,4 +188,13 @@ describe('one list of everything the film can use, in time order', () => {
     setup(<Workspace folder="/data" onChange={() => {}} />); await screen.findByText('G21')
     const order = Array.from(document.querySelectorAll('aside li')).map(li => li.textContent ?? ''); expect(order.findIndex(x => x.includes('Photo P2'))).toBeLessThan(order.findIndex(x => x.includes('G21')))
   })
+
+  it('shows a picture for a street view section and for a gap whose clip is made, and a label box for one that is not', async () => {
+    mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_1_0001_D', start_utc: '2026-02-20T10:00:00Z' })] })
+    mockGet('/api/gaps', { gaps: [makeGap({ id: 'G01', t0: Date.parse('2026-02-20T11:00:00Z') / 1000, clips: [makeGapClip({ id: 'G01', exists: true, seconds: 12 })] }), makeGap({ id: 'G02', t0: Date.parse('2026-02-20T14:00:00Z') / 1000 })] })
+    mockGet('/api/streetview/chosen', { sections: [{ key: 'mapillary:s:3.00', label: 'V1', id: 'M3', provider: 'mapillary', kind: '360', choice: 'must', t0: Date.parse('2026-02-20T13:00:00Z') / 1000, t1: Date.parse('2026-02-20T13:05:00Z') / 1000, length_m: 800, quality: 'good', min_s: 4, max_s: 40, seconds: null, default_s: 12, script: [] }] })
+    setup(<Workspace folder="/data" onChange={() => {}} />); await screen.findByText('V1')
+    const img = (t: string) => Array.from(document.querySelectorAll('aside li')).find(li => li.textContent?.includes(t))?.querySelector('img')?.getAttribute('src')
+    expect(img('G01')).toContain('/api/gaps/thumb?folder=%2Fdata&id=G01'); expect(img('V1')).toContain('/api/streetview/thumb?folder=%2Fdata&key=mapillary%3As%3A3.00'); expect(img('G02')).toBeUndefined()
+  })
 })

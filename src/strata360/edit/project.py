@@ -124,7 +124,7 @@ def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
     if not items: return []
     cfg = config.load(folder); tp = config.track_path(folder, cfg); tz = cfg.get('timezone', 'Europe/Brussels')
     if not tp: raise O.Infeasible('the script uses gaps but there is no race track')
-    gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}; last = None
+    gaps = {g['id']: g for g in GP.project_gaps(folder, track.load(tp), 1200.0, tz)}; made = []; docs = {c['id']: c for c in SY.load(folder)['clips']}; last = None
     def kind_of(old, gap, sec):
         """A rendered clip and one you made keep their kind; otherwise the planner chooses (and remembers the last choice for the variety)."""
         nonlocal last
@@ -156,7 +156,7 @@ def sync_gap_clips(folder, specs, log=print):
     from strata360.pipeline import config
     docs = {c['id']: c for c in SY.load(folder)['clips']}; todo = [sp for sp in specs if sp['clip'] not in docs or abs(docs[sp['clip']]['seconds'] - sp['seconds']) > 0.05]
     if not todo: return []
-    cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.find_gaps(GP.load_spans(folder), track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []; last = None
+    cfg = config.load(folder); tp = config.track_path(folder, cfg); gaps = {g['id']: g for g in GP.project_gaps(folder, track.load(tp), 1200.0, cfg.get('timezone', 'Europe/Brussels'))}; made = []; last = None
     for sp in todo:
         old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
         kind = SY.gap_settings(folder, sp['clip'])['kind'] or (old['kind'] if old and (old.get('by') == 'user' or old.get('file')) else SY.choose_kind(gaps[sp['clip']], sec, last))           # the planner chooses again for the new length (a clip shortened to 4 s is a map), unless it is rendered or yours

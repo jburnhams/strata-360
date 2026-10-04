@@ -3,13 +3,14 @@ import { api, type Photo, type Cutoff, type ExtraLine, type TileStatus, type Tra
 import { useThumbOverlay } from '../thumbOverlay'
 import { PanelSkeleton } from './Skeleton'
 import TrackMap from './TrackMap'
+import StopsTable from './StopsTable'
 import TrackCharts, { type XMode } from './TrackCharts'
 import ClipCard from './ClipCard'
 import GapsPanel from './GapsPanel'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
 // Hover a marker for the clip's card, click it to open the clip.
-export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, tz = 'Europe/Brussels', photos = [], onOpenPhoto }: { folder: string; onOpenClip?: (clip: string) => void; onOpenGap?: (gap: string) => void; tz?: string; photos?: Photo[]; onOpenPhoto?: (p: Photo) => void }) {
+export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, tz = 'Europe/Brussels', photos = [], onOpenPhoto, onGapsChanged }: { folder: string; onGapsChanged?: () => void; onOpenClip?: (clip: string) => void; onOpenGap?: (gap: string) => void; tz?: string; photos?: Photo[]; onOpenPhoto?: (p: Photo) => void }) {
   const [t, setT] = useState<TrackOverview>()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string>()
@@ -58,14 +59,14 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, t
       </div>
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
       <TracksList folder={folder} listing={listing} onChange={changed} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
-      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} photos={photos} onOpenPhoto={onOpenPhoto} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
+      <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} photos={photos} onOpenPhoto={onOpenPhoto} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} onOpenGap={onOpenGap} onStop={async (key, add) => { try { setListing(await api.setStop(folder, key, add)); onGapsChanged?.() } catch (e) { setErr((e as Error).message) } }} />
       <GapsPanel folder={folder} onOpen={onOpenGap} />
     </div>
   )
 }
 
 type Pick = { hot: string | null; setHot: (id: string | null) => void; pinned: string[]; toggle: (id: string) => void }
-function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, setHot, pinned, toggle }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string; photos: Photo[]; onOpenPhoto?: (p: Photo) => void } & Pick) {
+function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, setHot, pinned, toggle, onOpenGap, onStop }: { folder: string; listing?: TracksListing; onOpenClip: (clip: string) => void; tz: string; photos: Photo[]; onOpenPhoto?: (p: Photo) => void; onOpenGap?: (gap: string) => void; onStop?: (key: string, add: boolean) => void | Promise<void> } & Pick) {
   const [overlay] = useThumbOverlay()
   const [base, setBase] = useState<TrackLine>(), [series, setSeries] = useState<TrackSeries>(), [clips, setClips] = useState<TrackClip[]>([]), [hasDraft, setHasDraft] = useState(false), [tiles, setTiles] = useState<TileStatus>(), [err, setErr] = useState<string>()
   const [xMode, setXMode] = useState<XMode>('time'), [cursor, setCursor] = useState<number | null>(null), [hover, setHover] = useState<{ clip: TrackClip; x: number; y: number }>()
@@ -111,7 +112,8 @@ function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, s
         {(listing?.runs ?? 0) > 1 && <span><span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: '#a3a3a3' }} />each run · <span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: '#15803d' }} />merged race track</span>}
         {(listing?.divergences?.length ?? 0) > 0 && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-full bg-red-600 text-center align-middle text-[10px] font-bold leading-[14px] text-white">!</span>run leaves the route by over 50 m (the {listing?.divergences?.length} farthest)</span>}
         {(listing?.pois.some(p => p.sym === 'checkpoint')) && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-full bg-blue-700 text-center align-middle text-[9px] font-bold leading-[14px] text-white">1</span>checkpoint where one route ends and the next starts</span>}
-        {(listing?.pois.length ?? 0) > 0 && <span><span className="mr-1 inline-block h-2.5 w-2.5 rotate-45 align-middle" style={{ background: '#f59e0b' }} />point of interest</span>}
+        {(listing?.pois.some(p => p.sym !== 'checkpoint' && p.sym !== 'stop')) && <span><span className="mr-1 inline-block h-2.5 w-2.5 rotate-45 align-middle" style={{ background: '#f59e0b' }} />point of interest</span>}
+        {(listing?.pois.some(p => p.sym === 'stop')) && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-full bg-amber-700 text-center align-middle text-[9px] leading-[14px] text-white">⏸</span>other stop (10 min or more)</span>}
         <span>click the map, then scroll to zoom</span>
         {tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}
         <span>{clips.filter(c => c.covered).length} clips on the track{off.length ? ` · not on the track: ${off.map(c => c.label).join(', ')}` : ''}</span>
@@ -119,6 +121,7 @@ function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, s
           <select aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="time">time</option><option value="km">distance</option></select></span>
       </div>
       <TrackCharts series={series} clips={clips} xMode={xMode} tz={tz} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} />
+      <StopsTable pois={listing?.pois ?? []} tz={tz} onOpenGap={onOpenGap} onToggle={onStop} />
       {hover && <div className="pointer-events-none fixed z-40" style={{ left: Math.min(hover.x + 16, window.innerWidth - 280), top: Math.min(hover.y + 16, window.innerHeight - 330) }}><ClipCard folder={folder} clip={hover.clip} overlay={overlay} /></div>}
     </div>
   )

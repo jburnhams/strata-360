@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import PanoPlayer from './PanoPlayer'
+import TrackMap from './TrackMap'
 import StepVideo from './FrameStep'
+import { addEnds, addPois, addRoutes, addTiles } from '../mapLayers'
 import 'leaflet/dist/leaflet.css'
 import { api } from '../api'
-import type { StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
+import type { EndMarkers, Poi, StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
@@ -90,10 +92,11 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
       setNearErr('the search is taking too long'); setNearBusy(false)
     } catch (e) { setNearErr((e as Error).message); setNearBusy(false) }
   }
+  const [pois, setPois] = useState<Poi[]>([]), [ends, setEnds] = useState<EndMarkers | null>(null)
   const [routes, setRoutes] = useState<{ id: string; name: string; pts: [number, number][] }[]>([])
   useEffect(() => {                                                                              // the route tracks (the planned course), drawn in blue
-    let live = true; setRoutes([])
-    api.tracks(folder).then(l => Promise.all(l.tracks.filter(t => t.kind === 'route' && !t.error).map(t => api.tracksLine(folder, t.id).then(x => ({ id: t.id, name: t.name, pts: x.lat.map((la, i) => [la, x.lon[i]] as [number, number]) })).catch(() => null))))
+    let live = true; setRoutes([]); setPois([]); setEnds(null)
+    api.tracks(folder).then(l => { if (live) { setPois(l.pois ?? []); setEnds(l.markers ?? null) } return l }).then(l => Promise.all(l.tracks.filter(t => t.kind === 'route' && !t.error).map(t => api.tracksLine(folder, t.id).then(x => ({ id: t.id, name: t.name, pts: x.lat.map((la, i) => [la, x.lon[i]] as [number, number]) })).catch(() => null))))
       .then(r => { if (live) setRoutes(r.filter((x): x is { id: string; name: string; pts: [number, number][] } => !!x)) }).catch(() => {})
     return () => { live = false }
   }, [folder])
@@ -123,7 +126,7 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
       {data && roads && (
         <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
           <Filters shown={shown} setShown={setShown} data={data} filters={filters} setFilters={setFilters} total={sections.length} showing={visible.length} />
-          <SvMap routes={routes} probe={probe && { ...probe, items: near ? PROVIDERS.flatMap(p => near.providers[p].items) : [] }} onPick={pick} roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
+          <SvMap pois={pois} ends={ends} tz={tz} routes={routes} probe={probe && { ...probe, items: near ? PROVIDERS.flatMap(p => near.providers[p].items) : [] }} onPick={pick} roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
           <Legend scale={scale} hasClips={clips.length > 0} />
           <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-stone-600 dark:text-stone-400">
             <span>click anywhere on the map to see the nearest street view there</span>
@@ -200,25 +203,11 @@ function Filters({ shown, setShown, data, filters, setFilters, total, showing }:
   )
 }
 
-function SvMap({ routes, probe, onPick, roads, run, sections, clips, scale, sel, onSel, background }: { probe?: { lat: number; lon: number; items: SvNearItem[] }; onPick: (lat: number, lon: number) => void; routes: { id: string; name: string; pts: [number, number][] }[]; roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
-  const el = useRef<HTMLDivElement>(null), map = useRef<L.Map | null>(null), layers = useRef<L.LayerGroup | null>(null), onSelRef = useRef(onSel), onPickRef = useRef(onPick); onSelRef.current = onSel; onPickRef.current = onPick
-  useEffect(() => {
-    if (!el.current) return
-    const m = L.map(el.current, { renderer: L.svg(), attributionControl: false, zoomSnap: 0.5, scrollWheelZoom: false }); map.current = m               // (svg: a few hundred short lines, and no canvas to redraw after the page is left)
-    m.on('click', (e: L.LeafletMouseEvent) => { m.scrollWheelZoom.enable(); onPickRef.current(e.latlng.lat, e.latlng.lng) }); m.getContainer().addEventListener('mouseleave', () => m.scrollWheelZoom.disable())
-    const all = L.polyline(run); if (run.length) m.fitBounds(all.getBounds(), { padding: [20, 20] }); else m.setView([50, 5], 8)
-    layers.current = L.layerGroup().addTo(m)
-    return () => { m.remove(); map.current = null; layers.current = null }
-  }, [run])
-  useEffect(() => {
-    const m = map.current; if (!m || !background) return
-    const retina = background.tilePx === 512
-    const t = L.tileLayer(background.url, { tileSize: background.tilePx, zoomOffset: retina ? -1 : 0, maxZoom: 19, maxNativeZoom: retina ? 19 : 18 }).addTo(m); t.setZIndex(0); return () => { t.remove() }
-  }, [background?.url, background?.tilePx, run]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {                                                                              // redrawn when the data, the filters or the selection change
-    const g = layers.current; if (!g) return
-    g.clearLayers()
-    for (const r of routes) L.polyline(r.pts, { color: '#2563eb', weight: 5, opacity: 0.85, interactive: false }).addTo(g)                  // the route tracks in blue, under everything
+function SvMap({ pois = [], ends = null, tz = 'Europe/Brussels', routes, probe, onPick, roads, run, sections, clips, scale, sel, onSel, background }: { pois?: Poi[]; ends?: EndMarkers | null; tz?: string; probe?: { lat: number; lon: number; items: SvNearItem[] }; onPick: (lat: number, lon: number) => void; routes: { id: string; name: string; pts: [number, number][] }[]; roads: SvStretch[]; run: [number, number][]; sections: SvSectionInfo[]; clips: TrackClip[]; scale: { lo: number; hi: number }; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; background?: { url: string; tilePx: number } }) {
+  const onSelRef = useRef(onSel), onPickRef = useRef(onPick); onSelRef.current = onSel; onPickRef.current = onPick
+  const base = useMemo(() => ({ lat: run.map(p => p[0]), lon: run.map(p => p[1]), t: [] as number[] }), [run])
+  const decorate = useCallback((_m: L.Map, g: L.LayerGroup) => {                                // the road parts, the run in red over them, the sections, the clips and what was clicked, over the race map
+    addRoutes(g, routes, { weight: 5 })                                                           // the route tracks in blue, under everything
     for (const c of clips) {                                                                      // the stretch of the run each camera clip covers, coloured by how long the clip is, with a marker numbered like the clip
       const col = rampColour(c.duration_s, scale.lo, scale.hi)
       L.polyline(c.stretch!, { color: '#fff', weight: 9, opacity: 0.9, interactive: false }).addTo(g); L.polyline(c.stretch!, { color: col, weight: 6, opacity: 1, interactive: false }).addTo(g)
@@ -241,12 +230,8 @@ function SvMap({ routes, probe, onPick, roads, run, sections, clips, scale, sel,
       for (const it of probe.items) L.circleMarker([it.lat, it.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: COLOUR[it.provider], fillOpacity: 1, bubblingMouseEvents: false }).bindTooltip(`${NAME[it.provider]} ${kindLabel2(it)} · ${it.distance_m} m away`).addTo(g)
     }
   }, [roads, run, routes, sections, clips, scale, sel, probe])
-  useEffect(() => {                                                                              // the map moves to what was chosen
-    const m = map.current; if (!m || !sel) return
-    const pts = sel.kind === 'stretch' ? roads.find(r => r.id === sel.id)?.line : sections.find(s => s.id === sel.id)?.items.map(i => [i.lat, i.lon] as [number, number])
-    if (pts?.length) m.fitBounds(L.latLngBounds(pts), { padding: [60, 60], maxZoom: 17 })
-  }, [sel?.kind, sel?.id]) // eslint-disable-line react-hooks/exhaustive-deps
-  return <div ref={el} role="application" aria-label="Map of the road parts and street view coverage" className="h-[480px] w-full overflow-hidden rounded-lg bg-stone-200 dark:bg-stone-800" />
+  const pts = sel?.kind === 'stretch' ? roads.find(r => r.id === sel.id)?.line : sel?.kind === 'section' ? sections.find(s => s.id === sel.id)?.items.map(i => [i.lat, i.lon] as [number, number]) : undefined
+  return <TrackMap base={base} height="h-[480px]" label="Map of the road parts and street view coverage" tz={tz} background={background} pois={pois} ends={ends} runColor="#dc2626" runWeight={4} svg decorate={decorate} onMapClick={(la: number, lo: number) => onPickRef.current(la, lo)} fitTo={pts?.length ? { pts, key: `${sel?.kind}:${sel?.id}` } : undefined} />
 }
 
 /** What is known about when a section was filmed and passed and where it sits among the footage: the light warning, the times, the nearest footage each way and the sections over the same road. Shared by the candidates and the section's page in the film list. */

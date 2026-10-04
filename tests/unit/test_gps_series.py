@@ -37,6 +37,11 @@ def test_the_line_is_the_whole_track_or_the_part_in_the_box_in_order_and_never_t
     assert S.line(tr, (10.0, 10.0, 11.0, 11.0))['lat'] == []
 
 
+def test_the_line_can_be_cut_to_the_part_run_between_two_times():
+    tr = track(); part = S.line(tr, None, 1000, (T0 + 3600, T0 + 7200)); assert 0 < len(part['lat']) <= 361 and part['t'][0] >= 3600 - 1 and part['t'][-1] <= 7200 + 1
+    assert S.line(tr, None, 1000, (T0 + 10 ** 7, T0 + 10 ** 7 + 100))['lat'] == []
+
+
 def test_each_clip_is_placed_at_its_middle_with_the_stretch_it_covers_and_the_facts_for_its_card():
     tr = track(); spans = [dict(id='A', t0=T0 + 600, t1=T0 + 660), dict(id='B', t0=T0 - 3600, t1=T0 - 3500), dict(id='C', t0=T0 + 2 * 3600, t1=T0 + 2 * 3600 + 20)]
     a, b, c = S.clips(tr, spans)

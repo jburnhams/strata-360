@@ -1,17 +1,15 @@
 import { useState } from 'react'
 import { api, type Gap, type GapClip, type GapKind, type GapSettings } from '../api'
 import { usePoll } from '../usePoll'
-import ItemPage, { LengthField } from './ItemPage'
+import ItemPage, { Card, LengthField } from './ItemPage'
+import TrackMap from './TrackMap'
 import { PanelSkeleton } from './Skeleton'
 import StepVideo from './FrameStep'
 
 // A gap in the footage as a page of its own, like a clip: the preview of its generated clip, how it is drawn (2D map or 3D flyover, or left to the planner) and how long it is (set exactly, or at least),
 // whether the film must use it, what the script says over it, and your notes with the voice-over you want inside it (they go to the script writer like a clip's).
 const KIND: Record<GapKind, string> = { map: '2D map', flyover: '3D flyover (4K)' }
-const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900"><h3 className="mb-2 text-sm font-semibold">{title}</h3>{children}</section>
-)
-export default function GapView({ folder, gap }: { folder: string; gap: string }) {
+export default function GapView({ folder, gap, tz }: { folder: string; gap: string; tz?: string }) {
   const [tick, setTick] = useState(0)
   const data = usePoll(() => api.gaps(folder), 4000, [folder, gap, tick])
   const [err, setErr] = useState<string>()
@@ -32,8 +30,10 @@ export default function GapView({ folder, gap }: { folder: string; gap: string }
   const state = c ? (c.rendering ? (c.progress || 'rendering…') : c.error ? `failed: ${c.error}` : c.exists ? `ready · ${c.kind === 'flyover' ? '3D · ' : '2D · '}${c.seconds} s for ${(c.duration_s / 3600).toFixed(1)} h (x${c.speedup})` : 'planned, not rendered yet') : 'no clip yet'
   return (
     <ItemPage folder={folder} noun="gap" must={s.must} script={g.script ?? []} err={err} noteClip={g.id} noteTitle="Notes for this gap" notePlaceholder="What was this stretch? Where were you, how did it feel, what to mention or avoid…"
-      heading={<>Gap {g.id} <span className="text-sm font-normal text-stone-500">{g.local_start} → {g.local_end}</span></>}
+      heading={<>{g.stop ? 'Stop' : 'Gap'} {g.id} <span className="text-sm font-normal text-stone-500">{g.local_start} → {g.local_end}</span></>}
       sub={`${(g.duration_s / 3600).toFixed(1)} h · km ${g.km_start}–${g.km_end} · +${g.ascent_m} m${g.daylight ? ` · ${g.daylight}` : ''} · ${Math.round(100 * g.moving_share)}% moving`}
+      more={g.stop ? <StopCard folder={folder} stop={g.stop} tz={tz ?? 'Europe/Brussels'} onChanged={() => setTick(t => t + 1)} /> : undefined}
+      where={<TrackMap folder={folder} tz={tz} span={[g.t0, g.t1]} label={`Gap ${g.id}`} />}
       preview={<>
         {c?.exists ? <StepVideo aria-label={`${g.id} ${c.kind === 'flyover' ? 'flyover' : 'map clip'}`} className="w-full max-w-3xl rounded" src={api.gapVideoUrl(folder, c.id)} />
           : <div className="flex aspect-video w-full max-w-3xl items-center justify-center rounded bg-stone-200 text-sm text-stone-500 dark:bg-stone-800">{c?.rendering ? (c.progress || 'rendering…') : 'No clip rendered yet'}</div>}
@@ -53,5 +53,24 @@ export default function GapView({ folder, gap }: { folder: string; gap: string }
           <label className="flex items-center gap-2 sm:col-span-2"><input type="checkbox" aria-label="Must be used in the film" checked={s.must} onChange={e => save({ must: e.target.checked })} /> <span>Must be used in the film <span className="text-xs text-stone-500">(added where it falls in the race if the script leaves it out)</span></span></label>
       </>}
       help={(s.mode === 'set' ? 'The film shows this gap for exactly this long; the music fit never changes it.' : s.mode === 'min' ? 'The film shows this gap for at least this long; the music fit may make it longer, never shorter.' : 'The plan sets the length to fit the music (the script may name one).') + ' ' + (s.kind ? 'The kind you chose is kept.' : 'Left to the planner, the kind follows the land (a big climb or descent gets a flyover).')} />
+  )
+}
+
+const clock = (t: number, tz: string) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(',', '') } catch { return '' } }
+const mins = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${String(Math.round((s % 3600) / 60)).padStart(2, '0')} min` : `${Math.round(s / 60)} min`)
+
+/** The facts of a stop that was added to the video as this gap: the clip covers the stop and a little of the arriving and the leaving. */
+function StopCard({ folder, stop, tz, onChanged }: { folder: string; stop: NonNullable<Gap['stop']>; tz: string; onChanged: () => void }) {
+  return (
+    <Card title="The stop">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 text-sm">
+        <dt className="text-stone-500">Stopped</dt><dd>{mins(stop.stopped_s)}, within {stop.radius_m} m</dd>
+        <dt className="text-stone-500">From</dt><dd>{clock(stop.arrived, tz)}</dd><dt className="text-stone-500">To</dt><dd>{clock(stop.left, tz)}</dd>
+        <dt className="text-stone-500">Where</dt><dd>km {stop.km} of the run</dd>
+        <dt className="text-stone-500">The clip</dt><dd>starts {mins(stop.pad_s)} before the stop and ends {mins(stop.pad_s)} after it, to show arriving and leaving</dd>
+        {(stop.covered_before || stop.covered_after) && <><dt className="text-stone-500">Footage</dt><dd>already covers the {stop.covered_before && stop.covered_after ? 'start and the end' : stop.covered_before ? 'start' : 'end'} of this stop, so this clip is only the time outside it</dd></>}
+      </dl>
+      <button type="button" className="mt-2 text-xs text-stone-500 underline" onClick={async () => { await api.setStop(folder, stop.key, false).catch(() => {}); onChanged() }}>Take this stop out of the video</button>
+    </Card>
   )
 }

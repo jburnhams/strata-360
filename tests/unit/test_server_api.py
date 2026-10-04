@@ -942,3 +942,44 @@ class TestStreetViewHires(TestStreetViewApi):
         calls = []; monkeypatch.setattr(CAM, 'fetch_google_pano', lambda *a, **k: calls.append(('pano', k.get('grid')))); monkeypatch.setattr(CAM, 'fetch', lambda *a, **k: calls.append(('flat', None))); monkeypatch.setattr(CAM, 'render', lambda *a, **k: calls.append(('render', k.get('grid'))) or {})
         sec = dict(provider='google', id='G1', key='k', seq='g', km0=0.0, hires=True); SC.render(project.folder, sec, 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('pano', 'hi'), ('render', 'hi')]
         calls.clear(); SC.render(project.folder, dict(sec, hires=False), 8.0, project.race_dir + '/x/v.mp4', log=lambda m: None); assert calls == [('flat', None), ('render', None)]
+
+
+class TestSidebarThumbs(TestStreetViewApi):
+    def test_a_gap_clip_and_a_street_view_section_have_a_thumbnail_made_from_a_frame_of_their_video(self, client, project, monkeypatch):
+        import subprocess
+        from strata360 import streetview as SV
+        from strata360.edit import synthetic as SY
+        self.make_docs(project); rd = project.race_dir; q = dict(folder=project.folder); made = []
+        def fake_run(cmd, **k): made.append(cmd); open(cmd[-1], 'wb').write(b'\xff\xd8JPEG'); return subprocess.CompletedProcess(cmd, 0)
+        monkeypatch.setattr(subprocess, 'run', fake_run)
+        assert client.get('/api/gaps/thumb', params=dict(q, id='G99')).status_code == 404
+        s = SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS})[0]; v = SV.video_path(rd, s); os.makedirs(os.path.dirname(v), exist_ok=True); open(v, 'wb').write(b'MP4')
+        r = client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)); assert r.status_code == 200 and r.content == b'\xff\xd8JPEG' and r.headers['content-type'] == 'image/jpeg' and any('scale=100:-2' in ' '.join(c) for c in made)
+        n = len(made); assert client.get('/api/streetview/thumb', params=dict(q, key=s['key'], w=100)).status_code == 200 and len(made) == n                      # kept
+        assert client.get('/api/streetview/thumb', params=dict(q, key='nope')).status_code == 404
+
+
+class TestVideoStartedElsewhere(TestStreetViewVideoApi):
+    def test_a_video_whose_log_is_being_written_is_shown_as_being_made_even_by_a_job_this_server_did_not_start(self, client, project, fake_popen):
+        import time
+        from strata360 import streetview as SV
+        key = self.key(project); rd = project.race_dir; s = next(x for x in SV.annotate(rd, {p: SV.load(rd, p) for p in SV.PROVIDERS}) if x['key'] == key); lf = os.path.splitext(SV.video_path(rd, s))[0] + '.log'
+        os.makedirs(os.path.dirname(lf), exist_ok=True); open(lf, 'w').write('fetching picture 2 of 10\n'); q = dict(folder=project.folder, key=key)
+        j = client.get('/api/streetview/video', params=q).json(); assert j['running'] is True and j['progress']['done'] == 2
+        assert client.post('/api/streetview/video', json=dict(q)).json()['started'] is False
+        old = time.time() - 1000; os.utime(lf, (old, old)); assert client.get('/api/streetview/video', params=q).json()['running'] is False          # a log nobody has written to for minutes: it stopped
+        open(lf, 'w').write('fetching picture 2 of 10\nstreetview-video: boom\n'); assert client.get('/api/streetview/video', params=q).json()['running'] is False
+
+
+
+class TestStopsInTheVideo(TestGapSettings):
+    def test_a_stop_added_to_the_video_becomes_a_gap_with_its_stop_facts_and_goes_again_when_taken_out(self, client, project, monkeypatch):
+        from strata360.gps import tracks as TKS
+        self.with_gap(project); q = dict(folder=project.folder)
+        stop = dict(lat=50.0, lon=5.0, arrived=self.T0 + 2000, left=self.T0 + 2700, stopped_s=700, radius_m=60, km=1.2); monkeypatch.setattr(TKS, 'other_stops', lambda rd, **k: [stop])
+        before = client.get('/api/gaps', params=q).json()['gaps']; pois = [p for p in client.get('/api/tracks', params=q).json()['pois'] if p['sym'] == 'stop']
+        assert len(pois) == 1 and pois[0]['added'] is False and len(before) >= 1 and not any(g.get('stop') for g in before)
+        key = pois[0]['key']; r = client.post('/api/stops', json=dict(q, key=key, add=True)).json(); p = [p for p in r['pois'] if p['sym'] == 'stop'][0]; assert p['added'] is True and p['gap']
+        gaps = client.get('/api/gaps', params=q).json()['gaps']; g = next(x for x in gaps if x.get('stop')); assert g['id'] == p['gap'] and g['stop']['key'] == key and g['stop']['pad_s'] >= 180 and g['t0'] < self.T0 + 2000 and g['t1'] > self.T0 + 2700
+        assert client.post('/api/stops', json=dict(q, key='nope', add=True)).status_code == 404
+        r = client.post('/api/stops', json=dict(q, key=key, add=False)).json(); assert [p for p in r['pois'] if p['sym'] == 'stop'][0]['added'] is False and not any(x.get('stop') for x in client.get('/api/gaps', params=q).json()['gaps'])

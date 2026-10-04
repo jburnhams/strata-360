@@ -218,3 +218,6 @@ class TestVideoProgress:
         assert SV.video_progress(g, True) == dict(pct=16, phase='asking Google for views and stitching panoramas', done=5, total=25)
         assert SV.video_progress(g + ['google G+1: panorama 25 of 25 stitched (400 requests so far)', 'rendering 10 of 25 pictures'], True) == dict(pct=88, phase='rendering the video', done=10, total=25)
         assert SV.video_progress(['fetching picture 3 of 36']) == dict(pct=4, phase='fetching pictures', done=3, total=36) and SV.video_progress(['fetching picture 36 of 36', 'rendering 36 of 36 pictures'])['pct'] == 100
+
+    def test_views_part_way_through_a_panorama_move_the_bar(self):
+        p = SV.video_progress(['google G+1: panorama 3 of 24: view 30 of 60'], True); assert p['phase'] == 'asking Google for views' and p['done'] == 3 and p['total'] == 24 and p['pct'] == round(100 * 0.8 * (2.5 / 24))

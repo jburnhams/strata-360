@@ -71,9 +71,10 @@ def series(tr, points=2000, smooth_s=SMOOTH_S):
     return dict(points=k, start_utc=_iso(T[0]), end_utc=_iso(T[-1]), duration_s=round(float(T[-1] - T[0])), distance_km=_r(float(np.nanmax(tr['dist'])) / 1000.0, 1) if np.isfinite(tr['dist']).any() else None, **out)
 
 
-def line(tr, bbox=None, max_points=3000):
-    """The track inside `bbox` = (lat0, lon0, lat1, lon1), or all of it, as at most `max_points` points. A point whose neighbour is inside is kept, so the line leaves and enters the box without a gap."""
+def line(tr, bbox=None, max_points=3000, span=None):
+    """The track inside `bbox` = (lat0, lon0, lat1, lon1), or all of it (`span` = (t0, t1) epoch seconds: only the part run between those times), as at most `max_points` points. A point whose neighbour is inside is kept, so the line leaves and enters the box without a gap."""
     ok = np.isfinite(tr['lat']) & np.isfinite(tr['lon'])
+    if span is not None: ok = ok & (tr['t'] >= span[0]) & (tr['t'] <= span[1])                                # (only the part of the run between two times, as epoch seconds)
     if bbox is not None:
         la0, lo0, la1, lo1 = bbox; inside = ok & (tr['lat'] >= la0) & (tr['lat'] <= la1) & (tr['lon'] >= lo0) & (tr['lon'] <= lo1); near = inside.copy(); near[1:] |= inside[:-1]; near[:-1] |= inside[1:]; ok = ok & near
     idx = np.flatnonzero(ok)

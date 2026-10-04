@@ -34,8 +34,8 @@ export function LengthField({ id, mode, seconds, modes, min, max, fallback, disa
   )
 }
 
-export default function ItemPage({ folder, heading, sub, err, preview, settings, help, script, noun, must, noteClip, noteTitle, notePlaceholder, more }: {
-  folder: string; heading: React.ReactNode; sub?: React.ReactNode; err?: string; preview: React.ReactNode; settings: React.ReactNode; help: string; script: GapScriptItem[]; noun: string; must: boolean; noteClip: string; noteTitle: string; notePlaceholder: string; more?: React.ReactNode
+export default function ItemPage({ folder, heading, sub, err, preview, where, settings, help, script, noun, must, noteClip, noteTitle, notePlaceholder, more }: {
+  folder: string; heading: React.ReactNode; sub?: React.ReactNode; err?: string; preview: React.ReactNode; where?: React.ReactNode; settings: React.ReactNode; help: string; script: GapScriptItem[]; noun: string; must: boolean; noteClip: string; noteTitle: string; notePlaceholder: string; more?: React.ReactNode
 }) {
   return (
     <div className="space-y-4">
@@ -45,6 +45,7 @@ export default function ItemPage({ folder, heading, sub, err, preview, settings,
       </div>
       {err && <p role="alert" className="text-sm text-red-600">{err}</p>}
       <Card title="Preview">{preview}</Card>
+      {where && <Card title="Where on the route">{where}</Card>}
       {more}
       <Card title="How it is drawn and how long it is"><div className="grid gap-3 text-sm sm:grid-cols-2">{settings}</div><p className="mt-2 text-xs text-stone-500">{help}</p></Card>
       <VoiceOverCard items={script} noun={noun} must={must} />

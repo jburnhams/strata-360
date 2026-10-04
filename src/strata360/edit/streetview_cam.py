@@ -109,7 +109,7 @@ def fetch_google_pano(rd, section, road=None, download=None, log=print, workers=
     log(f"google {section['id']}: {len(items)} panoramas, {missing} views still to ask Google for ({len(items) * len(pano_tiles(grid)) - missing} already kept), the ones nearest your track first")
     def get_tile(args):
         pid, h, p = args; f = pano_tile_path(rd, section, pid, h, p, grid)
-        if os.path.exists(f): return 0
+        if os.path.exists(f): return 0                                                                     # (kept from before)
         for attempt in (0, 1):
             try: data = download('https://maps.googleapis.com/maps/api/streetview', dict(size=f'{PANO_TILE_PX}x{PANO_TILE_PX}', pano=pid, heading=h, fov=fov, pitch=p, key=gkey)); break
             except RuntimeError:
@@ -118,7 +118,10 @@ def fetch_google_pano(rd, section, road=None, download=None, log=print, workers=
     with ThreadPoolExecutor(workers) as ex:
         for n, it in enumerate(items, 1):
             if os.path.exists(pano_path(rd, section, it['id'], grid)): log(f"google {section['id']}: panorama {n} of {len(items)} stitched (kept from before)"); continue
-            asked += sum(ex.map(get_tile, [(it['id'], h, p) for h, p in pano_tiles(grid)]))
+            K = len(pano_tiles(grid)); got = 0
+            for a in ex.map(get_tile, [(it['id'], h, p) for h, p in pano_tiles(grid)]):
+                asked += a; got += 1
+                if got % 5 == 0 or got == K: log(f"google {section['id']}: panorama {n} of {len(items)}: view {got} of {K}")
             tiles = {(h, p): cv2.imread(pano_tile_path(rd, section, it['id'], h, p, grid)) for h, p in pano_tiles(grid)}
             if any(v is None for v in tiles.values()): raise RuntimeError(f"google {section['id']}: a view of {it['id']} could not be read")
             tmp = pano_path(rd, section, it['id'], grid) + '.part.jpg'; cv2.imwrite(tmp, stitch_pano(tiles, grid=grid), [cv2.IMWRITE_JPEG_QUALITY, 92]); os.replace(tmp, pano_path(rd, section, it['id'], grid))

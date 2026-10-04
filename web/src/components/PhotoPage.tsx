@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, type MotionStyle, type Photo } from '../api'
 import ItemPage, { LengthField } from './ItemPage'
 import PhotoMotion from './PhotoMotion'
+import TrackMap from './TrackMap'
 
 // A photo used in the film as a page of its own, with the same sections as a gap (ItemPage). "Use in the film" on the overview only makes a photo an option (it is then in the film list); "Must be used" here makes the plan add it if
 // the script leaves it out.
@@ -16,6 +17,7 @@ export default function PhotoPage({ folder, photo, tz, onChanged }: { folder: st
     <ItemPage folder={folder} noun="photo" must={!!p.must} script={p.script ?? []} err={err} noteClip={label} noteTitle="Notes for this photo" notePlaceholder="What was this? Where were you, what to mention or avoid…"
       heading={<>Photo {label} <span className="text-sm font-normal text-stone-500">{when}</span></>}
       sub={`${p.name}${p.track ? ` · km ${p.track.km}` : ''}${p.analysis?.place ? ` · ${p.analysis.place}` : ''}`}
+      where={p.loc || p.track ? <TrackMap folder={folder} tz={tz} point={p.loc ?? p.track!} at={p.taken_utc} label={`Photo ${label}`} /> : <p className="text-sm text-stone-500">This photo is not on the run: it has no place, or its time is outside the run.</p>}
       preview={<>
         <a href={api.photoFile(folder, p.id)} target="_blank" rel="noreferrer"><img src={api.photoThumb(folder, p.id, 960)} alt={p.name} className="w-full max-w-3xl rounded" /></a>
         <div className="mt-2"><PhotoMotion folder={folder} p={p} onChanged={onChanged} /></div>
