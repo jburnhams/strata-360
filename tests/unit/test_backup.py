@@ -60,7 +60,16 @@ def test_ticker_backs_up_and_survives_errors(proj, monkeypatch):
     monkeypatch.setattr(B, 'backup', lambda f: 1 / 0); t.tick()
 
 
-def test_gpx_tracks_are_always_metadata_whatever_their_size(proj):
-    rd = config.race_dir(proj); os.makedirs(os.path.join(rd, 'tracks'))
-    for rel in ('track.gpx', 'tracks/t2-run.gpx', 'track.gpx.20260101.replaced'): open(os.path.join(rd, rel), 'wb').write(b'x' * 6_000_000)
-    assert {'track.gpx', 'tracks/t2-run.gpx', 'track.gpx.20260101.replaced'} <= {r for r, _ in B.collect(proj)}
+def test_current_tracks_and_music_are_saved_whatever_their_size_but_their_history_is_not(proj):
+    rd = config.race_dir(proj); os.makedirs(os.path.join(rd, 'tracks', 'removed')); os.makedirs(os.path.join(rd, 'music'))
+    cur = ['track.gpx', 'tracks/t2-run.gpx', 'music/track.mp3']; old = ['track.gpx.20260101T000000000Z.replaced', 'music/track.mp3.20260101T000000000Z.replaced', 'tracks/removed/t1-a.gpx', 'tracks/t3-x.gpx.bad']
+    for rel in cur + old: open(os.path.join(rd, rel), 'wb').write(b'x' * 6_000_000)
+    got = {r for r, _ in B.collect(proj)}; assert set(cur) <= got and not got & set(old)
+
+
+def test_replacing_music_keeps_every_earlier_track(tmp_path, monkeypatch):
+    from strata360.edit import music as M
+    monkeypatch.setattr(M, '_measure', lambda p: (None, None)); monkeypatch.setattr(M, 'analyse_samples', lambda x, S=None: {}); monkeypatch.setattr(M, '_record_with', lambda rd, rel, name, x, S, an: rel)
+    rd = str(tmp_path)
+    for i in range(3): M.store(rd, b'a%d' % i, '.mp3', 'n')
+    names = sorted(os.listdir(os.path.join(rd, 'music'))); assert 'track.mp3' in names and len([n for n in names if n.endswith('.replaced')]) == 2
