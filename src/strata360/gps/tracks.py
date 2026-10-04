@@ -7,7 +7,7 @@
 
 Merging runs (`merge`): the runs are taken in priority order (the older single file, then the uploads in order); a lower run keeps only the samples outside the stretches that a higher run recorded without a break (more than 30 s without a sample is a break), so two devices recording the same hours do not double the
 track, while a run that fills the gap left by another (a flat battery, a second watch) joins on. Samples are then in time order and the distance is worked out again along the merged line. Points of interest: waypoints of a GPX, course points of a FIT (`pois`)."""
-import datetime as dt, hashlib, json, os, re
+import datetime as dt, hashlib, json, os, re, time
 
 import numpy as np
 
@@ -125,6 +125,7 @@ def add(rd, filename, data, kind=None):
     if len(data) < 100 or len(data) > MAX_BYTES: raise ValueError('the file is empty or too large')
     if kind is not None and kind not in KINDS: raise ValueError(f'kind: one of {", ".join(KINDS)}')
     doc = _manifest(rd); kind = kind or ('run' if not runs(rd) else 'route'); tid = f"t{doc['next']}"; os.makedirs(dir_of(rd), exist_ok=True); dest = os.path.join(dir_of(rd), f'{tid}-{_safe(filename)}')
+    while os.path.exists(dest): dest = os.path.join(dir_of(rd), f'{tid}-{int(time.time() * 1000)}-{_safe(filename)}')
     with open(dest, 'wb') as f: f.write(data)
     try:
         info = summary(dest)

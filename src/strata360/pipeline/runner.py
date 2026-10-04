@@ -10,7 +10,7 @@ import atexit, datetime as dt, fnmatch, hashlib, json, os, time, traceback
 from contextlib import contextmanager
 from strata360 import oslib
 from strata360.pipeline import guard
-from strata360.pipeline import config, clips as clipmod, resources, retry
+from strata360.pipeline import backup, config, clips as clipmod, resources, retry
 from strata360.pipeline.stages import STAGES, ORDER, Ctx
 
 
@@ -258,6 +258,7 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
     def L(msg):
         line = f"{dt.datetime.now().strftime('%H:%M:%S')} [{os.getpid()}] {msg}"; log(line); logf.write(line + '\n'); logf.flush()
 
+    ticker = backup.Ticker(lambda: [race]).start()                                                          # metadata backup every 30 min while there are changes (pipeline/backup.py)
     result = {}; tried = set(); L(f'worker started: {len(cl)} clips, stages {names}')
     while max_items is None or len(result) < max_items:
         picked = None; waiting = []                                                                       # waiting: when items that failed for now may be tried again
@@ -312,7 +313,7 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
         json.dump(dict(race=race, generated=dt.datetime.now().isoformat(timespec='seconds'), clips=[c.to_dict() for c in cl], unsupported=[dict(path=p, reason=r) for p, r in other]), open(os.path.join(rd, 'catalog.json'), 'w'), indent=1)
     counts = {}
     for v in result.values(): counts[v] = counts.get(v, 0) + 1
-    L(f'worker done: {counts or "nothing left to do"}'); logf.close()
+    L(f'worker done: {counts or "nothing left to do"}'); logf.close(); ticker.stop()
     try: os.remove(reg)
     except OSError: pass
     return result
