@@ -90,8 +90,27 @@ Pure Python, the heart of the feature, and unit-testable without audio.
   - `bridge`: a few bars that join two sources.
 
   Each section also has its **layers**: which stems play and at what gain per bar.
-- **Sung moments:** the original's phrases (`lyrics.py`: the counted phrases, with your corrections) placed only in **quiet windows**: stretches of at least the phrase's length plus a bar each side with no voice-over line and no clip speech (V4's timeline). There are few of them [2 to 4 in a film; the hook near the finish when it fits]. A phrase keeps its place in the bar, so it starts on the same beat as in the original.
-- **Who chooses the moments:** the director (V7, Gemini Pro) already sees the lyrics with their times and can anchor "the hook on the finish line"; this adds no extra call. The rules then place a phrase in the nearest quiet window that fits, and report any that cannot be placed. With no director run, the rules pick the best-confidence phrases for the highest-intensity quiet windows.
+- **Sung moments: chosen by the director (decided 5 Oct).** The director (V7, Gemini Pro, the call it already makes) lays out the film as a sequence of items and already decides where narration and clip speech go, so it also decides where the original's singing is heard, with a new item kind (4.2a). No new call is needed. The planner then builds the music around those moments: the phrase is fixed, and the music bends to it.
+- **Without a director run** (a plan made by hand, or the planner alone): the rules pick the best-confidence phrases for the highest-intensity stretches with no narration or clip speech that are long enough, and report it when there are none.
+
+### 4.2a The `sing` item in the director's draft
+
+**What the director is given:** when the music is built (not fixed), the pack (`script_pack.music_facts`) lists the original's sung phrases as a **library**, not at fixed film times, because the built music can put a phrase anywhere. Each phrase has:
+- an id (`P01`, ...);
+- the words heard, flagged as rough (the recogniser mishears; your corrections in `lyrics_edits.json` apply);
+- its length in seconds and in bars;
+- a confidence, with doubtful and deleted phrases left out;
+- whether its words repeat in the track (a repeated line is probably the hook).
+
+**What it returns:** `{"type": "sing", "phrase": "P07", "clip": "0023", "why": "the hook as the runner crosses the line"}`. The `clip` is the picture under the singing, played like b-roll (a `gap` clip such as `G04` works too). There is no narration and no clip speech inside a `sing` item, so the item *is* the quiet window. Its length is the phrase's length rounded up to whole bars, plus [one bar] of lead-in and lead-out; the director does not set it. The usual optional `anchor` applies ("land this on the finish").
+
+**The prompt:** mostly instrumental, so sung moments are rare and earned [at most 4 in a film; often none in the first third]; use them where the words or the energy fit what is on screen and nothing needs saying; never the same phrase twice unless it is the hook and the moments are far apart.
+
+**`check` (`script_draft`)** rejects and returns for a retry: an unknown or doubtful phrase, more `sing` items than allowed, two sung moments closer than [30 s], and a `sing` item with no picture. `director_notes` advises: a phrase over a busy stretch of the intensity curve, and a hook used before the halfway point.
+
+**What the planner does with it (G2):** it puts the phrase's first sung beat on the same beat of a bar as in the original, moving the item by at most half a bar and taking the difference from the neighbouring b-roll, as V5 does. It marks the bars around it as sung for the score, so the sources and form (4.3) for those bars follow from the fidelity setting (4.5). Everywhere else the original's vocals stay off.
+
+**With the original track fixed (no built music, as today):** a phrase is heard only where the track sings it, so a `sing` item there means "keep narration and clip speech clear while the track sings P07", and it must be anchored at that phrase's film time. It is the same item with a stricter check, and it replaces today's advisory note about narration over singing.
 
 ### 4.3 How a sung moment sounds
 
@@ -155,7 +174,7 @@ A3, with the built track as "the music", plus the per-bar stem gains and the bac
 |---|---|---|
 | **G0** | **Stems, re-sequencing and layering, no generative model.** Demucs stems of the uploaded track; bar-level re-sequencing to any length ending on its own ending; per-bar layer gains from a given curve; vocals only in given windows. | M |
 | **G1** | **Intensity curve** from the signals in 4.1; drawn under the music waveform. | S to M |
-| **G2** | **Score plan**: `score.py`, key estimation in `music.py`, quiet windows, placing the sung phrases (director anchors plus rules), sources and layers per section, and the **fidelity setting** (4.5) with per-section pins. | M |
+| **G2** | **Score plan**: `score.py`, key estimation in `music.py`, quiet windows, the director's `sing` items (4.2a: the phrase library in the pack, the item in the prompt, `check` and `director_notes`, a prompt version bump) and the rules for a plan with no director run, sources and layers per section, and the **fidelity setting** (4.5) with per-section pins. | M |
 | **G3** | **ACE-Step on the PC**: the backend interface, generated and bridge sections in the original's style, repaint for repairs. | M |
 | **G4** | **Stable Audio 3 Medium** as the second backend; a **bake-off on Legends** (the same score, both backends, plus G0 alone, judged by ear, like `docs/bakeoff`). | S to M |
 | **G5** | **Fit, check, repair**, and the Music panel: the **fidelity slider** with its five stops, takes, the score's sections (original or generated) and sung moments drawn on the waveform, pin or rebuild a section. | M to L |
@@ -165,7 +184,7 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 **Done when:**
 - **G0:** the Legends track built to 60, 247 and 400 s, each ending on its own ending, with no audible jump (by ear) and every bar boundary within 10 ms of the grid; layer gains follow a given curve per bar; no singing outside the given windows (vocal stem check).
 - **G1:** unit tests on synthetic signals: the level changes only on phrase boundaries, a single loud window does not change it, and the start and finish get the top level when marked.
-- **G2:** unit tests: bars times bar length equals the film's length within one frame; at fidelity 1.0 no bar is generated, and at 0.0 no original audio plays outside the sung moments; the share of original bars never falls as fidelity rises; a pinned section ignores the slider; moving the slider changes the keys of only the sections whose source or strength changed; no sung phrase overlaps a voice-over line or clip speech; a phrase starts on its original beat in the bar; a phrase with no window that fits is reported, not squeezed in.
+- **G2:** unit tests: a draft's `sing` item becomes a stretch with no narration or clip speech, as long as its phrase rounded up to bars plus the lead-in and lead-out; the phrase starts on its original beat in the bar; a doubtful phrase, too many `sing` items, or two too close are sent back; with the track fixed, an unanchored `sing` item is sent back; bars times bar length equals the film's length within one frame; at fidelity 1.0 no bar is generated, and at 0.0 no original audio plays outside the sung moments; the share of original bars never falls as fidelity rises; a pinned section ignores the slider; moving the slider changes the keys of only the sections whose source or strength changed; no sung phrase overlaps a voice-over line or clip speech; a phrase starts on its original beat in the bar; a phrase with no window that fits is reported, not squeezed in.
 - **G3 and G4:** backends behind fakes in the unit suite (`tests/utils` fakes); one real build per backend run by hand on the PC (like the other model-dependent checks, overview section 0) and logged in `progress.md` with its time and peak GPU memory.
 - **G5:** on Legends, a built track whose downbeats are all within 40 ms of the grid after fitting, with no singing outside the chosen moments, and a film of the right length that plays through the rough mix.
 
@@ -178,7 +197,7 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 | G-D3 | Lyrics? | **Decided 5 Oct: none of our own.** Mostly instrumental; the only singing is portions of the uploaded track's vocals. |
 | G-D4 | Tempo and key? | **Follows from G-D3: the original's.** |
 | G-D5 | Where does generation run? | **Decided 5 Oct: the Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM). |
-| G-D6 | How many sung moments, and which form (4.3 a or b)? | [2 to 4; form a] |
+| G-D6 | How many sung moments, and which form (4.3 a or b)? | **Decided 5 Oct: the director chooses the moments** (4.2a), within a limit [at most 4, 30 s apart]; the form follows the fidelity setting (4.5) and can be overridden per moment. |
 | G-D7 | How does the project folder reach the PC: a shared drive, a sync folder, or a copy of just the inputs (`music.json`, its file, the score) and the takes back? | [the takes are self-contained files by key, so copying only the inputs and the takes is enough] |
 | G-D8 | The fidelity default (4.5). | [0.75, "extended"] |
 
