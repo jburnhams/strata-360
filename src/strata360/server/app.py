@@ -229,13 +229,15 @@ def create_app(roots, token=None):
         try: return json.load(open(p)) if os.path.exists(p) else None
         except ValueError: return None
 
-    def objects_view(d):                                                                            # the things passed (objects.json) for the clip page: what each is, where (a direction in the world-locked frame the player uses), when it was in view; None when the stage has not run
+    def objects_view(d, folder):                                                                            # the things passed (objects.json) for the clip page: what each is, where (a direction in the world-locked frame the player uses), when it was in view; None when the stage has not run
         ob = _j(d, 'objects.json')
         if not ob: return None
         crops = {n for n in os.listdir(os.path.join(d, 'objects'))} if os.path.isdir(os.path.join(d, 'objects')) else set()
+        from strata360.analysis import objects as OBJ, vocab as VOC
+        lp = VOC.project_paths(folder)['local']; local = _j(os.path.dirname(lp), 'vocab_local.json') or {}; v = VOC.load(local=local); mine = set(local.get('hide') or []); ids = set((_j(d, 'objects_hidden.json') or {}).get('ids') or [])                  # the lists of what not to show are read now, so changing them changes the page without touching the data
         keep = ('id', 'label', 'word', 'kind', 'source', 'yoloe', 'conf', 'lon', 'lat', 'deg', 'best_t')
-        objs = [dict({k: o.get(k) for k in keep}, seen=o.get('seen', [])[:40], crop=f"o{o['id']:03d}.jpg" in crops) for o in ob.get('objects', [])]
-        return dict(skipped=ob.get('skipped'), model=ob.get('model'), moments=ob.get('moments'), objects=objs, regions=ob.get('regions') or [], areas=ob.get('areas') or {}, scenery_labels=ob.get('scenery_labels') or {}, counts=ob.get('counts') or {})
+        objs = [dict({k: o.get(k) for k in keep}, seen=o.get('seen', [])[:40], crop=f"o{o['id']:03d}.jpg" in crops, hidden=('object' if o['id'] in ids else 'label' if (o.get('label') or '').lower() in mine else OBJ.hidden_kind(o.get('label'), o.get('source'), v))) for o in ob.get('objects', [])]          # hidden by you (this one, or every one with this label) or by the lists
+        return dict(skipped=ob.get('skipped'), model=ob.get('model'), moments=ob.get('moments'), objects=objs, regions=ob.get('regions') or [], areas=ob.get('areas') or {}, scenery_labels=dict(__import__('collections').Counter(o['word'] or o['label'] for o in objs if o['hidden'] == 'scenery').most_common()), counts=ob.get('counts') or {})
 
     def in_film(f):
         """The ids of the clips and gaps the film's plan plays now (empty when there is no plan)."""
@@ -346,6 +348,23 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404, 'the proxy video has not been made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
+    @api.post('/api/clip/object/hide', dependencies=[Depends(auth)])
+    def post_object_hide(body: dict):                                                        # {folder, clip, id, hide} hides (or shows again) one object of a clip; {folder, label, hide} every object with that label in the project. The data is never changed: the page just does not list what is hidden.
+        from strata360.analysis import vocab as VOC
+        f = folder_of(body.get('folder')); hide = body.get('hide', True) is not False
+        def write(p, obj):
+            os.makedirs(os.path.dirname(p), exist_ok=True); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(obj, open(tmp, 'w'), indent=1); os.replace(tmp, p)
+        if body.get('label') is not None:
+            label = str(body['label']).strip().lower()
+            if not label: raise HTTPException(400, 'label: what to hide')
+            lp = VOC.project_paths(f)['local']; local = _j(os.path.dirname(lp), 'vocab_local.json') or {}
+            write(lp, dict(local, hide=sorted((set(local.get('hide') or []) | {label}) if hide else (set(local.get('hide') or []) - {label}))))
+        elif body.get('id') is not None:
+            d = _cd(f, str(body.get('clip') or '')); p = os.path.join(d, 'objects_hidden.json'); ids = set((_j(d, 'objects_hidden.json') or {}).get('ids') or []); oid = int(body['id'])
+            write(p, dict(ids=sorted((ids | {oid}) if hide else (ids - {oid}))))
+        else: raise HTTPException(400, 'id (with clip) or label')
+        return dict(ok=True)
+
     @api.get('/api/clip/object')
     def get_clip_object(request: Request, folder: str, clip: str, id: int):                           # the picture the labelling model was shown for one object (an <img> cannot send headers: the cookie/query token authenticates)
         auth(request); p = os.path.join(_cd(folder_of(folder), clip), 'objects', f'o{int(id):03d}.jpg')
@@ -367,7 +386,7 @@ def create_app(roots, token=None):
         tr = effective(d); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
         out['transcript'] = [x for si, s in enumerate((tr or {}).get('segments', [])) for x in phrase_parts(s, si, lab.get((round(s['t0'], 2), round(s['t1'], 2))), flagged=bool(s.get('flags')))]
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
-        out['objects'] = objects_view(d)
+        out['objects'] = objects_view(d, f)
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
         ev = _j(d, 'audio_events.json')

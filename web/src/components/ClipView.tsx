@@ -35,7 +35,7 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
   useEffect(() => { if (c && focus != null) document.getElementById(`seg-${Math.round(focus * 100)}`)?.scrollIntoView({ block: 'center' }) }, [c, focus])
   if (err) return <p className="text-stone-500">{err}</p>
   if (!c) return <div className="space-y-4"><Skeleton className="aspect-video w-full" /><div className="grid gap-4 md:grid-cols-2"><PanelSkeleton title="When and where" /><PanelSkeleton title="Motion and picture" /></div><PanelSkeleton title="Transcript" rows={4} /></div>
-  const marks: Mark[] = [...(c.objects?.objects ?? []).map(o => ({ kind: 'object' as const, label: o.label ?? o.yoloe, lon: o.lon, lat: o.lat, deg: o.deg, seen: o.seen, hot: look?.lon === o.lon && look?.lat === o.lat })),
+  const marks: Mark[] = [...(c.objects?.objects ?? []).filter(o => !o.hidden).map(o => ({ kind: 'object' as const, label: o.label ?? o.yoloe, lon: o.lon, lat: o.lat, deg: o.deg, seen: o.seen, hot: look?.lon === o.lon && look?.lat === o.lat })),
     ...(c.objects?.regions ?? []).map(r => ({ kind: r.kind, label: r.kind, lon: r.lon, lat: r.lat, deg: Math.max(r.w_deg, r.h_deg), polygon: r.polygon, seen: r.seen, hot: look?.lon === r.lon && look?.lat === r.lat }))]
   const utc = String(c.time.start_utc ?? ''), m = c.motion, sc = c.scenes?.summary, id = c.identity
   return (
@@ -60,7 +60,7 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
           <Kv k="Ahead" v={sceneLine(sc?.front)} /><Kv k="Behind" v={sceneLine(sc?.rear)} />
           {!sc && <p className="text-sm text-stone-500">Scene tagging has not run for this clip yet.</p>}
         </Card>
-        <Card title="Things passed"><ObjectsCard folder={folder} clip={clip} info={c.objects} marked={marked} onMarked={setMarked} onLook={l => setLook({ ...l, n: Date.now() })} /></Card>
+        <Card title="Things passed"><ObjectsCard folder={folder} clip={clip} info={c.objects} marked={marked} onMarked={setMarked} onLook={l => setLook({ ...l, n: Date.now() })} onHide={(o, scope, hide) => api.hideObject(scope === 'label' ? { folder, label: o.label ?? o.yoloe, hide } : { folder, clip, id: o.id, hide }).then(reload).catch(() => {})} /></Card>
         <Card title="Where (OpenStreetMap)">
           {!c.places ? <p className="text-sm text-stone-500">The places lookup has not run for this clip yet.</p>
             : !c.places.covered ? <p className="text-sm text-stone-500">{c.places.note}</p>

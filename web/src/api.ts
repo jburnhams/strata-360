@@ -148,7 +148,7 @@ export interface Line { si: number; part?: number; play0?: number; play1?: numbe
 export interface Why { starts_because: string; ends_because?: string; steadiness: number; shake_dps: number; exposure_ok: number; scenic: number; lens_blocked: number; score: number; speech: boolean; chatter: number }
 export interface Candidate { id: string; kind?: 'span' | 'best' | 'speech' | 'person' | 'you' | 'scene'; view?: string; priority?: number; span?: number; start_s: number; end_s: number; start_utc: string; quality: number; energy: number; features: Record<string, number>; settings: string[]; people: number; why?: Why }
 /** A thing the objects stage found: what it is, where (a direction in the world-locked frame the player uses: lon = the player's yaw, degrees), how big, and when it was in view. */
-export interface DetectedObject { id: number; label: string | null; word: string | null; kind: 'named' | 'other'; source: 'detector' | 'vlm'; yoloe: string; conf: number; lon: number; lat: number; deg: number; best_t: number; seen: number[]; crop: boolean }
+export interface DetectedObject { id: number; label: string | null; word: string | null; kind: 'named' | 'other'; source: 'detector' | 'vlm'; yoloe: string; conf: number; lon: number; lat: number; deg: number; best_t: number; seen: number[]; crop: boolean; hidden?: 'stop' | 'scenery' | 'label' | 'object' | null }       // hidden: the lists of what not to show (stop, scenery) or you (this one, or every one with its label)
 /** An area of snow or water (a box on a wide view, as a polygon of four corners and its middle and size). */
 export interface Region { kind: 'snow' | 'water'; lon: number; lat: number; w_deg: number; h_deg: number; polygon: [number, number][]; seen: number[]; n: number }
 export interface ObjectsInfo { skipped: string | null; model: string | null; moments: number; objects: DetectedObject[]; regions: Region[]; areas: Record<string, { boxes: number; max_conf: number }>; scenery_labels: Record<string, number>; counts: Record<string, number> }
@@ -285,6 +285,7 @@ export const api = {
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
+  hideObject: (b: { folder: string; clip?: string; id?: number; label?: string; hide: boolean }) => call<{ ok: boolean }>('/api/clip/object/hide', b),
   objectUrl: (folder: string, clip: string, id: number) => '/api/clip/object?' + q({ folder, clip, id: String(id) }),
   clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean' | 'background') => '/api/clip/audio?' + q({ folder, clip, kind }),
   editScript: (folder: string, texts: Record<string, string>) => call<{ saved: string | null; speaking: boolean }>('/api/script/edit', { folder, texts }),

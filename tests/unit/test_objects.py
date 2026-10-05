@@ -107,7 +107,7 @@ def test_a_trusted_word_keeps_the_detectors_name_and_the_labelling_model_is_not_
 
 def test_labels_that_are_not_things_are_dropped_and_counted(tmp_path):
     detect, label, seen = fakes({0: [('goat', 0.5, MID)], 1: []}, {0: 'unclear'}); doc = run(tmp_path, detect, label)
-    assert doc['objects'] == [] and doc['dropped_by_stoplist'] == 1 and VOC.StatsBook(doc['stats']).words['goat']['false_positive'] == 1
+    assert [(o['label'], o['hidden']) for o in doc['objects']] == [('unclear', 'stop')] and doc['dropped_by_stoplist'] == 1 and VOC.StatsBook(doc['stats']).words['goat']['false_positive'] == 1       # kept, but marked as not to be shown
 
 
 def test_big_scenery_words_are_counted_per_clip_not_labelled(tmp_path):
@@ -151,7 +151,7 @@ def test_small_marks_on_the_ground_are_not_sent_and_scenery_labels_are_counted_a
             if n.endswith(f't{TILE:02d}.jpg'): f[n[:-6] + f'{low:02d}.jpg'], f[n] = f[n], dict(named=[], pf=[])
         return d
     doc = run(tmp_path, lower, label, times=(1.0,)); assert doc['counts']['ground'] == 1 and doc['objects'] == [] and seen['label'] == []
-    doc = run(tmp_path, detect, label, times=(1.0,)); assert doc['objects'] == [] and doc['scenery_labels'] == {'tree trunk': 1} and doc['dropped_by_stoplist'] == 0
+    doc = run(tmp_path, detect, label, times=(1.0,)); assert [(o['label'], o['hidden']) for o in doc['objects']] == [('tall tree trunk', 'scenery')] and doc['scenery_labels'] == {'tree trunk': 1} and doc['dropped_by_stoplist'] == 0
 
 
 # ---- snow and water regions ----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -201,8 +201,10 @@ def test_boxes_of_all_views_and_moments_are_merged_into_areas_and_slivers_are_dr
     assert R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 10, -20, 6, 2.0, 2.0)])[0]['n'] == 1 and len(R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 10, -20, 6, 3.0, 2.0)])) == 2        # a small box in a large one is a different thing
 
 
-def test_a_finished_document_can_be_filtered_again_with_the_current_lists_without_the_model():
+def test_a_finished_document_is_marked_with_what_the_current_lists_hide_and_nothing_is_removed():
     v = VOC.load(); mk = lambda i, label, source='vlm': dict(id=i, label=label, word=label, source=source)
     doc = dict(objects=[mk(0, 'goat'), mk(1, 'sunlight through trees'), mk(2, 'tall trees'), mk(3, 'sign', 'detector'), mk(4, 'tree', 'detector')], dropped_by_stoplist=2, scenery_labels={'tree trunk': 5})
-    got = O.refilter(doc, v); assert [o['id'] for o in got['objects']] == [0, 3, 4] and got['dropped_by_stoplist'] == 3 and got['scenery_labels'] == {'tree trunk': 5, 'tall trees': 1}      # (a trusted detector word is not judged again)
-    assert O.refilter(got, v) == got and doc['dropped_by_stoplist'] == 2                                                                                                          # repeating changes nothing, and the original is not touched
+    got = O.annotate(doc, v); assert [(o['id'], o['hidden']) for o in got['objects']] == [(0, None), (1, 'stop'), (2, 'scenery'), (3, None), (4, None)] and got['dropped_by_stoplist'] == 1 and got['scenery_labels'] == {'tall trees': 1}      # (a trusted detector word is not judged)
+    assert O.annotate(got, v) == got and 'hidden' not in doc['objects'][0] and len(got['objects']) == 5                                                                                                            # repeating changes nothing, the original is not touched
+    local = dict(v, stoplist=v['stoplist'] + ['goat']); assert [o['hidden'] for o in O.annotate(doc, local)['objects']][0] == 'stop'                                                                                    # a changed list changes what is hidden
+    assert VOC.load(local=dict(stoplist=['gizmo'], scenery=['dune']))['stoplist'][-1] == 'gizmo' and 'dune' in VOC.load(local=dict(scenery=['dune']))['scenery'] and 'gizmo' not in VOC.load()['stoplist']      # the project can add words of its own
