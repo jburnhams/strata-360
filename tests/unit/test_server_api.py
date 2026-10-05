@@ -584,6 +584,17 @@ class TestClipSounds:
         d = client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()
         assert d['audio_files'] == dict(original=False, clean=False, background=True)
 
+    def test_the_clip_detail_carries_the_objects_and_the_picture_of_each_is_served(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID); get = lambda: client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()
+        assert get()['objects'] is None                                                                                  # the stage has not run
+        doc = dict(model='m', moments=2, skipped=None, counts=dict(wearer=3), areas={'tree': dict(boxes=2, max_conf=0.5)}, scenery_labels={'tree trunk': 4},
+                   objects=[dict(id=0, label='goat', word='goat', kind='named', source='vlm', yoloe='cow', conf=0.8, lon=-90.0, lat=-5.0, deg=4.0, best_t=1.0, seen=[1.0, 8.5], route='label', extra='dropped'), dict(id=1, label='sign', word='sign', kind='other', source='detector', yoloe='sign', conf=0.9, lon=10.0, lat=2.0, deg=3.0, best_t=2.0, seen=[2.0]), dict(id=2, label='sunlight through trees', word=None, kind='other', source='vlm', yoloe='comet', conf=0.5, lon=0.0, lat=50.0, deg=5.0, best_t=1.0, seen=[1.0]), dict(id=3, label='tall trees', word='tree', kind='other', source='vlm', yoloe='birch', conf=0.7, lon=0.0, lat=30.0, deg=30.0, best_t=1.0, seen=[1.0])],
+                   regions=[dict(kind='snow', lon=40.0, lat=-30.0, w_deg=30.0, h_deg=10.0, polygon=[[0, 0]] * 4, seen=[1.0], n=2)])
+        json.dump(doc, open(os.path.join(p.clip_dir(), 'objects.json'), 'w')); os.makedirs(os.path.join(p.clip_dir(), 'objects')); open(os.path.join(p.clip_dir(), 'objects', 'o000.jpg'), 'wb').write(b'jpg')
+        o = get()['objects']; assert [(x['id'], x['label'], x['crop'], x['hidden']) for x in o['objects']] == [(0, 'goat', True, None), (1, 'sign', False, None), (2, 'sunlight through trees', False, 'stop'), (3, 'tall trees', False, 'scenery')] and 'extra' not in o['objects'][0] and o['regions'][0]['kind'] == 'snow' and o['counts'] == dict(wearer=3) and o['scenery_labels'] == {'tree': 1}      # all kept, the lists say what is hidden
+        pic = lambda i: client.get('/api/clip/object', params={'folder': p.folder, 'clip': CLIP_ID, 'id': i}); assert pic(0).content == b'jpg' and pic(0).headers['content-type'] == 'image/jpeg' and pic(1).status_code == 404
+        assert client.get('/api/clip/object', params={'folder': p.folder, 'clip': '../x', 'id': 0}).status_code == 404            # a clip id cannot climb out of the project
+
 
 def test_the_interpreters_hashlib_noise_never_reaches_a_job_log_shown_in_the_web():
     from strata360.server import app as SRV
@@ -983,3 +994,20 @@ class TestStopsInTheVideo(TestGapSettings):
         gaps = client.get('/api/gaps', params=q).json()['gaps']; g = next(x for x in gaps if x.get('stop')); assert g['id'] == p['gap'] and g['stop']['key'] == key and g['stop']['pad_s'] >= 180 and g['t0'] < self.T0 + 2000 and g['t1'] > self.T0 + 2700
         assert client.post('/api/stops', json=dict(q, key='nope', add=True)).status_code == 404
         r = client.post('/api/stops', json=dict(q, key=key, add=False)).json(); assert [p for p in r['pois'] if p['sym'] == 'stop'][0]['added'] is False and not any(x.get('stop') for x in client.get('/api/gaps', params=q).json()['gaps'])
+
+
+class TestObjectHiding:
+    def objs(self, p):
+        doc = dict(model='m', moments=1, objects=[dict(id=i, label=l, word=l, kind='named', source='vlm', yoloe='x', conf=0.5, lon=0.0, lat=0.0, deg=3.0, best_t=1.0, seen=[1.0]) for i, l in enumerate(['goat', 'goat', 'sign', 'sunlight'])], regions=[])
+        json.dump(doc, open(os.path.join(p.clip_dir(), 'objects.json'), 'w'))
+
+    def test_one_object_or_every_object_with_a_label_can_be_hidden_and_shown_again_without_touching_the_data(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID); self.objs(p); before = open(os.path.join(p.clip_dir(), 'objects.json')).read()
+        get = lambda: [(o['id'], o['hidden']) for o in client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()['objects']['objects']]
+        post = lambda **b: client.post('/api/clip/object/hide', json=dict(folder=p.folder, **b))
+        assert get() == [(0, None), (1, None), (2, None), (3, 'stop')]                                   # 'sunlight' is on the lists
+        assert post(clip=CLIP_ID, id=1).json() == dict(ok=True); assert get() == [(0, None), (1, 'object'), (2, None), (3, 'stop')]
+        assert post(clip=CLIP_ID, id=1, hide=False).status_code == 200 and get()[1] == (1, None)
+        post(label='Goat '); assert get() == [(0, 'label'), (1, 'label'), (2, None), (3, 'stop')]; assert json.load(open(os.path.join(p.clip_dir(), '..', '..', 'vocab_local.json')))['hide'] == ['goat']
+        post(label='goat', hide=False); assert get()[0] == (0, None) and open(os.path.join(p.clip_dir(), 'objects.json')).read() == before
+        assert post(clip=CLIP_ID).status_code == 400 and post(label='  ').status_code == 400 and post(clip='nope', id=0).status_code == 404

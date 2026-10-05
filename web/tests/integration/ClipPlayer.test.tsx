@@ -80,3 +80,26 @@ describe('ClipPlayer: the aim of a point camera drawn over the picture', () => {
     await waitFor(() => expect(seen).toHaveBeenCalledWith(12.5)); expect(v.getAttribute('src')).toContain('/api/preview')
   })
 })
+
+describe('ClipPlayer: marks and looking at a place', () => {
+  const arcs: number[] = [], texts: string[] = []
+  const gl = new Proxy({} as Record<string, unknown>, { get: (t, k) => (k in t ? t[k as string] : (..._a: unknown[]) => ({})) })
+  const ctx2d = new Proxy({} as Record<string, unknown>, { get: (t, k) => (k === 'arc' ? (x: number) => { arcs.push(x) } : k === 'fillText' ? (s: string) => { texts.push(s) } : k in t ? t[k as string] : () => {}), set: () => true })
+  beforeEach(() => {
+    arcs.length = 0; texts.length = 0; stubMedia(); stubBrowserApis()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((type: string) => (type === 'webgl2' ? gl : ctx2d)) as never)
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 640 }); Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 360 })
+  })
+  afterEach(() => { vi.restoreAllMocks(); delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth; delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight })
+
+  it('writes the name of a thing over the picture while it is in view', async () => {
+    const marks = [{ kind: 'object' as const, label: 'goat', lon: 0, lat: 0, deg: 4, seen: [0] }]
+    const { user } = setup(<ClipPlayer {...base} marks={marks} />); await user.click(screen.getAllByRole('button', { name: 'Play' })[0]); await waitFor(() => expect(texts).toContain('goat'))
+  })
+
+  it('turns the view to a place, zooms to fit it and goes to the time, starting the video first', async () => {
+    const seen = vi.spyOn(HTMLMediaElement.prototype, 'currentTime', 'set'); const { rerender } = setup(<ClipPlayer {...base} />)
+    rerender(<ClipPlayer {...base} look={{ lon: 0, lat: 0, fov: 60, t: 7.5, n: 1 }} />); const v = document.querySelector('video') as HTMLVideoElement; fireEvent.loadedMetadata(v)
+    await waitFor(() => expect(seen).toHaveBeenCalledWith(7.5)); expect(screen.getByRole('combobox', { name: 'Where the view points' })).toHaveValue('free'); expect((screen.getByLabelText(/^view/i) as HTMLInputElement).value).toBe('60')
+  })
+})

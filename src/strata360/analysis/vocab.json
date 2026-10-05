@@ -876,7 +876,7 @@
   "thing",
   "item",
   "stuff",
-  "puddle", "patch", "patches", "sheet", "slab"
+  "puddle", "patch", "patches", "sheet", "slab", "sun", "sunlight", "sunbeam", "bright light"
  ],
  "scenery": [
   "tree trunk",
@@ -893,6 +893,7 @@
   "branch",
   "twig",
   "stick",
-  "tree", "rock", "ceiling light", "light fixture", "fluorescent"
+  "tree", "trees", "canopy", "rock", "ceiling light", "light fixture", "fluorescent",
+  "brick wall", "stone wall", "brick building", "metal bracket", "wall-mounted light", "window", "window frame", "dormer window", "door handle", "smoke detector", "metal hook", "white pipe"
  ]
 }

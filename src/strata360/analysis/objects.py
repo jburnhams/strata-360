@@ -184,6 +184,19 @@ def run_regions(images, out, models=None):
     return json.load(open(out))
 
 
+def hidden_kind(label, source, vocab):
+    """'stop' or 'scenery' when an object's label, as given by the labelling model, is on the vocab's lists of what is not shown (ground and body parts, trees and rocks), else None. A name the detector's trusted word gave is never hidden."""
+    if source != 'vlm' or not label: return None
+    k = VOC.kind_of_label(label, vocab); return k if k in ('stop', 'scenery') else None
+
+
+def annotate(doc, vocab=None):
+    """A finished objects document with `hidden` (stop, scenery or None) set on every object from the current lists, and the counts of what is hidden brought up to date. Nothing is removed: the data stays, the lists decide what the app shows. Safe to repeat."""
+    v = vocab or VOC.load(); objs = []
+    for o in doc.get('objects') or []: objs.append(dict(o, hidden=hidden_kind(o.get('label'), o.get('source'), v)))
+    return dict(doc, objects=objs, dropped_by_stoplist=sum(1 for o in objs if o['hidden'] == 'stop'), scenery_labels=dict(Counter(o.get('word') or o['label'] for o in objs if o['hidden'] == 'scenery').most_common()))
+
+
 def analyse_regions(work_dir, times, scenes, renderer, regions_label=run_regions, log=print):
     """The snow and water areas of a clip: (regions, seconds). Wide views are cut for the moments where the scene labels say there is snow or water (regions.plan), the model boxes only that, and the boxes of all views and moments are merged
     into areas (regions.merge); `raw` boxes are not kept. Nothing is asked of the model when the scene labels give nothing."""
@@ -258,11 +271,11 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
             o.update(label=lab, source='vlm'); kind = VOC.kind_of_label(lab, vocab) if lab else 'stop'; word = VOC.normalise_label(lab, vocab) if lab else ''
             if o['kind'] == 'named': book.record_named(o['yoloe'], lab or 'unclear', vocab, categories)
             elif kind == 'feature' and word: book.record_leftover(lab, clip, vocab)
-            o['word'] = word if kind != 'stop' else None; o['stop'] = kind == 'stop'; o['scenery'] = kind == 'scenery'
-            if crops_to and kind != 'stop': os.makedirs(crops_to, exist_ok=True); shutil.copy(os.path.join(crops, f"o{o['id']:03d}.jpg"), os.path.join(crops_to, f"o{o['id']:03d}.jpg"))
+            o['word'] = word if kind != 'stop' else None; o['hidden'] = kind if kind in ('stop', 'scenery') else None
+            if crops_to: os.makedirs(crops_to, exist_ok=True); shutil.copy(os.path.join(crops, f"o{o['id']:03d}.jpg"), os.path.join(crops_to, f"o{o['id']:03d}.jpg"))
         for c in categories: book.use_category(c)
-        for o in mem.objects: o['word'] = o.get('word') or (o['yoloe'] if o['source'] == 'detector' else None)
+        for o in mem.objects: o['word'] = o.get('word') or (o['yoloe'] if o['source'] == 'detector' else None); o.setdefault('hidden', None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     regions, rsecs = analyse_regions(work_dir, [t for t in times if not black_at(exposure, t)], scenes, renderer=cr, regions_label=regions_label)
-    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop') and not o.get('scenery')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('scenery')).most_common()), areas=areas, counts=counts, wearer_dropped=dropped, regions=regions, regions_seconds=rsecs, stats=book.to_json())
+    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=mem.objects, dropped_by_stoplist=sum(1 for o in mem.objects if o.get('hidden') == 'stop'), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('hidden') == 'scenery').most_common()), areas=areas, counts=counts, wearer_dropped=dropped, regions=regions, regions_seconds=rsecs, stats=book.to_json())

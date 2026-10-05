@@ -41,6 +41,7 @@ def load(path=None, local=None):
     if local:
         for cat, words in (local.get('add') or {}).items():
             c = v['categories'].setdefault(cat, dict(about='', words=[])); c['words'] = c['words'] + [w for w in words if w not in c['words']]
+        for k in ('stoplist', 'scenery'): v[k] = list(v.get(k, [])) + [w for w in local.get(k) or [] if w not in v.get(k, [])]       # the project's own words not to show
         gone = set(local.get('remove') or [])
         v['categories'] = {k: dict(c, words=[w for w in c['words'] if w not in gone]) for k, c in v['categories'].items()}
         v['always'] = {k: [w for w in ws if w not in gone] for k, ws in v['always'].items()}

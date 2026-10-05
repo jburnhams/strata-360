@@ -242,15 +242,16 @@ def scenes(ctx):
 def objects(ctx):
     from strata360.analysis import objects as OBJ, sampling, vocab as VOC
     from strata360.gps import sun as SUN
-    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); local_p = VOC.project_paths(root)['local']
+    rd = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); root = os.path.dirname(rd) if os.path.basename(rd) == 'strata360' else rd                 # the footage folder (the results are in <folder>/strata360): where the project's own word list and statistics are
+    local_p = VOC.project_paths(root)['local']
     local = json.load(open(local_p)) if os.path.exists(local_p) else None; vocab = VOC.load(local=local); scenes_doc = ctx.read('scenes.json')
     cats = OBJ.categories_of(scenes_doc, vocab); words = VOC.words_for(cats, vocab)
     try: tp = _track_file(ctx)[1]
     except RuntimeError: tp = None
     times = sampling.times_for(str(ctx.dir), tp)
     if times is None: times = [float(t) for t in range(1, int(ctx.clip_json['video']['source_frames'] / ctx.clip_json['video']['nominal_fps']), 5)]
-    rd = lambda n: ctx.read(n) if os.path.exists(ctx.path(n)) else None
-    doc = OBJ.analyse(ctx.clip.osv, str(ctx.dir), times, words, stats=VOC.stats_for(root), vocab=vocab, categories=cats, sun=SUN.load(str(ctx.dir)), exposure=rd('exposure.json'), focus=(rd('focus.json') or {}).get('samples'),
+    rj = lambda n: ctx.read(n) if os.path.exists(ctx.path(n)) else None
+    doc = OBJ.analyse(ctx.clip.osv, str(ctx.dir), times, words, stats=VOC.stats_for(root), vocab=vocab, categories=cats, sun=SUN.load(str(ctx.dir)), exposure=rj('exposure.json'), focus=(rj('focus.json') or {}).get('samples'),
                       clip=os.path.basename(str(ctx.dir)), scenes=scenes_doc, crops_to=ctx.path('objects'), log=ctx.log)
     ctx.write('objects.json', ctx.stamped(doc))
 

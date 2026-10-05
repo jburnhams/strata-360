@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type AimPath } from '../api'
-import { aimAt, drawAim } from '../aimOverlay'
+import { aimAt, drawAim, drawMarks, type Mark } from '../aimOverlay'
 import { Follower, aimPitch, vfovDeg } from '../aim'
 import { useThumbOverlay } from '../thumbOverlay'
 import { FrameStepButtons, useFrameLength } from './FrameStep'
@@ -43,13 +43,14 @@ function describeAim(a: Aim, found: boolean, speaking: boolean): string {
 const AIMS: [Aim, string, string][] = [['free', 'Free', 'stays where you put it'], ['heading', 'Heading', 'points where the runner is going, at 95°'], ['you', 'You mid', 'turns to you, the wearer, at the film\'s mid view (85°)'], ['you_close', 'You close', 'you, close up (50°)'], ['you_far', 'You far', 'you, far out with the surroundings (130°)'],
   ['person', 'Person', 'always another person (70°): stays with the same one as long as it can, and jumps as little as possible'], ['clarity', 'Clarity', 'the part of the picture with the most detail, contrast and colour (and away from a foggy lens), at 100°'], ['scenic', 'Scenic', 'the best scenery with nobody in view, at 100°']]
 
-export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, person, clarity, scenic, sounds, hasPreview, duration, window: win, autoStart, aimPath, seekTo }: {
+export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, person, clarity, scenic, sounds, hasPreview, duration, window: win, autoStart, aimPath, seekTo, marks, look }: {
   folder: string; clip: string; thumbKind?: string; heading?: { t: number[]; deg: number[] } | null; focus?: Focus[] | null; person?: Focus[] | null; clarity?: { t: number; yaw: number; pitch: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; sounds?: { original?: boolean; clean?: boolean; background?: boolean }; hasPreview: boolean; duration: number
   aimPath?: AimPath | null; seekTo?: { t: number; n: number }     // a point camera's aim to draw over the picture (a dot and the edge of its frame, through whatever view the player has: dragged, or following someone), and a place to go to
+  marks?: Mark[]; look?: { lon: number; lat: number; fov: number; t: number; n: number }     // things to mark on the picture (objects, areas of snow and water), and a place to look at: turn the view to the direction, zoom, go to the time
   window?: { start: number; end: number }; autoStart?: boolean   // play only this part of the clip (the timeline's window); autoStart begins at once
 }) {
   const video = useRef<HTMLVideoElement>(null), frameS = useFrameLength(video)
-  const canvas = useRef<HTMLCanvasElement>(null), ov = useRef<HTMLCanvasElement>(null), aimRef = useRef<AimPath | null | undefined>(aimPath), pendingSeek = useRef<number | null>(null)
+  const canvas = useRef<HTMLCanvasElement>(null), ov = useRef<HTMLCanvasElement>(null), aimRef = useRef<AimPath | null | undefined>(aimPath), marksRef = useRef<Mark[] | undefined>(marks), pendingSeek = useRef<number | null>(null)
   const st = useRef({ yaw: 0, pitch: 0, fov: 100, aim: 'heading' as Aim, tyaw: 0, tpitch: 0, decay: 0, cur: 0, fol: null as null | Follower, folAim: '' as string, lastT: 0, lastMs: 0, active: 0, gl: null as null | { draw: () => void }, raf: 0 })
   const [started, setStarted] = useState(false)
   const [overlay] = useThumbOverlay()
@@ -122,7 +123,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
       gl.uniform1f(U('yaw'), yaw); gl.uniform1f(U('pitch'), pitch); gl.uniform1f(U('tanx'), Math.tan((s.fov * Math.PI) / 360)); gl.uniform1f(U('aspect'), cv.width / cv.height)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
       const o = ov.current, c2 = o?.getContext('2d')
-      if (o && c2) { if (o.width !== cv.width || o.height !== cv.height) { o.width = cv.width; o.height = cv.height } drawAim(c2, o.width, o.height, { yaw: (yaw * 180) / Math.PI, pitch: (pitch * 180) / Math.PI, fov: s.fov, aspect: cv.width / cv.height }, aimAt(aimRef.current, now)) }          // the camera's aim through the view as it is NOW (dragged, or following someone)
+      if (o && c2) { if (o.width !== cv.width || o.height !== cv.height) { o.width = cv.width; o.height = cv.height } const view = { yaw: (yaw * 180) / Math.PI, pitch: (pitch * 180) / Math.PI, fov: s.fov, aspect: cv.width / cv.height }; drawAim(c2, o.width, o.height, view, aimAt(aimRef.current, now)); if (marksRef.current?.length) drawMarks(c2, o.width, o.height, view, marksRef.current, now) }          // the camera's aim through the view as it is NOW (dragged, or following someone)
     }
     st.current.gl = { draw }
     // Draw every frame only while something is happening (playing, dragging, zooming, a switch of aim, the follower still moving); when the picture is idle, and whenever the tab is hidden, a few checks a second: an
@@ -147,6 +148,12 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   useEffect(() => { const id = setInterval(() => { const a = st.current.aim, f = FOCUS_AIMS.includes(a) ? focusAt(video.current?.currentTime ?? 0, a) : null; setShown(describeAim(a, !!f, !!f?.speaking)) }, 500); return () => clearInterval(id) }, [focusAt, headingAt])
   useEffect(() => { st.current.fov = fov; st.current.active = performance.now() }, [fov])
   useEffect(() => { aimRef.current = aimPath; st.current.active = performance.now() }, [aimPath])
+  useEffect(() => { marksRef.current = marks; st.current.active = performance.now() }, [marks])
+  useEffect(() => {                                                                                    // look at a place: free view turned to the direction (the player's yaw is the marks' longitude), zoomed, at that time
+    if (!look) return; const s = st.current, v = video.current
+    s.aim = 'free'; s.fol = null; s.cur = 0; s.decay = 0; s.yaw = (look.lon * Math.PI) / 180; s.pitch = Math.max(-1.45, Math.min(1.45, (look.lat * Math.PI) / 180)); s.fov = look.fov; s.active = performance.now(); setAim('free'); setFov(look.fov)
+    if (started && v && v.readyState >= 1) v.currentTime = look.t; else { pendingSeek.current = look.t; setStarted(true) }
+  }, [look?.n])           // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {                                                                                    // go to the start of a camera: now, or once the video has loaded
     if (!seekTo) return; const v = video.current
     if (started && v && v.readyState >= 1) { v.currentTime = seekTo.t; st.current.active = performance.now() } else { pendingSeek.current = seekTo.t; setStarted(true) }

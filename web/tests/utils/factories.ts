@@ -1,4 +1,4 @@
-import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, RoughMix, Lyrics, LyricPhrase } from '../../src/api'
+import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, RoughMix, Lyrics, LyricPhrase, DetectedObject, Region, ObjectsInfo } from '../../src/api'
 
 // Typed builders for API payloads: sensible defaults, override what the test cares about (`makeBrowse({ can_create: false })`).
 // Add one per interface in src/api.ts as tests need it. Keep the defaults boring and valid.
@@ -102,3 +102,7 @@ export const makePointCam = (o: Partial<import('../../src/api').PointCam> = {}):
 export const makePointCams = (cams: import('../../src/api').PointCam[] = [], o: Partial<import('../../src/api').PointCams> = {}): import('../../src/api').PointCams => ({
   cams, limits: { height_m: [0, 300], before_m: [5, 400], after_m: [5, 400], fov_near: [30, 130], fov_far: [20, 130], smooth_s: [0, 4] }, defaults: { height_m: 0, before_m: 40, after_m: 40, fov_near: 95, fov_far: 55, smooth_s: 0.8, use: '' }, ...o,
 })
+
+export const makeObject = (o: Partial<DetectedObject> = {}): DetectedObject => ({ id: 0, label: 'goat', word: 'goat', kind: 'named', source: 'vlm', yoloe: 'cow', conf: 0.8, lon: -90, lat: -5, deg: 4, best_t: 1, seen: [1, 8.5], crop: true, ...o })
+export const makeRegion = (o: Partial<Region> = {}): Region => ({ kind: 'snow', lon: 40, lat: -30, w_deg: 30, h_deg: 10, polygon: [[25, -25], [55, -25], [55, -35], [25, -35]], seen: [1], n: 2, ...o })
+export const makeObjects = (o: Partial<ObjectsInfo> = {}): ObjectsInfo => ({ skipped: null, model: 'Qwen3.5', moments: 4, objects: [makeObject()], regions: [], areas: {}, scenery_labels: {}, counts: {}, ...o })
