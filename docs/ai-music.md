@@ -5,7 +5,7 @@ Status: **design, nothing built.** Decided with the user on 5 Oct:
 - everything is made **locally** (a few Gemini Pro calls, like the script writer's, are fine);
 - **mostly instrumental**, so the film's own sound is never obscured;
 - **no lyrics of our own**: the only singing is portions of the uploaded track's own vocals;
-- generation runs on the **Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM). The Mac (16 GB) does everything else.
+- the whole project, generation included, runs on the **Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM), like every other stage: no special handling for another machine.
 
 The landscape in section 3 was researched on 5 Oct 2026. The field changes monthly (several of the models below shipped in September 2026), so re-check it before building G3 or G4.
 
@@ -49,14 +49,14 @@ Ranks are from the Artificial Analysis vocal music arena (blind pairwise votes, 
 
 | Model | Licence | Fits the 5070 Ti (16 GB)? | For us |
 |---|---|---|---|
-| **ACE-Step 1.5** (Jan 2026; **1.5 XL**, 4B, Apr 2026) | **MIT** | Base: yes, easily (under 6 GB without its planner LM, 12 GB with). XL: yes with offload (12 GB; 20 GB without), and the 64 GB of RAM takes the offload. The base also runs on the Mac (MLX). | **First choice.** BPM, key and time signature as inputs; 10 s to 10 min; **instrumental** generation; **reference audio** (the original's instrumental stem); **repaint** a time range; **Complete** and **Lego** (generate an accompaniment for, or add a layer to, existing audio); **Extract** (stems); extend. Its own audio analysis can describe the uploaded track (genre, instruments). REST server or Python API. |
+| **ACE-Step 1.5** (Jan 2026; **1.5 XL**, 4B, Apr 2026) | **MIT** | Base: yes, easily (under 6 GB without its planner LM, 12 GB with). XL: yes with offload (12 GB; 20 GB without), and the 64 GB of RAM takes the offload. (The base also runs on a Mac via MLX.) | **First choice.** BPM, key and time signature as inputs; 10 s to 10 min; **instrumental** generation; **reference audio** (the original's instrumental stem); **repaint** a time range; **Complete** and **Lego** (generate an accompaniment for, or add a layer to, existing audio); **Extract** (stems); extend. Its own audio analysis can describe the uploaded track (genre, instruments). REST server or Python API. |
 | **Stable Audio 3 Medium** (1.4B; Small 459M) (May 2026) | Stability community licence (free for personal use) | yes | **Second choice, for the bake-off.** Instrumental only, which is now what we want, and trained on licensed data. Up to 6:20; **audio-to-audio** from the original; **inpainting** and **continuation**. Good for bridges, risers and extending a section. |
 | MiniMax Music 3.0 (Aug 2026) | community licence | no: about 11B parameters in all | A songs-with-lyrics model, too large for 16 GB. Not needed now. |
 | YuE2-3B (Sep 2026), HeartMuLa-oss-3B (Feb 2026), LeVo 2 | CC BY-NC / Apache-2.0 / unclear | YuE2 wants 24 GB; the others are borderline | Song-with-lyrics models. Not needed now that we write no lyrics. |
 
-**Stem separation:** Demucs (`htdemucs_ft`, MIT; vocals, drums, bass, other; fast on CUDA and fine on the Mac) by default, with ACE-Step's Extract as an alternative to compare by ear.
+**Stem separation:** Demucs (`htdemucs_ft`, MIT; vocals, drums, bass, other; fast on CUDA) by default, with ACE-Step's Extract as an alternative to compare by ear.
 
-**The Windows PC:** the 5070 Ti is a Blackwell card, so it needs a PyTorch build for CUDA 12.8 or later. `hw.gpu_device()` already returns `cuda` there. The models live in their own environment, like `.venv-vision` on the Mac.
+**The Windows PC:** the 5070 Ti is a Blackwell card, so it needs a PyTorch build for CUDA 12.8 or later. `hw.gpu_device()` already returns `cuda` there. `requirements.txt` pins torch 2.9.1, which has CUDA 12.8 wheels. The music models live in their own environment, like `.venv-vision`, because ACE-Step pins its own dependencies.
 
 ## 4. Design
 
@@ -73,7 +73,7 @@ A value from 0 to 1 per bar of film time, from signals we already have, each map
 - `audio_events` energy categories (cheering, shouting, crowd, applause);
 - motion and camera shake (`analysis/motion.py`);
 - pace, slope and heart rate from the track (`overlay/series.py`);
-- the `scenes` stage's `energy` (0 to 1) and `mood` every 5 s, already written by the local Qwen3.5-9B;
+- the `scenes` stage's `energy` (0 to 1) and `mood` every 5 s, where that stage has run (its Qwen runner is MLX, so on the PC it is present only for clips analysed on a Mac); the curve works without it;
 - the technique energy of each window (overview 18);
 - story weight: the start, the finish, and moments the director marks;
 - the voice-over and dialogue: the music is sparser under speech anyway.
@@ -150,11 +150,11 @@ The fidelity value is part of each section's key, so moving the slider rebuilds 
 
 ### 4.6 Building the take (`audio/music_gen/`)
 
-One interface: `render(section, backend, seed) -> audio`. Each take is stored under `<race dir>/music_gen/<key>/`, where the key covers the section's spec, the backend, the model version, the seed and the settings, so nothing is computed twice and takes travel with the project between the PC and the Mac. A section that changes is the only one built again. Several takes per generated section [3]; the user picks one in the Music panel.
+One interface: `render(section, backend, seed) -> audio`. Each take is stored under `<race dir>/music_gen/<key>/`, where the key covers the section's spec, the backend, the model version, the seed and the settings, so nothing is computed twice. A section that changes is the only one built again. Several takes per generated section [3]; the user picks one in the Music panel.
 - **Stems** (G0): Demucs on the uploaded track, once, kept next to `music.json`.
-- **ACE-Step** (G3, the PC; the base model also on the Mac, more slowly): generated sections and bridges; repaint for repairs.
-- **Stable Audio 3 Medium** (G4, the PC): the same section specs, for the bake-off; continuation and inpainting for bridges.
-- **Captions:** a template from the level and the original's description (from ACE-Step's analysis or written once by hand) ["sparse", "steady", "driving", "full"]. The local Qwen3.5-9B could write richer ones from the scene labels, but it runs on MLX (the Mac only); the template is the default and Qwen is an option to try.
+- **ACE-Step** (G3): generated sections and bridges; repaint for repairs.
+- **Stable Audio 3 Medium** (G4): the same section specs, for the bake-off; continuation and inpainting for bridges.
+- **Captions:** a template from the level and the original's description (from ACE-Step's analysis or written once by hand) ["sparse", "steady", "driving", "full"]. The project's Qwen3.5-9B could write richer ones from the scene labels, but its runner is MLX (Apple only), so on the PC it would need a CUDA runner first. The template is the default; Qwen is a later option.
 
 ### 4.7 Fit, check and repair (`edit/music_fit.py`)
 
@@ -175,7 +175,7 @@ A3, with the built track as "the music", plus the per-bar stem gains and the bac
 | **G0** | **Stems, re-sequencing and layering, no generative model.** Demucs stems of the uploaded track; bar-level re-sequencing to any length ending on its own ending; per-bar layer gains from a given curve; vocals only in given windows. | M |
 | **G1** | **Intensity curve** from the signals in 4.1; drawn under the music waveform. | S to M |
 | **G2** | **Score plan**: `score.py`, key estimation in `music.py`, quiet windows, the director's `sing` items (4.2a: the phrase library in the pack, the item in the prompt, `check` and `director_notes`, a prompt version bump) and the rules for a plan with no director run, sources and layers per section, and the **fidelity setting** (4.5) with per-section pins. | M |
-| **G3** | **ACE-Step on the PC**: the backend interface, generated and bridge sections in the original's style, repaint for repairs. | M |
+| **G3** | **ACE-Step**: the backend interface, generated and bridge sections in the original's style, repaint for repairs. | M |
 | **G4** | **Stable Audio 3 Medium** as the second backend; a **bake-off on Legends** (the same score, both backends, plus G0 alone, judged by ear, like `docs/bakeoff`). | S to M |
 | **G5** | **Fit, check, repair**, and the Music panel: the **fidelity slider** with its five stops, takes, the score's sections (original or generated) and sung moments drawn on the waveform, pin or rebuild a section. | M to L |
 
@@ -185,8 +185,26 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 - **G0:** the Legends track built to 60, 247 and 400 s, each ending on its own ending, with no audible jump (by ear) and every bar boundary within 10 ms of the grid; layer gains follow a given curve per bar; no singing outside the given windows (vocal stem check).
 - **G1:** unit tests on synthetic signals: the level changes only on phrase boundaries, a single loud window does not change it, and the start and finish get the top level when marked.
 - **G2:** unit tests: a draft's `sing` item becomes a stretch with no narration or clip speech, as long as its phrase rounded up to bars plus the lead-in and lead-out; the phrase starts on its original beat in the bar; a doubtful phrase, too many `sing` items, or two too close are sent back; with the track fixed, an unanchored `sing` item is sent back; bars times bar length equals the film's length within one frame; at fidelity 1.0 no bar is generated, and at 0.0 no original audio plays outside the sung moments; the share of original bars never falls as fidelity rises; a pinned section ignores the slider; moving the slider changes the keys of only the sections whose source or strength changed; no sung phrase overlaps a voice-over line or clip speech; a phrase starts on its original beat in the bar; a phrase with no window that fits is reported, not squeezed in.
-- **G3 and G4:** backends behind fakes in the unit suite (`tests/utils` fakes); one real build per backend run by hand on the PC (like the other model-dependent checks, overview section 0) and logged in `progress.md` with its time and peak GPU memory.
+- **G3 and G4:** backends behind fakes in the unit suite (`tests/utils` fakes); one real build per backend run by hand on the PC's GPU (like the other model-dependent checks, overview section 0) and logged in `progress.md` with its time and peak GPU memory.
 - **G5:** on Legends, a built track whose downbeats are all within 40 ms of the grid after fitting, with no singing outside the chosen moments, and a film of the right length that plays through the rough mix.
+
+## 5a. Ready to start (5 Oct)
+
+Every decision is taken except the fidelity default, and 0.75 is enough to start. What G needs from the rest of the plan is built: the music record and analysis (`music.py`), the lyrics and their phrases (`lyrics.py`), the voice-over fit (V4, `vo_fit.py`), the director with items and anchors (V7, L1 to L4), and the background track and sound events.
+
+**Four things to settle inside the work, not before it:**
+1. **Precise beats.** `music.py` assumes a constant tempo. Re-sequencing bars (G0) needs every beat and downbeat to within a few milliseconds, allowing drift. That beat tracker is already planned for V5 ("Beat times, precisely"). Build it once, as G0's first step, and V5 reuses it.
+2. **Demucs with torchaudio 2.9.** Recent torchaudio removed the audio file loading Demucs relies on (the project already patches DeepFilterNet for the same thing). Call Demucs's model API on samples decoded by ffmpeg, as `music.decode` does, and write the stems with ffmpeg. Pin the version.
+3. **Film length with built music (V4).** V4 fits the voice-over against a fixed music length M. With built music, M follows the film: V4 runs as "no music" for the length (L = V plus lead-in and lead-out, or the target length), and the score is built to L. That is a small mode switch in `vo_fit`, done in G2.
+4. **ACE-Step on Windows with the 5070 Ti** (G3 step 0): install it in its own environment, generate one 30 s instrumental at a given BPM and key, repaint 8 s of it, and note the actual parameter names (reference strength, cover strength) and the time and peak GPU memory, in `progress.md`. Do the same for Stable Audio 3 Medium before G4.
+
+**First piece of work (G0a), all unit-testable with synthetic audio** (`tests/unit`: clicks at a known tempo, a drifting tempo, a tone sequence with known self-similar bars):
+- the precise beat and downbeat tracker in `music.py` (V5's, shared);
+- a key estimate in `music.py` (chroma against key profiles);
+- bar features (chroma and timbre per bar) and the bar-to-bar similarity used for jump points;
+- `edit/remix.py`: a re-sequencing to a target number of bars that ends on the track's own ending, with every join on a downbeat between similar bars; output as a bar list (pure), then rendered with ffmpeg and short crossfades.
+
+Then **G0b**: Demucs stems (stored next to `music.json`, keyed by the file's signature), per-bar layer gains, and vocals only inside given windows. After G0b, a built track can already be heard in the rough mix. G1 (the intensity curve) can run alongside.
 
 ## 6. Decisions
 
@@ -196,10 +214,10 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 | G-D2 | Hosted generation or local? | **Decided 5 Oct: local only**; a few Gemini Pro calls are fine. |
 | G-D3 | Lyrics? | **Decided 5 Oct: none of our own.** Mostly instrumental; the only singing is portions of the uploaded track's vocals. |
 | G-D4 | Tempo and key? | **Follows from G-D3: the original's.** |
-| G-D5 | Where does generation run? | **Decided 5 Oct: the Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM). |
+| G-D5 | Where does generation run? | **Decided 5 Oct: the Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM), where the whole project runs. |
 | G-D6 | How many sung moments, and which form (4.3 a or b)? | **Decided 5 Oct: the director chooses the moments** (4.2a), within a limit [at most 4, 30 s apart]; the form follows the fidelity setting (4.5) and can be overridden per moment. |
-| G-D7 | How does the project folder reach the PC: a shared drive, a sync folder, or a copy of just the inputs (`music.json`, its file, the score) and the takes back? | [the takes are self-contained files by key, so copying only the inputs and the takes is enough] |
-| G-D8 | The fidelity default (4.5). | [0.75, "extended"] |
+| G-D7 | How does the project reach the generator? | **Decided 5 Oct: no question.** The whole project runs on the PC, like every other stage. |
+| G-D8 | The fidelity default (4.5). | [0.75, "extended"]: enough to start; to be tuned by ear in G4's bake-off. |
 
 ## 7. Risks
 
@@ -207,7 +225,7 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 - **Quality cannot be unit-tested.** The plan, the grid, the fit and the checks can; how it sounds needs the user's ears on each new backend or model.
 - **Separated vocals** (form b) can sound thin or carry the drums' ghost; form a avoids that.
 - **Generated material against the original:** new sections may not sound like the same band. The reference audio, the original's key and tempo, and joins on bar lines are the defences; the bake-off with G0 alone shows whether generation earns its place.
-- **Two machines:** the backends run on the PC and the rest mostly on the Mac. The takes, stored by key, are what keep them in step.
+- **The Blackwell GPU and Windows:** ACE-Step and Stable Audio 3 are developed mostly on Linux and Apple. A first-hour check on the PC (G3 step 0) confirms they install and run before anything is built on them.
 - **Churn:** the backend interface keeps any one model replaceable; re-check section 3 before G3 and G4.
 
 ## Sources (5 Oct 2026)
