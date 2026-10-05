@@ -344,6 +344,12 @@ Long stretches of the race have no footage: most nights, and the hours when the 
 **Open decisions:** (N1 is built; N2 is a working prototype, to be connected to the film next); which imagery for N2 and its licence; the gap threshold; whether the film is non-commercial (decides N3); the picture size [same as the film].
 - **Done when (N1):** unit tests: the gap finder (spans, threshold, no coverage means no gap); the speed-up arithmetic; the synthetic clip's time map is monotonic and covers the gap once; a synthetic clip is accepted by the script pack and the planner. A rendered 30 s clip of one Legends night shows the right position at three known moments (checked against the overlay's position marker).
 
+## Milestone G: generated music (design 5 Oct; options and plan in `docs/ai-music.md`)
+
+Music made to fit the film instead of the film fitted to a track: elements of the uploaded track and of the clips' background sound, any length, sung lines in the gaps between narration and dialogue, and intensity that follows the action. The result is an ordinary music track plus a score (`score.json`), so V5, the rough mix and A3 use it unchanged. The score's beat grid is planned before any audio exists, so V5 cuts on it without waiting for generation.
+**Steps:** G0 remix the uploaded track to any length, with stem layering (no generative model; also the fallback); G1 the intensity curve; G2 the score plan, vocal windows and the director's lyrics; G3 the backend interface and ACE-Step 1.5 (local, MIT, Mac); G4 ElevenLabs Music v2.5 and Lyria 3.5 (hosted), plus "bring your own take" for Suno v6; G5 fit, check and repair against the grid and the vocal windows, the Music panel and a bake-off on Legends.
+**Open:** G-D1 to G-D5 in `docs/ai-music.md` (commercial use and the uploaded track's audio, hosted spend, how recognisable the original is, the lyrics, the tempo source).
+
 ## Milestone B: rendering is fast enough to iterate (GPU first)
 
 ### B1. Parallel pieces (S)
@@ -395,7 +401,7 @@ Long stretches of the race have no footage: most nights, and the hours when the 
 - **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A). 1 Oct: 39 to 47 after A1 and V1 to V4 (measured 50%).
 
 ## Later (parked until the film exists)
-- A generated (AI) backing track made to fit the finished cut: the film's length, its block boundaries as section changes, its energy curve, and beats placed on the cuts (the reverse of V5: the music fits the picture).
+- A generated (AI) backing track: now Milestone G (below).
 - Insta360 adapter (needs sample `.insv` files; overview 12 questions 2 and 10).
 - MCP / conversational interface (Phase 9).
 - Face blur for other runners and spectators (overview 12 question 7).
