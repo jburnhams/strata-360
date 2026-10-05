@@ -86,11 +86,21 @@ def refine_beats(beats, env, fps, radius=0.03):
     return np.array(out)
 
 
+def _extend(beats, dur, n_local):
+    """The beats carried back to the start and on to the end of the track at the local beat period (the tracker only reports beats it heard, and a quiet first or last bar has none)."""
+    head = float(np.median(np.diff(beats[:n_local + 1]))); tail = float(np.median(np.diff(beats[-n_local - 1:]))); a = []; t = beats[0] - head
+    while t >= -0.005: a.append(t); t -= head
+    z = []; t = beats[-1] + tail
+    while t <= dur + 0.01: z.append(t); t += tail
+    return np.concatenate([a[::-1], beats, z])
+
+
 def beat_grid(x, bar_beats=4, S=None):
     """The actual beats and downbeats of a track, in seconds, allowing the tempo to wander: dict(bpm, beats, downbeats, bar_beats). The first downbeat is the beat phase with the most low-frequency attack."""
     fps = SR / HOP; S = spectrogram(x) if S is None else S; env, low = onset_envelope(S); bpm, _, _ = tempo_and_phase(env, fps)
     beats = refine_beats(track_beats(env, fps, bpm), env, fps) + N_FFT / 2 / SR                         # a spectrogram frame is stamped at its start; the sound it hears is centred half a window later
     if len(beats) < 2 * bar_beats: raise RuntimeError('the track is too short')
+    beats = _extend(beats, len(x) / SR, bar_beats)
     idx = np.round(beats * fps).astype(int).clip(0, len(low) - 1); sums = [low[idx[k::bar_beats]].sum() for k in range(bar_beats)]; k0 = int(np.argmax(sums))
     return dict(bpm=round(float(bpm), 2), bar_beats=bar_beats, beats=[round(float(b), 4) for b in beats], downbeats=[round(float(b), 4) for b in beats[k0::bar_beats]])
 
