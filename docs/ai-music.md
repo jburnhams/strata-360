@@ -179,8 +179,8 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 | G-D4 | Tempo and key? | **Follows from G-D3: the original's.** |
 | G-D5 | Where does generation run? | **Decided 5 Oct: the Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM). |
 | G-D6 | How many sung moments, and which form (4.3 a or b)? | [2 to 4; form a] |
-| G-D8 | The fidelity default (4.5). | [0.75, "extended"] |
 | G-D7 | How does the project folder reach the PC: a shared drive, a sync folder, or a copy of just the inputs (`music.json`, its file, the score) and the takes back? | [the takes are self-contained files by key, so copying only the inputs and the takes is enough] |
+| G-D8 | The fidelity default (4.5). | [0.75, "extended"] |
 
 ## 7. Risks
 
