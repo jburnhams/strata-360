@@ -347,8 +347,8 @@ Long stretches of the race have no footage: most nights, and the hours when the 
 ## Milestone G: generated music (design 5 Oct; options and plan in `docs/ai-music.md`)
 
 Music made to fit the film instead of the film fitted to a track: elements of the uploaded track and of the clips' background sound, any length, sung lines in the gaps between narration and dialogue, and intensity that follows the action. The result is an ordinary music track plus a score (`score.json`), so V5, the rough mix and A3 use it unchanged. The score's beat grid is planned before any audio exists, so V5 cuts on it without waiting for generation.
-**Steps:** G0 remix the uploaded track to any length, with stem layering (no generative model; also the fallback); G1 the intensity curve; G2 the score plan, vocal windows and the director's lyrics; G3 the backend interface and ACE-Step 1.5 (local, MIT, Mac); G4 ElevenLabs Music v2.5 and Lyria 3.5 (hosted), plus "bring your own take" for Suno v6; G5 fit, check and repair against the grid and the vocal windows, the Music panel and a bake-off on Legends.
-**Open:** G-D1 to G-D5 in `docs/ai-music.md` (commercial use and the uploaded track's audio, hosted spend, how recognisable the original is, the lyrics, the tempo source).
+**Steps:** G0 remix the uploaded track to any length, with stem layering (no generative model; also the fallback); G1 the intensity curve; G2 the score plan, vocal windows and the director's lyrics; G3 the backend interface and ACE-Step 1.5 (local, MIT, Mac); G4 MiniMax Music 3 (second local generator) and Stable Audio 3 (instrumental bridges); G5 fit, check and repair against the grid and the vocal windows, the Music panel and a bake-off on Legends.
+**Decided 5 Oct:** personal film, everything local (a few Gemini Pro calls are fine: the lyrics ride on the director call); the local Qwen3.5-9B writes section captions and refits lyrics. **Open:** G-D3 to G-D6 in `docs/ai-music.md` (how recognisable the original is, the lyrics, the tempo source, the Mac's memory).
 
 ## Milestone B: rendering is fast enough to iterate (GPU first)
 
