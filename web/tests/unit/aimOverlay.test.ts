@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aimAt, dir, drawAim, frameDirections, project, type View } from '../../src/aimOverlay'
+import { aimAt, dir, drawAim, drawMarks, frameDirections, marksAt, project, type Mark, type View } from '../../src/aimOverlay'
 import type { AimPath } from '../../src/api'
 
 const view = (o: Partial<View> = {}): View => ({ yaw: 0, pitch: 0, fov: 90, aspect: 16 / 9, ...o })
@@ -58,5 +58,29 @@ describe('drawAim', () => {
   it('puts a marker on the edge when the aim is out of the picture, and survives a camera wholly behind the viewer', () => {
     const c = ctx(); drawAim(c, 640, 360, view(), { yaw: 80, pitch: 0, fov: 40 }); expect(c.calls.filter(x => x === 'arc')).toHaveLength(1)
     const d = ctx(); expect(() => drawAim(d, 640, 360, view(), { yaw: 180, pitch: 0, fov: 40 })).not.toThrow(); expect(d.calls.filter(x => x === 'arc')).toHaveLength(1)
+  })
+})
+
+describe('marks: objects and areas of snow and water drawn over the video', () => {
+  const ctx = () => { const calls: string[] = [], texts: string[] = [], widths: number[] = []; const o: Record<string, unknown> = { calls, texts, widths }; return new Proxy(o, { get: (t, k) => k in t ? t[k as string] : k === 'fillText' ? (s: string) => { texts.push(s); calls.push('fillText') } : (..._a: unknown[]) => { calls.push(String(k)) }, set: (t, k, v) => { if (k === 'lineWidth') widths.push(v); t[k as string] = v; return true } }) as unknown as CanvasRenderingContext2D & { calls: string[]; texts: string[]; widths: number[] } }
+  const obj = (o: Partial<Mark> = {}): Mark => ({ kind: 'object', label: 'goat', lon: 5, lat: 0, deg: 4, seen: [10], ...o })
+  it('belong to the moments they were found at, and always when none are given', () => {
+    const ms = [obj({ seen: [10] }), obj({ label: 'sign', seen: [20] }), obj({ label: 'tree', seen: [] })]
+    expect(marksAt(ms, 10.5).map(m => m.label)).toEqual(['goat', 'tree']); expect(marksAt(ms, 18.5).map(m => m.label)).toEqual(['sign', 'tree']); expect(marksAt(ms, 14).map(m => m.label)).toEqual(['tree'])
+  })
+  it('draw a ring and the name for an object in the picture, and nothing for one behind the viewer or out of the picture', () => {
+    const c = ctx(); drawMarks(c, 640, 360, view({ fov: 100 }), [obj()], 10); expect(c.calls.filter(x => x === 'arc')).toHaveLength(2); expect(c.texts).toEqual(['goat'])             // (the ring twice: a dark edge under the colour)
+    const b = ctx(); drawMarks(b, 640, 360, view(), [obj({ lon: 180 }), obj({ lon: 80 })], 10); expect(b.calls.filter(x => x === 'arc')).toHaveLength(0); expect(b.texts).toEqual([])
+    const g = ctx(); drawMarks(g, 640, 360, view(), [obj()], 99); expect(g.calls.filter(x => x === 'arc')).toHaveLength(0)
+  })
+  it('outline an area from its corners and name it, and skip an area with a corner behind the viewer', () => {
+    const poly: [number, number][] = [[-10, -5], [10, -5], [10, -15], [-10, -15]], c = ctx()
+    drawMarks(c, 640, 360, view({ fov: 100 }), [obj({ kind: 'snow', label: 'snow', polygon: poly, lon: 0, lat: -10, deg: 20 })], 10); expect(c.calls.filter(x => x === 'closePath')).toHaveLength(2); expect(c.calls.filter(x => x === 'lineTo')).toHaveLength(6); expect(c.texts).toEqual(['snow'])
+    const d = ctx(); drawMarks(d, 640, 360, view(), [obj({ kind: 'water', label: 'water', polygon: [[0, 0], [170, 0], [170, -10], [0, -10]] })], 10); expect(d.calls).not.toContain('closePath')
+  })
+  it('make the one being looked at thicker, and keep a ring from getting too small to see or too big for the picture', () => {
+    const thick = (hot: boolean) => { const c = ctx(); drawMarks(c, 640, 360, view(), [obj({ hot })], 10); return Math.max(...c.widths) }
+    expect(thick(true)).toBeGreaterThan(thick(false))
+    expect(() => drawMarks(ctx(), 640, 360, view(), [obj({ deg: 0.01 }), obj({ deg: 170 })], 10)).not.toThrow()
   })
 })

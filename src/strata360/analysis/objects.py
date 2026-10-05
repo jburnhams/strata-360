@@ -184,6 +184,18 @@ def run_regions(images, out, models=None):
     return json.load(open(out))
 
 
+def refilter(doc, vocab=None):
+    """A finished objects document with the current stop and scenery lists applied to the labels the labelling model gave (the model is not asked again): things whose label is now a stop word are dropped, scenery ones move to `scenery_labels`.
+    Names the detector's trusted word gave are left as they are. Safe to repeat."""
+    v = vocab or VOC.load(); keep = []; stop = doc.get('dropped_by_stoplist') or 0; scenery = dict(doc.get('scenery_labels') or {})
+    for o in doc.get('objects') or []:
+        kind = VOC.kind_of_label(o['label'], v) if o.get('source') == 'vlm' and o.get('label') else 'feature'
+        if kind == 'stop': stop += 1
+        elif kind == 'scenery': w = o.get('word') or o['label']; scenery[w] = scenery.get(w, 0) + 1
+        else: keep.append(o)
+    return dict(doc, objects=keep, dropped_by_stoplist=stop, scenery_labels=scenery)
+
+
 def analyse_regions(work_dir, times, scenes, renderer, regions_label=run_regions, log=print):
     """The snow and water areas of a clip: (regions, seconds). Wide views are cut for the moments where the scene labels say there is snow or water (regions.plan), the model boxes only that, and the boxes of all views and moments are merged
     into areas (regions.merge); `raw` boxes are not kept. Nothing is asked of the model when the scene labels give nothing."""

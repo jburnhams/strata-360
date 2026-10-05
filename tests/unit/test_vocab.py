@@ -27,8 +27,8 @@ def test_a_label_is_reduced_to_its_plain_noun(label, word):
 def test_labels_are_judged_as_not_worth_reporting_filler_or_a_feature():
     v = V.load()
     for stop in ('patch of snow', 'person running', 'unclear', "person's legs", 'white fungus', 'sky', 'orange running pole', 'ski pole'): assert V.kind_of_label(stop, v) == 'stop', stop
-    for stop in ('muddy puddle', 'white patches', 'white plastic sheet'): assert V.kind_of_label(stop, v) == 'stop', stop
-    for filler in ('rock', 'large rock', 'ceiling light fixture', 'tall tree trunk', 'bare tree', 'distant hills', 'tree branch', 'small twig'): assert V.kind_of_label(filler, v) == 'scenery', filler
+    for stop in ('muddy puddle', 'white patches', 'white plastic sheet', 'sunlight through trees', 'sun', 'bright light'): assert V.kind_of_label(stop, v) == 'stop', stop
+    for filler in ('tall trees', 'tree canopy', 'rock', 'large rock', 'ceiling light fixture', 'tall tree trunk', 'bare tree', 'distant hills', 'tree branch', 'small twig'): assert V.kind_of_label(filler, v) == 'scenery', filler
     for vague in ('red object', 'object', 'a thing'): assert V.kind_of_label(vague, v) == 'stop', vague
     for feat in ('yellow sign', 'church steeple', 'brown chicken', 'utility pole', 'concrete pole'): assert V.kind_of_label(feat, v) == 'feature', feat
     assert V.agrees('chicken', 'small brown bird', v) and V.agrees('car', 'grey car', v) and not V.agrees('house', 'blue sign', v) and V.agrees('tower', 'weather vane on a steeple', v) is True

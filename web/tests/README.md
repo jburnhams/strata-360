@@ -45,6 +45,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/TrackPanel.tsx` | 88.46% | done (branches tested via interactions, some fallback cases left) |
 | `src/components/WhoPanel.tsx` | 100% | done |
 | `src/components/Workspace.tsx` | 100% | done |
+| `src/components/ObjectsCard.tsx`, `src/sceneLine.ts`, marks in `src/aimOverlay.ts`, marks and look-at in `src/components/ClipPlayer.tsx` | ~100% | done: the list, the Look buttons, snow and water areas, the marks switch, the scene line of each direction, marks drawn at their moments (`ObjectsCard.test.tsx`, `ClipPlayer.test.tsx`, `unit/aimOverlay.test.ts`, `unit/sceneLine.test.ts`); `ClipView.tsx` only wires them |
 | `src/components/FolderBrowser.tsx` | 100% | done |
 | `src/components/NoteBox.tsx` | 100% | done |
 | `src/components/Health.tsx` | 100% | done |

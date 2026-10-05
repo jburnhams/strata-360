@@ -229,6 +229,14 @@ def create_app(roots, token=None):
         try: return json.load(open(p)) if os.path.exists(p) else None
         except ValueError: return None
 
+    def objects_view(d):                                                                            # the things passed (objects.json) for the clip page: what each is, where (a direction in the world-locked frame the player uses), when it was in view; None when the stage has not run
+        ob = _j(d, 'objects.json')
+        if not ob: return None
+        crops = {n for n in os.listdir(os.path.join(d, 'objects'))} if os.path.isdir(os.path.join(d, 'objects')) else set()
+        keep = ('id', 'label', 'word', 'kind', 'source', 'yoloe', 'conf', 'lon', 'lat', 'deg', 'best_t')
+        objs = [dict({k: o.get(k) for k in keep}, seen=o.get('seen', [])[:40], crop=f"o{o['id']:03d}.jpg" in crops) for o in ob.get('objects', [])]
+        return dict(skipped=ob.get('skipped'), model=ob.get('model'), moments=ob.get('moments'), objects=objs, regions=ob.get('regions') or [], areas=ob.get('areas') or {}, scenery_labels=ob.get('scenery_labels') or {}, counts=ob.get('counts') or {})
+
     def in_film(f):
         """The ids of the clips and gaps the film's plan plays now (empty when there is no plan)."""
         from strata360.edit import project as PJ
@@ -338,6 +346,12 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404, 'the proxy video has not been made yet')
         return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
 
+    @api.get('/api/clip/object')
+    def get_clip_object(request: Request, folder: str, clip: str, id: int):                           # the picture the labelling model was shown for one object (an <img> cannot send headers: the cookie/query token authenticates)
+        auth(request); p = os.path.join(_cd(folder_of(folder), clip), 'objects', f'o{int(id):03d}.jpg')
+        if not os.path.exists(p): raise HTTPException(404, 'no picture of this object')
+        return FileResponse(p, media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
+
     @api.get('/api/clip/audio')
     def get_clip_audio(request: Request, folder: str, clip: str, kind: str = 'original'):  # the clip's stored sound: original (lossless), cleaned, or the background without speech (Range requests work); <audio> cannot send headers, so the cookie/query token authenticates
         auth(request); f = folder_of(folder); name = {'clean': 'audio_clean.flac', 'background': 'audio_background.flac'}.get(kind, 'audio_original.flac'); p = os.path.join(_cd(f, clip), name)
@@ -353,6 +367,7 @@ def create_app(roots, token=None):
         tr = effective(d); sp = _j(d, 'speakers.json'); lab = {(round(s['t0'], 2), round(s['t1'], 2)): s.get('label') for s in (sp or {}).get('segments', [])}
         out['transcript'] = [x for si, s in enumerate((tr or {}).get('segments', [])) for x in phrase_parts(s, si, lab.get((round(s['t0'], 2), round(s['t1'], 2))), flagged=bool(s.get('flags')))]
         sc = _j(d, 'scenes.json'); out['scenes'] = None if not sc else dict(summary=sc['summary'], items=[i for i in sc['items'] if i['ok'] and i['view'] == 'front'][:60])
+        out['objects'] = objects_view(d)
         idn = _j(d, 'identity.json'); out['identity'] = None if not idn else idn['summary']
         cd = _j(d, 'candidates.json'); out['candidates'] = None if not cd else [{k: v for k, v in x.items() if k not in ('transcript', 'cuts')} for x in cd['candidates']]
         ev = _j(d, 'audio_events.json')

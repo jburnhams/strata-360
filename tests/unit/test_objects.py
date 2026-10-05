@@ -199,3 +199,10 @@ def test_boxes_of_all_views_and_moments_are_merged_into_areas_and_slivers_are_dr
     got = R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 12, -21, 28, 9, 21.0), b('snow', 100, -20, 30, 10, 1.0), b('water', 10, -20, 30, 10, 1.0), b('snow', 50, -20, 1.0, 40, 1.0), b('snow', 70, 0, 60, 2.5, 1.0)])
     assert [(o['kind'], o['lon'], o['seen'], o['n']) for o in got] == [('snow', 10, [1.0, 21.0], 2), ('snow', 100, [1.0], 1), ('water', 10, [1.0], 1)]            # the sliver (1 degree wide) and the thin strip (24 times longer than high) are gone
     assert R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 10, -20, 6, 2.0, 2.0)])[0]['n'] == 1 and len(R.merge([b('snow', 10, -20, 30, 10, 1.0), b('snow', 10, -20, 6, 3.0, 2.0)])) == 2        # a small box in a large one is a different thing
+
+
+def test_a_finished_document_can_be_filtered_again_with_the_current_lists_without_the_model():
+    v = VOC.load(); mk = lambda i, label, source='vlm': dict(id=i, label=label, word=label, source=source)
+    doc = dict(objects=[mk(0, 'goat'), mk(1, 'sunlight through trees'), mk(2, 'tall trees'), mk(3, 'sign', 'detector'), mk(4, 'tree', 'detector')], dropped_by_stoplist=2, scenery_labels={'tree trunk': 5})
+    got = O.refilter(doc, v); assert [o['id'] for o in got['objects']] == [0, 3, 4] and got['dropped_by_stoplist'] == 3 and got['scenery_labels'] == {'tree trunk': 5, 'tall trees': 1}      # (a trusted detector word is not judged again)
+    assert O.refilter(got, v) == got and doc['dropped_by_stoplist'] == 2                                                                                                          # repeating changes nothing, and the original is not touched

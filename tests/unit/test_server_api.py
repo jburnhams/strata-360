@@ -584,6 +584,17 @@ class TestClipSounds:
         d = client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()
         assert d['audio_files'] == dict(original=False, clean=False, background=True)
 
+    def test_the_clip_detail_carries_the_objects_and_the_picture_of_each_is_served(self, client, make_project):
+        p = make_project(config=True); p.add_clip(CLIP_ID); get = lambda: client.get('/api/clip', params={'folder': p.folder, 'clip': CLIP_ID}).json()
+        assert get()['objects'] is None                                                                                  # the stage has not run
+        doc = dict(model='m', moments=2, skipped=None, counts=dict(wearer=3), areas={'tree': dict(boxes=2, max_conf=0.5)}, scenery_labels={'tree trunk': 4},
+                   objects=[dict(id=0, label='goat', word='goat', kind='named', source='vlm', yoloe='cow', conf=0.8, lon=-90.0, lat=-5.0, deg=4.0, best_t=1.0, seen=[1.0, 8.5], route='label', extra='dropped'), dict(id=1, label='sign', word='sign', kind='other', source='detector', yoloe='sign', conf=0.9, lon=10.0, lat=2.0, deg=3.0, best_t=2.0, seen=[2.0])],
+                   regions=[dict(kind='snow', lon=40.0, lat=-30.0, w_deg=30.0, h_deg=10.0, polygon=[[0, 0]] * 4, seen=[1.0], n=2)])
+        json.dump(doc, open(os.path.join(p.clip_dir(), 'objects.json'), 'w')); os.makedirs(os.path.join(p.clip_dir(), 'objects')); open(os.path.join(p.clip_dir(), 'objects', 'o000.jpg'), 'wb').write(b'jpg')
+        o = get()['objects']; assert [(x['id'], x['label'], x['crop']) for x in o['objects']] == [(0, 'goat', True), (1, 'sign', False)] and 'extra' not in o['objects'][0] and o['regions'][0]['kind'] == 'snow' and o['counts'] == dict(wearer=3) and o['scenery_labels'] == {'tree trunk': 4}
+        pic = lambda i: client.get('/api/clip/object', params={'folder': p.folder, 'clip': CLIP_ID, 'id': i}); assert pic(0).content == b'jpg' and pic(0).headers['content-type'] == 'image/jpeg' and pic(1).status_code == 404
+        assert client.get('/api/clip/object', params={'folder': p.folder, 'clip': '../x', 'id': 0}).status_code == 404            # a clip id cannot climb out of the project
+
 
 def test_the_interpreters_hashlib_noise_never_reaches_a_job_log_shown_in_the_web():
     from strata360.server import app as SRV

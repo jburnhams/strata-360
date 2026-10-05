@@ -64,3 +64,28 @@ export function drawAim(ctx: CanvasRenderingContext2D, w: number, h: number, vie
     const x = ((ax / m) * k + 1) / 2 * w, y = (1 - (ay / m) * k) / 2 * h; ctx.fillStyle = colour; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.fill(); ctx.stroke()
   }
 }
+
+/** A thing to mark on the picture: an object (a ring and its name) or an area of snow or water (its outline). `seen` lists the clip times it was in view; it is drawn within MARK_WINDOW_S of one (the objects are found at a few moments, not every frame). */
+export interface Mark { kind: 'object' | 'snow' | 'water'; label: string; lon: number; lat: number; deg: number; polygon?: [number, number][]; seen: number[]; hot?: boolean }
+export const MARK_WINDOW_S = 1.6
+export const marksAt = (marks: Mark[], t: number) => marks.filter(m => !m.seen.length || m.seen.some(s => Math.abs(s - t) <= MARK_WINDOW_S))
+const MARK_COLOUR = { object: '#facc15', snow: '#f8fafc', water: '#38bdf8' }
+
+/** Draws the marks that belong to time `t` over what drawAim has drawn (it clears the canvas first): a ring about as big as the object with its name beside it, or the outline of an area with its name at one corner. Nothing is drawn for what is behind the viewer. */
+export function drawMarks(ctx: CanvasRenderingContext2D, w: number, h: number, view: View, marks: Mark[], t: number) {
+  const px = (p: { x: number; y: number }) => [((p.x + 1) / 2) * w, ((1 - p.y) / 2) * h] as const
+  ctx.lineJoin = 'round'; ctx.font = `${Math.max(13, Math.round(w / 45))}px sans-serif`; ctx.textBaseline = 'middle'
+  const text = (s: string, x: number, y: number, colour: string) => { ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.strokeText(s, x, y); ctx.fillStyle = colour; ctx.fillText(s, x, y) }
+  for (const m of marksAt(marks, t)) {
+    const colour = MARK_COLOUR[m.kind], lw = Math.max(2, w / 400) + (m.hot ? 2 : 0)
+    if (m.polygon && m.polygon.length > 1) {
+      const pts = m.polygon.map(([lo, la]) => project(view, dir(lo, la))); if (pts.some(p => !p)) continue
+      for (const halo of [true, false]) { ctx.strokeStyle = halo ? 'rgba(0,0,0,.65)' : colour; ctx.lineWidth = lw + (halo ? 2 : 0); ctx.beginPath(); pts.forEach((p, i) => { const [x, y] = px(p!); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y) }); ctx.closePath(); ctx.stroke() }
+      const [x, y] = px(pts[0]!); text(m.label, x + 4, y + 10, colour); continue
+    }
+    const c = project(view, dir(m.lon, m.lat)); if (!c || Math.abs(c.x) > 1 || Math.abs(c.y) > 1) continue
+    const [x, y] = px(c), r = Math.min(Math.max((m.deg / view.fov) * w / 2, 7), w / 5)
+    for (const halo of [true, false]) { ctx.strokeStyle = halo ? 'rgba(0,0,0,.65)' : colour; ctx.lineWidth = lw + (halo ? 2 : 0); ctx.beginPath(); ctx.arc(x, y, r, 0, 2 * Math.PI); ctx.stroke() }
+    text(m.label, x + r + 4, y, colour)
+  }
+}

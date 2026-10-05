@@ -6,6 +6,9 @@ import Phrase, { type Mode } from './Phrase'
 import PlayIcons from './PlayIcons'
 import Moments from './Moments'
 import ClipPlayer from './ClipPlayer'
+import ObjectsCard, { type Look } from './ObjectsCard'
+import { sceneLine } from '../sceneLine'
+import type { Mark } from '../aimOverlay'
 import { PanelSkeleton, Skeleton } from './Skeleton'
 import WordMarker from './WordMarker'
 import { usedSet } from '../marks'
@@ -26,16 +29,18 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
   const [mode, setMode] = useState<Mode>('translated')
   const script = usePoll(() => api.script2(folder), 15000, [folder, clip])
   const used = useMemo(() => usedSet(script?.used), [script])
-  const pc = usePointCams(folder, { kind: 'clip', clip }), [aimId, setAimId] = useState<string>(), [seek, setSeek] = useState<{ t: number; n: number }>(), aimCam = pc.cams.find(c => c.id === aimId), aim = useAimPath(folder, aimCam, 'clip')           // (a point camera picked under the player: its aim is drawn over the video)
+  const pc = usePointCams(folder, { kind: 'clip', clip }), [aimId, setAimId] = useState<string>(), [seek, setSeek] = useState<{ t: number; n: number }>(), [look, setLook] = useState<Look & { n: number }>(), [marked, setMarked] = useState(true), aimCam = pc.cams.find(c => c.id === aimId), aim = useAimPath(folder, aimCam, 'clip')           // (a point camera picked under the player: its aim is drawn over the video)
   useEffect(() => { setC(undefined); setErr(undefined); api.clip(folder, clip).then(setC).catch(e => setErr(e.message)) }, [folder, clip])
   const reload = () => api.clip(folder, clip).then(setC).catch(() => {})
   useEffect(() => { if (c && focus != null) document.getElementById(`seg-${Math.round(focus * 100)}`)?.scrollIntoView({ block: 'center' }) }, [c, focus])
   if (err) return <p className="text-stone-500">{err}</p>
   if (!c) return <div className="space-y-4"><Skeleton className="aspect-video w-full" /><div className="grid gap-4 md:grid-cols-2"><PanelSkeleton title="When and where" /><PanelSkeleton title="Motion and picture" /></div><PanelSkeleton title="Transcript" rows={4} /></div>
+  const marks: Mark[] = [...(c.objects?.objects ?? []).map(o => ({ kind: 'object' as const, label: o.label ?? o.yoloe, lon: o.lon, lat: o.lat, deg: o.deg, seen: o.seen, hot: look?.lon === o.lon && look?.lat === o.lat })),
+    ...(c.objects?.regions ?? []).map(r => ({ kind: r.kind, label: r.kind, lon: r.lon, lat: r.lat, deg: Math.max(r.w_deg, r.h_deg), polygon: r.polygon, seen: r.seen, hot: look?.lon === r.lon && look?.lat === r.lat }))]
   const utc = String(c.time.start_utc ?? ''), m = c.motion, sc = c.scenes?.summary, id = c.identity
   return (
     <div className="space-y-4">
-      <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} person={c.person} clarity={c.clarity} scenic={c.scenic} sounds={c.audio_files} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} aimPath={aim.path} seekTo={seek} />
+      <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} person={c.person} clarity={c.clarity} scenic={c.scenic} sounds={c.audio_files} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} aimPath={aim.path} seekTo={seek} marks={marked ? marks : undefined} look={look} />
       <CamAimPicker pc={pc} picked={aimId} onPick={setAimId} onGo={cam => { setAimId(cam.id); setSeek({ t: Math.max((cam.window?.[0] ?? 0) - Date.parse(utc) / 1000, 0), n: Date.now() }) }} note={aim.err} />
       <div className="-mt-2 flex items-center justify-between px-1 text-xs text-stone-500"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : 'no thumbnail yet'}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
       {Number.isFinite(Date.parse(utc)) && <Card title="Where on the route"><PointCamTool folder={folder} source={{ kind: 'clip', clip }} pc={pc} map={h => <TrackMap folder={folder} tz={tz} span={[Date.parse(utc) / 1000, Date.parse(utc) / 1000 + c.video.source_frames / c.video.nominal_fps]} label={`Clip ${clip.replace(/^CAM_/, '').replace(/_D$/, '')}`} {...h} />} /></Card>}
@@ -52,8 +57,10 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
         <Card title="What is in shot">
           <Kv k="People" v={id ? `median ${id.median_people}, up to ${id.max_people}` : null} /><Kv k="You in view" v={id ? `${Math.round(Number(id.me_fraction) * 100)}% of samples` : null} />
           <Kv k="Settings" v={sc ? Object.keys(sc.settings ?? {}).join(', ') : null} /><Kv k="Tags" v={sc?.tags?.slice(0, 8).join(', ')} /><Kv k="Lighting" v={sc ? Object.keys(sc.lighting ?? {}).join(', ') : null} />
+          <Kv k="Ahead" v={sceneLine(sc?.front)} /><Kv k="Behind" v={sceneLine(sc?.rear)} />
           {!sc && <p className="text-sm text-stone-500">Scene tagging has not run for this clip yet.</p>}
         </Card>
+        <Card title="Things passed"><ObjectsCard folder={folder} clip={clip} info={c.objects} marked={marked} onMarked={setMarked} onLook={l => setLook({ ...l, n: Date.now() })} /></Card>
         <Card title="Where (OpenStreetMap)">
           {!c.places ? <p className="text-sm text-stone-500">The places lookup has not run for this clip yet.</p>
             : !c.places.covered ? <p className="text-sm text-stone-500">{c.places.note}</p>
