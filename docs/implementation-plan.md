@@ -344,6 +344,12 @@ Long stretches of the race have no footage: most nights, and the hours when the 
 **Open decisions:** (N1 is built; N2 is a working prototype, to be connected to the film next); which imagery for N2 and its licence; the gap threshold; whether the film is non-commercial (decides N3); the picture size [same as the film].
 - **Done when (N1):** unit tests: the gap finder (spans, threshold, no coverage means no gap); the speed-up arithmetic; the synthetic clip's time map is monotonic and covers the gap once; a synthetic clip is accepted by the script pack and the planner. A rendered 30 s clip of one Legends night shows the right position at three known moments (checked against the overlay's position marker).
 
+## Milestone G: generated music (design 5 Oct; options and plan in `docs/ai-music.md`)
+
+Music built for the film instead of the film fitted to a track: mostly instrumental, so the film's own sound stays clear; any length; intensity that follows the action; the uploaded track's own sung phrases let through only in a few quiet moments (no lyrics of our own). The result is an ordinary music track plus a score (`score.json`), so V5, the rough mix and A3 use it unchanged. The grid is the uploaded track's, so V5 cuts on it without waiting for any of this.
+**Steps:** G0 stems (Demucs), re-sequencing the uploaded track to any length and per-bar layering, no generative model (already most of the idea, and the fallback); G1 the intensity curve; G2 the score plan, quiet windows, the original's sung phrases placed by the **director** with a new `sing` draft item (phrase id plus the picture under it; the item is the quiet window), and a **fidelity slider** from "the record" (only the original's audio) to "in its style" (all generated) [default 0.75, "extended"], with per-section pins; G3 ACE-Step 1.5 on the Windows PC for new sections in the original's style; G4 Stable Audio 3 Medium and a bake-off on Legends; G5 fit, check and repair, and the Music panel.
+**Decided 5 Oct:** personal film; everything local (a few Gemini Pro calls are fine); no lyrics of our own; tempo and key are the original's; everything runs on the Windows PC (RTX 5070 Ti 16 GB) like the rest of the project; the director chooses the sung moments. **Open:** only the fidelity default (G-D8, [0.75]). **Ready to start (5 Oct):** G0a first (the precise beat tracker shared with V5, key estimation, bar similarity, `edit/remix.py`); see `docs/ai-music.md` 5a.
+
 ## Milestone B: rendering is fast enough to iterate (GPU first)
 
 ### B1. Parallel pieces (S)
@@ -395,7 +401,7 @@ Long stretches of the race have no footage: most nights, and the hours when the 
 - **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A). 1 Oct: 39 to 47 after A1 and V1 to V4 (measured 50%).
 
 ## Later (parked until the film exists)
-- A generated (AI) backing track made to fit the finished cut: the film's length, its block boundaries as section changes, its energy curve, and beats placed on the cuts (the reverse of V5: the music fits the picture).
+- A generated (AI) backing track: now Milestone G (above).
 - Insta360 adapter (needs sample `.insv` files; overview 12 questions 2 and 10).
 - MCP / conversational interface (Phase 9).
 - Face blur for other runners and spectators (overview 12 question 7).
