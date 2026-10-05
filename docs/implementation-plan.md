@@ -346,9 +346,9 @@ Long stretches of the race have no footage: most nights, and the hours when the 
 
 ## Milestone G: generated music (design 5 Oct; options and plan in `docs/ai-music.md`)
 
-Music made to fit the film instead of the film fitted to a track: elements of the uploaded track and of the clips' background sound, any length, sung lines in the gaps between narration and dialogue, and intensity that follows the action. The result is an ordinary music track plus a score (`score.json`), so V5, the rough mix and A3 use it unchanged. The score's beat grid is planned before any audio exists, so V5 cuts on it without waiting for generation.
-**Steps:** G0 remix the uploaded track to any length, with stem layering (no generative model; also the fallback); G1 the intensity curve; G2 the score plan, vocal windows and the director's lyrics; G3 the backend interface and ACE-Step 1.5 (local, MIT, Mac); G4 MiniMax Music 3 (second local generator) and Stable Audio 3 (instrumental bridges); G5 fit, check and repair against the grid and the vocal windows, the Music panel and a bake-off on Legends.
-**Decided 5 Oct:** personal film, everything local (a few Gemini Pro calls are fine: the lyrics ride on the director call); the local Qwen3.5-9B writes section captions and refits lyrics. **Open:** G-D3 to G-D6 in `docs/ai-music.md` (how recognisable the original is, the lyrics, the tempo source, the Mac's memory).
+Music built for the film instead of the film fitted to a track: mostly instrumental, so the film's own sound stays clear; any length; intensity that follows the action; the uploaded track's own sung phrases let through only in a few quiet moments (no lyrics of our own). The result is an ordinary music track plus a score (`score.json`), so V5, the rough mix and A3 use it unchanged. The grid is the uploaded track's, so V5 cuts on it without waiting for any of this.
+**Steps:** G0 stems (Demucs), re-sequencing the uploaded track to any length and per-bar layering, no generative model (already most of the idea, and the fallback); G1 the intensity curve; G2 the score plan, quiet windows and placing the original's sung phrases (director anchors plus rules); G3 ACE-Step 1.5 on the Windows PC for new sections in the original's style; G4 Stable Audio 3 Medium and a bake-off on Legends; G5 fit, check and repair, and the Music panel.
+**Decided 5 Oct:** personal film; everything local (a few Gemini Pro calls are fine); no lyrics of our own; tempo and key are the original's; generation on the Windows PC (RTX 5070 Ti 16 GB). **Open:** G-D6 and G-D7 in `docs/ai-music.md` (how many sung moments and how they sound; how the project reaches the PC).
 
 ## Milestone B: rendering is fast enough to iterate (GPU first)
 
@@ -401,7 +401,7 @@ Music made to fit the film instead of the film fitted to a track: elements of th
 - **E4.** Raise `fail_under` as each milestone adds tests (target 50% after V and A). 1 Oct: 39 to 47 after A1 and V1 to V4 (measured 50%).
 
 ## Later (parked until the film exists)
-- A generated (AI) backing track: now Milestone G (below).
+- A generated (AI) backing track: now Milestone G (above).
 - Insta360 adapter (needs sample `.insv` files; overview 12 questions 2 and 10).
 - MCP / conversational interface (Phase 9).
 - Face blur for other runners and spectators (overview 12 question 7).

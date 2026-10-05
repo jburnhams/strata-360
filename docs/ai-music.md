@@ -1,182 +1,179 @@
 # Generated music (plan item G): options and plan, 5 Oct 2026
 
-Status: **design, nothing built.** **Decided 5 Oct (user): the film is personal, and the music is made locally**; the only remote calls are a few to Gemini Pro, as the script writer already makes. The landscape below was researched on 5 Oct 2026. This field changes monthly (three of the models below shipped in September 2026), so re-check section 3 before building G3 or G4.
+Status: **design, nothing built.** Decided with the user on 5 Oct:
+- the film is **personal**;
+- everything is made **locally** (a few Gemini Pro calls, like the script writer's, are fine);
+- **mostly instrumental**, so the film's own sound is never obscured;
+- **no lyrics of our own**: the only singing is portions of the uploaded track's own vocals;
+- generation runs on the **Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM). The Mac (16 GB) does everything else.
 
-## 1. The idea (from the user, 5 Oct)
+The landscape in section 3 was researched on 5 Oct 2026. The field changes monthly (several of the models below shipped in September 2026), so re-check it before building G3 or G4.
 
-Make the film's music instead of only fitting the film to a track:
+## 1. The idea
+
+Music made for the film instead of only fitting the film to a track:
 - **Elements of both** the uploaded track (`music.json`) and the clips' own background sound (`audio_background.flac`, the speech-free TIGER-DnR effects track).
 - **Any length**: the film's length, not the track's.
-- **Lyrics in the quiet moments**: sung lines where there is no voice-over and no clip speech.
-- **Intensity follows the action**: quieter and sparser on the long grind, fuller at the start, the finish, the crowds and the hard climbs.
+- **Mostly instrumental**, with **a few sung phrases from the uploaded track** placed in quiet moments, where there is no voice-over and no clip speech.
+- **Intensity follows the action**: sparser on the long grind, fuller at the start, the finish, the crowds and the hard climbs.
 
 ## 2. What changes from today
 
-Today the uploaded track is fixed: it sets the film's length (D7), `edit/music.py` finds its beats and energy for the planner, and `edit/lyrics.py` finds where it is sung so narration avoids it (V7). Generating the music turns three of those round:
+Today the uploaded track is fixed. It sets the film's length (D7), `edit/music.py` finds its beats and energy for the planner, and `edit/lyrics.py` finds where it is sung so narration avoids it (V7). The new design changes three of those:
 
-1. **The picture sets the music's length** (the old "Later" item: the reverse of V5). The voice-over-driven cut (V4) gives the length; the music is written to it.
-2. **We choose the tempo and the bar count**, so the beat grid exists *before* the audio does. V5 snaps cuts to the planned grid; the generated audio is then checked against it (G5). This removes the ordering problem: we do not have to generate, cut, and then generate again.
-3. **Vocals are something we place, not avoid.** The score puts sung lines into the gaps between narration and dialogue; the same `vocal_spans` check then confirms they landed there.
+1. **The picture sets the music's length** (the old "Later" item: the reverse of V5). The voice-over-driven cut (V4) gives the length, and the music is built to it.
+2. **The beat grid is the uploaded track's, planned before any audio is made.** The tempo, metre and key are the original's. They have to be, because its own vocal phrases and sections are reused. V5 snaps cuts to that grid, and the built track is checked against it afterwards (G5). There is no generate, cut, generate-again loop.
+3. **Vocals are placed, not avoided.** The original's vocals are removed everywhere (its instrumental stem is used) except in a few chosen moments. In those, a sung phrase from the original plays at its own place in the bar. `lyrics.py` already finds the phrases and their times.
 
-**The key design point:** the result is an ordinary music track plus a score sidecar. `music.json` records it (with `source: generated` and the score key), so V5's beat snapping, the rough mix, the A3 ducking and the GUI's waveform work unchanged.
+**The key design point:** the result is an ordinary music track plus a score sidecar. `music.json` records it (with `source: built` and the score key), so V5's beat snapping, the rough mix, the A3 ducking and the GUI's waveform work unchanged.
+
+**A consequence:** G0, below, delivers most of the idea **with no generative model at all**: the original's instrumental stem re-sequenced to any length, layers following the intensity, and its vocals let through only in the chosen moments. Generation (G3) adds what re-sequencing cannot: new material in the original's style where the original has nothing at the needed intensity (a sparse night section, a long build to the finish), and smooth bridges between distant parts of the track.
 
 ## 3. The landscape (5 Oct 2026)
 
-Quality ranks are from the Artificial Analysis vocal music arena (blind pairwise votes; Elo). No open-weight model is on that leaderboard, so open models' quality claims are their authors' own.
+### Hosted services (for reference only: not planned, decision G-D2)
 
-### Hosted services
+Ranks are from the Artificial Analysis vocal music arena (blind pairwise votes, Elo).
 
-| Service | Vocal arena Elo | Lyrics | Section timing | Audio in | API | Notes |
-|---|---|---|---|---|---|---|
-| **Suno v6** (9 Sep 2026; v6, v6-wild, v6-mini) | **1142 (1st)** | yes | soft (structure tags) | yes: covers, mashups, sampling, plain-language edits of a section | **no official API**; a partner API was being "explored" (July 2026). Resellers drive users' accounts, against the terms | Best quality. Trained partly on licensed catalogues (Warner, BMG, Believe); uploaded audio is screened for unauthorised use. Usable only by hand: export and drop in (G5 "bring your own take"). |
-| **Mureka V9.5** (Aug 2026) | 1103 (3rd) | yes | soft | reference tracks, melody IDs, cloned vocals | REST through resellers; check for an official one before building | Strong vocals; least known to us. |
-| **Google Lyria 3.5** (Gemini API since 4 Sep 2026) | 1052 (5th) | yes, with section tags | **timestamps in the prompt** (`[0:00 - 0:10] Intro: ...`), soft | **none** (text or image only) | **official**, the Gemini API we already use for the script writer; about $0.08 a song | Multi-minute songs, 44.1 kHz WAV, SynthID watermark, artist imitation and copyrighted lyrics blocked. Returns lyrics and structure, no word timings. |
-| **ElevenLabs Music v2.5** (11 Sep 2026) | 1012 (7th) | yes, per section | **hard: a composition plan of up to 30 sections, each 3 to 120 s in ms, 3 s to 10 min in total** | **inpainting on uploaded audio** by song ID and ms ranges (remix, extend, stitch) | **official** | Commercial use on every plan; optional **word-level timestamps**; stem separation; video-to-music in their Studio. A track that references another artist's work cannot be downloaded. |
-| MiniMax Music 2.6 and 3.0 (Aug 2026) | 987 to 1001 | yes, section tags | caption with BPM and key; length 10 to 300 s | cover model (6 s to 6 min reference) | official; $0.15 a song | 3.0 also has open weights (below). |
-| Stable Audio 3 Large (May 2026) | not ranked (instrumental) | **no vocals** | length; inpainting ranges | audio-to-audio, inpainting, continuation | official (and fal) | Instrumental beds and transitions only. |
-| Udio | n/a | | | | **no API; downloads disabled** since the UMG settlement (licensed walled garden) | **Not usable.** |
+| Service | Elo | Notes |
+|---|---|---|
+| Suno v6 (9 Sep 2026) | 1142 (1st) | Best quality. No official API (a partner API was being "explored" in July). Screens uploaded audio for unauthorised use. |
+| Mureka V9.5 (Aug 2026) | 1103 (3rd) | Reference tracks, melody IDs; REST via resellers. |
+| Google Lyria 3.5 (Gemini API, 4 Sep 2026) | 1052 (5th) | Soft section timestamps in the prompt; **no audio input**; about $0.08 a song. |
+| ElevenLabs Music v2.5 (11 Sep 2026) | 1012 (7th) | Hard per-section durations (composition plans), inpainting on uploaded audio, word timestamps. Will not release a track that references another artist's work. |
+| MiniMax Music 2.6 / 3.0 (Aug 2026) | 987 to 1001 | Cover model takes reference audio. |
+| Stable Audio 3 Large (May 2026) | instrumental | API only; the smaller sizes are open (below). |
+| Udio | n/a | No API, downloads disabled since its UMG settlement. |
 
 ### Open weights (run locally)
 
-| Model | Licence | Runs on | What matters for us |
+| Model | Licence | Fits the 5070 Ti (16 GB)? | For us |
 |---|---|---|---|
-| **ACE-Step 1.5** (Jan 2026; **1.5 XL**, 4B, Apr 2026) | **MIT** | **Mac (MLX)**, CUDA, ROCm, Intel, CPU. Under 6 GB in DiT-only mode, 12 GB+ with the planner LM, XL 20 GB+ (12 GB with offload) | **BPM, key and time signature as inputs**, length 10 s to 10 min, lyrics with structure tags, **repaint a time range** (new lyrics or style for that range only), cover and reference-audio guidance, **Lego** (add a track to existing audio), Extract and Complete, vocal-to-backing-track, **LRC lyric timestamps** out, LoRA training, REST server (`acestep-api`). Seconds per song on a good GPU. |
-| MiniMax Music 3.0 (13 Aug 2026) | MiniMax-Music3 **Community Licence** (read the terms before any commercial use) | heavy: 8B + 0.6B LLMs, 2.4B flow model; no official VRAM figure, reported running on Apple Metal | Lyrics with section tags plus a structured caption (genre, BPM, key, emotional progression, arrangement); up to 5 min; 32 kHz. No reference audio or editing. |
-| YuE2-3B (Sep 2026) | **CC BY-NC 4.0** (non-commercial output) | Linux, 24 GB NVIDIA | Claims to beat Suno v6 in a single generation (its own benchmark); zero-shot covers; outputs an editable ABC score as well as audio. Out unless the film is non-commercial and a CUDA machine is at hand. |
-| HeartMuLa-oss-3B (Feb 2026) | Apache-2.0 | CUDA; no stated Mac support | Lyrics and tags, up to about 4 min; reference-audio conditioning not released yet. Ships a lyrics transcriber (HeartTranscriptor) worth trying in place of faster-whisper in `lyrics.py`. |
-| LeVo 2 / SongGeneration 2 (Tencent) | unclear (Hugging Face card says Apache-2.0, repository terms are custom) | CUDA | Strong reported quality; licence to settle before use. |
-| Stable Audio 3 Small and Medium (May 2026) | free below $1M annual revenue | small (459M, 1.4B) | Instrumental only; up to 6:20; inpainting and continuation. A candidate for transitions and "bridge" bars between sections. |
+| **ACE-Step 1.5** (Jan 2026; **1.5 XL**, 4B, Apr 2026) | **MIT** | Base: yes, easily (under 6 GB without its planner LM, 12 GB with). XL: yes with offload (12 GB; 20 GB without), and the 64 GB of RAM takes the offload. The base also runs on the Mac (MLX). | **First choice.** BPM, key and time signature as inputs; 10 s to 10 min; **instrumental** generation; **reference audio** (the original's instrumental stem); **repaint** a time range; **Complete** and **Lego** (generate an accompaniment for, or add a layer to, existing audio); **Extract** (stems); extend. Its own audio analysis can describe the uploaded track (genre, instruments). REST server or Python API. |
+| **Stable Audio 3 Medium** (1.4B; Small 459M) (May 2026) | Stability community licence (free for personal use) | yes | **Second choice, for the bake-off.** Instrumental only, which is now what we want, and trained on licensed data. Up to 6:20; **audio-to-audio** from the original; **inpainting** and **continuation**. Good for bridges, risers and extending a section. |
+| MiniMax Music 3.0 (Aug 2026) | community licence | no: about 11B parameters in all | A songs-with-lyrics model, too large for 16 GB. Not needed now. |
+| YuE2-3B (Sep 2026), HeartMuLa-oss-3B (Feb 2026), LeVo 2 | CC BY-NC / Apache-2.0 / unclear | YuE2 wants 24 GB; the others are borderline | Song-with-lyrics models. Not needed now that we write no lyrics. |
 
-### What this means for us
+**Stem separation:** Demucs (`htdemucs_ft`, MIT; vocals, drums, bass, other; fast on CUDA and fine on the Mac) by default, with ACE-Step's Extract as an alternative to compare by ear.
 
-1. **The uploaded track's audio cannot go to the hosted services freely.** Suno screens uploads, ElevenLabs will not release a track that references other artists' work, and Lyria takes no audio at all. So "elements of the uploaded track" splits in two:
-   - **its features as text**: tempo, key, time signature, instrumentation, the energy shape, the sections. These work with any backend, and they are what keeps the generated music "in the family" of the original;
-   - **its actual audio**: stems, sections, motifs. That needs either a local model (ACE-Step: reference audio, cover, repaint, Lego) or a track the user owns the rights to (then ElevenLabs inpainting is the hosted route).
-2. **Exact timing.** Only ElevenLabs takes hard per-section durations. ACE-Step takes BPM and total length, and its repaint works on time ranges, so we can enforce sections by repainting. Lyria's timestamps are hints. Whatever the backend, G5 measures the result and repairs it.
-3. **Quality against control.** The best-sounding services (Suno, Mureka) are the hardest to automate.
-4. **Decided 5 Oct: local only.** The hosted services above are kept for reference and are not planned. That leaves the models that run on the Mac: **ACE-Step 1.5** (MLX; first), **MiniMax Music 3** (reported on Metal; second, for the bake-off; its community licence allows personal use), and **Stable Audio 3 Small or Medium** for instrumental bridges. YuE2, HeartMuLa and LeVo 2 need CUDA; YuE2's non-commercial licence would now be acceptable if a CUDA machine were ever at hand. Because the film is personal and nothing is uploaded, the uploaded track's own audio (stems, sections, reference) can be used freely.
+**The Windows PC:** the 5070 Ti is a Blackwell card, so it needs a PyTorch build for CUDA 12.8 or later. `hw.gpu_device()` already returns `cuda` there. The models live in their own environment, like `.venv-vision` on the Mac.
 
 ## 4. Design
 
 ```
-footage signals ─► intensity curve (G1) ─┐
-voice-over timeline (V4) ─► vocal windows ┼─► score plan (G2) ─► backend (G3/G4) ─► fit, check, repair (G5) ─► music track + score ─► V5 cuts, A3 mix
-uploaded track ─► tempo, key, sections ───┤        ▲ lyrics (director, V7)
-background sound ─► cadence, swells ──────┘
+footage signals ──► intensity curve (G1) ──┐
+voice-over timeline (V4) ──► quiet windows ┼──► score plan (G2) ──► build: original stems + generated sections (G0, G3, G4) ──► fit, check, repair (G5) ──► music track + score ──► V5 cuts, A3 mix
+uploaded track ──► grid, key, stems, sung phrases (lyrics.py) ──┤
+background sound ──► swells, footsteps ────┘
 ```
 
 ### 4.1 Intensity curve (`edit/intensity.py`, `intensity.json`)
 
-A value from 0 to 1 per bar of film time, from signals we already have, each mapped through the plan (EDL) into film time:
+A value from 0 to 1 per bar of film time, from signals we already have, each mapped through the plan into film time:
 - `audio_events` energy categories (cheering, shouting, crowd, applause);
 - motion and camera shake (`analysis/motion.py`);
-- pace, slope and **heart rate** from the track (`overlay/series.py`);
-- the `scenes` stage's `energy` (0 to 1) and `mood` every 5 s, which the local Qwen3.5-9B already writes for every clip;
-- the technique energy of each window (overview 18, `energy`);
+- pace, slope and heart rate from the track (`overlay/series.py`);
+- the `scenes` stage's `energy` (0 to 1) and `mood` every 5 s, already written by the local Qwen3.5-9B;
+- the technique energy of each window (overview 18);
 - story weight: the start, the finish, and moments the director marks;
-- the voice-over and dialogue as *negative space*: the music thins under speech anyway.
+- the voice-over and dialogue: the music is sparser under speech anyway.
 
-The curve is smoothed, quantised to bars, and given hysteresis so the level does not flicker. Changes land on phrase boundaries (4 or 8 bars [default 4]).
+The curve is smoothed, quantised to bars, and given hysteresis so the level does not flicker. Changes land on phrase boundaries [4 bars].
 
 ### 4.2 Score plan (`edit/score.py`, `score.json`)
 
-Pure Python, the heart of the feature, and fully unit-testable without audio.
-- **Grid:** tempo [default: the uploaded track's BPM; option: from the runner's cadence, often 160 to 180 steps a minute, or half of it], time signature and key from the uploaded track (key needs a chroma-based estimate added to `music.py`). Bars = the film length (V4) over the bar length, rounded; the remainder goes to a tail or a 1 to 3% stretch.
-- **Sections:** cut where the intensity level changes; each has bars, start and end in film time, an energy level, style and instrumentation tags (from the uploaded track's description plus the level), and its **sources** (generated, a stretch of the original track, or a background sound layer).
-- **Vocal windows:** stretches of at least N bars [default 4] with no voice-over line and no clip speech (V4's timeline). Each gets a syllable budget from its bar count and the tempo.
-- **Lyrics:** written by the director (V7, Gemini Pro) in the same call as the script, so no extra remote call: it gets the vocal windows with their bar counts and budgets and what happens on screen there, and returns lyrics per window [default: English, first person, about the race]. Checks: syllables within budget, no artist names and no existing lyrics (Lyria refuses them; they would also be a licence problem).
+Pure Python, the heart of the feature, and unit-testable without audio.
+- **Grid:** the uploaded track's tempo, metre and first downbeat (`music.json`), plus its key (a chroma estimate to add to `music.py`). Bars = the film's length over the bar length, rounded; the remainder goes to the ending's fade or a stretch of 3% at most.
+- **Sections:** cut where the intensity level changes. Each section has its bars, its film times and a level. Its **source** is one of:
+  - `original`: a stretch of the uploaded track, chosen by matching its own section energy to the level;
+  - `generated`: new instrumental material in the original's style, key and tempo;
+  - `bridge`: a few bars that join two sources.
 
-### 4.3 Where the local Qwen3.5-9B helps
+  Each section also has its **layers**: which stems play and at what gain per bar.
+- **Sung moments:** the original's phrases (`lyrics.py`: the counted phrases, with your corrections) placed only in **quiet windows**: stretches of at least the phrase's length plus a bar each side with no voice-over line and no clip speech (V4's timeline). There are few of them [2 to 4 in a film; the hook near the finish when it fits]. A phrase keeps its place in the bar, so it starts on the same beat as in the original.
+- **Who chooses the moments:** the director (V7, Gemini Pro) already sees the lyrics with their times and can anchor "the hook on the finish line"; this adds no extra call. The rules then place a phrase in the nearest quiet window that fits, and report any that cannot be placed. With no director run, the rules pick the best-confidence phrases for the highest-intensity quiet windows.
 
-The project already runs Qwen3.5-9B (4-bit, MLX, in `.venv-vision`): the `scenes`, `objects` and `regions` stages use it for pictures, and `analysis/vocab_llm.py` runs batches of text prompts through it. It cannot hear audio, so it describes and rewrites; it does not judge takes. Its jobs here, in the order they are needed:
-1. **Intensity (G1):** its scene `energy` and `mood` per 5 s are already on disk: an input, with no new calls.
-2. **Section captions (G2):** each section's style caption for the generator, written from the section's level, the uploaded track's description, and what is on screen (the scene labels: "night, forest, head torch, rain"). Many short prompts, so local is right, and greedy decoding makes them repeatable (the caption is part of the take's key).
-3. **Fitting the lyrics (G2, G5):** Gemini writes the lyrics once; Qwen rewrites any line over its syllable budget, and rewrites a window's lines when the cut changes and the window shrinks, so a changed cut does not need another Gemini call.
-4. **Repair wording (G5):** when a take sings in the wrong place, the repaint for that range needs its lyrics and caption restated for the shorter span.
+### 4.3 How a sung moment sounds
 
-It shares the machine with the generator, so the two run one after the other (`pipeline.guard.heavy`), never together.
+Two ways, both to try by ear on Legends:
+- **(a) The original's own bars** [default]: the full mix of the original around the phrase (its accompaniment and all), crossfaded on bar lines into what comes before and after. It sounds exactly like the record, but the intensity is whatever the original has there.
+- **(b) The phrase's vocal stem over the film's own accompaniment**: either the original's instrumental stem from elsewhere, or a generated one (ACE-Step Complete: an accompaniment for a given vocal). This is more flexible, but separated vocals carry faint artefacts, so it needs a careful listen.
+
+Everywhere else the original's **vocal stem is off**, and a G5 check makes sure no singing leaks through: separating vocals from a generated take catches a choir or hum the generator added.
 
 ### 4.4 Using both sources
 
-From least to most dependent on the original audio:
-1. **Style transfer by description** (any backend): the uploaded track's tempo, key, metre, instrumentation and energy shape written into the style tags.
-2. **Stem layering** (no generative model): separate stems (Demucs, or ACE-Step Extract) and fade layers in and out per bar to follow the intensity curve, the way adaptive game music does. This gives finer control than any generator, and works on the original track as well as on a generated one.
-3. **Background sound as an instrument**: footsteps set or confirm the tempo; crowd swells timed to the start, finish and aid stations; found-sound intros and outros that blend into the music; the existing ambience swell in quiet music (overview 5c-3). Generators handle field recordings poorly, so these are mixed in on the beat, not generated from.
-4. **Real sections of the original**: its intro, its hook or its ending kept, with generated sections bridging and extending (ACE-Step repaint, cover or Lego; allowed by G-D1).
+1. **Re-sequencing the original** (G0, no generative model): bar-level jumps between self-similar bars (chroma and timbre per bar), so a section can be repeated, shortened or reordered without an audible join; the original's own ending kept as the film's ending.
+2. **Stem layering** (G0): drums, bass and other faded in and out per bar to follow the intensity curve, the way adaptive game music works. This gives finer and more predictable control than any generator.
+3. **Generated sections in the original's style** (G3): ACE-Step with the original's BPM, key and metre, the original's instrumental stem as reference audio, and a caption for the level. Or repaint and extend from a real stretch of the original, so the new bars grow out of it.
+4. **The background sound as an instrument:** crowd swells timed to the start, finish and aid stations; found-sound intros and outros that blend into the music; the existing ambience swell when the music is quiet (overview 5c-3). Generators handle field recordings poorly, so these are mixed in on the beat, not generated from.
 
-### 4.5 Rendering backends (`audio/music_gen/`, all local)
+### 4.5 Building the take (`audio/music_gen/`)
 
-One interface: `render(score, backend, seed) -> audio + what it reports` (lyric timestamps when it has them). Each take is stored under `<race dir>/music_gen/<key>/`, where the key covers the score, the backend, the model version, the seed and the settings, so nothing is paid for or computed twice. Several takes per score [default 3]; the user picks one in the Music panel.
-- **ACE-Step** (local, first): BPM, key and length from the grid; lyrics with structure tags; the uploaded track as reference; then repaint per section where G5 finds a section off.
-- **MiniMax Music 3** (local, second; for the bake-off): lyrics with section tags plus a structured caption carrying BPM, key and the energy progression; no repaint, so G5 repairs a section by regenerating it, or by repainting with ACE-Step.
-- **Stable Audio 3 Small or Medium** (local, instrumental): bridges, risers and transitions between sections, and continuation past a take's end.
-- **Any file**: a take made elsewhere can be imported with its score and goes through G5 like any other. Not planned, but costs nothing.
-
-Over 10 minutes (ACE-Step's limit; 5 for MiniMax Music 3): split into movements at low-intensity bars and join on a downbeat, or extend with continuation, repaint or inpainting.
+One interface: `render(section, backend, seed) -> audio`. Each take is stored under `<race dir>/music_gen/<key>/`, where the key covers the section's spec, the backend, the model version, the seed and the settings, so nothing is computed twice and takes travel with the project between the PC and the Mac. A section that changes is the only one built again. Several takes per generated section [3]; the user picks one in the Music panel.
+- **Stems** (G0): Demucs on the uploaded track, once, kept next to `music.json`.
+- **ACE-Step** (G3, the PC; the base model also on the Mac, more slowly): generated sections and bridges; repaint for repairs.
+- **Stable Audio 3 Medium** (G4, the PC): the same section specs, for the bake-off; continuation and inpainting for bridges.
+- **Captions:** a template from the level and the original's description (from ACE-Step's analysis or written once by hand) ["sparse", "steady", "driving", "full"]. The local Qwen3.5-9B could write richer ones from the scene labels, but it runs on MLX (the Mac only); the template is the default and Qwen is an option to try.
 
 ### 4.6 Fit, check and repair (`edit/music_fit.py`)
 
-- `music.analyse` on the take: the tempo and every downbeat against the planned grid. A uniform error of up to 3% is fixed with a time-stretch (rubberband); drift or a bar out by more than [40 ms] means repairing that section (repaint) or regenerating it.
-- **Vocals:** ACE-Step's LRC timestamps, else `lyrics.py` on the take. Singing outside its window is repaired the same way; a window left empty is reported.
+- **Grid:** `music.analyse` on each generated section. A uniform tempo error of up to 3% is fixed with a time-stretch (rubberband). Drift, or a downbeat out by more than [40 ms], means the section is repainted or regenerated.
+- **Joins:** every join between sources is on a downbeat, with an equal-power crossfade [one beat].
+- **No stray singing:** the vocal stem of the whole built track is near silent outside the chosen moments.
 - **Length:** equals the film to within one frame; the ending lands on the last bar or the planned fade.
-- When the cut changes later, only the sections whose bars changed are stale and are repainted, not the whole song.
+- When the cut changes later, only the sections whose bars changed are stale.
 
 ### 4.7 Mix
 
-A3 unchanged: the generated track is "the music". Two additions: the stem layers' per-bar gains (4.4, point 2) and the background-sound layers on the beat.
+A3, with the built track as "the music", plus the per-bar stem gains and the background-sound layers on the beat. Because the music is mostly instrumental and sparse under speech, the ducking can be gentler than with a sung track.
 
-## 5. Recommendation and steps
-
-**All local, with ACE-Step 1.5** as the generator: MIT licence, runs on the Mac, takes BPM and key directly, repaints by time range, and uses the uploaded track as reference. **MiniMax Music 3** is the second model for the bake-off; **Stable Audio 3** fills instrumental bridges. Gemini Pro writes the lyrics inside the director call it already makes; the local Qwen3.5-9B writes the section captions and refits the lyrics. Before G3, a **G0** that needs no generative model, so "any length" and "follows the action" work early and stay as the fallback.
+## 5. Steps
 
 | Step | What | Size |
 |---|---|---|
-| **G0** | **Remix to length and stem layering, no generative model.** Bar-level re-sequencing of the uploaded track using self-similar jump points (chroma and timbre per bar), ending on its real ending; stems with per-bar gains from a hand-drawn or flat intensity curve. | M |
-| **G1** | **Intensity curve** from the signals in 4.1, through the EDL into film time; drawn under the music waveform. | S to M |
-| **G2** | **Score plan, vocal windows and lyrics**: `score.py`, key estimation in `music.py`, the director's lyrics (V7 prompt and checks), section captions and lyric refits by the local Qwen. | M |
-| **G3** | **Backend interface and ACE-Step** (its local REST server or Python API, in its own environment like `.venv-vision`; takes stored by key). | M |
-| **G4** | **MiniMax Music 3 and Stable Audio 3** (second generator, instrumental bridges); import of a take made elsewhere. | S to M |
-| **G5** | **Fit, check, repair**; Music panel: takes, score lanes on the waveform, regenerate a section; a bake-off on Legends (same score, every backend, judged by ear, like `docs/bakeoff`). | M to L |
+| **G0** | **Stems, re-sequencing and layering, no generative model.** Demucs stems of the uploaded track; bar-level re-sequencing to any length ending on its own ending; per-bar layer gains from a given curve; vocals only in given windows. | M |
+| **G1** | **Intensity curve** from the signals in 4.1; drawn under the music waveform. | S to M |
+| **G2** | **Score plan**: `score.py`, key estimation in `music.py`, quiet windows, placing the sung phrases (director anchors plus rules), sources and layers per section. | M |
+| **G3** | **ACE-Step on the PC**: the backend interface, generated and bridge sections in the original's style, repaint for repairs. | M |
+| **G4** | **Stable Audio 3 Medium** as the second backend; a **bake-off on Legends** (the same score, both backends, plus G0 alone, judged by ear, like `docs/bakeoff`). | S to M |
+| **G5** | **Fit, check, repair**, and the Music panel: takes, the score's sections and sung moments drawn on the waveform, rebuild a section. | M to L |
 
-Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts on the score's planned grid, so it does not wait for G3. G0, G1 and G2 can start now.
+Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts on the original's grid, so it does not wait for any of this. **G0 can start now**, and G0 with G1 and G2 is already a usable result.
 
 **Done when:**
-- **G0:** a remix of the Legends track to 60, 247 and 400 s, each ending on the track's own ending, has no audible jump (checked by ear), and every bar boundary is within 10 ms of the grid; the layer gains follow a given curve per bar.
-- **G1:** unit tests on synthetic signals: the level changes only on phrase boundaries, a single loud window does not change it, the start and finish get the highest level when marked.
-- **G2:** unit tests: bars times bar length equals the film length within one frame; no vocal window overlaps a voice-over line or clip speech; lyrics over budget or naming an artist fail the check.
-- **G3 and G4:** backends behind fakes in the unit suite (`tests/utils` HTTP and subprocess fakes); one real take per backend run by hand on the Mac (like the other model-dependent checks, overview section 0) and logged in `progress.md` with its time and peak memory.
-- **G5:** on Legends, a take whose downbeats are all within 40 ms of the grid after fitting, with no sung word outside a vocal window (or reported), and a film of the right length that plays through the rough mix.
+- **G0:** the Legends track built to 60, 247 and 400 s, each ending on its own ending, with no audible jump (by ear) and every bar boundary within 10 ms of the grid; layer gains follow a given curve per bar; no singing outside the given windows (vocal stem check).
+- **G1:** unit tests on synthetic signals: the level changes only on phrase boundaries, a single loud window does not change it, and the start and finish get the top level when marked.
+- **G2:** unit tests: bars times bar length equals the film's length within one frame; no sung phrase overlaps a voice-over line or clip speech; a phrase starts on its original beat in the bar; a phrase with no window that fits is reported, not squeezed in.
+- **G3 and G4:** backends behind fakes in the unit suite (`tests/utils` fakes); one real build per backend run by hand on the PC (like the other model-dependent checks, overview section 0) and logged in `progress.md` with its time and peak GPU memory.
+- **G5:** on Legends, a built track whose downbeats are all within 40 ms of the grid after fitting, with no singing outside the chosen moments, and a film of the right length that plays through the rough mix.
 
-## 6. Decisions (defaults in brackets await confirmation)
+## 6. Decisions
 
-| | Question | Default |
+| | Question | Answer or [default] |
 |---|---|---|
-| G-D1 | Personal or commercial? | **Decided 5 Oct: personal.** The uploaded track's audio may be reused locally (4.4 point 4). |
-| G-D2 | Hosted generation or local? | **Decided 5 Oct: local only**; a few Gemini Pro calls are fine (the lyrics ride on the director call). |
-| G-D3 | How recognisable should the original be: real sections kept, or only "in its style"? | [both, chosen per section: by default its intro and ending kept, the middle generated in its style] |
-| G-D4 | Lyrics: whose voice, what language, about what? May sung lines ever go over clip dialogue? | [English, first person, about the race; never over dialogue or the voice-over] |
-| G-D5 | Tempo from the uploaded track or from the runner's cadence? | [the uploaded track] |
-| G-D6 | The Mac's memory: ACE-Step 1.5 XL wants about 20 GB (12 GB with offload), the base model under 6 GB; Qwen3.5-9B 4-bit about 6 GB, run separately. | [the base model first; XL if the memory allows] |
+| G-D1 | Personal or commercial? | **Decided 5 Oct: personal.** The uploaded track's audio is reused locally. |
+| G-D2 | Hosted generation or local? | **Decided 5 Oct: local only**; a few Gemini Pro calls are fine. |
+| G-D3 | Lyrics? | **Decided 5 Oct: none of our own.** Mostly instrumental; the only singing is portions of the uploaded track's vocals. |
+| G-D4 | Tempo and key? | **Follows from G-D3: the original's.** |
+| G-D5 | Where does generation run? | **Decided 5 Oct: the Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM). |
+| G-D6 | How many sung moments, and which form (4.3 a or b)? | [2 to 4; form a] |
+| G-D7 | How does the project folder reach the PC: a shared drive, a sync folder, or a copy of just the inputs (`music.json`, its file, the score) and the takes back? | [the takes are self-contained files by key, so copying only the inputs and the takes is enough] |
 
 ## 7. Risks
 
-- **Licensing:** settled for now by G-D1 (personal, local). If the film is ever published, a cover or a stitched remix of the uploaded track is a derivative work, and MiniMax Music 3's community licence would need reading again.
+- **Licensing:** settled for now by G-D1 (personal, local). If the film is ever published, a remix or extension of the uploaded track is a derivative work.
 - **Quality cannot be unit-tested.** The plan, the grid, the fit and the checks can; how it sounds needs the user's ears on each new backend or model.
-- **Vocal timing** is the least reliable part of every generator. G5's repair loop is what makes "lyrics in the quiet moments" dependable, so it is not optional.
-- **Churn:** the backend interface keeps any one model replaceable; re-check this landscape before G3 and G4.
-- **Memory and time on the Mac:** the generator, Qwen and the render compete for the same memory; every heavy step runs under `pipeline.guard.heavy`, one at a time.
+- **Separated vocals** (form b) can sound thin or carry the drums' ghost; form a avoids that.
+- **Generated material against the original:** new sections may not sound like the same band. The reference audio, the original's key and tempo, and joins on bar lines are the defences; the bake-off with G0 alone shows whether generation earns its place.
+- **Two machines:** the backends run on the PC and the rest mostly on the Mac. The takes, stored by key, are what keep them in step.
+- **Churn:** the backend interface keeps any one model replaceable; re-check section 3 before G3 and G4.
 
 ## Sources (5 Oct 2026)
 
 - Artificial Analysis vocal music leaderboard: https://artificialanalysis.ai/music/leaderboard/vocals
-- ElevenLabs composition plans: https://elevenlabs.io/docs/eleven-api/guides/how-to/music/composition-plans ; inpainting: https://elevenlabs.io/docs/eleven-api/guides/how-to/music/inpainting ; Music v2.5: https://elevenlabs.io/blog/music-v2-5-model
-- Lyria 3.5 in the Gemini API: https://ai.google.dev/gemini-api/docs/interactions/music-generation
-- Suno v6: https://datanorth.ai/news/suno-launches-v6-v6-wild-and-v6-mini ; API status: https://www.musicbusinessworldwide.com/suno-explores-developer-api-seeking-apps-that-unlock-experiences-generative-music-makes-possible-for-the-first-time/
-- Mureka V9.5: https://useapi.net/docs/api-mureka-v1
-- MiniMax Music 3: https://kie.ai/blog/minimax-music-3-release
-- Udio: https://undetectr.com/blog/udio-download
-- ACE-Step 1.5: https://github.com/ace-step/ACE-Step-1.5 ; paper: https://arxiv.org/abs/2602.00744
-- YuE2: https://mer.vin/news/yue2-3b-claims-it-beats-suno-v6-on-open-music-generation/
-- HeartMuLa: https://github.com/HeartMuLa/heartlib
-- LeVo 2: https://huggingface.co/tencent/SongGeneration
+- ACE-Step 1.5: https://github.com/ace-step/ACE-Step-1.5 ; paper: https://arxiv.org/abs/2602.00744 ; 1.5 XL: https://gigazine.net/gsc_news/en/20260409-ace-step-1-5-xl/
 - Stable Audio 3: https://the-decoder.com/stability-ai-launches-stable-audio-3-0-with-up-to-six-minute-tracks-and-open-weights/
+- MiniMax Music 3: https://kie.ai/blog/minimax-music-3-release
+- YuE2: https://mer.vin/news/yue2-3b-claims-it-beats-suno-v6-on-open-music-generation/ ; HeartMuLa: https://github.com/HeartMuLa/heartlib ; LeVo 2: https://huggingface.co/tencent/SongGeneration
+- Suno v6: https://datanorth.ai/news/suno-launches-v6-v6-wild-and-v6-mini ; Lyria 3.5: https://ai.google.dev/gemini-api/docs/interactions/music-generation ; ElevenLabs composition plans: https://elevenlabs.io/docs/eleven-api/guides/how-to/music/composition-plans ; Udio: https://undetectr.com/blog/udio-download
