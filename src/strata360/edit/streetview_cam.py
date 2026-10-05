@@ -12,6 +12,7 @@ import json, math, os, subprocess
 
 import cv2
 import numpy as np
+from scipy.interpolate import CubicSpline
 from scipy.ndimage import gaussian_filter1d
 
 LOOK_M, SIGMA_HEADING = 25.0, {'mapillary': 4.0, 'panoramax': 5.0}          # metres ahead the camera looks; how many pictures the heading is smoothed over (chosen by measuring the shake of the finished clips)
@@ -214,11 +215,15 @@ def heading_along(prog, xy, at, look):
     return math.degrees(math.atan2(b[0] - a[0], b[1] - a[1])) % 360
 
 
-def flow_blend(A, B, alpha):
-    """The picture alpha of the way from A to B: both moved along the optical flow between them and mixed."""
+def flow_between(A, B):
+    """The optical flow from A to B (pixels, full size)."""
     g0 = cv2.cvtColor(A, cv2.COLOR_BGR2GRAY); g1 = cv2.cvtColor(B, cv2.COLOR_BGR2GRAY); dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
-    F = cv2.resize(dis.calc(cv2.resize(g0, None, fx=.5, fy=.5), cv2.resize(g1, None, fx=.5, fy=.5), None), (A.shape[1], A.shape[0])) * 2.0
-    h, w = g0.shape; gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32)); alpha = float(alpha)
+    return cv2.resize(dis.calc(cv2.resize(g0, None, fx=.5, fy=.5), cv2.resize(g1, None, fx=.5, fy=.5), None), (A.shape[1], A.shape[0])) * 2.0
+
+
+def flow_blend(A, B, alpha, F=None):
+    """The picture alpha of the way from A to B: both moved along the optical flow between them (`F`, else worked out) and mixed."""
+    F = flow_between(A, B) if F is None else F; h, w = A.shape[:2]; gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32)); alpha = float(alpha)
     wa = cv2.remap(A, (gx - alpha * F[..., 0]).astype(np.float32), (gy - alpha * F[..., 1]).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     wb = cv2.remap(B, (gx + (1 - alpha) * F[..., 0]).astype(np.float32), (gy + (1 - alpha) * F[..., 1]).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     return cv2.addWeighted(wa, 1 - alpha, wb, alpha, 0)
@@ -367,17 +372,104 @@ def cached_ups(rd, section, imgs, n, preview=False):
     u = np.array([estimate_up(im) for im in (imgs if imgs is not None else [])]); np.save(f, u); return u
 
 
-def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False, grid=None):
+# ---- dolly: moving towards the next picture by zooming ---------------------------------------------------------------------------------------------------------------------------------------
+DOLLY_SIGMA_D, DOLLY_SIGMA_YAW = 3.0, 2.5                # pictures the depth (and the turn) is smoothed over; pictures the travel heading is smoothed over
+DOLLY_WINDOW = 0.35                                  # half the share of a step over which one picture takes over from the next (0.35: the middle 70%; a narrower window packs the catch-up of near things into a few frames and jerks)
+
+
+def travel_bearing(a, b):
+    """Compass bearing from item a to item b (their lat/lon), degrees."""
+    la1, la2, dl = math.radians(a['lat']), math.radians(b['lat']), math.radians(b['lon'] - a['lon'])
+    return math.degrees(math.atan2(math.sin(dl) * math.cos(la2), math.cos(la1) * math.sin(la2) - math.sin(la1) * math.cos(la2) * math.cos(dl))) % 360
+
+
+def zoom_fov(z, fov=FOV): return math.degrees(2 * math.atan(math.tan(math.radians(fov) / 2) / z))
+
+
+def _ncc(a, b):
+    a = a - a.mean(); b = b - b.mean(); return float((a * b).sum() / (math.sqrt(float((a * a).sum()) * float((b * b).sum())) + 1e-9))
+
+
+def dolly_fit(rig, i, yaw, fit_size=(480, 270), small=None):
+    """How picture i looks from picture i+1's place, as a zoom: (z, dyaw, dpitch, score). A view of picture i, narrowed by the zoom `z` and turned by (dyaw, dpitch) to where the road is going, is made to match the centre of picture i+1's wide view (far field: the road, hills, signs) by
+    normalised correlation. Near things cannot match (parallax) and are left to the blend."""
+    small = small or (lambda k: rig.img(k)); W, H = fit_size; cen = (slice(H * 28 // 100, H * 78 // 100), slice(W * 26 // 100, W * 74 // 100))
+    def g(k, y, pt, fov): return cv2.GaussianBlur(cv2.cvtColor(reproject(small(k), rig.rot(k, y % 360, pt), fov, fit_size), cv2.COLOR_BGR2GRAY), (0, 0), 1.5).astype(np.float32)
+    B = g(i + 1, yaw, PITCH, FOV)
+    def score(z, dy, dp): return _ncc(g(i, yaw + dy, PITCH + dp, zoom_fov(z))[cen], B[cen])
+    best = max((score(z, 0, 0), z, 0.0, 0.0) for z in np.arange(1.0, 1.9, 0.04))
+    for dy in (-6, -3, 0, 3, 6):
+        for dp in (-4, -2, 0, 2, 4):
+            for z in (best[1] - 0.04, best[1], best[1] + 0.04):
+                if z >= 1.0:
+                    sc = score(z, dy, dp)
+                    if sc > best[0] + 1e-6: best = (sc, z, float(dy), float(dp))
+    return best[1], best[2], best[3], best[0]
+
+
+def dolly_plan(rig, log=print):
+    """For every step between two pictures: dict(D, gap, dyaw, dpitch, score), plus the smooth heading `dolly_yaw(plan, i + a)` gives. Each step is fitted on its own (zoom and turn that make picture i look like picture i+1), which gives a depth D of the scene ahead (zoom = D / (D - gap)); the depths
+    are then smoothed along the stretch (weighted by how well each step fitted) so that the zoom speed is steady from step to step, and so are the turns. The way the camera moves (bearing between positions) sets the heading, not the capture heading."""
+    its, n = rig.items, rig.n; pb = [travel_bearing(its[k], its[k + 1]) if rig.prog[k + 1] - rig.prog[k] > 0.5 else math.nan for k in range(n - 1)]
+    good = [k for k in range(n - 1) if not math.isnan(pb[k])]
+    pb = [pb[min(good, key=lambda g: abs(g - k))] if math.isnan(pb[k]) else pb[k] for k in range(n - 1)]; hb = smooth_heading(pb + [pb[-1]], DOLLY_SIGMA_YAW)
+    small_imgs = {}
+    def small(k):
+        if k not in small_imgs:
+            if len(small_imgs) > 4: small_imgs.clear()
+            small_imgs[k] = cv2.resize(rig.img(k), (3840, 1920), interpolation=cv2.INTER_AREA)
+        return small_imgs[k]
+    steps = []
+    for k in range(n - 1):
+        gap = float(rig.prog[k + 1] - rig.prog[k])
+        if gap <= 0.5: steps.append(dict(D=math.nan, gap=gap, dyaw=0.0, dpitch=0.0, score=0.0)); continue
+        z, dy, dp, sc = dolly_fit(rig, k, float(hb[k + 1]), small=small); ok = sc > 0.5 and z > 1.04
+        steps.append(dict(D=gap * z / (z - 1) if ok else math.nan, gap=gap, dyaw=dy, dpitch=dp, score=sc if ok else 0.0)); log(f"fitting step {k + 1} of {n - 1}: zoom {z:.2f}, score {sc:.2f}")
+    w = np.array([s['score'] ** 2 for s in steps]); q = np.array([math.log(s['D'] / (s['D'] - s['gap'])) / s['gap'] if s['score'] > 0 else 0.0 for s in steps])                                # (log zoom per metre, fitted)
+    if w.sum() == 0: q = np.full(len(steps), math.log(60 / 59.0)); w = np.ones(len(steps))
+    den = gaussian_filter1d(w, DOLLY_SIGMA_D, mode='nearest'); sm = np.where(den > 1e-6, gaussian_filter1d(q * w, DOLLY_SIGMA_D, mode='nearest') / np.maximum(den, 1e-6), float(np.average(q, weights=w)))
+    dy = gaussian_filter1d(np.array([s['dyaw'] * s['score'] for s in steps]), DOLLY_SIGMA_D, mode='nearest') / np.maximum(gaussian_filter1d(np.array([s['score'] for s in steps]), DOLLY_SIGMA_D, mode='nearest'), 1e-6)
+    dp = gaussian_filter1d(np.array([s['dpitch'] * s['score'] for s in steps]), DOLLY_SIGMA_D, mode='nearest') / np.maximum(gaussian_filter1d(np.array([s['score'] for s in steps]), DOLLY_SIGMA_D, mode='nearest'), 1e-6)
+    node = np.concatenate([[sm[0]], (sm[1:] + sm[:-1]) / 2, [sm[-1]]])                                  # the zoom speed at each picture: one value, so it is continuous across the handover from a step to the next
+    for k, s in enumerate(steps): s.update(r0=float(node[k]), r1=float(node[k + 1]), dyaw=float(np.clip(dy[k], -6, 6)), dpitch=float(np.clip(dp[k], -4, 4)))
+    unwrapped = np.degrees(np.unwrap(np.radians(hb))); return dict(steps=steps, yaw=CubicSpline(np.arange(n), unwrapped))
+
+
+def yaw_mid(plan, i): return float(plan['yaw'](i + 0.5)) % 360
+
+
+def dolly_frame(rig, plan, i, a, size, flow=True):
+    """The picture a of the way along step i: picture i closing in on the scene ahead (its view narrows, and turns towards the road) while picture i+1 starts wider and settles to the normal view; mixed over a short window in the middle (by their optical flow after the zoom, which takes up
+    what the zoom cannot: nearby things). Both follow ONE zoom speed (log zoom per metre, `r0` at the picture to `r1` at the next, continuous from step to step), so the speed of the closing in does not jump at a handover."""
+    st = plan['steps'][i]; gap = st['gap']; yaw = float(plan['yaw'](i + a)) % 360
+    R = lambda s: st['r0'] * s + (st['r1'] - st['r0']) * s * s / (2 * gap)                                    # log zoom after s metres
+    def v(k, lz, e): return reproject(rig.img(k), rig.rot(k, (yaw + e * st['dyaw']) % 360, PITCH + e * st['dpitch']), zoom_fov(math.exp(lz)), size)       # lz: log zoom of the view; e: the share of the turn
+    w = float(np.clip((a - (0.5 - DOLLY_WINDOW)) / (2 * DOLLY_WINDOW), 0, 1)); w = w * w * (3 - 2 * w); s = a * gap
+    if w <= 0: return v(i, R(s), a)
+    if w >= 1: return v(i + 1, R(s) - R(gap), a - 1)
+    A = v(i, R(s), a); B = v(i + 1, R(s) - R(gap), a - 1)
+    if not flow: return cv2.addWeighted(A, 1 - w, B, w, 0)
+    if plan.get('flow_step') != (i, tuple(size)):                                                            # (the flow is worked out ONCE for the step, in the middle of the window: one that is worked out for each frame wobbles from frame to frame)
+        g = lambda k, lz, e: reproject(rig.img(k), rig.rot(k, (yaw_mid(plan, i) + e * st['dyaw']) % 360, PITCH + e * st['dpitch']), zoom_fov(math.exp(lz)), size)
+        plan['flow_step'] = (i, tuple(size)); plan['flow_F'] = flow_between(g(i, R(gap / 2), 0.5), g(i + 1, R(gap / 2) - R(gap), -0.5))
+    return flow_blend(A, B, w, plan['flow_F'])
+
+
+def default_blend(section, grid): return 'dollyflow' if grid and section['provider'] == 'google' else 'flow'                # (the stitched panoramas of a hires Google section can be zoomed into; the others are blended along their flow)
+
+
+def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False, grid=None, blend=None):
     """Write the clip of `section` (an entry of streetview.annotate with `items`) lasting `seconds` to `out` (H.264). The whole section is played through, so its pictures per second follow from the length. `road` is the stretch
     {line: [[lat, lon], ...], km0} (for Panoramax headings). `encode_size`, e.g. (3840, 2160), scales the finished picture; `preview` uses the smaller copies of the pictures."""
     rig = build(rd, section, road, size, preview, pano=bool(grid), grid=grid or 'std'); prog, hs, view, n = rig.prog, rig.hs, rig.view, rig.n          # (grid: a Google section made from its stitched 360 pictures instead of the one flat view along the road)
-    L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); w, h = encode_size or size
+    L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); w, h = encode_size or size; blend = blend or default_blend(section, grid); steps = dolly_plan(rig, log) if blend in ('dolly', 'dollyflow') and rig.rot is not None else None      # blend: None (a Google section made from stitched panoramas, `grid`, uses 'dollyflow', every other 'flow'), 'flow' (the pictures moved along their flow and mixed), 'dolly' (zoom towards the next picture, a short cross-fade), 'dollyflow' (the same with the flow after the zoom)
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{size[0]}x{size[1]}', '-r', str(fps), '-i', '-'] + (['-vf', f'scale={w}:{h}:flags=lanczos'] if (w, h) != tuple(size) else []) + ['-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', out + '.part.mp4']
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     try:
         for k in range(N):
             pos = prog[0] + L * k / (N - 1); i = max(0, min(int(np.searchsorted(prog, pos, side='right') - 1), n - 2)); a = float(np.clip((pos - prog[i]) / max(prog[i + 1] - prog[i], 1e-6), 0, 1))
-            yaw = (hs[i] + ((hs[i + 1] - hs[i] + 180) % 360 - 180) * a) % 360; p.stdin.write(flow_blend(view(i, yaw), view(i + 1, yaw), a).tobytes())
+            if steps: p.stdin.write(dolly_frame(rig, steps, i, a, size, flow=blend == 'dollyflow').tobytes())
+            else: yaw = (hs[i] + ((hs[i + 1] - hs[i] + 180) % 360 - 180) * a) % 360; p.stdin.write(flow_blend(view(i, yaw), view(i + 1, yaw), a).tobytes())
             if k % 15 == 0 or k == N - 1: log(f"rendering {k + 1} of {N} frames")
         p.stdin.close(); p.wait()
     except BrokenPipeError: p.wait()

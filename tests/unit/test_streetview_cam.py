@@ -164,3 +164,31 @@ class TestHeadings:
         with pytest.raises(ValueError, match='needs the road'): CAM.headings(str(tmp_path), sec)
         road = dict(line=[[50.0 + i * 1e-4, 5.0] for i in range(14)], km0=0.99); h = CAM.headings(str(tmp_path), sec, road); assert len(h) == 12 and np.all(np.minimum(h, 360 - h) < 12.0)
         with pytest.raises(ValueError, match='only 3 pictures'): CAM.headings(str(tmp_path), dict(sec, items=items[:3]))
+
+
+class TestDolly:
+    """Moving towards the next picture by zooming, then handing over (hires Google sections)."""
+    def rig(self, n=5, gap=10.0):
+        rng = np.random.default_rng(3); pano = cv2.GaussianBlur((rng.random((360, 720, 3)) * 255).astype(np.uint8), (0, 0), 3)
+        items = [dict(lat=50.0 + k * gap / 111320, lon=5.0) for k in range(n)]
+        return CAM.Rig(items, np.arange(n) * gap, np.zeros(n), None, rot=lambda i, yaw, pitch=CAM.PITCH: CAM.PANO_TO_PIC @ CAM.level_view(yaw, pitch), img=lambda i: pano)
+
+    def test_the_bearing_between_two_places_is_the_compass_course(self):
+        assert abs(CAM.travel_bearing(dict(lat=50.0, lon=5.0), dict(lat=50.001, lon=5.0))) < 0.01 or abs(CAM.travel_bearing(dict(lat=50.0, lon=5.0), dict(lat=50.001, lon=5.0)) - 360) < 0.01
+        assert abs(CAM.travel_bearing(dict(lat=0.0, lon=5.0), dict(lat=0.0, lon=5.001)) - 90) < 0.01
+
+    def test_a_zoom_narrows_the_view_and_one_is_no_change(self):
+        assert abs(CAM.zoom_fov(1.0) - CAM.FOV) < 1e-9 and abs(math.tan(math.radians(CAM.zoom_fov(2.0) / 2)) * 2 - math.tan(math.radians(CAM.FOV / 2))) < 1e-9          # (twice the zoom: half the width at the same distance)
+
+    def test_the_plan_has_one_zoom_speed_that_is_continuous_from_step_to_step(self):
+        plan = CAM.dolly_plan(self.rig(), log=lambda m: None); st = plan['steps']
+        assert len(st) == 4 and all(np.isfinite([s['r0'], s['r1']]).all() for s in st)
+        assert all(abs(a['r1'] - b['r0']) < 1e-9 for a, b in zip(st, st[1:]))
+
+    def test_the_frames_start_on_one_picture_and_end_on_the_next_with_the_same_view(self):
+        rig = self.rig(); plan = CAM.dolly_plan(rig, log=lambda m: None); size = (96, 54)
+        first = CAM.dolly_frame(rig, plan, 1, 0.0, size); last_of_previous = CAM.dolly_frame(rig, plan, 0, 1.0, size)
+        assert first.shape == (54, 96, 3) and np.abs(first.astype(int) - last_of_previous.astype(int)).mean() < 8          # (the same picture and view: nothing jumps at the handover)
+
+    def test_a_section_made_from_panoramas_uses_the_dolly_and_the_others_the_flow_blend(self):
+        assert CAM.default_blend(dict(provider='google'), 'hi') == 'dollyflow' and CAM.default_blend(dict(provider='google'), None) == 'flow' and CAM.default_blend(dict(provider='mapillary'), None) == 'flow'
