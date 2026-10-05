@@ -61,6 +61,77 @@ def analyse_samples(x, bar_beats=4, S=None):
     return dict(bpm=round(float(bpm), 2), offset_s=round(float(t0), 3), bar_beats=bar_beats, duration_s=round(len(x) / SR, 2), usable_beats=nb * bar_beats, sections=sections, confidence=round(float(min(score / 6.0, 1.0)), 2))
 
 
+def track_beats(env, fps, bpm, tight=100.0):
+    """Every beat of a track that may drift, in seconds (Ellis dynamic programming): the best chain of onset peaks whose spacing stays near the beat period of `bpm`. `tight` is how hard a spacing that differs from the period is punished."""
+    env = np.maximum(env - np.convolve(env, np.ones(int(fps * 1.5)) / int(fps * 1.5), 'same'), 0); env = env / max(float(env.max()), 1e-9); P = fps * 60.0 / bpm
+    lo, hi = max(1, int(round(P / 2))), int(round(2 * P)); n = len(env); score = env.copy(); back = np.full(n, -1)
+    lags = np.arange(lo, hi + 1); pen = -tight * np.log(lags / P) ** 2 * 0.01
+    for t in range(n):
+        prev = t - lags; ok = prev >= 0
+        if not ok.any(): continue
+        c = score[prev[ok]] + pen[ok]; k = int(np.argmax(c)); score[t] = env[t] + c[k]; back[t] = prev[ok][k]
+    t = int(np.argmax(score[max(0, n - int(P)):]) + max(0, n - int(P))); chain = [t]
+    while back[t] >= 0: t = back[t]; chain.append(t)
+    chain = chain[::-1]
+    while chain and env[chain[0]] < 0.2: chain.pop(0)                                                  # the chain starts and ends on real onsets, not on silence
+    while chain and env[chain[-1]] < 0.2: chain.pop()
+    return np.array(chain, float) / fps
+
+
+def refine_beats(beats, env, fps, radius=0.03):
+    """Move each beat to the highest onset within `radius` seconds."""
+    r = max(1, int(radius * fps)); out = []
+    for b in beats:
+        i = int(round(b * fps)); a = max(0, i - r); z = min(len(env), i + r + 1); out.append((a + int(np.argmax(env[a:z]))) / fps if z > a else b)
+    return np.array(out)
+
+
+def beat_grid(x, bar_beats=4, S=None):
+    """The actual beats and downbeats of a track, in seconds, allowing the tempo to wander: dict(bpm, beats, downbeats, bar_beats). The first downbeat is the beat phase with the most low-frequency attack."""
+    fps = SR / HOP; S = spectrogram(x) if S is None else S; env, low = onset_envelope(S); bpm, _, _ = tempo_and_phase(env, fps)
+    beats = refine_beats(track_beats(env, fps, bpm), env, fps) + N_FFT / 2 / SR                         # a spectrogram frame is stamped at its start; the sound it hears is centred half a window later
+    if len(beats) < 2 * bar_beats: raise RuntimeError('the track is too short')
+    idx = np.round(beats * fps).astype(int).clip(0, len(low) - 1); sums = [low[idx[k::bar_beats]].sum() for k in range(bar_beats)]; k0 = int(np.argmax(sums))
+    return dict(bpm=round(float(bpm), 2), bar_beats=bar_beats, beats=[round(float(b), 4) for b in beats], downbeats=[round(float(b), 4) for b in beats[k0::bar_beats]])
+
+
+MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+
+def chroma(S, sr=SR, lo=55.0, hi=2000.0):
+    """Pitch-class energy (frames x 12) from a magnitude spectrogram: each FFT bin between lo and hi hertz goes to its nearest semitone class."""
+    f = np.fft.rfftfreq(N_FFT, 1.0 / sr); m = (f >= lo) & (f <= hi); pc = (np.round(12 * np.log2(f[m] / 440.0)).astype(int) + 9) % 12; C = np.zeros((S.shape[0], 12), np.float32)
+    for k in range(12): C[:, k] = S[:, m][:, pc == k].sum(1)
+    return C
+
+
+def estimate_key(C):
+    """(tonic 0..11 with 0 = C, 'major' or 'minor', name such as 'A minor', confidence 0..1) of a chroma matrix, by correlation with the Krumhansl-Kessler profiles."""
+    v = C.sum(0).astype(np.float64); best = (-2.0, 0, 'major'); second = -2.0
+    for mode, prof in (('major', MAJOR), ('minor', MINOR)):
+        for t in range(12):
+            r = float(np.corrcoef(v, np.roll(prof, t))[0, 1])
+            if r > best[0]: second = max(second, best[0]); best = (r, t, mode)
+            else: second = max(second, r)
+    return best[1], best[2], f'{NOTES[best[1]]} {best[2]}', round(float(np.clip((best[0] - second) * 4, 0, 1)), 2)
+
+
+def bar_features(x, downbeats, S=None, bands=8):
+    """One feature vector per bar (the bars between consecutive downbeats): its chroma (12) and its energy in `bands` log-spaced frequency bands, each unit length, so a dot product is a similarity. Returns (bars x (12 + bands)) array."""
+    S = spectrogram(x) if S is None else S; C = chroma(S); f = np.fft.rfftfreq(N_FFT, 1.0 / SR); edges = np.geomspace(60.0, 8000.0, bands + 1); fps = SR / HOP; out = []; masks = [(f >= lo) & (f < hi) for lo, hi in zip(edges[:-1], edges[1:])]
+    for a, b in zip(downbeats[:-1], downbeats[1:]):
+        i = min(int(round(a * fps)), len(C) - 1); j = min(max(int(round(b * fps)), i + 1), len(C)); c = np.log1p(C[i:j].mean(0)); t = np.array([np.log1p(S[i:j][:, m].mean()) if m.any() else 0.0 for m in masks])
+        out.append(np.concatenate([c / max(np.linalg.norm(c), 1e-9), t / max(np.linalg.norm(t), 1e-9)]))
+    return np.array(out)
+
+
+def bar_similarity(F):
+    """Bar-to-bar similarity 0..1 (1 = the same sound) from bar_features, chroma and timbre weighted equally."""
+    n = F.shape[1] - 8; a, b = F[:, :n], F[:, n:]; return np.clip(0.5 * (a @ a.T) + 0.5 * (b @ b.T), 0, 1)
+
+
 def waveform(x, n=PEAKS):
     """Loudest absolute sample in each of n equal pieces of the track, scaled so the biggest is 1."""
     n = max(1, min(n, len(x))); p = np.array([np.abs(c).max() for c in np.array_split(x, n)]); return [round(float(v), 3) for v in p / max(float(p.max()), 1e-9)]
