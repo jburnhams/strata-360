@@ -20,7 +20,7 @@ from collections import Counter
 
 import numpy as np
 
-from strata360.analysis import vocab as VOC, views as V
+from strata360.analysis import regions as RG, vocab as VOC, views as V
 
 SCHEMA_VERSION = 1
 TFOV, TPX = 60.0, 1024
@@ -37,6 +37,7 @@ CROP_MARGIN, CROP_FOV = 1.8, (10.0, 60.0)
 TINY_DEG = V.CROP_WANT_PX / 3 / V.NATIVE_PPD       # below this even the lens frame gives the box fewer than a third of the pixels the labelling model wants
 DARK_SUN, DARK_EXPOSURE, BLACK_FRAME = -12.0, 0.2, 0.02
 WEARER_NEAR_S = 1.5
+PERSON_NAMED = 0.3                        # how far from a person's middle (in their heights) a named box still counts as part of them
 GROUND_LAT, GROUND_DEG = -40.0, 8.0         # a small prompt-free box this far below the horizon is a mark on the ground (snow patch, puddle, leaves), not something passed: not sent to the labelling model
 SAME_OBJECT_DEG = 2.0                     # two boxes closer than this (or 0.6 of their size) in the world frame are the same object
 BATCH = 8                                 # moments per detector call (their tile pictures are on disk meanwhile)
@@ -117,13 +118,15 @@ def areas_of(named):
 
 
 def merge_moment(cands, people, wearer):
-    """One moment's candidates from all its tiles: the same thing seen in neighbouring tiles once (the most confident), and those in the wearer's direction (or on a person) marked `wearer`."""
+    """One moment's candidates from all its tiles: the same thing seen in neighbouring tiles once (the most confident), and those on a person, or unnamed and within the wearer's own size of where they are, marked `wearer`."""
     kept = []
     for c in sorted(cands, key=lambda c: -c['conf']):
         if any(angdist((c['lon'], c['lat']), (k['lon'], k['lat'])) < max(1.5, 0.4 * max(c['deg'], k['deg'])) for k in kept): continue
         kept.append(c)
     for c in kept:
-        c['wearer'] = any(angdist((c['lon'], c['lat']), (lo, la)) < max(h / 2, 12) + 8 for lo, la, h in wearer) or any(angdist((c['lon'], c['lat']), (p['lon'], p['lat'])) < p['deg'] * 0.6 for p in people)
+        on_person = any(angdist((c['lon'], c['lat']), (p['lon'], p['lat'])) < p['deg'] * (0.6 if c['kind'] == 'other' else PERSON_NAMED) for p in people)         # an unnamed box near a person is mostly their hands, shoes or gear; a named chair, cup or sign is dropped only when it is on them
+        in_cone = c['kind'] == 'other' and any(angdist((c['lon'], c['lat']), (lo, la)) < max(h / 2, 12) for lo, la, h in wearer)           # only a box the detector could not name is judged by the cone: a named dog, sign or car next to the wearer is kept
+        c['wearer'] = on_person or in_cone
     return kept
 
 
@@ -175,6 +178,33 @@ def run_labeller(images, out, models=None):
     return json.load(open(out))
 
 
+def run_regions(images, out, models=None):
+    """The labelling model's boxes for snow and water on the wide views in `images` (with jobs.json): {'model', 'seconds', 'answers': {file: text}}."""
+    subprocess.run([_py(), '-m', 'strata360.analysis.regions_vlm', images, out] + (['--model', models] if models else []), check=True, env=_env(), stdout=subprocess.PIPE)
+    return json.load(open(out))
+
+
+def analyse_regions(work_dir, times, scenes, renderer, regions_label=run_regions, log=print):
+    """The snow and water areas of a clip: (regions, seconds). Wide views are cut for the moments where the scene labels say there is snow or water (regions.plan), the model boxes only that, and the boxes of all views and moments are merged
+    into areas (regions.merge); `raw` boxes are not kept. Nothing is asked of the model when the scene labels give nothing."""
+    import cv2
+    plan = dict(RG.plan(scenes, times)) if scenes else {}
+    if not plan: return [], 0.0
+    tmp = tempfile.mkdtemp(prefix='s360reg_', dir=work_dir); jobs = {}; meta = {}
+    try:
+        for t, kinds in plan.items():
+            for lon0 in RG.YAWS:
+                name = f'r{len(jobs):04d}.jpg'; cv2.imwrite(os.path.join(tmp, name), renderer.crop(t, math.radians(lon0), math.radians(RG.PITCH), RG.FOV, RG.PX)[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 92]); jobs[name] = kinds; meta[name] = (t, lon0)
+        json.dump(jobs, open(os.path.join(tmp, 'jobs.json'), 'w')); log(f'regions: {len(plan)} moments, {len(jobs)} views')
+        rr = regions_label(tmp, os.path.join(tmp, 'regions.json')); boxes = []
+        for name, text in sorted(rr['answers'].items()):
+            t, lon0 = meta[name]
+            for kind, box in RG.parse(text, jobs[name]): boxes.append(dict(kind=kind, t=t, **RG.to_world(box, lon0, RG.PITCH)))
+        return RG.merge(boxes), rr.get('seconds', 0.0)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ---- the stage ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 def categories_of(scenes_doc, vocab):
     """The wordlist categories of a clip: both directions' scene labels through the plain rules (the stage does not call a model for this; `vocab categorise` does with one)."""
@@ -185,14 +215,14 @@ def categories_of(scenes_doc, vocab):
     return out
 
 
-def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=None, exposure=None, focus=None, clip='', detect=run_detector, label=run_labeller, renderer=None, crops_to=None, rng=None, batch=BATCH, log=print):
+def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=None, exposure=None, focus=None, clip='', scenes=None, regions_label=run_regions, detect=run_detector, label=run_labeller, renderer=None, crops_to=None, rng=None, batch=BATCH, log=print):
     """The objects of a clip at the moments `times` (clip seconds): the document written as objects.json. `stats` is the StatsBook the routing reads; the numbers of this clip's own outcomes are in the document's `stats`
     (the project's book is rebuilt from the clips, vocab.collect, so parallel clips never write the same file). `crops_to` is a folder to keep a small picture of each object that was labelled."""
     t0 = time.time(); doc = dict(schema=SCHEMA_VERSION, clip=clip, words=list(words), categories=list(categories), moments=len(times), seconds=0.0)
     why = clip_is_dark(sun, exposure)
-    if why: return dict(doc, skipped=why, objects=[], areas={}, counts={}, stats=VOC.StatsBook().to_json())
+    if why: return dict(doc, skipped=why, objects=[], areas={}, counts={}, regions=[], stats=VOC.StatsBook().to_json())
     import cv2
-    cr = renderer or V.CropRenderer(osv); mem = Memory(); areas = {}; counts = dict(black=0, tiles=0, wearer=0, tiny=0, ground=0); tmp = tempfile.mkdtemp(prefix='s360obj_', dir=work_dir); crops = os.path.join(tmp, 'crops'); os.makedirs(crops)
+    cr = renderer or V.CropRenderer(osv); mem = Memory(); areas = {}; counts = dict(black=0, tiles=0, wearer=0, tiny=0, ground=0); dropped = []; tmp = tempfile.mkdtemp(prefix='s360obj_', dir=work_dir); crops = os.path.join(tmp, 'crops'); os.makedirs(crops)
     low = {w for c in ('wildlife', 'farm_rural') for w in vocab['categories'].get(c, {}).get('words', [])}; rng = rng or random.Random(0); todo = []
     try:
         use = [t for t in times if not black_at(exposure, t)]; counts['black'] = len(times) - len(use)
@@ -208,7 +238,7 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
                     c, p = tile_candidates(k, named, pf, low); cands += c; people += p
                     for w, cf in areas_of(named).items(): a = areas.setdefault(w, dict(boxes=0, max_conf=0.0)); a['boxes'] += 1; a['max_conf'] = max(a['max_conf'], round(cf, 3))
                 for c in merge_moment(cands, people, wearer_dirs(focus, t)):
-                    if c['wearer']: counts['wearer'] += 1; continue
+                    if c['wearer']: counts['wearer'] += 1; dropped.append(dict(t=t, kind=c['kind'], yoloe=c['yoloe'], conf=round(c['conf'], 2), lon=round(c['lon'], 1), lat=round(c['lat'], 1), deg=round(c['deg'], 1))); continue
                     if c['deg'] < TINY_DEG: counts['tiny'] += 1; continue
                     if c['kind'] == 'other' and c['lat'] < GROUND_LAT and c['deg'] < GROUND_DEG: counts['ground'] += 1; continue
                     o, new = mem.see(c, t)
@@ -234,4 +264,5 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
         for o in mem.objects: o['word'] = o.get('word') or (o['yoloe'] if o['source'] == 'detector' else None)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop') and not o.get('scenery')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('scenery')).most_common()), areas=areas, counts=counts, stats=book.to_json())
+    regions, rsecs = analyse_regions(work_dir, [t for t in times if not black_at(exposure, t)], scenes, renderer=cr, regions_label=regions_label)
+    return dict(doc, model=model, seconds=round(time.time() - t0, 1), seconds_model=secs, objects=[o for o in mem.objects if not o.get('stop') and not o.get('scenery')], dropped_by_stoplist=sum(1 for o in mem.objects if o.get('stop')), scenery_labels=dict(Counter(o['word'] or o['label'] for o in mem.objects if o.get('scenery')).most_common()), areas=areas, counts=counts, wearer_dropped=dropped, regions=regions, regions_seconds=rsecs, stats=book.to_json())

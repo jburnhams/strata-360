@@ -176,7 +176,8 @@ def run(folder, stages=None, only=None, force=False, log=print, detect=run_detec
     def img(r):
         if r['id'] not in imgs: imgs[r['id']] = read_bgr(os.path.join(rd, r['file']))
         return imgs[r['id']]
-    prof_path = os.path.join('profiles', cfg.get('profile', 'me') + '.npz')
+    from strata360.pipeline import config as CFG
+    prof_path = CFG.profile_path(rd, cfg)
     def keys(stage, r):
         src = os.path.join(rd, r['file']); base = [os.path.getmtime(src), os.path.getsize(src)]
         if stage in ('places', 'thumb_overlay'): base += [r.get('loc'), r['taken_utc'], tp and os.path.getmtime(tp)]

@@ -208,7 +208,8 @@ def people(ctx):
 def identity(ctx):
     import numpy as np, os
     from strata360.analysis import identity as I
-    path = os.path.join('profiles', ctx.cfg.get('profile', 'me') + '.npz')
+    from strata360.pipeline import config
+    path = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), '..', '..')), ctx.cfg)
     if not os.path.exists(path): raise RuntimeError(f'no wearer profile {path}: run ./strata360 who RACE --me N (or --auto) first')
     ctx.write('identity.json', ctx.stamped(I.analyse_clip(ctx.read('people.json'), np.load(ctx.path('faces.npy')), I.load_profile(path))))
 
@@ -250,7 +251,7 @@ def objects(ctx):
     if times is None: times = [float(t) for t in range(1, int(ctx.clip_json['video']['source_frames'] / ctx.clip_json['video']['nominal_fps']), 5)]
     rd = lambda n: ctx.read(n) if os.path.exists(ctx.path(n)) else None
     doc = OBJ.analyse(ctx.clip.osv, str(ctx.dir), times, words, stats=VOC.stats_for(root), vocab=vocab, categories=cats, sun=SUN.load(str(ctx.dir)), exposure=rd('exposure.json'), focus=(rd('focus.json') or {}).get('samples'),
-                      clip=os.path.basename(str(ctx.dir)), crops_to=ctx.path('objects'), log=ctx.log)
+                      clip=os.path.basename(str(ctx.dir)), scenes=scenes_doc, crops_to=ctx.path('objects'), log=ctx.log)
     ctx.write('objects.json', ctx.stamped(doc))
 
 
@@ -260,7 +261,8 @@ def speakers(ctx):
     import numpy as np, os
     from strata360.analysis import voices
     doc, emb = voices.analyse(audio_src(ctx), ctx.read('transcript.json'), str(ctx.dir))
-    prof = os.path.join('profiles', ctx.cfg.get('profile', 'me') + '_voice.npz')
+    from strata360.pipeline import config
+    prof = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), '..', '..')), ctx.cfg, voice=True)
     if os.path.exists(prof) and len(emb):
         lab, sim = voices.label(emb, prof)
         for s, l, m in zip(doc['segments'], lab, sim): s['label'] = l; s['sim'] = m

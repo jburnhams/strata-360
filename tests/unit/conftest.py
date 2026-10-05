@@ -12,3 +12,10 @@ import pytest
 def limits_on(monkeypatch):
     """CI sets STRATA_NO_RESOURCE_LIMITS (the guards are for local machines); the unit tests of the guards and of the resource rules need them on."""
     monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS', raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_repo_profiles(monkeypatch):
+    """A developer's own face profile in the repository's profiles/ folder must not decide what a test finds: none is looked in unless the test sets the list."""
+    from strata360.pipeline import config
+    monkeypatch.setattr(config, 'LEGACY_PROFILE_DIRS', [])
