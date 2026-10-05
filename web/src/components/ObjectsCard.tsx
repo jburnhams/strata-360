@@ -11,8 +11,8 @@ const WHY: Record<string, string> = { stop: 'on the list of what is not a thing 
 export const where = (lon: number, lat: number) => `${Math.round(((lon % 360) + 360) % 360)}°${Math.abs(lat) >= 5 ? `, ${Math.round(Math.abs(lat))}° ${lat > 0 ? 'up' : 'down'}` : ''}`
 /** The field of view that frames something of the given size: about four times as wide, between 40° and 100°. */
 export const framing = (deg: number) => Math.max(40, Math.min(100, Math.round(deg * 4)))
-/** The field of view that shows a whole area of snow or water: its width, or its height times the picture's 16:9, with a margin; between 60° and 140°. */
-export const framingArea = (w: number, h: number) => Math.max(60, Math.min(140, Math.round(Math.max(w, h * (16 / 9)) * 1.3)))
+/** The field of view that shows a whole area of snow or water: its width, or its height times the picture's 16:9, with a small margin; between 60° and 140°. */
+export const framingArea = (w: number, h: number) => Math.max(60, Math.min(140, Math.round(Math.max(w, h * (16 / 9)) * 1.15)))
 
 const Row = ({ o, folder, clip, onLook, onHide }: { o: DetectedObject; folder: string; clip: string; onLook: (l: Look) => void; onHide?: Hide }) => {
   const name = o.label ?? o.yoloe, differs = o.source === 'vlm' && o.yoloe && !name.toLowerCase().includes(o.yoloe.toLowerCase())

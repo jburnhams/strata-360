@@ -81,6 +81,6 @@ describe('ObjectsCard: hiding things', () => {
 describe('where and framing', () => {
   it('give a bearing in 0 to 360 degrees with the height when it is more than a few degrees off the horizon, and a field of view of four times the size between 40 and 100', () => {
     expect(where(-90, 0)).toBe('270°'); expect(where(370, -12)).toBe('10°, 12° down'); expect(where(0, 4.9)).toBe('0°'); expect(framing(2)).toBe(40); expect(framing(15)).toBe(60); expect(framing(50)).toBe(100)
-    expect(framingArea(10, 5)).toBe(60); expect(framingArea(40, 12)).toBe(60); expect(framingArea(60, 40)).toBe(92); expect(framingArea(200, 10)).toBe(140)
+    expect(framingArea(10, 5)).toBe(60); expect(framingArea(40, 12)).toBe(60); expect(framingArea(60, 40)).toBe(82); expect(framingArea(100, 20)).toBe(115); expect(framingArea(200, 10)).toBe(140)
   })
 })
