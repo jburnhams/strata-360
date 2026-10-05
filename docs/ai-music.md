@@ -27,7 +27,7 @@ Today the uploaded track is fixed. It sets the film's length (D7), `edit/music.p
 
 **The key design point:** the result is an ordinary music track plus a score sidecar. `music.json` records it (with `source: built` and the score key), so V5's beat snapping, the rough mix, the A3 ducking and the GUI's waveform work unchanged.
 
-**A consequence:** G0, below, delivers most of the idea **with no generative model at all**: the original's instrumental stem re-sequenced to any length, layers following the intensity, and its vocals let through only in the chosen moments. Generation (G3) adds what re-sequencing cannot: new material in the original's style where the original has nothing at the needed intensity (a sparse night section, a long build to the finish), and smooth bridges between distant parts of the track.
+**A consequence:** G0, below, delivers most of the idea **with no generative model at all** (it is the top of the fidelity slider, 4.5): the original's instrumental stem re-sequenced to any length, layers following the intensity, and its vocals let through only in the chosen moments. Generation (G3) adds what re-sequencing cannot: new material in the original's style where the original has nothing at the needed intensity (a sparse night section, a long build to the finish), and smooth bridges between distant parts of the track.
 
 ## 3. The landscape (5 Oct 2026)
 
@@ -108,7 +108,28 @@ Everywhere else the original's **vocal stem is off**, and a G5 check makes sure 
 3. **Generated sections in the original's style** (G3): ACE-Step with the original's BPM, key and metre, the original's instrumental stem as reference audio, and a caption for the level. Or repaint and extend from a real stretch of the original, so the new bars grow out of it.
 4. **The background sound as an instrument:** crowd swells timed to the start, finish and aid stations; found-sound intros and outros that blend into the music; the existing ambience swell when the music is quiet (overview 5c-3). Generators handle field recordings poorly, so these are mixed in on the beat, not generated from.
 
-### 4.5 Building the take (`audio/music_gen/`)
+### 4.5 True to the track, or in its style: the fidelity setting
+
+One setting, a slider in the Music panel from 0 to 1 [default 0.75], decides how much of what you hear is the uploaded track's own audio and how much is new material in its style. It is film-wide, and any section can be pinned either way ("keep the original here", "generate here"). The slider has five named stops; values between them interpolate.
+
+| Fidelity | Name | What is built |
+|---|---|---|
+| **1.0** | **The record** | Only the original's audio: re-sequenced, layered, extended by repeating its own bars (G0). No generative model. Following the intensity is limited to what the original's own sections and stems can do. |
+| **0.75** | **Extended** | Original sections wherever one matches the level; generated audio only for bridges and for levels the original never reaches (a sparse night, a long build). Generated bars grow out of the neighbouring original bars (repaint or continuation), with strong reference to the original. |
+| **0.5** | **Remix** | About half the bars are original. Generated sections are free to follow the intensity, still with the original's stems as reference audio and its key and tempo. |
+| **0.25** | **Inspired by** | Mostly generated, with the original's instrumental stem as reference audio at low strength. The original's own audio is heard only at sung moments, and at the start and end if pinned. |
+| **0.0** | **In its style** | Everything generated from a description of the original (genre, instruments, tempo, key, metre) with no reference audio. Sung moments, if any, are the original's vocal stem over a generated accompaniment (4.3 form b). |
+
+What the setting changes, so the planner can be tested without audio (`score.py`):
+- **The share of original bars.** For each section the planner compares the best-matching original stretch (energy against the level, plus how well its bars join) with "generate". The tolerance for accepting an original stretch widens as fidelity rises, so the share of original bars never falls as the slider goes up. At 1.0, generation is not allowed (a level the original cannot reach is reported, and layering does what it can). At 0.0, original audio is not allowed outside the sung moments.
+- **Reference strength** for generated sections: ACE-Step's reference-audio and cover strength, or Stable Audio 3's audio-to-audio strength. Strong near the top of the slider, weak near the bottom, and none at 0.0. The exact parameter names are to be confirmed against each model's API when G3 and G4 are built.
+- **Where generated bars come from:** at 0.75 and above they are repainted or continued from the neighbouring original bars, so they start from the record's own sound. Below that they are generated fresh and joined on bar lines.
+- **The sung moments:** at 0.5 and above, form a (the original's own bars); below 0.5, form b (its vocal stem over the film's accompaniment). Each moment can be overridden.
+- **Layering:** at high fidelity the original's arrangement is mostly kept, and the curve only mutes or lifts whole stems at phrase boundaries. At low fidelity the generated material is already written to the level, and layering only trims it.
+
+The fidelity value is part of each section's key, so moving the slider rebuilds only the sections whose source or reference strength changed, and takes made at an earlier setting stay cached for comparison. The rough mix (V6) previews any setting within a minute when the takes exist.
+
+### 4.6 Building the take (`audio/music_gen/`)
 
 One interface: `render(section, backend, seed) -> audio`. Each take is stored under `<race dir>/music_gen/<key>/`, where the key covers the section's spec, the backend, the model version, the seed and the settings, so nothing is computed twice and takes travel with the project between the PC and the Mac. A section that changes is the only one built again. Several takes per generated section [3]; the user picks one in the Music panel.
 - **Stems** (G0): Demucs on the uploaded track, once, kept next to `music.json`.
@@ -116,7 +137,7 @@ One interface: `render(section, backend, seed) -> audio`. Each take is stored un
 - **Stable Audio 3 Medium** (G4, the PC): the same section specs, for the bake-off; continuation and inpainting for bridges.
 - **Captions:** a template from the level and the original's description (from ACE-Step's analysis or written once by hand) ["sparse", "steady", "driving", "full"]. The local Qwen3.5-9B could write richer ones from the scene labels, but it runs on MLX (the Mac only); the template is the default and Qwen is an option to try.
 
-### 4.6 Fit, check and repair (`edit/music_fit.py`)
+### 4.7 Fit, check and repair (`edit/music_fit.py`)
 
 - **Grid:** `music.analyse` on each generated section. A uniform tempo error of up to 3% is fixed with a time-stretch (rubberband). Drift, or a downbeat out by more than [40 ms], means the section is repainted or regenerated.
 - **Joins:** every join between sources is on a downbeat, with an equal-power crossfade [one beat].
@@ -124,7 +145,7 @@ One interface: `render(section, backend, seed) -> audio`. Each take is stored un
 - **Length:** equals the film to within one frame; the ending lands on the last bar or the planned fade.
 - When the cut changes later, only the sections whose bars changed are stale.
 
-### 4.7 Mix
+### 4.8 Mix
 
 A3, with the built track as "the music", plus the per-bar stem gains and the background-sound layers on the beat. Because the music is mostly instrumental and sparse under speech, the ducking can be gentler than with a sung track.
 
@@ -134,17 +155,17 @@ A3, with the built track as "the music", plus the per-bar stem gains and the bac
 |---|---|---|
 | **G0** | **Stems, re-sequencing and layering, no generative model.** Demucs stems of the uploaded track; bar-level re-sequencing to any length ending on its own ending; per-bar layer gains from a given curve; vocals only in given windows. | M |
 | **G1** | **Intensity curve** from the signals in 4.1; drawn under the music waveform. | S to M |
-| **G2** | **Score plan**: `score.py`, key estimation in `music.py`, quiet windows, placing the sung phrases (director anchors plus rules), sources and layers per section. | M |
+| **G2** | **Score plan**: `score.py`, key estimation in `music.py`, quiet windows, placing the sung phrases (director anchors plus rules), sources and layers per section, and the **fidelity setting** (4.5) with per-section pins. | M |
 | **G3** | **ACE-Step on the PC**: the backend interface, generated and bridge sections in the original's style, repaint for repairs. | M |
 | **G4** | **Stable Audio 3 Medium** as the second backend; a **bake-off on Legends** (the same score, both backends, plus G0 alone, judged by ear, like `docs/bakeoff`). | S to M |
-| **G5** | **Fit, check, repair**, and the Music panel: takes, the score's sections and sung moments drawn on the waveform, rebuild a section. | M to L |
+| **G5** | **Fit, check, repair**, and the Music panel: the **fidelity slider** with its five stops, takes, the score's sections (original or generated) and sung moments drawn on the waveform, pin or rebuild a section. | M to L |
 
 Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts on the original's grid, so it does not wait for any of this. **G0 can start now**, and G0 with G1 and G2 is already a usable result.
 
 **Done when:**
 - **G0:** the Legends track built to 60, 247 and 400 s, each ending on its own ending, with no audible jump (by ear) and every bar boundary within 10 ms of the grid; layer gains follow a given curve per bar; no singing outside the given windows (vocal stem check).
 - **G1:** unit tests on synthetic signals: the level changes only on phrase boundaries, a single loud window does not change it, and the start and finish get the top level when marked.
-- **G2:** unit tests: bars times bar length equals the film's length within one frame; no sung phrase overlaps a voice-over line or clip speech; a phrase starts on its original beat in the bar; a phrase with no window that fits is reported, not squeezed in.
+- **G2:** unit tests: bars times bar length equals the film's length within one frame; at fidelity 1.0 no bar is generated, and at 0.0 no original audio plays outside the sung moments; the share of original bars never falls as fidelity rises; a pinned section ignores the slider; moving the slider changes the keys of only the sections whose source or strength changed; no sung phrase overlaps a voice-over line or clip speech; a phrase starts on its original beat in the bar; a phrase with no window that fits is reported, not squeezed in.
 - **G3 and G4:** backends behind fakes in the unit suite (`tests/utils` fakes); one real build per backend run by hand on the PC (like the other model-dependent checks, overview section 0) and logged in `progress.md` with its time and peak GPU memory.
 - **G5:** on Legends, a built track whose downbeats are all within 40 ms of the grid after fitting, with no singing outside the chosen moments, and a film of the right length that plays through the rough mix.
 
@@ -158,6 +179,7 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 | G-D4 | Tempo and key? | **Follows from G-D3: the original's.** |
 | G-D5 | Where does generation run? | **Decided 5 Oct: the Windows PC** (RTX 5070 Ti 16 GB, 64 GB RAM). |
 | G-D6 | How many sung moments, and which form (4.3 a or b)? | [2 to 4; form a] |
+| G-D8 | The fidelity default (4.5). | [0.75, "extended"] |
 | G-D7 | How does the project folder reach the PC: a shared drive, a sync folder, or a copy of just the inputs (`music.json`, its file, the score) and the takes back? | [the takes are self-contained files by key, so copying only the inputs and the takes is enough] |
 
 ## 7. Risks
