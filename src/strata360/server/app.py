@@ -51,6 +51,7 @@ def scenic_samples(d, osv):
 
 
 LYRICS_JOBS = {}              # folder -> Popen of a running `strata360 lyrics`
+MUSIC_BUILD_JOBS = {}         # folder -> Popen of a running `strata360 music-build`
 STREETVIEW_LOG_STALE_S = 180.0    # a street view video whose log was written to this recently, with no end line, is taken to be still being made (even by a job this server did not start)
 STREETVIEW_NEAR_JOBS = {}     # folder -> the nearest-street-view search being made (lat, lon, log, error, thread)
 STREETVIEW_NEAR = {}          # (folder, provider, picture id) -> what the near-point search found (so the thumbnails can be fetched, and nothing else)
@@ -749,6 +750,63 @@ def create_app(roots, token=None):
         try: PJ.set_music(f, None)
         except O.Infeasible: pass
         MU.remove(config.race_dir(f)); return dict(file=None, name=None, analysis=None, waveform=None, spectrogram=False)
+
+    def studio_track(f):
+        from strata360.edit import project as PJ
+        r = PJ.music_record(f, PJ.load(f)['settings'])
+        if not r: raise HTTPException(404, 'no music track')
+        return config.race_dir(f), r['file']
+
+    @api.get('/api/music/studio', dependencies=[Depends(auth)])
+    def get_music_studio(folder: str):                                                   # the Music studio screen: the track's grid, the built track's score, and whether a build is running or failed
+        from strata360.edit import music_studio as MS
+        f = folder_of(folder); rd, rel = studio_track(f); job = MUSIC_BUILD_JOBS.get(f); running = bool(job and job.poll() is None); log = os.path.join(rd, 'music', 'build.log')
+        try: lines = [l for l in open(log, errors='replace').read().strip().splitlines() if 'unsupported hash type' not in l]
+        except OSError: lines = []
+        err = ''
+        if job and not running and job.returncode: err = next((l for l in reversed(lines) if l.strip() and not l.startswith(('Traceback', '  File', '    '))), 'failed')[:300]
+        return dict(MS.state(rd, rel), building=running, error=err, log=lines[-1] if lines else '')
+
+    @api.post('/api/music/studio/analyse', dependencies=[Depends(auth)])
+    def post_music_studio_analyse(body: dict):                                            # {folder}: find the beats, downbeats, key and bar similarity of the track (a few seconds to a minute)
+        from strata360.edit import music_build as MB, music_studio as MS
+        f = folder_of(body.get('folder')); rd, rel = studio_track(f)
+        try: MB.grid(rd, rel)
+        except RuntimeError as e: raise HTTPException(400, str(e))
+        return MS.state(rd, rel)
+
+    @api.post('/api/music/studio/preview', dependencies=[Depends(auth)])
+    def post_music_studio_preview(body: dict):                                            # {folder, length_s, preset?, levels?, windows? [[t0, t1] film seconds]}: the plan for a build, with no audio made
+        from strata360.edit import music_studio as MS
+        f = folder_of(body.get('folder')); rd, rel = studio_track(f); preset = body.get('preset') or 'arc'
+        if preset not in MS.PRESETS: raise HTTPException(400, 'unknown preset')
+        try: length = float(body.get('length_s'))
+        except (TypeError, ValueError): raise HTTPException(400, 'length_s is a number of seconds')
+        if not 4 <= length <= 3600: raise HTTPException(400, 'the length is 4 s to an hour')
+        try:
+            g = MS.read_grid(rd, rel)
+            if not g: raise RuntimeError('analyse the track first')
+            bar_s = (g['downbeats'][-1] - g['downbeats'][0]) / (len(g['downbeats']) - 1); n = max(1, int(round(length / bar_s)))
+            return MS.preview(rd, rel, length, preset, body.get('levels'), MS.windows_to_bars([tuple(w) for w in body.get('windows') or []], bar_s, n))
+        except RuntimeError as e: raise HTTPException(409, str(e))
+
+    @api.post('/api/music/studio/build', dependencies=[Depends(auth)])
+    def post_music_studio_build(body: dict):                                              # {folder, length_s, preset?, levels?, windows?}: build the track in the background (`strata360 music-build`)
+        f = folder_of(body.get('folder')); rd, rel = studio_track(f); job = MUSIC_BUILD_JOBS.get(f)
+        if job and job.poll() is None: return dict(started=False, reason='a track is already being built')
+        try: length = float(body.get('length_s'))
+        except (TypeError, ValueError): raise HTTPException(400, 'length_s is a number of seconds')
+        cmd = [*oslib.cli_command(), 'music-build', f, '--length-s', str(length), '--preset', str(body.get('preset') if body.get('preset') in ('flat', 'arc', 'build', 'quiet') else 'flat')]
+        if body.get('preset') == 'manual' and body.get('levels'): cmd += ['--levels', ','.join(str(float(v)) for v in body['levels'])]
+        for w in body.get('windows') or []: cmd += ['--vocals', f'{float(w[0])}-{float(w[1])}']
+        os.makedirs(os.path.join(rd, 'music'), exist_ok=True); log = open(os.path.join(rd, 'music', 'build.log'), 'wb')
+        MUSIC_BUILD_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+
+    @api.get('/api/music/built/audio')
+    def get_music_built_audio(request: Request, folder: str, v: str = ''):               # the built track, to play in the page
+        auth(request); f = folder_of(folder); p = os.path.join(config.race_dir(f), 'music', 'built.flac')
+        if not os.path.exists(p): raise HTTPException(404, 'no built track yet')
+        return FileResponse(p, media_type='audio/flac', headers={'Cache-Control': 'no-cache'})
 
     TRACKS = {}
 

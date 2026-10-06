@@ -39,7 +39,7 @@ def test_a_built_track_has_the_length_the_bar_lines_and_the_ending(rd):
     s = MB.build(rd, 'music/track.mp3', 40.0, decode=lambda p: x, separator=lambda p: st, write=write, read=read)
     assert s['source'] == 'built' and len(s['bars']) == 20 and s['length_s'] == pytest.approx(40.0, abs=0.3) and s['bars'][-2:] == [6, 7] and s['bars'][0] == 0
     assert np.allclose(np.diff(s['downbeats']), BAR, atol=0.05) and json.load(open(os.path.join(rd, 'music', 'built.json')))['bars'] == s['bars']
-    assert s['stray_vocal_db'] == float('-inf') and store[os.path.join(rd, 'music', 'built.flac')][1] == 8000
+    assert s['stray_vocal_db'] is None and store[os.path.join(rd, 'music', 'built.flac')][1] == 8000
 
 
 def test_vocals_play_only_in_the_given_windows(rd):
@@ -55,7 +55,7 @@ def test_levels_choose_the_layers_and_the_grid_is_cached(rd):
     def dec(p): calls.append(1); return x
     MB.build(rd, 'music/track.mp3', 24.0, levels=[0.0] * 6 + [1.0] * 6, decode=dec, separator=lambda p: st, write=write, read=read); n = len(calls)
     MB.build(rd, 'music/track.mp3', 24.0, decode=dec, separator=lambda p: st, write=write, read=read)
-    g = json.load(open(os.path.join(rd, 'music', 'grid.json'))); assert g['key']['name'] and len(g['energy']) == len(g['downbeats']) - 1 and len(calls) == n + 1      # the second build decodes once for its bar features, not again for the grid
+    g = json.load(open(os.path.join(rd, 'music', 'grid.json'))); assert g['key']['name'] and len(g['energy']) == len(g['downbeats']) - 1 == len(g['sim']) and len(calls) == n      # the grid, with its bar similarity, is cached: the second build decodes nothing
 
 
 def test_the_bar_count_follows_the_length():

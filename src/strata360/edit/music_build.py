@@ -15,10 +15,10 @@ def grid(rd, rel, decode=None):
     p = os.path.join(rd, rel); sig = MU._sig(p); gp = os.path.join(rd, 'music', 'grid.json')
     try:
         g = json.load(open(gp))
-        if g.get('version') == 1 and g.get('sig') == sig and g.get('file') == rel: return g
+        if g.get('version') == 2 and g.get('sig') == sig and g.get('file') == rel: return g
     except (OSError, ValueError): pass
     x = (decode or MU.decode)(p); S = MU.spectrogram(x); g = MU.beat_grid(x, S=S); t, mode, name, conf = MU.estimate_key(MU.chroma(S))
-    g['energy'] = bar_energy(x, g['downbeats']); g.update(version=1, file=rel, sig=sig, key=dict(tonic=int(t), mode=mode, name=name, confidence=conf), duration_s=round(len(x) / MU.SR, 3)); os.makedirs(os.path.dirname(gp), exist_ok=True); json.dump(g, open(gp, 'w')); return g
+    g['energy'] = bar_energy(x, g['downbeats']); g['sim'] = [[round(float(v), 2) for v in r] for r in MU.bar_similarity(MU.bar_features(x, g['downbeats'], S=S))]; g.update(version=2, file=rel, sig=sig, key=dict(tonic=int(t), mode=mode, name=name, confidence=conf), duration_s=round(len(x) / MU.SR, 3)); os.makedirs(os.path.dirname(gp), exist_ok=True); json.dump(g, open(gp, 'w')); return g
 
 
 def bar_count(g, length_s):
@@ -26,7 +26,8 @@ def bar_count(g, length_s):
 
 
 def build(rd, rel, length_s, levels=None, windows=(), separator=None, decode=None, write=None, read=None, ending_bars=2):
-    g = grid(rd, rel, decode); db = g['downbeats']; T, bar_s = bar_count(g, length_s); x = (decode or MU.decode)(os.path.join(rd, rel)); sim = MU.bar_similarity(MU.bar_features(x, db))
+    """levels: a 0..1 level per film bar (resampled if the count differs); windows: film bars [(first, end)]."""
+    g = grid(rd, rel, decode); db = g['downbeats']; T, bar_s = bar_count(g, length_s); sim = np.array(g['sim'])
     lv = None if levels is None else np.asarray(levels, float)
     if lv is not None and len(lv) != T: lv = np.interp(np.linspace(0, 1, T), np.linspace(0, 1, len(lv)), lv)
     en = np.asarray(g['energy'], float) if lv is not None else None
@@ -35,7 +36,7 @@ def build(rd, rel, length_s, levels=None, windows=(), separator=None, decode=Non
     leak = layers.stray_vocal_db(layers.mix(dict(vocals=st['vocals']), sr, db, plan['bars'], gains, end_s=g.get('duration_s'))[0], sr, marks, windows)     # the vocal stem as it is in the mix: silent outside the windows
     out = os.path.join(rd, 'music', 'built.flac'); (write or ST.ffmpeg_write)(out, np.clip(y, -1, 1), sr)
     score = dict(version=SCORE_VERSION, source='built', file='music/built.flac', of=rel, length_s=round(len(y) / sr, 3), bpm=g['bpm'], key=g['key'], bars=plan['bars'], runs=plan['runs'], joins=plan['joins'], worst_join=plan['worst_join'],
-                 downbeats=marks, levels=None if lv is None else [round(float(v), 3) for v in lv], windows=[list(w) for w in windows], stray_vocal_db=leak)
+                 downbeats=marks, levels=None if lv is None else [round(float(v), 3) for v in lv], windows=[list(w) for w in windows], stray_vocal_db=None if leak == float('-inf') else leak)       # None: silent (JSON has no -infinity)
     json.dump(score, open(os.path.join(rd, 'music', 'built.json'), 'w'), indent=1); return score
 
 
