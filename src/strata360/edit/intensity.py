@@ -17,12 +17,19 @@ def _scaled(v):
     v = np.asarray(v, float); lo, hi = np.percentile(v, 5), np.percentile(v, 95); return np.clip((v - lo) / (hi - lo), 0, 1) if hi - lo > 1e-9 else np.zeros_like(v)
 
 
+def signal_bars(n_bars, bar_s, signals):
+    """Each signal as a 0..1 value per bar: [(name, weight, array)]. Points with no value (NaN) are dropped first; a signal with fewer than two points is skipped."""
+    centres = (np.arange(n_bars) + 0.5) * bar_s; out = []
+    for i, s in enumerate(signals):
+        t = np.asarray(s['t'], float); v = np.asarray(s['v'], float); ok = np.isfinite(t) & np.isfinite(v)
+        if ok.sum() < 2: continue
+        out.append((s.get('name', f'signal {i + 1}'), float(s.get('weight', 1.0)), np.interp(centres, t[ok], _scaled(v[ok]))))
+    return out
+
+
 def curve(n_bars, bar_s, signals=(), marks=(), speech=(), phrase_bars=4, smooth_bars=SMOOTH_BARS, hysteresis=HYSTERESIS):
     centres = (np.arange(n_bars) + 0.5) * bar_s; acc = np.zeros(n_bars); wsum = 0.0
-    for s in signals:
-        t = np.asarray(s['t'], float)
-        if len(t) < 2: continue
-        w = float(s.get('weight', 1.0)); acc += w * np.interp(centres, t, _scaled(s['v'])); wsum += w
+    for _, w, a in signal_bars(n_bars, bar_s, signals): acc += w * a; wsum += w
     base = acc / wsum if wsum else np.full(n_bars, 0.5)
     if smooth_bars > 1: k = np.ones(smooth_bars) / smooth_bars; base = np.convolve(np.pad(base, (smooth_bars, smooth_bars), mode='edge'), k, 'same')[smooth_bars:-smooth_bars]
     for a, b in speech: base[(centres >= a) & (centres < b)] *= SPEECH_DUCK

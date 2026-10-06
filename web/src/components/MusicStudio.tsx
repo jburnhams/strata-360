@@ -4,8 +4,9 @@ import { usePoll } from '../usePoll'
 
 const LEVEL_NAMES = ['sparse', 'steady', 'driving', 'full'], LEVELS = [0.15, 0.4, 0.65, 0.9], PHRASE = 4
 const STEMS = ['drums', 'bass', 'other', 'vocals'] as const
-const PRESET_NOTES: Record<StudioPreset, string> = { flat: 'steady throughout', arc: 'full at the start and finish, a slow wave between', build: 'rising to the finish', quiet: 'sparse throughout', manual: 'set by hand below' }
-const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
+const PRESET_NOTES: Record<StudioPreset, string> = { flat: 'steady throughout', arc: 'full at the start and finish, a slow wave between', build: 'rising to the finish', quiet: 'sparse throughout', manual: 'set by hand below', footage: 'follows what is in the film: motion, crowd sound, pace, climb, heart rate and the shots\' own energy; sparser under speech' }
+const SIGNAL_LABELS: Record<string, string> = { motion: 'motion', crowd: 'crowd sound', pace: 'pace', climb: 'climb', heart: 'heart rate', technique: 'shot energy' }
+const mmss = (s: number) => { const r = Math.round(s); return `${Math.floor(r / 60)}:${String(r % 60).padStart(2, '0')}` }
 const levelIndex = (v: number) => LEVELS.reduce((best, l, i) => (Math.abs(l - v) < Math.abs(LEVELS[best] - v) ? i : best), 0)
 
 // The Music studio: the track's bars and key, a preview of the music built for a length (no audio is made for it: which of the track's bars play where, how intense each phrase is, which layers play), and the built track itself.
@@ -16,8 +17,8 @@ export default function MusicStudio({ folder }: { folder: string }) {
   const grid = st?.grid
   const [length, setLength] = useState<number>(), [preset, setPreset] = useState<StudioPreset>('arc'), [manual, setManual] = useState<number[]>(), [windows, setWindows] = useState<[number, number][]>([])
   const [busy, setBusy] = useState(false), [msg, setMsg] = useState<string>(), [pv, setPv] = useState<StudioPreview>(), [pvErr, setPvErr] = useState<string>()
-  const seeded = useRef(false)
-  useEffect(() => { if (grid && !seeded.current) { seeded.current = true; setLength(Math.round(grid.duration_s)) } }, [grid])         // the length starts as the track's; clearing the box later must not bring it back
+  const seeded = useRef(false), footage = st?.footage
+  useEffect(() => { if (grid && st && !seeded.current) { seeded.current = true; if (footage) { setLength(Math.round(footage.length_s)); setPreset('footage') } else setLength(Math.round(grid.duration_s)) } }, [grid, st, footage])         // the length starts as the film's (or the track's); clearing the box later must not bring it back
   const settings = useMemo<StudioSettings | undefined>(() => length === undefined || !(length >= 4) ? undefined : { length_s: length, preset, ...(preset === 'manual' && manual ? { levels: manual } : {}), windows }, [length, preset, manual, windows])
   useEffect(() => {
     if (!grid || !settings) return
@@ -50,7 +51,7 @@ export default function MusicStudio({ folder }: { folder: string }) {
           <label className="flex flex-col gap-1">Length (seconds)<input type="number" min={4} max={3600} value={length ?? ''} onChange={e => setLength(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 rounded border border-stone-300 px-2 py-1 dark:border-stone-700 dark:bg-stone-950" /></label>
           <label className="flex flex-col gap-1">Intensity over the film
             <select value={preset} onChange={e => setPreset(e.target.value as StudioPreset)} className="rounded border border-stone-300 px-2 py-1 dark:border-stone-700 dark:bg-stone-950">
-              {(['arc', 'flat', 'build', 'quiet'] as StudioPreset[]).map(p => <option key={p} value={p}>{p}</option>)}{preset === 'manual' && <option value="manual">manual</option>}</select></label>
+              {(footage ? ['footage', 'arc', 'flat', 'build', 'quiet'] as StudioPreset[] : ['arc', 'flat', 'build', 'quiet'] as StudioPreset[]).map(p => <option key={p} value={p}>{p === 'footage' ? 'follow the footage' : p}</option>)}{preset === 'manual' && <option value="manual">manual</option>}</select></label>
           <span className="pb-1 text-xs text-stone-500">{PRESET_NOTES[preset]}</span>
         </div>
         <Windows windows={windows} setWindows={setWindows} max={length ?? 0} />
@@ -108,17 +109,19 @@ function Preview({ pv, setLevel }: { pv: StudioPreview; setLevel: (phrase: numbe
 
       <div>
         <div className="mb-1 text-xs font-medium">Intensity: click a phrase to change its level</div>
-        <div className="flex h-20 items-end gap-0.5">
+        <div className="flex items-end gap-2"><span className="w-20 shrink-0 text-xs text-stone-500">level</span>
+        <div className="flex h-20 flex-1 items-end gap-0.5">
           {Array.from({ length: phrases }, (_, p) => { const idx = levelIndex(pv.levels[p * PHRASE] ?? 0.4)
             return <button key={p} aria-label={`Phrase ${p + 1} (from ${mmss(p * PHRASE * pv.bar_s)}): ${LEVEL_NAMES[idx]}. Click for the next level`} title={`${mmss(p * PHRASE * pv.bar_s)}: ${LEVEL_NAMES[idx]}`} onClick={() => setLevel(p, (idx + 1) % LEVELS.length)}
               className="flex h-full min-w-0 flex-1 items-end rounded-sm bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700"><span className="block w-full rounded-sm bg-emerald-600" style={{ height: `${20 + 26.7 * idx}%` }} /></button> })}
-        </div>
-        <div className="mt-1 flex justify-between text-xs text-stone-500"><span>0:00</span><span>{LEVEL_NAMES.join(' · ')}</span><span>{mmss(pv.length_s)}</span></div>
+        </div></div>
+        <div className="mt-1 flex justify-between pl-[5.5rem] text-xs text-stone-500"><span>0:00</span><span>{LEVEL_NAMES.join(' · ')}</span><span>{mmss(pv.length_s)}</span></div>
+        {pv.why && <Why why={pv.why} />}
       </div>
 
       <div>
         <div className="mb-1 text-xs font-medium">Layers: which parts of the track play, bar by bar</div>
-        <div className="space-y-0.5">{STEMS.map(n => <div key={n} className="flex items-center gap-2"><span className="w-12 shrink-0 text-xs text-stone-500">{n}</span>
+        <div className="space-y-0.5">{STEMS.map(n => <div key={n} className="flex items-center gap-2"><span className="w-20 shrink-0 text-xs text-stone-500">{n}</span>
           <div className="flex h-4 flex-1 gap-px" role="img" aria-label={`${n} layer by bar`}>{pv.gains[n].map((g, i) => <div key={i} data-stem={n} className={`min-w-0 flex-1 ${n === 'vocals' ? 'bg-sky-500' : 'bg-emerald-600'}`} style={{ opacity: 0.08 + 0.92 * g }} />)}</div></div>)}</div>
         {pv.windows.length > 0 && <p className="mt-1 text-xs text-sky-700 dark:text-sky-400">The original's singing plays in bars {pv.windows.map(([a, b]) => `${a + 1} to ${b}`).join(' and ')}.</p>}
       </div>
@@ -128,6 +131,18 @@ function Preview({ pv, setLevel }: { pv: StudioPreview; setLevel: (phrase: numbe
         <Similarity pv={pv} />
       </div>
     </section>
+  )
+}
+
+// What the 'follow the footage' curve was made from: each signal's value per bar (darker: more), and the bars where speech keeps the music down.
+function Why({ why }: { why: NonNullable<StudioPreview['why']> }) {
+  return (
+    <div className="mt-2 space-y-0.5" aria-label="What drove the intensity">
+      {why.signals.map(s => <div key={s.name} className="flex items-center gap-2"><span className="w-20 shrink-0 text-xs text-stone-500" title={`weight ${s.weight}`}>{SIGNAL_LABELS[s.name] ?? s.name}</span>
+        <div className="flex h-3 flex-1 gap-px" role="img" aria-label={`${SIGNAL_LABELS[s.name] ?? s.name} by bar`}>{s.values.map((v, i) => <div key={i} data-signal={s.name} className="min-w-0 flex-1 bg-amber-500" style={{ opacity: 0.08 + 0.92 * v }} />)}</div></div>)}
+      {why.speech.some(Boolean) && <div className="flex items-center gap-2"><span className="w-20 shrink-0 text-xs text-stone-500">speech</span>
+        <div className="flex h-3 flex-1 gap-px" role="img" aria-label="speech by bar">{why.speech.map((v, i) => <div key={i} data-signal="speech" className={`min-w-0 flex-1 ${v ? 'bg-sky-500' : 'bg-transparent'}`} />)}</div></div>}
+    </div>
   )
 }
 

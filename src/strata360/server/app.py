@@ -765,7 +765,8 @@ def create_app(roots, token=None):
         except OSError: lines = []
         err = ''
         if job and not running and job.returncode: err = next((l for l in reversed(lines) if l.strip() and not l.startswith(('Traceback', '  File', '    '))), 'failed')[:300]
-        return dict(MS.state(rd, rel), building=running, error=err, log=lines[-1] if lines else '')
+        from strata360.edit import intensity_signals as IS
+        return dict(MS.state(rd, rel), building=running, error=err, log=lines[-1] if lines else '', footage=MS.footage_summary(IS.cached(f)))
 
     @api.post('/api/music/studio/analyse', dependencies=[Depends(auth)])
     def post_music_studio_analyse(body: dict):                                            # {folder}: find the beats, downbeats, key and bar similarity of the track (a few seconds to a minute)
@@ -777,7 +778,7 @@ def create_app(roots, token=None):
 
     @api.post('/api/music/studio/preview', dependencies=[Depends(auth)])
     def post_music_studio_preview(body: dict):                                            # {folder, length_s, preset?, levels?, windows? [[t0, t1] film seconds]}: the plan for a build, with no audio made
-        from strata360.edit import music_studio as MS
+        from strata360.edit import music_studio as MS, intensity_signals as IS
         f = folder_of(body.get('folder')); rd, rel = studio_track(f); preset = body.get('preset') or 'arc'
         if preset not in MS.PRESETS: raise HTTPException(400, 'unknown preset')
         try: length = float(body.get('length_s'))
@@ -787,7 +788,7 @@ def create_app(roots, token=None):
             g = MS.read_grid(rd, rel)
             if not g: raise RuntimeError('analyse the track first')
             bar_s = (g['downbeats'][-1] - g['downbeats'][0]) / (len(g['downbeats']) - 1); n = max(1, int(round(length / bar_s)))
-            return MS.preview(rd, rel, length, preset, body.get('levels'), MS.windows_to_bars([tuple(w) for w in body.get('windows') or []], bar_s, n))
+            return MS.preview(rd, rel, length, preset, body.get('levels'), MS.windows_to_bars([tuple(w) for w in body.get('windows') or []], bar_s, n), IS.cached(f) if preset == 'footage' else None)
         except RuntimeError as e: raise HTTPException(409, str(e))
 
     @api.post('/api/music/studio/build', dependencies=[Depends(auth)])
@@ -796,7 +797,7 @@ def create_app(roots, token=None):
         if job and job.poll() is None: return dict(started=False, reason='a track is already being built')
         try: length = float(body.get('length_s'))
         except (TypeError, ValueError): raise HTTPException(400, 'length_s is a number of seconds')
-        cmd = [*oslib.cli_command(), 'music-build', f, '--length-s', str(length), '--preset', str(body.get('preset') if body.get('preset') in ('flat', 'arc', 'build', 'quiet') else 'flat')]
+        cmd = [*oslib.cli_command(), 'music-build', f, '--length-s', str(length), '--preset', str(body.get('preset') if body.get('preset') in ('flat', 'arc', 'build', 'quiet', 'footage') else 'flat')]
         if body.get('preset') == 'manual' and body.get('levels'): cmd += ['--levels', ','.join(str(float(v)) for v in body['levels'])]
         for w in body.get('windows') or []: cmd += ['--vocals', f'{float(w[0])}-{float(w[1])}']
         os.makedirs(os.path.join(rd, 'music'), exist_ok=True); log = open(os.path.join(rd, 'music', 'build.log'), 'wb')

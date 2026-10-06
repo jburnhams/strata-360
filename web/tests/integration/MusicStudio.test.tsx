@@ -76,6 +76,26 @@ describe('MusicStudio', () => {
     await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ windows: [[8, 16]] })); await user.click(screen.getByRole('button', { name: 'remove' })); await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ windows: [] }))
   })
 
+  it('follows the footage by default when the film has signals, at the length of the film, and shows what drove the curve', async () => {
+    mockGet('/api/music/studio', makeStudioState({ footage: { length_s: 120, used: ['motion', 'crowd'] } }))
+    mockPost('/api/music/studio/preview', makeStudioPreview({ why: { signals: [{ name: 'crowd', weight: 2, values: [0, 0.5, 1, 1, 0, 0, 0, 0] }, { name: 'technique', weight: 1, values: [0.2, 0.2, 0.2, 0.2, 0.9, 0.9, 0.9, 0.9] }], speech: [false, false, true, true, false, false, false, false] } }))
+    const seen = recordRequests('/api/music/studio/preview'); setup(<MusicStudio folder="/data" />)
+    const why = await screen.findByLabelText('What drove the intensity'); expect(seen.at(-1)?.body).toMatchObject({ length_s: 120, preset: 'footage' })
+    expect(screen.getByLabelText(/Intensity over the film/)).toHaveValue('footage'); expect(screen.getByRole('option', { name: 'follow the footage' })).toBeInTheDocument()
+    expect(within(screen.getByRole('img', { name: 'crowd sound by bar' })).getAllByText((_, el) => el?.getAttribute('data-signal') === 'crowd')).toHaveLength(8); expect(within(why).getByText('shot energy')).toBeInTheDocument()
+    expect(within(screen.getByRole('img', { name: 'speech by bar' })).getAllByText((_, el) => el?.className.includes('bg-sky-500') ?? false)).toHaveLength(2)
+  })
+
+  it('does not offer the footage when the film has no signals, nor show a reason for a preset curve', async () => {
+    setup(<MusicStudio folder="/data" />); await screen.findByLabelText('Preview of the build')
+    expect(screen.queryByRole('option', { name: 'follow the footage' })).not.toBeInTheDocument(); expect(screen.queryByLabelText('What drove the intensity')).not.toBeInTheDocument()
+  })
+
+  it('writes minutes and seconds without a 60', async () => {
+    mockPost('/api/music/studio/preview', makeStudioPreview({ length_s: 179.9 })); setup(<MusicStudio folder="/data" />)
+    expect((await screen.findAllByText(/3:00/)).length).toBeGreaterThan(0); expect(screen.queryByText(/2:60/)).not.toBeInTheDocument()
+  })
+
   it('says in which bars the singing plays', async () => {
     mockPost('/api/music/studio/preview', makeStudioPreview({ windows: [[2, 4]], gains: { ...makeStudioPreview().gains, vocals: [0, 0, 1, 1, 0, 0, 0, 0] } }))
     setup(<MusicStudio folder="/data" />); expect(await screen.findByText(/singing plays in bars 3 to 4/)).toBeInTheDocument()

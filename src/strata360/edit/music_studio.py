@@ -7,10 +7,15 @@ import json, os
 import numpy as np
 from strata360.edit import intensity, layers, music_build as MB, remix
 
-PRESETS = ('flat', 'arc', 'build', 'quiet', 'manual')
+FOOTAGE_NOTE = 'follows the footage'
+
+PRESETS = ('flat', 'arc', 'build', 'quiet', 'manual', 'footage')
 
 
-def levels_for(preset, n, levels=None):
+def levels_for(preset, n, levels=None, footage=None, bar_s=None):
+    if preset == 'footage':
+        if not footage or not footage.get('signals'): raise RuntimeError('there is no film plan with footage signals yet')
+        return np.array(intensity.curve(n, bar_s, footage['signals'], footage['marks'], footage['speech'])['levels'])
     if preset == 'manual' and levels is not None:
         lv = np.asarray(levels, float); return lv if len(lv) == n else np.interp(np.linspace(0, 1, n), np.linspace(0, 1, len(lv)), lv)
     if preset == 'quiet': return np.full(n, intensity.LEVELS[0])
@@ -46,10 +51,22 @@ def windows_to_bars(spans, bar_s, n):
     out = [(max(0, int(t0 // bar_s)), min(n, int(-(-t1 // bar_s)))) for t0, t1 in spans if t1 > t0]; return [w for w in out if w[0] < w[1]]
 
 
-def preview(rd, rel, length_s, preset='arc', levels=None, windows=()):
+def preview(rd, rel, length_s, preset='arc', levels=None, windows=(), footage=None):
     g = read_grid(rd, rel)
     if not g: raise RuntimeError('analyse the track first')
-    T, bar_s = MB.bar_count(g, length_s); lv = levels_for(preset, T, levels); sim = np.array(g['sim']); en = np.asarray(g['energy'], float)
+    T, bar_s = MB.bar_count(g, length_s); lv = levels_for(preset, T, levels, footage, bar_s); sim = np.array(g['sim']); en = np.asarray(g['energy'], float)
     plan = remix.plan(sim, T, levels=lv, energy=en); gains = layers.open_vocals(layers.layer_gains(lv), windows)
     return dict(bars=T, bar_s=round(bar_s, 3), length_s=round(T * bar_s, 2), levels=[round(float(v), 3) for v in lv], windows=[list(w) for w in windows], plan=dict(bars=plan['bars'], runs=[list(r) for r in plan['runs']], joins=plan['joins'], worst_join=plan['worst_join']),
-                gains={n: [round(float(v), 3) for v in a] for n, a in gains.items()}, sim=g['sim'], energy=g['energy'])
+                gains={n: [round(float(v), 3) for v in a] for n, a in gains.items()}, sim=g['sim'], energy=g['energy'],
+                why=why(footage, T, bar_s) if preset == 'footage' else None)
+
+
+def why(footage, n, bar_s):
+    """What drove the 'footage' curve, per bar: each signal's 0..1 value, and the bars under speech."""
+    sp = np.zeros(n, bool); centres = (np.arange(n) + 0.5) * bar_s
+    for a, b in footage['speech']: sp |= (centres >= a) & (centres < b)
+    return dict(signals=[dict(name=nm, weight=w, values=[round(float(v), 3) for v in a]) for nm, w, a in intensity.signal_bars(n, bar_s, footage['signals'])], speech=[bool(v) for v in sp])
+
+
+def footage_summary(footage):
+    return None if not footage or not footage.get('signals') else dict(length_s=footage['length_s'], used=footage['used'])

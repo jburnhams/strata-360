@@ -103,3 +103,12 @@ class TestStudioApi:
     def test_the_built_track_is_served_when_there_is_one(self, client, project, track):
         f = project.folder; assert client.get('/api/music/built/audio', params=dict(folder=f)).status_code == 404
         open(os.path.join(project.race_dir, 'music', 'built.flac'), 'wb').write(b'fLaC'); r = client.get('/api/music/built/audio', params=dict(folder=f)); assert r.status_code == 200 and r.content == b'fLaC'
+
+    def test_the_studio_offers_the_footage_signals_and_previews_with_them(self, client, project, track, monkeypatch):
+        from strata360.edit import intensity_signals as IS
+        segs = [dict(film_start_s=i * 10.0, dur_s=10.0, clip='A', clip_start_s=0.0, utc_start='2026-02-21T12:00:00.000Z', energy=0.1 if i < 2 else 0.9) for i in range(4)]
+        fp = IS.signals_from(segs, None, None, None, step_s=2.0); monkeypatch.setattr(IS, 'cached', lambda f: fp); f = project.folder
+        s = client.get('/api/music/studio', params=dict(folder=f)).json(); assert s['footage'] == dict(length_s=40.0, used=['technique'])
+        r = client.post('/api/music/studio/preview', json=dict(folder=f, length_s=40, preset='footage')).json(); assert r['why']['signals'][0]['name'] == 'technique' and r['levels'][0] == 0.9
+        monkeypatch.setattr(IS, 'cached', lambda f: None); assert client.get('/api/music/studio', params=dict(folder=f)).json()['footage'] is None
+        assert client.post('/api/music/studio/preview', json=dict(folder=f, length_s=40, preset='footage')).status_code == 409
