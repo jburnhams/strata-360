@@ -1,6 +1,6 @@
 # Generated music (plan item G): options and plan, 5 Oct 2026
 
-Status: **design, nothing built.** Decided with the user on 5 Oct:
+Status (6 Oct): **G0, G1 and a Music studio screen are built; G2 to G5 are not.** Built: the precise beat tracker, key and bar similarity (`edit/music.py`), re-sequencing to any length (`edit/remix.py`), stems with Demucs, per-bar layer gains and vocal windows (`edit/stems.py`, `edit/layers.py`), the build (`edit/music_build.py`, `strata360 music-build`), the intensity curve from the footage signals (`edit/intensity.py`, `edit/intensity_signals.py`) and the screen (`web/src/components/MusicStudio.tsx`, `edit/music_studio.py`, endpoints under `/api/music/studio`). All tested on synthetic audio only: **nothing has been heard on a real track, and Demucs has not run** (needs the PC). What is left of G1: the `scenes` energy, the director's marked moments, the real voice-over timeline, the curve under the Overview waveform. The step list is in section 5; `docs/implementation-plan.md` (Milestone G) has the details of each piece and what is not yet done. Decided with the user on 5 Oct:
 - the film is **personal**;
 - everything is made **locally** (a few Gemini Pro calls, like the script writer's, are fine);
 - **mostly instrumental**, so the film's own sound is never obscured;
@@ -172,8 +172,8 @@ A3, with the built track as "the music", plus the per-bar stem gains and the bac
 
 | Step | What | Size |
 |---|---|---|
-| **G0** | **Stems, re-sequencing and layering, no generative model.** Demucs stems of the uploaded track; bar-level re-sequencing to any length ending on its own ending; per-bar layer gains from a given curve; vocals only in given windows. | M |
-| **G1** | **Intensity curve** from the signals in 4.1; drawn under the music waveform. | S to M |
+| **G0** | **(built 5 Oct, untried on real audio)** **Stems, re-sequencing and layering, no generative model.** Demucs stems of the uploaded track; bar-level re-sequencing to any length ending on its own ending; per-bar layer gains from a given curve; vocals only in given windows. | M |
+| **G1** | **(built 6 Oct apart from the items listed in the status)** **Intensity curve** from the signals in 4.1; drawn under the music waveform. | S to M |
 | **G2** | **Score plan**: `score.py`, key estimation in `music.py`, quiet windows, the director's `sing` items (4.2a: the phrase library in the pack, the item in the prompt, `check` and `director_notes`, a prompt version bump) and the rules for a plan with no director run, sources and layers per section, and the **fidelity setting** (4.5) with per-section pins. | M |
 | **G3** | **ACE-Step**: the backend interface, generated and bridge sections in the original's style, repaint for repairs. | M |
 | **G4** | **Stable Audio 3 Medium** as the second backend; a **bake-off on Legends** (the same score, both backends, plus G0 alone, judged by ear, like `docs/bakeoff`). | S to M |
@@ -188,7 +188,7 @@ Dependencies: G1 and G2 need V4 (the voice-over timeline) and the plan. V5 cuts 
 - **G3 and G4:** backends behind fakes in the unit suite (`tests/utils` fakes); one real build per backend run by hand on the PC's GPU (like the other model-dependent checks, overview section 0) and logged in `progress.md` with its time and peak GPU memory.
 - **G5:** on Legends, a built track whose downbeats are all within 40 ms of the grid after fitting, with no singing outside the chosen moments, and a film of the right length that plays through the rough mix.
 
-## 5a. Ready to start (5 Oct)
+## 5a. Ready to start (5 Oct; G0a, G0b and G1 since built, see the status above)
 
 Every decision is taken except the fidelity default, and 0.75 is enough to start. What G needs from the rest of the plan is built: the music record and analysis (`music.py`), the lyrics and their phrases (`lyrics.py`), the voice-over fit (V4, `vo_fit.py`), the director with items and anchors (V7, L1 to L4), and the background track and sound events.
 
