@@ -37,9 +37,9 @@ describe('ClipView', () => {
       track_text: 'Track A',
       motion: { steady: 0.9 },
       exposure: { mean_lin_range_stops: 3.2 },
-      objects: { objects: [{ id: 1, label: 'dog', lon: 0, lat: 0, deg: 0, seen: [1, 2], word: 'dog', kind: 'named', source: 'vlm', yoloe: 'dog', conf: 0.9 }], regions: [], areas: {}, scenery_labels: {}, counts: {}, skipped: null, model: 'Qwen3.5', moments: 4 },
+      objects: { objects: [{ id: 1, label: 'dog', lon: 0, lat: 0, deg: 0, seen: [1, 2], word: 'dog', kind: 'named', source: 'vlm', yoloe: 'dog', conf: 0.9, best_t: 1, crop: true }], regions: [], areas: {}, scenery_labels: {}, counts: {}, skipped: null, model: 'Qwen3.5', moments: 4 },
       transcript: [{ si: 1, t0: 0, t1: 1, text: 'hello', text_en: 'hello', lang: 'en', flagged: false, who: 'wearer', words: [] }],
-      sounds: { seconds: { voice: 1 }, hints: { voice: ['voice', 0] }, windows: [{ t0: 0, t1: 5, cats: { voice: 0.8 } }] }
+      sounds: { seconds: { voice: 1 }, hints: { voice: ['voice', 0] }, windows: [{ t0: 0, t1: 5, cats: { voice: 0.8 }, top: [] }] }
     }))
 
     const { findByText, getByText, findByTestId } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
@@ -57,7 +57,7 @@ describe('ClipView', () => {
   it('allows hiding objects', async () => {
     mockGet('/api/pointcams', makePointCams())
     mockGet('/api/clip', makeClipDetail({
-      objects: { objects: [{ id: 1, label: 'dog', lon: 0, lat: 0, deg: 0, seen: [1, 2], word: 'dog', kind: 'named', source: 'vlm', yoloe: 'dog', conf: 0.9 }], regions: [], areas: {}, scenery_labels: {}, counts: {}, skipped: null, model: 'Qwen3.5', moments: 4 },
+      objects: { objects: [{ id: 1, label: 'dog', lon: 0, lat: 0, deg: 0, seen: [1, 2], word: 'dog', kind: 'named', source: 'vlm', yoloe: 'dog', conf: 0.9, best_t: 1, crop: true }], regions: [], areas: {}, scenery_labels: {}, counts: {}, skipped: null, model: 'Qwen3.5', moments: 4 },
     }))
 
     const reqs = recordRequests('/api/clip/object/hide')
