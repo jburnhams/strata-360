@@ -137,6 +137,12 @@ export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | '
 export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; bitrate: string }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean }
 export interface MusicAnalysis { bpm: number; offset_s: number; bar_beats?: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number }
 export interface MusicState { file: string | null; name?: string | null; analysis: MusicAnalysis | null; waveform?: number[] | null; spectrogram?: boolean }
+export interface StudioGrid { bpm: number; key: { tonic: number; mode: string; name: string; confidence: number }; bars: number; duration_s: number; bar_s: number; downbeats: number[]; energy: number[] }
+export interface MusicScore { source: 'built'; file: string; of: string; length_s: number; bpm: number; key: StudioGrid['key']; bars: number[]; runs: [number, number][]; joins: number[]; worst_join: number; downbeats: number[]; levels: number[] | null; windows: [number, number][]; stray_vocal_db: number | null }
+export interface StudioState { grid: StudioGrid | null; built: MusicScore | null; stems: boolean; building: boolean; error: string; log: string; footage?: { length_s: number; used: string[] } | null }
+export type StudioPreset = 'flat' | 'arc' | 'build' | 'quiet' | 'manual' | 'footage'
+export interface StudioSettings { length_s: number; preset: StudioPreset; levels?: number[]; windows?: [number, number][] }
+export interface StudioPreview { bars: number; bar_s: number; length_s: number; levels: number[]; windows: [number, number][]; plan: { bars: number[]; runs: [number, number][]; joins: number[]; worst_join: number }; gains: Record<'drums' | 'bass' | 'other' | 'vocals', number[]>; sim: number[][]; energy: number[]; why?: { signals: { name: string; weight: number; values: number[] }[]; speech: boolean[] } | null }
 export interface ClockState { offset_s: number; verified: boolean; note: string | null; drift_s_per_day?: number | null; anchors: unknown[]; has_track: boolean }
 export interface WhoState { ready: boolean; reason?: string; profile: boolean; sheet?: boolean; clusters?: { cluster: number; n: number; clips: number; rear_fraction: number; median_size_px: number }[]; suggested?: { clusters: number[]; confident: boolean; why: string } }
 export interface EditResponse { edit: EditState; techniques: { id: string; family: string; hero: boolean; dur: number[]; dialogue_ok: boolean }[]; script: Record<string, { text: string; says: string[]; words: number | null; budget: number | null }> }
@@ -313,6 +319,11 @@ export const api = {
   musicAudioUrl: (folder: string) => '/api/music/audio?' + q({ folder }),
   musicSpectrogramUrl: (folder: string, v: string) => '/api/music/spectrogram?' + q({ folder, v }),
   removeMusic: (folder: string) => fetch('/api/music?' + q({ folder }), { method: 'DELETE' }),
+  musicStudio: (folder: string) => call<StudioState>('/api/music/studio?' + q({ folder })),
+  analyseMusic: (folder: string) => call<StudioState>('/api/music/studio/analyse', { folder }),
+  previewMusic: (folder: string, o: StudioSettings) => call<StudioPreview>('/api/music/studio/preview', { folder, ...o }),
+  buildMusic: (folder: string, o: StudioSettings) => call<{ started: boolean; reason?: string }>('/api/music/studio/build', { folder, ...o }),
+  builtMusicUrl: (folder: string, v: string) => '/api/music/built/audio?' + q({ folder, v }),
   clock: (folder: string) => call<ClockState>('/api/clock?' + q({ folder })),
   clockSuggest: (folder: string) => call<{ current: number; suggestions: { offset_s: number; votes: number; confidence: number; score: number; clips?: string[] }[] }>('/api/clock/suggest?' + q({ folder })),
   setClock: (folder: string, offset_seconds: number) => call<{ clock: ClockState; retimed: number }>('/api/clock', { folder, offset_seconds }),

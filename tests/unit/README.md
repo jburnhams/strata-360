@@ -18,6 +18,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `server/app.py` | 60% | partial: auth, browse, last, open, notes, log, clips, clock, who done; the rest of the endpoints todo (transcript, script, voiceover, film, final, music, track, edit, state/clear/stop) |
 | `gps/track.py` | 52% | partial: `at`, `to_gpx`, cache done; `load_fit`/`load_gpx` need fitdecode/gpxpy (add to requirements-test.txt to test them) |
 | `edit/llm_remote.py` | 81% | partial: Vertex/Gemini/Claude request shape, retries and tiers done |
+| `edit/remix.py`, `edit/layers.py`, `edit/intensity.py`, `edit/intensity_signals.py`, `edit/music_build.py`, `edit/music_studio.py` | 96-100% | done: synthetic audio and fakes only (clicks, drifting tempo, chord loops, a fake separator); the music-studio endpoints are in `test_music_studio.py` |
+| `edit/stems.py`, the beat tracker, key and bar features in `edit/music.py` | 67% | partial: the cache and separator contract, the tracker and bar features done; `demucs_separator` and the ffmpeg read/write need models and ffmpeg (an integration run on the PC), the rest of `music.py` is the integration owner's |
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
 | `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |

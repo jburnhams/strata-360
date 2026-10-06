@@ -15,6 +15,7 @@ import VoiceoverPanel from './VoiceoverPanel'
 import Timeline from './Timeline'
 import FilmDetails from './FilmDetails'
 import MusicPanel from './MusicPanel'
+import MusicStudio from './MusicStudio'
 import GapView from './GapView'
 import PhotosPanel from './PhotosPanel'
 import StreetViewPage from './StreetViewPage'
@@ -44,6 +45,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         <button onClick={() => setSel(null)} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === null ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Overview</button>
         <button onClick={() => setSel('@streetview')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@streetview' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Street view</button>
         <button onClick={() => setSel('@timeline')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@timeline' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Timeline</button>
+        <button onClick={() => setSel('@music')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@music' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Music studio</button>
         <label className="mb-1 flex shrink-0 items-center gap-2 px-1 text-xs text-stone-600 dark:text-stone-400" title="Show the thumbnails with the race overlay (clock, numbers, maps) as the film will have it, where the thumb_overlay stage has made one">
           <input type="checkbox" checked={overlay} onChange={e => setOverlay(e.target.checked)} /> Overlay on thumbnails
         </label>
@@ -74,6 +76,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <TranscriptPanel folder={folder} clips={clips ?? []} tz={meta?.timezone ?? 'Europe/Brussels'} onOpen={(c, t) => { setFocus(t); setSel(c) }} />
           </div>
         ) : sel === '@streetview' ? <StreetViewPage folder={folder} tz={tz} />
+          : sel === '@music' ? <MusicStudio folder={folder} />
           : sel === '@timeline' ? <Timeline folder={folder} clips={clips ?? []} onOpenClip={c => { setFocus(undefined); setSel(c) }} />
           : sel.startsWith('@gap:') ? <GapView folder={folder} gap={sel.slice(5)} tz={tz} />
           : sel.startsWith('@sv:') ? <SvItemPage folder={folder} item={(svChosen ?? []).find(x => x.key === sel.slice(4))} tz={tz} onChanged={() => setPhotoTick(t => t + 1)} />
