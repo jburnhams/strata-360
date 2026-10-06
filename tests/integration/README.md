@@ -44,6 +44,7 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 | `render/preview.py` | 67% | `test_render.py` | preview GUI rendering |
 | `render/proxy.py` | 66% | `test_render.py` | proxy GUI rendering |
 | `audio/dsp.py` | 63% | `test_audio.py` | core ffmpeg audio operations |
+| `osv/*` | 92% | `test_osv.py` | mp4, telemetry, calibration, meta, pbdump covered on synthetic media |
 
 ## Known issues
 
