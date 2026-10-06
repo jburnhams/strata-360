@@ -112,3 +112,9 @@ export const makePointCams = (cams: import('../../src/api').PointCam[] = [], o: 
 export const makeObject = (o: Partial<DetectedObject> = {}): DetectedObject => ({ id: 0, label: 'goat', word: 'goat', kind: 'named', source: 'vlm', yoloe: 'cow', conf: 0.8, lon: -90, lat: -5, deg: 4, best_t: 1, seen: [1, 8.5], crop: true, ...o })
 export const makeRegion = (o: Partial<Region> = {}): Region => ({ kind: 'snow', lon: 40, lat: -30, w_deg: 30, h_deg: 10, polygon: [[25, -25], [55, -25], [55, -35], [25, -35]], seen: [1], n: 2, ...o })
 export const makeObjects = (o: Partial<ObjectsInfo> = {}): ObjectsInfo => ({ skipped: null, model: 'Qwen3.5', moments: 4, objects: [makeObject()], regions: [], areas: {}, scenery_labels: {}, counts: {}, ...o })
+export const makeClipDetail = (o: Partial<import('../../src/api').ClipDetail> = {}): import('../../src/api').ClipDetail => ({
+  id: 'CAM_1_D', note: '', time: { start_utc: '2026-02-22T19:00:00Z', utc_status: 'ok' }, video: { source_frames: 300, nominal_fps: 30, dropped_frames: 0 }, camera: {},
+  motion: { steady: 0.9, median_shake_dps: 1.5, cadence_hz: 2.8, total_turn_deg: 45 }, audio: { summary: {}, segments: [] },
+  transcript: [], scenes: null, identity: null, candidates: null, preview: true, heading: null, unusable: null, thresholds: null,
+  objects: null, places: null, exposure: { mean_lin_range_stops: 3.2 }, thumb: { kind: 'center', t_s: 5, why: 'default' }, track: {}, track_text: 'Track A', ...o
+})

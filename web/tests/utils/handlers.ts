@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeStudioState, makeStudioPreview, makeEditResponse, makeScript2State, makeScriptState, makeVoiceoverState, makeTrackLine, makeTracksListing, makeTrackSeries, makeTrackClip, makeFilmState, makeFinalState, makeRoughMix, makeLyrics } from './factories'
+import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeStudioState, makeStudioPreview, makeEditResponse, makeScript2State, makeScriptState, makeVoiceoverState, makeTrackLine, makeTracksListing, makeTrackSeries, makeTrackClip, makeClipDetail, makeFilmState, makeFinalState, makeRoughMix, makeLyrics } from './factories'
 
 // Default happy-path handlers, one per endpoint. Only the endpoints the tests so far need are here: when a test hits an endpoint that is missing,
 // msw fails it loudly (onUnhandledFrame: 'error'), so add the handler here (with a factory in factories.ts) rather than inline in the test.
@@ -74,3 +74,9 @@ export const handlers = [
   http.post('/api/voiceover/record', () => HttpResponse.json({ ok: true })),
   http.delete('/api/voiceover/record', () => HttpResponse.json({ ok: true }))
 ]
+export const extraHandlers = [
+  http.get('/api/clip', () => HttpResponse.json(makeClipDetail())),
+  http.post('/api/clip/object/hide', () => HttpResponse.json({ ok: true })),
+]
+
+handlers.push(...extraHandlers)

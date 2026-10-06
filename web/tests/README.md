@@ -45,7 +45,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/TrackPanel.tsx` | 88.46% | done (branches tested via interactions, some fallback cases left) |
 | `src/components/WhoPanel.tsx` | 100% | done |
 | `src/components/Workspace.tsx` | 100% | done |
-| `src/components/ObjectsCard.tsx`, `src/sceneLine.ts`, marks in `src/aimOverlay.ts`, marks and look-at in `src/components/ClipPlayer.tsx` | ~100% | done: the list, the Look buttons, snow and water areas, the marks switch, the scene line of each direction, marks drawn at their moments (`ObjectsCard.test.tsx`, `ClipPlayer.test.tsx`, `unit/aimOverlay.test.ts`, `unit/sceneLine.test.ts`); `ClipView.tsx` only wires them |
+| `src/components/ObjectsCard.tsx`, `src/sceneLine.ts`, marks in `src/aimOverlay.ts`, marks and look-at in `src/components/ClipPlayer.tsx` | ~100% | done: the list, the Look buttons, snow and water areas, the marks switch, the scene line of each direction, marks drawn at their moments (`ObjectsCard.test.tsx`, `ClipPlayer.test.tsx`, `unit/aimOverlay.test.ts`, `unit/sceneLine.test.ts`) |
 | `src/components/FolderBrowser.tsx` | 100% | done |
 | `src/components/NoteBox.tsx` | 100% | done |
 | `src/components/Health.tsx` | 100% | done |
@@ -62,8 +62,14 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | every other file in `src/` | 0% | todo
 | `src/components/Timeline.tsx` | 77.55% | partial (interactions and edge cases)
 | `src/components/Moments.tsx` | 100% | done |
+| `src/components/Skeleton.tsx` | 100% | done |
+| `src/components/PlayIcons.tsx` | 100% | done |
+| `src/components/WindowPlayer.tsx` | 100% | done |
+| `src/components/ClipView.tsx` | 75% | partial (loading states, populated states, redo dialog, hide object; branches like audio missing some tests) |
 
 ### Helpers Added
 
 * `makeEditResponse`, `makePlanSegment`, `makeScriptState`, `makeVoiceoverState` in `factories.ts`.
 * `extraHandlers` in `handlers.ts` to support API calls specific to `Timeline` such as `/api/edit`, `/api/edit/propose` and `/api/edit/override`. Added `api.script`, `api.voiceover`, etc.
+* `makeClipDetail` in `factories.ts`.
+* Mock handlers for `/api/clip` and `/api/clip/object/hide` in `handlers.ts`.
