@@ -10,7 +10,7 @@ import datetime as dt, json, math, os, re, time
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
 from strata360.edit.script_pack import norm_label
 
-PROMPT_VERSION = 14
+PROMPT_VERSION = 15
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
 VO_PAUSE_S = 0.25             # breathing room after a narration item
 ANCHOR_SLACK_S = 8.0          # an anchor further than this from where the items put it is sent back (the editor stretches b-roll for small differences)
@@ -18,6 +18,9 @@ MIN_GAP_S = 2.0               # a gap item plays for this long at least,
 MAX_GAP_S = SP.MAX_GAP_S      # and this long at most
 MIN_PHOTO_S, MAX_PHOTO_S = SP.MIN_PHOTO_S, SP.MAX_PHOTO_S      # a photo item plays for this long at least and at most
 TOLERANCE = 0.03              # the film's length may differ from the target by this share
+MAX_SING = 4                  # sung moments in one film
+MIN_SING_GAP_S = 30.0         # two sung moments closer than this are too close
+SING_LEAD_BARS = 1            # a bar of picture before and after the sung phrase
 KEEP = 3                      # drafts kept
 VO_WPM = 145.0                # a comfortable narration pace (edit/script.py DEFAULT_WPM)
 VO_MAX_SPEEDUP = 1.25         # the voice can be sped up this much at most (edit/vo_fit.py)
@@ -32,6 +35,7 @@ THE KINDS OF ITEM, played one after another in the order you write them (never a
 - "photo": a photo the runner took (a clip marked PHOTO: P1, P2 ...): "clip" is its name and "seconds" is how long it is shown (2 to 3: a plain picture needs less time than a busy one); the editor pans and zooms on it, aimed at the face, the people or the detail. Photos are optional extras: use the ones that add to the story or the sense of the place (a view, an aid station, a moment you could not film), at the point in the film where they were taken (they are in the clip list in time order), and leave the rest; one the runner marked MUST INCLUDE you must use. You may put "vo" over a photo.
 - "streetview": a steady view along the road, made from street-level pictures (a clip marked STREET VIEW: V1, V2 ...): "clip" is its name and "seconds" is how long it plays, between the two lengths given for it (the whole stretch of road always plays through, so a shorter item is faster). It shows the road the runner was on, with the clock, distance, pace and altitude on screen, so it can stand in for the footage of a stretch that has none. Use one where seeing the road helps: a long road section, a town, a turning point; the runner marked some MUST INCLUDE and you must use those. Two sections that cover the same road are alternatives (use at most one). You may put "vo" over one.
 - "camera": a shot the runner made of one place, a camera that looks at a landmark (a church, a bridge, a viewpoint) from the path, turning and zooming to keep it in frame while the runner (or a street view) goes past (a clip marked POINT CAMERA: C1, C2 ...): "clip" is its name and "seconds" is how long it plays, between the two lengths given for it. It shows what the runner passed, with the clock, distance, pace and altitude on screen. Use one where the place matters to the story and its moment in the race is in the film; the runner marked some MUST INCLUDE and you must use those. You may put "vo" over one.
+- "sing": the music's own singing is heard, over the picture of that clip, with no narration and no clip speech in it: "phrase" is the id of a sung phrase from THE MUSIC list (never a doubtful one) and "clip" the picture under it (a clip, a gap clip or a photo). Use it rarely (at most 4 in a film, often none in the first third, at least 30 s apart): where the words or the energy fit what is on screen and nothing needs saying, and never the same phrase twice unless it is the hook and the moments are far apart. Its length is the phrase's length rounded up to whole bars with a bar before and after; you do not set it. When the music is the fixed track, the phrase is sung where the track sings it, so the item must carry an "anchor" at that time (the editor snaps it to the bar).
 A "clip" or "broll" item may carry "view": "mid" (the usual view of the runner), "close" (a face zoom: for an emotional or intimate line) or "far" (ultra wide: the whole body and the surroundings, for the sense of place, effort or loneliness). A clip lists which views it has ("views of you") and for how much of its time; ask only for a view it has. Without a "view" the editor chooses, and cuts a long talking stretch between the views itself, so ask for one only where it matters.
 Any item may carry "anchor": {"film_s": number, "why": "reason"}: where in the film (in seconds) it should start, when it matters (the start of a sung chorus, the music's biggest section, the last line before the end). An anchor is a wish with a reason, not an exact time; the editor snaps items to the music's bars afterwards and keeps what it can.
 
@@ -63,6 +67,7 @@ SCHEMA = '''Return ONE JSON object and nothing else:
     {"type": "photo", "clip": "P2", "seconds": 5, "why": "what the photo shows and why it is in the film", "t": 41.5},
     {"type": "streetview", "clip": "V1", "seconds": 6, "why": "what the road shows and why it is in the film", "t": 44.0},
     {"type": "camera", "clip": "C1", "seconds": 8, "why": "what the place is and why the camera is on it", "t": 45.0},
+    {"type": "sing",  "clip": "0012", "phrase": "L07", "why": "the hook as the runner crosses the line", "t": 45.8, "anchor": {"film_s": 45, "why": "the track sings it here"}},
     {"type": "gap",   "clip": "G03", "seconds": 12, "why": "what the gap holds and why it is shown", "t": 46.5, "anchor": {"film_s": 100, "why": "optional: the chorus starts here"}}
   ],
   "skipped": [{"clip": "0001", "why": "reason"}],
@@ -142,11 +147,22 @@ def on_beats(d, kind, beat_s):
     n = round(d / beat_s) if kind == 'broll' else math.ceil(d / beat_s - 1e-9); return max(1, n) * beat_s
 
 
+def sing_seconds(phrase, bar_s, lead=SING_LEAD_BARS):
+    """How long a sing item plays: a bar of lead-in, the bars the phrase sits in (it starts part-way into its bar), a bar of lead-out."""
+    off = (phrase['t0'] % bar_s) / bar_s; return (math.ceil(off + (phrase['t1'] - phrase['t0']) / bar_s - 1e-9) + 2 * lead) * bar_s
+
+
+def sing_start(phrase, bar_s, lead=SING_LEAD_BARS):
+    """The film second a sing item for this phrase starts at with the fixed track: the bar line a lead-in before the phrase."""
+    return max(0.0, (phrase['t0'] // bar_s - lead) * bar_s)
+
+
 def check(script, pack, target_s, wpm):
     """(report, problems): durations are recomputed from the pack (the model's arithmetic is not used); `problems` are structural and drive a retry."""
     beat_s = 60.0 / pack['music']['bpm'] if (pack.get('music') or {}).get('bpm') else None
     clips = {c['label']: c for c in pack['clips']}; order = {c['label']: i for i, c in enumerate(pack['clips'])}; by = {l['id']: l for c in pack['clips'] for l in c['lines']}; pos = PN.index(pack)
-    rows = []; anchors = []; items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0, photo=0.0, streetview=0.0, camera=0.0); words_total = 0; last_line = {}
+    rows = []; anchors = []; items = (script or {}).get('items') or []; per = {}; total = 0.0; probs = []; last_clip = -1; seen_done = set(); cur = None; kinds = dict(vo=0.0, clip=0.0, broll=0.0, gap=0.0, photo=0.0, streetview=0.0, camera=0.0, sing=0.0); words_total = 0; last_line = {}
+    mus = pack.get('music') or {}; bar_s = mus.get('bar_s'); phrases = {p['id']: p for p in ((mus.get('lyrics') or {}).get('phrases') or []) if p.get('id')}; sung = []; used_phrases = set()
     for n, it in enumerate(items, 1):
         t = it.get('type'); cl = norm_label(it.get('clip', '')); total_before = total
         if cl not in clips: probs.append(f'item {n}: no such clip {cl}'); continue
@@ -188,6 +204,19 @@ def check(script, pack, target_s, wpm):
             d = float(it.get('seconds') or 0); c = clips[cl]
             if not c.get('photo'): probs.append(f'item {n}: {cl} is not a photo: a photo item names a photo such as P2'); continue
             if not MIN_PHOTO_S <= d <= MAX_PHOTO_S: probs.append(f'item {n}: a photo plays for {MIN_PHOTO_S:g} to {MAX_PHOTO_S:g} seconds, not {d:g}')
+        elif t == 'sing':
+            ph = phrases.get(str(it.get('phrase'))); d = 0.0
+            if not bar_s or not ph: probs.append(f"item {n}: no sung phrase {it.get('phrase')}: a sing item names a phrase id from THE MUSIC list" + (f" ({', '.join(list(phrases)[:8])} ...)" if phrases else ' (this track has none)')); continue
+            d = sing_seconds(ph, bar_s)
+            if ph.get('doubtful'): probs.append(f"item {n}: the phrase {ph['id']} is doubtful (the recogniser is unsure it is sung): choose another")
+            if len(sung) >= MAX_SING: probs.append(f'item {n}: more than {MAX_SING} sing items')
+            if sung and total_before - sung[-1][1] < MIN_SING_GAP_S: probs.append(f'item {n}: sung moments less than {MIN_SING_GAP_S:g} s apart')
+            if ph['id'] in used_phrases and not ph.get('hook'): probs.append(f"item {n}: the phrase {ph['id']} is used twice and is not the hook")
+            used_phrases.add(ph['id']); sung.append((total_before, total_before + d))
+            if not mus.get('built'):
+                at = sing_start(ph, bar_s); a = it.get('anchor')
+                if not (isinstance(a, dict) and isinstance(a.get('film_s'), (int, float))): probs.append(f"item {n}: a sing item with the fixed track must be anchored at {at:.0f} s, where the track sings {ph['id']}: add \"anchor\": {{\"film_s\": {at:.0f}, \"why\": \"...\"}}")
+                elif abs(a['film_s'] - at) > bar_s: probs.append(f"item {n}: the track sings {ph['id']} at {ph['t0']:.0f} s: anchor the item at {at:.0f} s, not {a['film_s']:.0f} s")
         else: probs.append(f'item {n}: unknown type {t}'); continue
         if it.get('view') is not None:
             yv = clips[cl].get('you_views') or {}
@@ -211,7 +240,7 @@ def check(script, pack, target_s, wpm):
         if lab in per and per[lab] > c['usable_s'] + 0.5: probs.append(f"clip {lab} gets {per[lab]:.1f} s of picture but only {c['usable_s']} s is usable")
         if lab in per and per[lab] < 2.5: probs.append(f'clip {lab} gets only {per[lab]:.1f} s')
     if abs(total - target_s) > TOLERANCE * target_s: probs.append(f'the film is {total:.0f} s by the real durations but the target is {target_s:.0f} s (allowed {(1 - TOLERANCE) * target_s:.0f} to {(1 + TOLERANCE) * target_s:.0f}): ' + ('add' if total < target_s else 'remove') + f' about {abs(target_s - total):.0f} s')
-    rep = dict(total_s=round(total, 1), target_s=round(target_s, 1), vo_s=round(kinds['vo'], 1), clip_s=round(kinds['clip'], 1), broll_s=round(kinds['broll'], 1), gap_s=round(kinds['gap'], 1), photo_s=round(kinds['photo'], 1), streetview_s=round(kinds['streetview'], 1), camera_s=round(kinds['camera'], 1), vo_words=words_total, claimed_total=(script or {}).get('total_s'),
+    rep = dict(total_s=round(total, 1), target_s=round(target_s, 1), vo_s=round(kinds['vo'], 1), clip_s=round(kinds['clip'], 1), broll_s=round(kinds['broll'], 1), gap_s=round(kinds['gap'], 1), photo_s=round(kinds['photo'], 1), streetview_s=round(kinds['streetview'], 1), camera_s=round(kinds['camera'], 1), sing_s=round(kinds['sing'], 1), vo_words=words_total, claimed_total=(script or {}).get('total_s'),
                clips_used=len(per), clips_skipped=len(skipped), per_clip={k: round(v, 1) for k, v in sorted(per.items())}, rows=[(n, t, cl, round(d, 1), round(tot, 1)) for n, t, cl, d, tot in rows])
     return rep, probs
 
@@ -222,6 +251,9 @@ def resolve(script, pack, wpm):
     for it in (script or {}).get('items') or []:
         if it.get('type') == 'vo': it['seconds'] = round(max(SP.words(it.get('text', '')) * 60.0 / wpm + VO_PAUSE_S, (by_label.get(norm_label(it.get('clip', ''))) or {}).get('duration_s', 0.0) if (by_label.get(norm_label(it.get('clip', ''))) or {}).get('synthetic') else 0.0), 1)
         elif it.get('type') in ('broll', 'gap', 'photo', 'streetview', 'camera'): it['seconds'] = round(float(it.get('seconds') or 0), 1)
+        elif it.get('type') == 'sing':
+            ph = {p['id']: p for p in (((pack.get('music') or {}).get('lyrics') or {}).get('phrases') or [])}.get(str(it.get('phrase'))); bs = (pack.get('music') or {}).get('bar_s')
+            if ph and bs: it['seconds'] = round(sing_seconds(ph, bs), 1); it['text'] = ph['text']
         elif it.get('type') == 'clip':
             sp = span(it, pack)
             if sp:
@@ -241,13 +273,16 @@ def used_line_ids(script, pack):
 
 def director_notes(script, pack):
     """Advisory notes on how the script meets the music (after resolve(): items have `seconds`): anchors that the running time does not reach. (Narration over singing is not noted: it is normal, and the music is turned down under it.) They never force a retry."""
-    notes = []; t = 0.0; used = {norm_label(it.get('clip', '')) for it in (script or {}).get('items') or []}
+    notes = []; t = 0.0; total = sum(float(i.get('seconds') or 0.0) for i in (script or {}).get('items') or []); used = {norm_label(it.get('clip', '')) for it in (script or {}).get('items') or []}
     open_gaps = [c['label'] for c in pack['clips'] if c.get('synthetic') and c.get('race_s', 0) >= 3600 and c['label'] not in used]
     if open_gaps: notes.append(f"{len(open_gaps)} gap(s) of an hour or more are not filled: {', '.join(open_gaps)}")
     for n, it in enumerate((script or {}).get('items') or [], 1):
         d = float(it.get('seconds') or 0.0); a, b = t, t + d
         anc = it.get('anchor')
         if isinstance(anc, dict) and isinstance(anc.get('film_s'), (int, float)) and abs(anc['film_s'] - a) > 6.0: notes.append(f"item {n}: anchored at {anc['film_s']:.0f} s but the running total starts it at {a:.0f} s; the editor will move it to the nearest bar it can")
+        if it.get('type') == 'sing':
+            ph = {p['id']: p for p in (((pack.get('music') or {}).get('lyrics') or {}).get('phrases') or [])}.get(str(it.get('phrase')))
+            if ph and ph.get('hook') and a < total / 2: notes.append(f"item {n}: the hook {ph['id']} is used at {a:.0f} s, before the halfway point")
         t = b
     return notes
 

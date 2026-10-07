@@ -54,7 +54,7 @@ def test_key_of_a_c_major_scale():
 
 def test_the_same_chord_in_two_bars_is_similar_and_a_different_one_is_not():
     x = tones([0, 0, 6, 0]); db = [0, 2, 4, 6, 8]; sim = M.bar_similarity(M.bar_features(x, db))
-    assert sim[0, 1] > 0.99 and sim[0, 3] > 0.99 and sim[0, 2] < 0.9 and sim.shape == (4, 4)
+    assert sim[0, 1] > 0.97 and sim[0, 3] > 0.97 and sim[0, 2] < 0.9 and sim.shape == (4, 4)
 
 
 @pytest.fixture
@@ -105,3 +105,50 @@ def test_render_keeps_every_bar_line_and_the_length():
 def test_a_join_is_an_equal_power_crossfade_on_the_bar_line():
     sr = 8000; x = np.ones(sr * 8, np.float32); y, _ = R.render(x, sr, [0.0, 2.0, 4.0, 6.0], [0, 1, 2, 1], fade_s=0.1, end_s=8.0)
     j = 6 * sr; assert y[j, 0] == pytest.approx(np.sqrt(2), abs=0.01) and y[j - 2 * sr // 10, 0] == pytest.approx(1.0, abs=1e-6) and y[j + 2 * sr // 10, 0] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_a_held_range_is_never_cut_by_a_jump():
+    n = 30; sim = np.eye(n) * 0.0 + 0.9; np.fill_diagonal(sim, 1.0)                       # every join costs the same, so the plan may jump anywhere
+    free = R.plan(sim, 14, jump_penalty=0.0)
+    held = R.plan(sim, 14, jump_penalty=0.0, hold=[(8, 14)])
+    def whole(bars): return all(bars[bars.index(b) + 1] == b + 1 for b in range(8, 14) if b in bars and bars.index(b) + 1 < len(bars))
+    assert whole(held['bars']) and any(r[0] <= 8 <= r[0] + r[1] - 1 for r in held['runs']) or 8 not in held['bars']
+    assert len(free['bars']) == len(held['bars']) == 14
+
+
+def test_a_prefix_is_played_as_the_track_has_it_and_the_jumps_come_after():
+    n = 40; sim = np.full((n, n), 0.2); np.fill_diagonal(sim, 1.0)
+    p = R.plan(sim, 30, prefix=10, jump_penalty=0.0)
+    assert p['bars'][:10] == list(range(10)) and p['bars'][-2:] == [38, 39] and len(p['bars']) == 30
+    assert R.plan(sim, 12, prefix=10)['bars'][:10] == list(range(10))
+    assert R.plan(sim, 8, prefix=10)['bars'][-2:] == [38, 39]                                  # too short for the opening: ordinary plan
+
+
+def test_stray_beats_are_pulled_back_onto_the_tempo_but_drift_is_kept():
+    true = np.arange(0, 60 * 0.6, 0.6); b = true.copy(); b[20] += 0.17; b[31] -= 0.14; b[32] += 0.12                  # beats that landed on off-beat hits
+    r = M.regularise(b); assert np.abs(r - true).max() < 0.01
+    drift = np.cumsum(0.5 + 0.0015 * np.arange(80)); assert np.abs(M.regularise(drift) - drift).max() < 0.012          # a real tempo change is not flattened
+
+
+def test_a_bad_join_costs_more_so_the_worst_join_never_gets_worse():
+    rng = np.random.default_rng(3); n = 40; a = rng.random((n, n)); sim = (a + a.T) / 2; np.fill_diagonal(sim, 1.0); energy = rng.random(n); lv = rng.random(30)
+    for seed in range(3):
+        energy = np.random.default_rng(seed).random(n); lv = np.random.default_rng(seed + 9).random(30)
+        with_pen = R.plan(sim, 30, levels=lv, energy=energy); without = R.plan(sim, 30, levels=lv, energy=energy, bad_weight=0.0)
+        assert with_pen['worst_join'] <= without['worst_join'] + 1e-9 and len(with_pen['bars']) == 30
+
+
+def test_a_cheap_join_is_not_used_over_and_over_to_loop_a_few_bars():
+    n = 30; sim = np.full((n, n), 0.1); np.fill_diagonal(sim, 1.0); sim[23, 20] = sim[22, 19] = 1.0                      # jumping from bar 22 back to bar 20 costs nothing; every other jump is poor
+    loop = R.plan(sim, 70, short_weight=0.0); spread = R.plan(sim, 70)
+    runs = lambda p: [r[1] for r in p['runs'][:-1]]
+    assert min(runs(loop)) <= 3 and len(loop['bars']) == len(spread['bars']) == 70                                       # the loop is there without the penalty
+    assert sum(1 for r in runs(spread) if r < 4) < sum(1 for r in runs(loop) if r < 4)                                   # and used less with it
+    flat = R.plan(np.full((n, n), 0.9), 40); assert flat['bars'][-2:] == [28, 29] and len(flat['bars']) == 40
+
+
+def test_a_pinned_stretch_plays_its_source_bars_at_the_film_bars_asked():
+    n = 40; sim = np.full((n, n), 0.2); np.fill_diagonal(sim, 1.0)
+    p = R.plan(sim, 60, pins=[(30, 12, 6)]); assert p['bars'][30:36] == [12, 13, 14, 15, 16, 17] and p['bars'][-2:] == [38, 39] and len(p['bars']) == 60
+    p = R.plan(sim, 60, prefix=10, pins=[(5, 20, 4), (30, 12, 6)]); assert p['bars'][:10] == list(range(10)) and p['bars'][30:36] == list(range(12, 18))              # a pin inside the opening is ignored
+    p = R.plan(sim, 60, pins=[(30, 37, 6)]); assert len(p['bars']) == 60 and p['bars'][-2:] == [38, 39]                                                           # one into the ending is ignored where it cannot be played

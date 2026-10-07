@@ -753,9 +753,9 @@ def create_app(roots, token=None):
 
     def studio_track(f):
         from strata360.edit import project as PJ
-        r = PJ.music_record(f, PJ.load(f)['settings'])
+        st = PJ.load(f)['settings']; r = PJ.music_record(f, st)
         if not r: raise HTTPException(404, 'no music track')
-        return config.race_dir(f), r['file']
+        return config.race_dir(f), PJ.original_track(f, st) or r['file']                      # the studio works on the uploaded track, also while the built one plays
 
     @api.get('/api/music/studio', dependencies=[Depends(auth)])
     def get_music_studio(folder: str):                                                   # the Music studio screen: the track's grid, the built track's score, and whether a build is running or failed

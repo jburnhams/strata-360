@@ -10,7 +10,7 @@ N = 8
 def write_grid(rd, rel='music/track.mp3', n=N):
     os.makedirs(os.path.join(rd, 'music'), exist_ok=True); p = os.path.join(rd, rel); open(p, 'wb').write(b'abc'); chords = [0, 0, 1, 1, 0, 0, 2, 2][:n]
     sim = [[1.0 if chords[i] == chords[j] else 0.4 for j in range(n)] for i in range(n)]; db = [2.0 * i for i in range(n + 1)]
-    g = dict(version=2, file=rel, sig=MU._sig(p), bpm=120.0, bar_beats=4, beats=[], downbeats=db, key=dict(tonic=9, mode='minor', name='A minor', confidence=0.8), duration_s=2.0 * n, energy=[0.2, 0.2, 0.5, 0.5, 0.8, 0.8, 0.3, 0.3][:n], sim=sim)
+    g = dict(version=3, file=rel, sig=MU._sig(p), bpm=120.0, bar_beats=4, beats=[], downbeats=db, key=dict(tonic=9, mode='minor', name='A minor', confidence=0.8), duration_s=2.0 * n, energy=[0.2, 0.2, 0.5, 0.5, 0.8, 0.8, 0.3, 0.3][:n], sim=sim)
     json.dump(g, open(os.path.join(rd, 'music', 'grid.json'), 'w')); return rel
 
 

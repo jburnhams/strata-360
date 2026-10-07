@@ -36,7 +36,7 @@ def io():
 
 def test_a_built_track_has_the_length_the_bar_lines_and_the_ending(rd):
     x = song(); write, read, store = io(); st = fake_stems(x)
-    s = MB.build(rd, 'music/track.mp3', 40.0, decode=lambda p: x, separator=lambda p: st, write=write, read=read)
+    s = MB.build(rd, 'music/track.mp3', 40.0, keep_intro=False, decode=lambda p: x, separator=lambda p: st, write=write, read=read)
     assert s['source'] == 'built' and len(s['bars']) == 20 and s['length_s'] == pytest.approx(40.0, abs=0.3) and s['bars'][-2:] == [6, 7] and s['bars'][0] == 0
     assert np.allclose(np.diff(s['downbeats']), BAR, atol=0.05) and json.load(open(os.path.join(rd, 'music', 'built.json')))['bars'] == s['bars']
     assert s['stray_vocal_db'] is None and store[os.path.join(rd, 'music', 'built.flac')][1] == 8000
@@ -44,7 +44,7 @@ def test_a_built_track_has_the_length_the_bar_lines_and_the_ending(rd):
 
 def test_vocals_play_only_in_the_given_windows(rd):
     x = song(); write, read, store = io(); st = fake_stems(x)
-    s = MB.build(rd, 'music/track.mp3', 24.0, windows=[(4, 6)], decode=lambda p: x, separator=lambda p: st, write=write, read=read)
+    s = MB.build(rd, 'music/track.mp3', 24.0, windows=[(4, 6)], keep_intro=False, decode=lambda p: x, separator=lambda p: st, write=write, read=read)
     y, sr = store[os.path.join(rd, 'music', 'built.flac')]; assert s['windows'] == [[4, 6]] and s['stray_vocal_db'] < -20                  # the 0.25 s ramp at a window's edge is all that leaks
     inside = np.abs(y[int(9 * sr):int(11 * sr)]).max(); stems_only = MB.layers.layer_gains(np.full(12, 0.5))
     assert inside > 0.3 and stems_only['vocals'].sum() == 0
@@ -60,3 +60,35 @@ def test_levels_choose_the_layers_and_the_grid_is_cached(rd):
 
 def test_the_bar_count_follows_the_length():
     g = dict(downbeats=[0.0, 2.0, 4.0, 6.0]); assert MB.bar_count(g, 40.0) == (20, 2.0) and MB.bar_count(g, 0.1)[0] == 1
+
+
+def test_the_opening_is_the_first_build_and_the_break_after_it():
+    e = [0, 0, 0, 0, .24, .4, .4, .37, .73, .99, 1, .97, 1, .95, .96, .97, 1, .95, 1, .42, .03, .35, .61, .36]
+    assert MB.intro_bars(e) == 22                                                                 # the energy returns at bar 22
+    assert MB.intro_bars([0.1, 0.2, 0.3, 0.4]) == 0 and MB.intro_bars([0, 0.9, 0.95, 0.9]) == 0   # no peak, or no break after it
+
+
+def test_the_opening_plays_as_it_is_with_every_stem_on(rd, monkeypatch):
+    x = song(); write, read, store = io(); st = fake_stems(x); monkeypatch.setattr(MB, 'intro_bars', lambda e: 4)
+    s = MB.build(rd, 'music/track.mp3', 40.0, levels=[0.0] * 20, decode=lambda p: x, separator=lambda p: st, write=write, read=read)
+    assert s['intro_bars'] == 4 and s['bars'][:4] == [0, 1, 2, 3] and s['bars'][-2:] == [6, 7] and s['windows'][0][0] == 0
+    assert MB.build(rd, 'music/track.mp3', 40.0, keep_intro=False, decode=lambda p: x, separator=lambda p: st, write=write, read=read)['intro_bars'] == 0
+
+
+def test_the_ending_is_the_last_loud_bar_not_the_long_fade():
+    e = [0.9] * 90 + [0.8, 0.62, 0.3, 0, 0, 0, 0, 0, 0]
+    assert MB.quick_end(e) == 91 and MB.quick_end([0.1, 0.2]) == 0
+
+
+def test_a_quick_ending_cuts_the_track_after_its_last_loud_bar_and_fades(rd):
+    x = song(); write, read, store = io(); st = fake_stems(x); kw = dict(keep_intro=False, decode=lambda p: x, separator=lambda p: st, write=write, read=read)
+    full = MB.build(rd, 'music/track.mp3', 24.0, **kw); quick = MB.build(rd, 'music/track.mp3', 24.0, ending='quick', fade_s=1.0, **kw)
+    y, sr = store[os.path.join(rd, 'music', 'built.flac')]
+    assert full['ending'] == 'original' and quick['ending'] in ('quick', 'original')
+    if quick['ending'] == 'quick': assert quick['length_s'] <= full['length_s'] and abs(y[-int(0.05 * sr):]).max() < 0.1 * abs(y).max() + 1e-6
+
+
+def test_a_pin_plays_the_asked_source_bars_at_the_asked_film_bars_with_the_vocals_open(rd):
+    x = song(); write, read, store = io(); st = fake_stems(x)
+    s = MB.build(rd, 'music/track.mp3', 40.0, keep_intro=False, pins=[(10, 2, 3)], decode=lambda p: x, separator=lambda p: st, write=write, read=read)
+    assert s['bars'][10:13] == [2, 3, 4] and [10, 13] in s['windows'] and s['pins'] == [[10, 2, 3]] and len(s['bars']) == 20

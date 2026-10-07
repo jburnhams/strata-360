@@ -17,7 +17,7 @@ from strata360.edit.script_pack import norm_label
 from strata360.pipeline import config
 from strata360.edit import techniques as TQ, chrono as CH, optimise as O
 
-DEFAULT_SETTINGS = dict(length_s=90.0, bpm=120.0, bar_beats=4, seed=1, wpm=145.0, style='', music=None)      # music: a file inside the project folder (music/track.*): tempo, bars and energy then come from it
+DEFAULT_SETTINGS = dict(length_s=90.0, bpm=120.0, bar_beats=4, seed=1, wpm=145.0, style='', music=None, music_original=None, music_mode='fixed')      # music: a file inside the project folder (music/track.* or music/built.flac): tempo, bars and energy then come from it; music_original is the uploaded track while the built one is in use; music_mode 'built' means the music is made for the film after the script (the picture sets its length), 'fixed' that the film is cut to the track
 EMPTY_OVERRIDES = dict(locked=[], tech_force={}, bans_cands=[], bans_techs=[], clip_weight={}, transitions={})
 
 
@@ -79,7 +79,7 @@ def rough_blocks(folder, target_s=None, auto=False):
     from strata360.edit import blocks as BL
     edit = load(folder); s = edit['settings']; o = edit['overrides']; clips, missing = load_clips(folder); mus = None if auto else music_info(folder, s)
     if target_s is not None: source, target = 'target', float(target_s)
-    elif mus: source, target = 'music', max(float(mus['duration_s']) - float(mus['offset_s']), 0.0)
+    elif mus and not fixed_length_free(s): source, target = 'music', max(float(mus['duration_s']) - float(mus['offset_s']), 0.0)
     else: source, target = 'automatic', None
     bpm = float(mus['bpm']) if mus else float(s['bpm'])
     st = CH.Settings(seed=int(s['seed']), locked=tuple(o['locked']), tech_force=dict(o['tech_force']), bans_cands=frozenset(o['bans_cands']), bans_techs=frozenset(o['bans_techs']), clip_weight={k: float(v) for k, v in o['clip_weight'].items()})
@@ -92,7 +92,7 @@ def rough_blocks(folder, target_s=None, auto=False):
 def _planner(edit, lib, prev_plan, mus=None):
     s = edit['settings']; o = edit['overrides']; bpm = float(mus['bpm']) if mus else float(s['bpm']); bar = int(mus['bar_beats']) if mus else int(s['bar_beats'])
     beats = int(round(s['length_s'] * bpm / 60.0)); beats -= beats % bar                              # a whole number of bars
-    if mus: beats = min(beats, int(mus['usable_beats']))                                               # never longer than the track
+    if mus and not fixed_length_free(s): beats = min(beats, int(mus['usable_beats']))                  # never longer than the track (unless the music is to be built for the film)
     music = O.Music(bpm=bpm, beats=beats, bar_beats=bar, sections=[tuple(x) for x in mus['sections']] if mus else [(0, 10 ** 9, 0.5)])
     prefer = {g['id']: g['technique'] for g in (prev_plan or {}).get('segments', [])}
     st = CH.Settings(seed=int(s['seed']), locked=tuple(o['locked']), tech_force=dict(o['tech_force']), prefer=prefer, bans_cands=frozenset(o['bans_cands']), bans_techs=frozenset(o['bans_techs']),
@@ -257,6 +257,38 @@ def set_technique(folder, wid, technique):
 def set_music(folder, rel):
     """Use the audio file `rel` (inside the project folder) as the film's music, or None for no music; re-plans around its tempo and energy."""
     edit = load(folder); edit['settings']['music'] = rel; save(folder, edit); return propose(folder)
+
+
+BUILT = 'music/built.flac'
+
+
+def use_built(folder):
+    """Play the film over the track built for it (music/built.flac, strata360 music-build): the uploaded track is kept as music_original, and the plan is made again around the built track's bars. RuntimeError when nothing is built."""
+    rd = config.race_dir(folder)
+    if not os.path.exists(os.path.join(rd, BUILT)): raise RuntimeError('no built track: build one first (strata360 music-build)')
+    edit = load(folder); s = edit['settings']
+    if s.get('music') != BUILT: s['music_original'] = s.get('music')
+    s['music'] = BUILT; save(folder, edit); return propose(folder)
+
+
+def use_original(folder):
+    """Go back to the uploaded track (music_original) as the film's music."""
+    edit = load(folder); s = edit['settings']
+    if s.get('music') == BUILT: s['music'] = s.get('music_original')
+    s['music_original'] = None; save(folder, edit); return propose(folder)
+
+
+def original_track(folder, settings):
+    """The uploaded track's file (the one the Music studio and the lyrics are about): music_original while the built track is in use, else the music."""
+    return settings.get('music_original') or settings.get('music')
+
+
+def built_mode(settings): return settings.get('music_mode') == 'built'
+
+
+def fixed_length_free(settings):
+    """True while the music is still to be built for the film (music_mode 'built' and the built track is not the one in use): the track's length then sets nothing, the picture does."""
+    return built_mode(settings) and settings.get('music') != BUILT
 
 
 def set_transition(folder, wid, kind):

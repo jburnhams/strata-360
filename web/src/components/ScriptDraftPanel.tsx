@@ -13,6 +13,7 @@ const KIND: Record<ScriptItem['type'], { label: string; cls: string }> = {
   vo: { label: 'narration', cls: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300' },
   clip: { label: 'you', cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' },
   gap: { label: 'gap', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' },
+  sing: { label: 'sung', cls: 'bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300' },
   broll: { label: 'b-roll', cls: 'bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300' },
 }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
@@ -138,6 +139,7 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
                       {it.type === 'clip' && (words(it).some(Boolean) ? words(it) : <span>{it.text}</span>)}
                       {it.type === 'broll' && <span className="text-stone-500">{it.why}</span>}
                       {it.type === 'gap' && <span className="text-stone-500">gap clip, {it.seconds} s: {it.why}</span>}
+                      {it.type === 'sing' && <span className="text-stone-500">the track sings {it.phrase}{it.text ? `: “${it.text}”` : ''} ({it.seconds} s): {it.why}</span>}
                       {it.view && <span className="ml-2 text-xs text-stone-500">{it.view} view of you</span>}
                       {it.anchor && <span className="ml-2 text-xs text-stone-500" title={it.anchor.why}>anchored at {it.anchor.film_s} s</span>}
                       {diff.added.has(i) && <span className="ml-2 rounded bg-emerald-200 px-1 text-xs text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100">new</span>}

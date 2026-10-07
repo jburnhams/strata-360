@@ -285,7 +285,7 @@ def cmd_script_draft(a):
     """Write (or, with --revise, revise) the whole-race script: the writer sees every clip, the notes, the transcript marks and the pins (edit/script_draft.py)."""
     from strata360.edit import script_draft as SD, script_pack as SP, script_pins as PN, project as PJ, voiceover as VO
     from strata360.pipeline import notes as N
-    cfg = config.load(a.name); pack = SP.build(a.name); notes = N.load(a.name); mus = None if a.auto else PJ.music_info(a.name, PJ.load(a.name)['settings'])
+    cfg = config.load(a.name); pack = SP.build(a.name); notes = N.load(a.name); mus = None if a.auto or PJ.fixed_length_free(PJ.load(a.name)['settings']) else PJ.music_info(a.name, PJ.load(a.name)['settings'])      # music to be built for the film: its length guides nothing
     target, src = SD.length_guide(pack, (float(mus['duration_s']) - float(mus['offset_s'])) if mus else None, a.target_s); wpm = a.wpm or SD.narration_wpm(pack, measured=VO.measured_wpm(a.name))
     pins = PN.project_pins(notes, pack, SD.load_pins(a.name)); prev = SD.list_drafts(a.name)[-1] if a.revise and SD.list_drafts(a.name) else None; draft = SD.load_draft(a.name) if a.revise else None
     if a.revise and not draft: sys.exit('there is no draft to revise yet: run script-draft without --revise first')
@@ -391,9 +391,12 @@ def cmd_music_build(a):
     """Build music to a length from the project's music track (its own bars re-sequenced, its stems layered; the vocals only in --vocals START-END film-second windows): music/built.flac and music/built.json."""
     from strata360.edit import music_build as MB, music_studio as MS, project as PJ
     from strata360.pipeline import guard
-    folder = a.name; rd = config.race_dir(folder); rec = PJ.music_record(folder, PJ.load(folder)['settings']); rel = a.track or (rec['file'] if rec else 'music/track.mp3')
+    folder = a.name; rd = config.race_dir(folder); settings = PJ.load(folder)['settings']; rec = PJ.music_record(folder, settings); rel = a.track or PJ.original_track(folder, settings) or (rec['file'] if rec else 'music/track.mp3')       # the uploaded track, also while a built one plays
     if not os.path.exists(os.path.join(rd, rel)): sys.exit('no music track: ' + rel)
     from strata360.edit import intensity_signals as IS
+    length = a.length_s or (((PJ.load(folder).get('plan') or {}).get('film') or {}).get('length_s'))
+    if not length: sys.exit('give --length-s: there is no film plan to take the length from')
+    a.length_s = float(length)
     try: T, bar_s = MB.bar_count(MB.grid(rd, rel), a.length_s)
     except RuntimeError as e: sys.exit(str(e))
     win = []
@@ -402,9 +405,14 @@ def cmd_music_build(a):
     try:
         manual = [float(v) for v in a.levels.split(',')] if a.levels else None
         lv = None if a.preset == 'flat' and not manual else MS.levels_for('manual' if manual else a.preset, T, manual, IS.gather(folder) if a.preset == 'footage' else None, bar_s)
-        with guard.heavy('music-build', 1.5): sc = MB.build(rd, rel, a.length_s, levels=lv, windows=win)
+        from strata360.edit import lyrics as LY
+        ly = LY.view(folder); spans = ly['vocal_spans'] if ly and not ly['instrumental'] else None                 # the sung stretches: a vocal window grows to hold them whole
+        g = MB.grid(rd, rel); pins, pin_notes = MS.sing_pins(folder, g, bar_s, T) if not a.no_sing else ([], [])
+        for note in pin_notes: print('sing:', note)
+        with guard.heavy('music-build', 1.5): sc = MB.build(rd, rel, a.length_s, levels=lv, windows=win, spans=spans, pins=pins)
     except RuntimeError as e: sys.exit(str(e))
-    print(json.dumps({k: sc[k] for k in ('file', 'length_s', 'bpm', 'key', 'worst_join', 'stray_vocal_db')}))
+    print(json.dumps({k: sc[k] for k in ('file', 'length_s', 'bpm', 'key', 'worst_join', 'stray_vocal_db', 'windows', 'partial_windows')}))
+    if a.use: PJ.use_built(folder); print('the film now plays over the built track (music_original keeps the uploaded one)')
 
 
 def cmd_credits(a):
@@ -685,7 +693,7 @@ def main():
     p = sub.add_parser('gap-clip', help='render the animated map clip or 3D flyover for a gap (see `gaps`) to an MP4'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--gap'); p.add_argument('--clip', help='a clip already planned in synthetic.json'); p.add_argument('--min-minutes', type=float, default=20.0, help='as for gaps: the gap ids depend on it'); p.add_argument('--seconds', type=float); p.add_argument('--speedup', type=float); p.add_argument('--from', dest='t_from', help='start of a stretch of the gap, UTC ISO'); p.add_argument('--to', dest='t_to'); p.add_argument('--id'); p.add_argument('--fps', type=float, default=30.0); p.add_argument('--kind', choices=['map', 'flyover'], default='map', help='the animated 2D map, or the 3D terrain flyover (4K)'); p.add_argument('--size', help='WIDTHxHEIGHT (default 1920x1080 for the map, 3840x2160 for the flyover)'); p.add_argument('--style', help='map style (default tf-landscape, which needs a Thunderforest key; osm needs none)'); p.add_argument('--imagery', choices=['esri', 'eox', 'osm', 'topo'], help='flyover imagery (default esri)'); p.add_argument('--no-sharp', action='store_true', help='flyover: enlarge the 720p map tiles at larger sizes (faster, softer) instead of fetching finer ones'); p.set_defaults(fn=cmd_gap_clip)
     p = sub.add_parser('lyrics', help='find the words in the music track (where it is sung)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--reset', action='store_true'); p.add_argument('--reset-all', action='store_true', help='also forget your corrections'); p.set_defaults(fn=cmd_lyrics)
     p = sub.add_parser('credits', help='the credits the film needs (map tiles, imagery, terrain), to add with its distribution'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--write', action='store_true', help='save credits.txt in the project'); p.set_defaults(fn=cmd_credits)
-    p = sub.add_parser('music-build', help='build music of a given length from the music track: its bars re-sequenced, stems layered, vocals only in the windows'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--length-s', type=float, required=True); p.add_argument('--track', help='the track inside the race dir (default: the project\'s)'); p.add_argument('--vocals', action='append', metavar='START-END', help='film seconds where the original\'s vocals play (repeat for several)'); p.add_argument('--preset', choices=('flat', 'arc', 'build', 'quiet', 'footage'), default='flat', help='the intensity over the film'); p.add_argument('--levels', help='a 0..1 level per film bar, comma separated (overrides --preset)'); p.set_defaults(fn=cmd_music_build)
+    p = sub.add_parser('music-build', help='build music of a given length from the music track: its bars re-sequenced, stems layered, vocals only in the windows'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--length-s', type=float, help='film length in seconds (default: the film plan\'s)'); p.add_argument('--track', help='the track inside the race dir (default: the project\'s)'); p.add_argument('--vocals', action='append', metavar='START-END', help='film seconds where the original\'s vocals play (repeat for several)'); p.add_argument('--preset', choices=('flat', 'arc', 'build', 'quiet', 'footage'), default='flat', help='the intensity over the film'); p.add_argument('--levels', help='a 0..1 level per film bar, comma separated (overrides --preset)'); p.add_argument('--no-sing', action='store_true', help='ignore the script\'s sing items'); p.add_argument('--use', action='store_true', help='then use the built track as the film\'s music and plan the film again around it'); p.set_defaults(fn=cmd_music_build)
     p = sub.add_parser('rough-mix', help='the rough mix of the film plan: the sound only, music and background quiet, voice-over and speech up'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--reset', action='store_true', help='forget the earlier mix first (it is also made again by itself when its inputs change)'); p.set_defaults(fn=cmd_rough_mix)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)

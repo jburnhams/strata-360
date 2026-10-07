@@ -197,18 +197,48 @@ def camera_clips(folder, tr, tz):
     return out
 
 
+def hooks(phrases):
+    """The phrases with `hook` set on those whose words are sung more than once in the track (a repeated line is probably the hook)."""
+    norm = lambda t: ' '.join(re.findall(r'[a-z0-9\']+', t.lower())); n = {}
+    for p in phrases: n[norm(p['text'])] = n.get(norm(p['text']), 0) + 1
+    return [dict(p, hook=bool(norm(p['text'])) and n[norm(p['text'])] > 1) for p in phrases]
+
+
+def lyrics_facts(v, off, length):
+    """The lyrics part of the music facts, in seconds from `off` (the track's first downbeat) up to `length`: where it is sung and the trusted phrases with their ids."""
+    if not v: return None
+    if v['instrumental']: return dict(instrumental=True)
+    film = lambda t: round(t - off, 1); spans = [[film(x), film(y)] for x, y in v['vocal_spans'] if y - off > 0 and x - off < length]
+    return dict(language=v.get('language'), vocal_spans=[[max(x, 0.0), min(y, length)] for x, y in spans],
+                phrases=hooks([dict(id=p['id'], t0=max(film(p['t0']), 0.0), t1=film(p['t1']), text=p['text'], doubtful=p['doubtful']) for p in v['phrases'] if p['counts'] and p['t1'] - off > 0 and p['t0'] - off < length]))
+
+
+def built_music_facts(folder, settings):
+    """What the writer is told when the music is BUILT for the film (music_mode 'built'): no length and no sections, because the picture sets the length and the intensity follows the story; the uploaded track's tempo and bar, and its sung phrases as a library (`sing` items place them wherever the film wants). None when there is no track. The times of a phrase are from the track's first downbeat, so a phrase keeps its place in its bar."""
+    from strata360.edit import project as PJ, lyrics as LY, music_build as MB
+    from strata360.pipeline import config
+    rel = PJ.original_track(folder, settings)
+    if not rel: return None
+    try: g = MB.grid(config.race_dir(folder), rel)
+    except (RuntimeError, OSError): return None
+    d = g['downbeats']; bar_s = (d[-1] - d[0]) / (len(d) - 1); off = d[0]; length = float(g['duration_s']) - off
+    return dict(built=True, length_s=None, bpm=round(float(g['bpm']), 1), bar_s=round(bar_s, 2), sections=[], source_length_s=round(length, 1), lyrics=lyrics_facts(LY.view(folder), off, length))
+
+
 def music_facts(folder):
     """What the writer is told about the music, in FILM time (the film starts at the track's first downbeat): its length, tempo, the sections with their energy, and the lyrics (lyrics.py): where it is sung and the words heard
     (rough: the times are right, the words are often wrong). None when there is no track."""
     from strata360.edit import project as PJ, lyrics as LY
-    edit = PJ.load(folder); mus = PJ.music_record(folder, edit['settings'])
+    edit = PJ.load(folder)
+    if PJ.built_mode(edit['settings']): return built_music_facts(folder, edit['settings'])
+    mus = PJ.music_record(folder, edit['settings'])
     if not mus: return None
     a = mus['analysis']; beat = 60.0 / float(a['bpm']); off = float(a['offset_s']); length = round(float(a['usable_beats']) * beat, 1)
     out = dict(length_s=length, bpm=round(float(a['bpm']), 1), bar_s=round(beat * int(a['bar_beats']), 2), sections=[dict(t0=round(s0 * beat, 1), t1=round(s1 * beat, 1), energy=round(float(e), 2)) for s0, s1, e in a['sections']], lyrics=None)
     v = LY.view(folder)
     if v and not v['instrumental']:
         film = lambda t: round(t - off, 1); spans = [[film(x), film(y)] for x, y in v['vocal_spans'] if y - off > 0 and x - off < length]
-        out['lyrics'] = dict(language=v.get('language'), vocal_spans=[[max(x, 0.0), min(y, length)] for x, y in spans], phrases=[dict(t0=max(film(p['t0']), 0.0), t1=film(p['t1']), text=p['text'], doubtful=p['doubtful']) for p in v['phrases'] if p['counts'] and p['t1'] - off > 0 and p['t0'] - off < length])
+        out['lyrics'] = dict(language=v.get('language'), vocal_spans=[[max(x, 0.0), min(y, length)] for x, y in spans], phrases=hooks([dict(id=p['id'], t0=max(film(p['t0']), 0.0), t1=film(p['t1']), text=p['text'], doubtful=p['doubtful']) for p in v['phrases'] if p['counts'] and p['t1'] - off > 0 and p['t0'] - off < length]))
     elif v: out['lyrics'] = dict(instrumental=True)
     return out
 
@@ -259,14 +289,23 @@ def render(pack, with_usable=False, marks=None):
     if r.get('course'): L += ['The course, the checkpoints and the cut-offs (cut-offs are times since the start of the run):'] + r['course']
     if r.get('note'): L += ["The runner's own notes about the race:", r['note']]
     m = pack.get('music')
-    if m:
+    if m and m.get('built'):
+        L += ['', 'THE MUSIC IS BUILT FOR THE FILM, AFTER YOUR SCRIPT: it has no fixed length (the film is as long as the target) and follows the picture: sparse on the long stretches, full at the start, the finish, the crowds and the hard climbs. It is made from the uploaded track, mostly instrumental, so the film\'s own sound is never buried.', f"The track is {m['bpm']:g} bpm, a bar is {m['bar_s']:g} s. Its own sections do not matter here: do not plan around them."]
+        ly = m.get('lyrics')
+        if ly and ly.get('instrumental'): L.append('The track is instrumental: nothing is sung, so there are no sing items.')
+        elif ly:
+            L.append('Only the track\'s sung phrases (the library below, in the track\'s own seconds) can be heard sung, and only where a sing item puts one. Words heard by speech recognition (rough: use them for what the song is about, never quote them):')
+            L += [f"  {p['id'] + ' ' if p.get('id') else ''}[{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') + (' (repeated: the hook?)' if p.get('hook') else '') for p in ly['phrases'][:45]]
+            L.append('A sing item names a phrase by its id (never a doubtful one); the film keeps the voice-over and the runner\'s speech clear of it. Use them rarely.')
+    elif m:
         L += ['', 'THE MUSIC (times are FILM seconds: the film starts with the music and ends when it ends)', f"length {m['length_s']:.0f} s, {m['bpm']:g} bpm, a bar is {m['bar_s']:g} s. Sections by energy (0 quiet, 1 loud): " + '; '.join(f"{x['t0']:.0f}-{x['t1']:.0f} s {x['energy']:.2f}" for x in m['sections'])]
         ly = m.get('lyrics')
         if ly and ly.get('instrumental'): L.append('The track is instrumental: nothing is sung.')
         elif ly:
             L.append(f"Sung ({ly.get('language')}): " + (', '.join(f'{a:.0f}-{b:.0f} s' for a, b in ly['vocal_spans']) or 'nowhere') + '. Narration over singing is fine and often unavoidable (the music is turned down under it).')
             L.append('Words heard by speech recognition (rough: the times are right, the words are often wrong; use them for what the song is about and where, never quote them):')
-            L += [f"  [{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') for p in ly['phrases'][:45]]
+            L += [f"  {p['id'] + ' ' if p.get('id') else ''}[{p['t0']:.0f} s] {p['text'][:70]}" + (' (doubtful)' if p['doubtful'] else '') + (' (repeated: the hook?)' if p.get('hook') else '') for p in ly['phrases'][:45]]
+            L.append('A sung phrase can be featured with a "sing" item that names its id (never a doubtful one): the film then keeps the voice-over and the runner\'s speech clear of it. Use them rarely.')
     L += ['', f"CLIPS (all {len(pack['clips'])}, in shooting order; the film follows this order)"]
     for c in pack['clips']:
         L.append(f"\n=== {'PHOTO' if c.get('photo') else 'STREET VIEW' if c.get('streetview') else 'POINT CAMERA' if c.get('camera') else 'CLIP'} {c['label']}: {c['duration_s']} s long, {c['usable_s']} s usable" + (f" | {c['local']}" if c.get('local') else '') + (f" | km {c['km']}" if c.get('km') is not None else '') + ' ===')

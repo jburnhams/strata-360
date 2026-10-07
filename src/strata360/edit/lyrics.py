@@ -37,6 +37,11 @@ def track_of(folder):
     """(absolute path, signature) of the project's music track from music.json, or (None, None)."""
     rec = _load(os.path.join(config.race_dir(folder), 'music.json'), None)
     if not rec or not rec.get('file'): return None, None
+    from strata360.edit import project as PJ, music as MU
+    orig = PJ.original_track(folder, PJ.load(folder)['settings'])                                    # while a built track plays, the words are still the uploaded track's
+    if orig and orig != rec['file']:
+        p = os.path.join(config.race_dir(folder), orig)
+        return (p, MU._sig(p)) if os.path.exists(p) else (None, None)
     p = os.path.join(config.race_dir(folder), rec['file']); return (p, rec.get('sig')) if os.path.exists(p) else (None, None)
 
 

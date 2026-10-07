@@ -135,7 +135,7 @@ def pieces(draft, pack, voice_s, wpm):
         elif it['type'] == 'vo':
             text = (it.get('text') or '').strip(); d = voice_s.get(n); est = d is None; d = estimated_s(text, wpm) if est else d
             out.append(dict(base, kind='vo', text=text, speak_s=d, estimated=est, seconds=LEAD_S + d + TAIL_S, seg=seg_id(c['clip'], text)))
-        elif it['type'] == 'broll': out.append(dict(base, kind='broll', seconds=float(it.get('seconds') or 0), view=it.get('view')))
+        elif it['type'] in ('broll', 'sing'): out.append(dict(base, kind='broll', seconds=float(it.get('seconds') or 0), view=it.get('view'), sing=it.get('phrase') if it['type'] == 'sing' else None))
     return out, warn
 
 
