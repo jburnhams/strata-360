@@ -32,7 +32,7 @@ def test_manual_levels_are_resampled_to_the_bars():
 
 
 def test_the_state_without_a_grid_or_a_build_is_empty(rd):
-    p = os.path.join(rd, 'music'); os.makedirs(p); open(os.path.join(p, 'track.mp3'), 'wb').write(b'x'); assert MS.state(rd, 'music/track.mp3') == dict(grid=None, built=None, stems=False)
+    p = os.path.join(rd, 'music'); os.makedirs(p); open(os.path.join(p, 'track.mp3'), 'wb').write(b'x'); assert MS.state(rd, 'music/track.mp3') == dict(grid=None, built=None, stems=False, generator=False)
 
 
 def test_the_state_reports_the_grid_and_the_built_score(rd):
@@ -53,6 +53,21 @@ def test_the_preview_has_the_length_a_plan_and_gains_for_every_bar(rd):
 def test_a_quiet_preview_prefers_quiet_bars(rd):
     rel = write_grid(rd); q = MS.preview(rd, rel, 40.0, 'quiet'); l = MS.preview(rd, rel, 40.0, 'build')
     assert np.mean([q['energy'][b] for b in q['plan']['bars'][1:-2]]) < np.mean([l['energy'][b] for b in l['plan']['bars'][-10:-2]])
+
+
+def test_the_preview_has_the_score_and_marks_what_a_build_would_make_new(rd):
+    rel = write_grid(rd); p = MS.preview(rd, rel, 40.0, 'build', fidelity=0.0)
+    assert p['score']['share_original'] == 0.0 and all(s['source'] == 'generate' and s['new'] for s in p['score']['sections'])
+    json.dump(dict(sections=p['score']['sections']), open(os.path.join(rd, 'music', 'built.json'), 'w'))
+    q = MS.preview(rd, rel, 40.0, 'build', fidelity=0.0, section_pins={0: 'original'})['score']; assert q['sections'][0]['source'] == 'original' and q['sections'][0]['new'] and not any(s['new'] for s in q['sections'][1:])
+    assert MS.preview(rd, rel, 40.0, 'build', fidelity=1.0)['score']['share_original'] == 1.0
+
+
+def test_the_state_lists_every_take_of_a_generated_piece(rd):
+    write_grid(rd); d = os.path.join(rd, 'music_gen', 'k1'); os.makedirs(d)
+    for seed, act in ((0, 'regenerate'), (1, 'as is')): json.dump(dict(seed=seed, action=act), open(os.path.join(d, f'take{seed}.json'), 'w'))
+    json.dump(dict(generated=[dict(first=0, end=4, key='k1', ok=True, seed=1)]), open(os.path.join(rd, 'music', 'built.json'), 'w'))
+    assert [t['action'] for t in MS.state(rd, 'music/track.mp3')['built']['generated'][0]['all_takes']] == ['regenerate', 'as is']
 
 
 def test_a_preview_needs_the_grid(rd):
@@ -99,6 +114,12 @@ class TestStudioApi:
         fake_popen.instances[-1].returncode = 1; open(os.path.join(project.race_dir, 'music', 'build.log'), 'w').write('Traceback (most recent call last):\n  File "x", line 1\nModuleNotFoundError: No module named demucs\n')
         s = client.get('/api/music/studio', params=dict(folder=f)).json(); assert s['building'] is False and s['error'] == 'ModuleNotFoundError: No module named demucs'
         assert client.post('/api/music/studio/build', json=dict(folder=f, length_s='x')).status_code == 400
+
+    def test_a_build_passes_the_fidelity_the_pins_the_style_and_the_takes(self, client, project, track, fake_popen):
+        f = project.folder; r = client.post('/api/music/studio/build', json=dict(folder=f, length_s=60, fidelity=0.5, pins={'8': 'generate', '0': 'loud'}, style=' rap rock ', takes={'abc': 2})).json(); assert r == dict(started=True)
+        cmd = fake_popen.instances[-1].cmd; assert cmd[cmd.index('--fidelity') + 1] == '0.5' and cmd.count('--pin') == 1 and cmd[cmd.index('--pin') + 1] == '8=generate' and cmd[cmd.index('--style') + 1] == 'rap rock' and cmd[cmd.index('--take') + 1] == 'abc=2'
+        fake_popen.instances[-1].returncode = 0
+        assert client.post('/api/music/studio/build', json=dict(folder=f, length_s=60, fidelity='x')).status_code == 400 and client.post('/api/music/studio/preview', json=dict(folder=f, length_s=40, pins=['x'])).status_code == 400
 
     def test_the_built_track_is_served_when_there_is_one(self, client, project, track):
         f = project.folder; assert client.get('/api/music/built/audio', params=dict(folder=f)).status_code == 404

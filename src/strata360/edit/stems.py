@@ -53,3 +53,10 @@ def stems_for(rd, rel, separator=None, write=None, read=None):
     for n in NAMES: write(os.path.join(d, n + '.flac'), stems[n], sr)
     json.dump(dict(version=VERSION, file=rel, sig=sig, sr=sr, model=MODEL), open(meta, 'w'), indent=1)
     return {n: np.asarray(stems[n], np.float32) for n in NAMES}, sr
+
+
+def vocals_of(x, sr, separator=None):
+    """The vocal stem of some samples (a generated take): written to a temporary file and separated (demucs by default). For the check that a generated take has no singing in it."""
+    import tempfile
+    d = tempfile.mkdtemp(prefix='s360voc_'); p = os.path.join(d, 'take.wav'); ffmpeg_write(p, np.asarray(x, np.float32) if np.asarray(x).ndim > 1 else np.stack([x, x], 1), sr)
+    return (separator or demucs_separator)(p)[0]['vocals']

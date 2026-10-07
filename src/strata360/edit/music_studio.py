@@ -43,7 +43,11 @@ def read_built(rd):
 
 
 def state(rd, rel):
-    g = read_grid(rd, rel); return dict(grid=grid_summary(g) if g else None, built=read_built(rd), stems=os.path.exists(os.path.join(rd, 'music', 'stems', 'stems.json')))
+    from strata360.audio import music_gen as MG
+    g = read_grid(rd, rel); b = read_built(rd); gen = MG.Generator(rd, 0)
+    for p in (b or {}).get('generated') or []:
+        if p.get('key'): p['all_takes'] = gen.takes(p['key'])                                                # every take kept for the piece, from this build and earlier ones
+    return dict(grid=grid_summary(g) if g else None, built=b, stems=os.path.exists(os.path.join(rd, 'music', 'stems', 'stems.json')), generator=MG.available())
 
 
 def sing_pins(folder, g, bar_s, n_bars, lead=1):
@@ -71,14 +75,23 @@ def windows_to_bars(spans, bar_s, n):
     out = [(max(0, int(t0 // bar_s)), min(n, int(-(-t1 // bar_s)))) for t0, t1 in spans if t1 > t0]; return [w for w in out if w[0] < w[1]]
 
 
-def preview(rd, rel, length_s, preset='arc', levels=None, windows=(), footage=None):
+def preview(rd, rel, length_s, preset='arc', levels=None, windows=(), footage=None, fidelity=0.75, section_pins=None):
     g = read_grid(rd, rel)
     if not g: raise RuntimeError('analyse the track first')
     T, bar_s = MB.bar_count(g, length_s); lv = levels_for(preset, T, levels, footage, bar_s); sim = np.array(g['sim']); en = np.asarray(g['energy'], float)
     plan = remix.plan(sim, T, levels=lv, energy=en); gains = layers.open_vocals(layers.layer_gains(lv), windows)
     return dict(bars=T, bar_s=round(bar_s, 3), length_s=round(T * bar_s, 2), levels=[round(float(v), 3) for v in lv], windows=[list(w) for w in windows], plan=dict(bars=plan['bars'], runs=[list(r) for r in plan['runs']], joins=plan['joins'], worst_join=plan['worst_join']),
                 gains={n: [round(float(v), 3) for v in a] for n, a in gains.items()}, sim=g['sim'], energy=g['energy'],
-                why=why(footage, T, bar_s) if preset == 'footage' else None)
+                why=why(footage, T, bar_s) if preset == 'footage' else None, score=score_preview(rd, lv, bar_s, g['energy'], windows, fidelity, section_pins))
+
+
+def score_preview(rd, levels, bar_s, energy, windows, fidelity, section_pins):
+    """The score for these settings (edit/score.py): each section's source, and which generated sections are new against the built track (they would be made; the rest have takes already)."""
+    from strata360.edit import score as SC, music_fit as MF
+    sp = SC.plan(levels, bar_s, energy, fidelity, sung=[dict(first=a, end=b) for a, b in windows], pins=section_pins); b = read_built(rd)
+    new = {s['first'] for s in MF.stale((b or {}).get('sections'), sp['sections'])}
+    for s in sp['sections']: s['new'] = s['first'] in new
+    return dict(fidelity=sp['fidelity'], sections=sp['sections'], share_original=sp['share_original'], unreachable=sp['unreachable'], sung=sp['sung'])
 
 
 def why(footage, n, bar_s):

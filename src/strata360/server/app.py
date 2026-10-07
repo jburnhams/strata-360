@@ -777,7 +777,7 @@ def create_app(roots, token=None):
         return MS.state(rd, rel)
 
     @api.post('/api/music/studio/preview', dependencies=[Depends(auth)])
-    def post_music_studio_preview(body: dict):                                            # {folder, length_s, preset?, levels?, windows? [[t0, t1] film seconds]}: the plan for a build, with no audio made
+    def post_music_studio_preview(body: dict):                                            # {folder, length_s, preset?, levels?, windows? [[t0, t1] film seconds], fidelity?, pins?}: the plan for a build, with no audio made
         from strata360.edit import music_studio as MS, intensity_signals as IS
         f = folder_of(body.get('folder')); rd, rel = studio_track(f); preset = body.get('preset') or 'arc'
         if preset not in MS.PRESETS: raise HTTPException(400, 'unknown preset')
@@ -788,11 +788,19 @@ def create_app(roots, token=None):
             g = MS.read_grid(rd, rel)
             if not g: raise RuntimeError('analyse the track first')
             bar_s = (g['downbeats'][-1] - g['downbeats'][0]) / (len(g['downbeats']) - 1); n = max(1, int(round(length / bar_s)))
-            return MS.preview(rd, rel, length, preset, body.get('levels'), MS.windows_to_bars([tuple(w) for w in body.get('windows') or []], bar_s, n), IS.cached(f) if preset == 'footage' else None)
+            return MS.preview(rd, rel, length, preset, body.get('levels'), MS.windows_to_bars([tuple(w) for w in body.get('windows') or []], bar_s, n), IS.cached(f) if preset == 'footage' else None, fidelity_of(body), pins_of(body))
         except RuntimeError as e: raise HTTPException(409, str(e))
 
+    def fidelity_of(body):
+        try: return min(1.0, max(0.0, float(body.get('fidelity', 0.75))))
+        except (TypeError, ValueError): raise HTTPException(400, 'fidelity is a number from 0 to 1')
+
+    def pins_of(body):                                                                   # {"<first bar of a section>": "original" | "generate"}
+        try: return {int(k): v for k, v in (body.get('pins') or {}).items() if v in ('original', 'generate')}
+        except (TypeError, ValueError, AttributeError): raise HTTPException(400, 'pins are {first bar: "original" | "generate"}')
+
     @api.post('/api/music/studio/build', dependencies=[Depends(auth)])
-    def post_music_studio_build(body: dict):                                              # {folder, length_s, preset?, levels?, windows?}: build the track in the background (`strata360 music-build`)
+    def post_music_studio_build(body: dict):                                              # {folder, length_s, preset?, levels?, windows?, fidelity?, pins?, style?, takes? {piece key: seed}}: build the track in the background (`strata360 music-build`)
         f = folder_of(body.get('folder')); rd, rel = studio_track(f); job = MUSIC_BUILD_JOBS.get(f)
         if job and job.poll() is None: return dict(started=False, reason='a track is already being built')
         try: length = float(body.get('length_s'))
@@ -800,6 +808,10 @@ def create_app(roots, token=None):
         cmd = [*oslib.cli_command(), 'music-build', f, '--length-s', str(length), '--preset', str(body.get('preset') if body.get('preset') in ('flat', 'arc', 'build', 'quiet', 'footage') else 'flat')]
         if body.get('preset') == 'manual' and body.get('levels'): cmd += ['--levels', ','.join(str(float(v)) for v in body['levels'])]
         for w in body.get('windows') or []: cmd += ['--vocals', f'{float(w[0])}-{float(w[1])}']
+        cmd += ['--fidelity', str(fidelity_of(body))]
+        for k, v in pins_of(body).items(): cmd += ['--pin', f'{k}={v}']
+        if isinstance(body.get('style'), str): cmd += ['--style', body['style'].strip()[:300]]
+        for k, v in (body.get('takes') or {}).items(): cmd += ['--take', f'{str(k)[:40]}={int(v)}']
         os.makedirs(os.path.join(rd, 'music'), exist_ok=True); log = open(os.path.join(rd, 'music', 'build.log'), 'wb')
         MUSIC_BUILD_JOBS[f] = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 

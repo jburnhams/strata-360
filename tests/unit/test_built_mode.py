@@ -66,3 +66,24 @@ def test_the_scripts_sing_items_become_pins_for_the_build(tmp_path, monkeypatch)
     pins, notes = MS.sing_pins(f, g, 2.5, 80)
     assert pins == [(18, 11, 6)]                                                                                         # bar 12 holds 32 s (2 + 2.5 * 12): one bar of lead-in from source bar 11, bars 12 to 15 hold the phrase, one of lead-out; the item is at 45.2 s: film bar 18
     assert any('L02' in n and 'not a trusted' in n for n in notes) and any('L03' in n and 'does not fit' in n for n in notes) and len(pins) == 1                                  # L03 sits in the track's last bars: its lead-out would run past the end
+
+
+def test_music_build_passes_the_score_settings_and_prints_each_generated_piece(tmp_path, monkeypatch, capsys):
+    import argparse
+    from strata360 import cli
+    from strata360.pipeline import config
+    from strata360.edit import music_build as MB, lyrics as LY
+    f, rd = project(tmp_path); open(os.path.join(rd, 'music', 'track.mp3'), 'wb').write(b'x'); seen = {}
+    monkeypatch.setattr(config, 'race_dir', lambda name: rd); monkeypatch.setattr(PJ, 'music_record', lambda folder, s: dict(file='music/track.mp3')); monkeypatch.setattr(LY, 'view', lambda folder: None)
+    monkeypatch.setattr(MB, 'grid', lambda rd_, rel: dict(downbeats=[2.0 * i for i in range(30)]))
+    json.dump(dict(style='rap rock'), open(os.path.join(rd, 'music', 'built.json'), 'w'))
+    def build(rd_, rel, length, **kw):
+        seen.update(kw); return dict(file='music/built.flac', length_s=length, bpm=120.0, key={}, worst_join=0.1, stray_vocal_db=None, windows=[], partial_windows=[], fidelity=kw['fidelity'], share_original=0.5, check=dict(ok=True),
+                                     generated=[dict(first=4, end=12, mode='repaint', seed=1), dict(first=20, end=24, kept_original=True, why='no take kept time with the grid')])
+    monkeypatch.setattr(MB, 'build', build)
+    a = argparse.Namespace(name=f, length_s=60.0, track=None, vocals=None, preset='flat', levels=None, no_sing=True, use=False, fidelity=0.5, pin=['8=generate'], style=None, take=['abc=3'], no_generate=False)
+    cli.cmd_music_build(a); out = capsys.readouterr().out
+    assert seen['fidelity'] == 0.5 and seen['section_pins'] == {8: 'generate'} and seen['takes'] == {'abc': 3} and seen['style'] == 'rap rock' and callable(seen['generator'])           # the style is remembered from the last build
+    assert 'bars 5 to 12: generated (repaint, take 1)' in out and "bars 21 to 24: the track's own bars: no take kept time" in out
+    with pytest.raises(SystemExit, match='--pin'): cli.cmd_music_build(argparse.Namespace(**dict(vars(a), pin=['8=loud'])))
+    cli.cmd_music_build(argparse.Namespace(**dict(vars(a), no_generate=True, style='funk'))); assert seen['generator'] is None and seen['style'] == 'funk'
