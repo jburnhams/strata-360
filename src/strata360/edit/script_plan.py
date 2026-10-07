@@ -34,6 +34,7 @@ def seg_id(clip, text):
 def estimated_s(text, wpm): return len(text.split()) * 60.0 / wpm
 
 
+SHORT_S = 0.05               # narration this little longer than its picture is absorbed by rounding its shots up to whole beats: no borrow, no hold
 SPLIT_FROM_S = 9.0           # a talking stretch at least this long is cut into several shots (different views of you) when the footage has more than one
 SPLIT_TARGET_S = 6.0         # each about this long, the cuts in the pauses between the lines
 SPLIT_MIN_S = 3.0
@@ -70,7 +71,7 @@ def join_runs(segs, windows, ps, beat_s):
     for a, b, wa, wb in zip(segs, segs[1:], windows, windows[1:]):
         if wa._piece != wb._piece or a.cand.clip != b.cand.clip: continue
         end = a.clip_start_s + a.beats * beat_s; over = end - b.clip_start_s
-        if over <= 1e-6: continue
+        if over <= 1e-6 or b.clip_start_s < a.clip_start_s: continue                                    # (only a shot that starts inside the one before it: one that comes from earlier in the clip is not a run)
         hi = next((h for lo, h in ps[wb._piece].get('pause_spans') or [] if lo - 1e-6 <= b.clip_start_s <= h + 1e-6), None)
         move = min(over, max(hi - b.clip_start_s, 0.0)) if hi is not None else min(over, beat_s)                  # a cut in a pause moves no further than the pause; a cut inside speech (busy footage) runs on exactly: the first shot's tail has the words the second would have started with
         if move > 1e-6: wb._start += move; b.clip_start_s = round(wb._start, 3); b.in_s = round(wb._start - b.cand.start_s, 3)
@@ -93,16 +94,37 @@ def split_points(start, seconds, pauses, target=SPLIT_TARGET_S, floor=SPLIT_MIN_
     return cuts
 
 
-def chain_windows(wins, beat_s, duration, speech, broll=False):
+def _clash(a, b, busy):
+    """How much of [a, b] lies in footage another shot uses (the largest single overlap)."""
+    return max((min(b, y) - max(a, x) for x, y in busy), default=0.0)
+
+
+def _clear(start, beats, beat_s, duration, busy):
+    """A picture shot of `beats` beats at `start` moved clear of `busy` footage: slid back to end where the footage in its way begins, or on to start where it ends; failing both, one beat shorter (never under one beat). Returns (start, beats)."""
+    for _ in range(4):
+        dur = beats * beat_s; a, b = start, start + dur
+        if _clash(a, b, busy) <= 1e-6: return start, beats
+        ahead = min((x for x, y in busy if a < x < b and min(b, y) - max(a, x) > 1e-6), default=None); behind = max((y for x, y in busy if a < y < b and min(b, y) - max(a, x) > 1e-6), default=None)
+        for s in ([ahead - dur] if ahead is not None else []) + ([behind] if behind is not None else []):
+            if 0.0 <= s <= duration - dur + 1e-6 and _clash(s, s + dur, busy) <= 1e-6: return s, beats
+        if beats <= 1: return start, beats
+        beats -= 1
+    return start, beats
+
+
+def chain_windows(wins, beat_s, duration, speech, broll=False, busy=()):
     """The shots of one piece as [(candidate, start, length, beats)] in whole beats. A talking stretch cut into several shots is played straight through: a shot is rounded UP to whole beats, so it runs past the point where the next one was meant to start;
-    the next one then picks up exactly where the last ended (it is shorter by the difference, and left out if nothing is left of it), so no words and no picture are heard or seen twice. `duration` is the clip's length."""
-    out = []; prev_end = None
+    the next one then picks up exactly where the last ended (it is shorter by the difference, and left out if nothing is left of it), so no words and no picture are heard or seen twice. `duration` is the clip's length. `busy` is the footage
+    other shots use: a picture shot that rounding would push into it is moved clear (`_clear`), and so are the piece's own shots of each other, so no footage is shown twice."""
+    out = []; prev_end = None; taken = list(busy)
     for c, start, length in wins:
         if speech and prev_end is not None and start < prev_end - 1e-6:
             length -= prev_end - start; start = prev_end
             if length < 0.4 * beat_s: continue                                                              # (a sliver the last shot already covers is not worth a shot of its own)
         beats = max(1, int(round(length / beat_s))) if broll else max(1, int(math.ceil(length / beat_s - 1e-9))); dur = beats * beat_s; start = max(min(start, duration - dur), 0.0)
+        if not speech and taken: start, beats = _clear(start, beats, beat_s, duration, taken); dur = beats * beat_s
         out.append((c, start, length, beats)); prev_end = start + dur
+        if not speech: taken.append((start, start + dur))
     return out
 
 
@@ -457,16 +479,19 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     windows = []; roles = []; first_window = {}
     for k, p in enumerate(ps):
         if p['kind'] == 'synthetic': continue                                                       # placed after the footage windows are planned (below)
-        fp = foot[p['clip']]
+        fp = foot[p['clip']]; before = list(fp.occ)                                               # the footage earlier items' shots cover
         wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=snap_cuts(split_points(p['start'], p['seconds'], p.get('pauses') or [], target=SPLIT_TARGET_S * (0.5 + 0.5 * CH.calm(_steady_of(fp, p))), free=CH.calm(_steady_of(fp, p)) < 0.7), p.get('pause_spans') or [], p['start'], beat_s, end=p['start'] + p['seconds']) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
         if p['kind'] == 'vo' and wins:                                                                  # the narration must have picture for as long as it is spoken
             short = p['seconds'] - sum(w[2] for w in wins)
-            if short > 1e-6 and borrow(ps, k, short, foot):                                              # the next item's picture starts earlier and the line runs on over it, rather than a held frame
+            if short > SHORT_S and borrow(ps, k, short, foot):                                              # the next item's picture starts earlier and the line runs on over it, rather than a held frame
                 warn.append(f"item {p['n'] + 1}: the narration needs {p['seconds']:.1f} s but clip {p['label']} has {p['seconds'] - short:.1f} s of footage for it; it runs on {short:.1f} s over the next item's picture"); p['seconds'] -= short; p['borrowed_s'] = round(short, 3); short = 0.0
-            if short > 1e-6:
+            if short > SHORT_S:
                 c0, s0, l0 = wins[-1]; grow = min(short, max(cap_p - l0, 0.0)); wins[-1] = (c0, s0, l0 + grow)
                 warn.append(f"item {p['n'] + 1}: the narration needs {p['seconds']:.1f} s but clip {p['label']} has {p['seconds'] - short:.1f} s of footage for it; the last frame is held" + (f" for {short - grow:.1f} s more than a window allows" if short - grow > 1e-6 else '') + ' (choices: shorten the line, move it to a longer clip, or let the hold stand)')
-        for c, start, length, beats in chain_windows(wins, beat_s, fp.duration, p['kind'] == 'clip', p['kind'] == 'broll'):
+        busy = before + fp.reserved if p['kind'] != 'clip' else ()          # the footage other shots use (and the dialogue the script plays): rounding a picture shot up to whole beats must not run into it
+        chained = chain_windows(wins, beat_s, fp.duration, p['kind'] == 'clip', p['kind'] == 'broll', busy=busy)
+        fp.occ = before + [(s, s + b * beat_s) for _, s, _, b in chained]                   # what the shots really cover, so later items keep off it too
+        for c, start, length, beats in chained:
             speech = p['kind'] == 'clip'; dur = beats * beat_s
             w = CH.Window(index[p['clip']], c, start - c.start_s, beats, c.quality, getattr(c, 'forced', False), speech=speech); w._piece = k; w._start = start; w.view = p.get('view'); w.face = fp.face_share(start, start + dur); w.forced = w.forced or not _has_technique(w, c, lib, music, dur)
             windows.append(w); roles.append(p['kind']); first_window.setdefault(k, len(windows) - 1)
