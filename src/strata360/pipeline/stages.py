@@ -161,6 +161,14 @@ def quality(ctx):
     QG.save(ctx.path(QG.FILE), QG.analyse(ctx.path('proxy.mp4')))
 
 
+@stage('cameras', 1, keys=('camera_seed',), outputs=('cameras.json',), deps=('quality', 'motion', 'identity'), soft_deps=('scenes', 'people'),
+       note='the clip\'s virtual cameras, best first: heading, you, person, scenery (nobody in view) and about one free camera per 15 s, each with a start, an end, a score and its aim; seeded variety (setting camera_seed; no video decoding)')
+def cameras(ctx):
+    from strata360.edit import cameras as CM, clip_views
+    v = clip_views.load(str(ctx.dir), ctx.clip.osv); seed = int(ctx.cfg.get('camera_seed', 0))
+    ctx.write('cameras.json', ctx.stamped(dict(seed=seed, cameras=CM.build(v, seed))))
+
+
 @stage('lens', 1, outputs=('lens_check.json',), deps=('ingest',), note='once a second, per lens, how much of the lens picture is covered by something smooth and near (a hand or finger, fog, water): for clear_nadir, so a planet, tunnel or spin is not shown with a hand over the lens (reads the lens files at low resolution)')
 def lens(ctx):
     from strata360.analysis import lens_check as LC
