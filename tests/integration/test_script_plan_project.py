@@ -146,3 +146,18 @@ def test_a_photo_marked_must_use_is_planned_even_when_the_script_does_not_name_i
     PH.add(rd, 'view.jpg', b.getvalue() + b'\0' * 200); PH.set_must(rd, 'p1', True); monkeypatch.setattr(SY, 'PHOTO_SIZE', '640x360'); SD.save_draft(folder, draft_for(folder))
     monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.5 for l in lines}); edit = PJ.plan_from_script(folder)
     assert [g['clip'] for g in edit['plan']['segments'] if g['clip'] == 'P1'] == ['P1'] and any('because you marked them to use' in w for w in edit['plan']['warnings'])
+
+
+def test_with_a_music_track_the_cuts_land_on_its_real_beats_and_the_music_start_is_recorded(folder, monkeypatch):
+    from library import make_track
+    from strata360.edit import music_build as MB
+    from strata360.pipeline import config
+    rd = config.race_dir(folder); os.makedirs(os.path.join(rd, 'music'), exist_ok=True); make_track(os.path.join(rd, 'music', 'track.wav'), 124.0, 1.3, 64)
+    edit = PJ.load(folder); edit['settings']['music'] = 'music/track.wav'; PJ.save(folder, edit)
+    SD.save_draft(folder, draft_for(folder)); monkeypatch.setattr(VO, 'line_durations', lambda f, lines, log=print: {l['seg']: 2.5 for l in lines})
+    p = PJ.plan_from_script(folder)['plan']; rep = p['beat_sync']; mus = p['film']['music']
+    assert rep and rep['cuts'] == len(p['segments']) and mus['synced'] and mus['offset_s'] == rep['seek_s'] and abs(p['film']['length_s'] - rep['length_s']) < 1e-9
+    beats = [b - rep['seek_s'] + rep['delay_s'] for b in MB.grid(rd, 'music/track.wav')['beats']]; off = {o['cut'] for o in rep['off_beat']}
+    cuts = [g['film_start_s'] for g in p['segments'][1:]] + [rep['length_s']]
+    assert all(min(abs(c - b) for b in beats) < 0.001 for k, c in enumerate(cuts, 1) if k not in off)                         # every cut not reported is on a beat of the track as heard
+    assert all(abs(a['film_start_s'] + a['dur_s'] - b['film_start_s']) < 1e-6 for a, b in zip(p['segments'], p['segments'][1:]))

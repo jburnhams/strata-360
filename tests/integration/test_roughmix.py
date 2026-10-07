@@ -61,3 +61,10 @@ def test_a_dialogue_window_plays_the_clips_voice_only_over_the_wanted_lines_and_
     assert band(1.2, 2.3, 1000) > 0.07 and band(1.2, 2.3, 200) < 0.002                       # inside the wanted lines: the voice, not the background
     assert band(0.1, 0.8, 1000) < 0.002 and band(0.1, 0.8, 200) > 0.004 and band(3.0, 3.9, 1000) < 0.002 and band(3.0, 3.9, 200) > 0.004          # before and after: the background only, no voice
     w2 = dict(w, voice_span=None); PV.build_audio(f, dict(segments=[w2], film=dict(length_s=4.0)), out, 4.0); assert band(3.0, 3.9, 1000) > 0.07                  # no span known (an older plan): the whole window as before
+
+
+def test_music_the_cuts_start_after_the_film_does_is_delayed_in_the_mix(folder):
+    from strata360.render import preview as PV
+    out = os.path.join(folder, 'late.wav'); plan = PJ.load(folder)['plan']; PV.build_audio(folder, plan, out, 8.0); assert levels(out, 0.0, 1.4) > 0.004                                    # from its first downbeat at once
+    plan['film']['music'] = dict(file='music/track.wav', offset_s=1.3, delay_s=1.5, synced=True); PV.build_audio(folder, plan, out, 8.0)
+    assert levels(out, 0.0, 1.4) < 0.002 and levels(out, 1.6, 6.0) > 0.004                                                                  # 1.5 s of silence, then the music

@@ -411,6 +411,22 @@ def anchor_pass(ps, draft, music, warn):
     return out
 
 
+def borrow(ps, k, short, foot):
+    """Narration piece `k` is `short` seconds longer than its clip's footage: lengthen the NEXT piece by that much, so its picture starts under the end of the line instead of a held last frame (V4: "borrow from the next item").
+    Only a picture-only piece can lend: camera b-roll with that much unused footage left, or a generated clip with no narration of its own that may grow that far (flex()); never the runner's own words, a sung moment or more narration. True when it lent."""
+    if k + 1 >= len(ps): return False
+    q = ps[k + 1]
+    if q['kind'] == 'broll' and not q.get('sing'):
+        fp = foot.get(q['clip'])
+        if fp is None or free_seconds(fp) < q['seconds'] + short - 1e-6: return False
+        q['duration_s'] = max(float(q.get('duration_s') or 0.0), q['seconds'] + short)                     # (cap_broll's ceiling moves with it)
+    elif q['kind'] == 'synthetic' and q.get('role') == 'broll' and not q.get('text'):
+        f = flex(q)
+        if f is None or q['seconds'] + short > f[1] + 1e-6: return False
+    else: return False
+    q['seconds'] += short; q['lent_s'] = round(short, 3); return True
+
+
 def over_singing(lines, spans, share=0.3):
     """The narration lines (each {text, film_start_s, speak_s}) that are mostly over singing: [{text, a, b, sung_s}]."""
     out = []
@@ -445,6 +461,8 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
         wins = dialogue_windows(fp, p['start'], p['seconds'], warn, p['label'], cap_d, cuts=snap_cuts(split_points(p['start'], p['seconds'], p.get('pauses') or [], target=SPLIT_TARGET_S * (0.5 + 0.5 * CH.calm(_steady_of(fp, p))), free=CH.calm(_steady_of(fp, p)) < 0.7), p.get('pause_spans') or [], p['start'], beat_s, end=p['start'] + p['seconds']) if fp.views_ok(p['start'], p['start'] + p['seconds']) else ()) if p['kind'] == 'clip' else take(fp, p['seconds'], warn, p['label'], cap_p)
         if p['kind'] == 'vo' and wins:                                                                  # the narration must have picture for as long as it is spoken
             short = p['seconds'] - sum(w[2] for w in wins)
+            if short > 1e-6 and borrow(ps, k, short, foot):                                              # the next item's picture starts earlier and the line runs on over it, rather than a held frame
+                warn.append(f"item {p['n'] + 1}: the narration needs {p['seconds']:.1f} s but clip {p['label']} has {p['seconds'] - short:.1f} s of footage for it; it runs on {short:.1f} s over the next item's picture"); p['seconds'] -= short; p['borrowed_s'] = round(short, 3); short = 0.0
             if short > 1e-6:
                 c0, s0, l0 = wins[-1]; grow = min(short, max(cap_p - l0, 0.0)); wins[-1] = (c0, s0, l0 + grow)
                 warn.append(f"item {p['n'] + 1}: the narration needs {p['seconds']:.1f} s but clip {p['label']} has {p['seconds'] - short:.1f} s of footage for it; the last frame is held" + (f" for {short - grow:.1f} s more than a window allows" if short - grow > 1e-6 else '') + ' (choices: shorten the line, move it to a longer clip, or let the hold stand)')
@@ -485,5 +503,5 @@ def build(draft, pack, clips, lib, music, voice_s=None, wpm=150.0, st=None, seed
     spans = (((pack.get('music') or {}).get('lyrics')) or {}).get('vocal_spans') or []; sung = over_singing(lines, spans)
     if fit:
         fit['final_s'] = round((B + run) * beat_s, 2); fit['over_s'] = round(fit['final_s'] - target_s, 2)
-        if abs(fit['over_s']) > music.bar_beats * beat_s: warn.append(f"the film is {abs(fit['over_s']):.0f} s {'longer' if fit['over_s'] > 0 else 'shorter'} than the music ({fit['final_s']:.0f} s against {target_s:.0f} s) and the b-roll cannot absorb it: " + ('shorten narration, your own words or a gap clip' if fit['over_s'] > 0 else 'add picture or narration') + (' (the anchors fix where some items start)' if anchors else ''))
+        if abs(fit['over_s']) > music.bar_beats * beat_s: warn.append(f"the film is {abs(fit['over_s']):.0f} s {'longer' if fit['over_s'] > 0 else 'shorter'} than the music ({fit['final_s']:.0f} s against {target_s:.0f} s) and the b-roll cannot absorb it: " + ('shorten narration, your own words or a gap clip, or build the music to the film\'s length (the Music studio\'s built mode)' if fit['over_s'] > 0 else 'add picture or narration') + (' (the anchors fix where some items start)' if anchors else ''))
     return dict(segs=segs, roles=roles, piece_of=[w._piece for w in windows], pieces=ps, lines=lines, beats=B + run, synthetic=synthetic, anchors=anchors, over_singing=sung, fit=fit, auto_gaps=auto, warnings=warn)

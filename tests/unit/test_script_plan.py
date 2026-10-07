@@ -152,6 +152,32 @@ def test_narration_longer_than_the_clips_footage_gets_the_missing_time_held_with
     assert sum(s.dur_s for s in r['segs']) >= need - 1e-6 and any('narration needs' in w and 'shorten the line' in w and 'last frame is held' in w for w in r['warnings'])
 
 
+def test_narration_longer_than_its_clips_footage_runs_on_over_the_next_items_picture_instead_of_a_held_frame():
+    tiny = clip(3, 6.0, [cand('X', 0, 0, 3.0)]); pack = dict(race={}, clips=PACK['clips'] + [pc(tiny)])
+    d = dict(wpm=150, items=[dict(type='vo', clip='0003', text='A long line over a very short clip.'), item('broll', 2, seconds=4.0)])
+    r = SPL.build(d, pack, [C1, C2, tiny], LIB, MUSIC, {0: 6.0}, st=CH.Settings(seed=1)); need = 6.0 + SPL.LEAD_S + SPL.TAIL_S
+    assert not any('last frame is held' in w for w in r['warnings']) and any('runs on' in w and 'next item' in w for w in r['warnings'])
+    vo = [s for s, role in zip(r['segs'], r['roles']) if role == 'vo']; broll = [s for s, role in zip(r['segs'], r['roles']) if role == 'broll']
+    assert sum(s.dur_s for s in vo) < need - 1.0 and sum(s.dur_s for s in vo + broll) >= need - 1e-6                             # the line's own picture ends with its footage; the b-roll after it starts under the rest of it
+    assert sum(s.dur_s for s in broll) >= 4.0 + (need - 3.0) - BEAT - 1e-6 and r['pieces'][0]['borrowed_s'] == pytest.approx(r['pieces'][1]['lent_s'])
+    line = r['lines'][0]; assert line['speak_s'] == 6.0 and line['seconds'] < 6.0                                              # (the voice-over is placed by the next line's start, not by its window)
+
+
+def test_narration_is_never_run_on_over_the_runners_own_words_or_more_narration():
+    tiny = clip(3, 6.0, [cand('X', 0, 0, 3.0)]); pack = dict(race={}, clips=PACK['clips'] + [pc(tiny)])
+    for nxt in (item('clip', 1, lines=['0001.00']), item('vo', 2, text='And then another thing.')):
+        d = dict(wpm=150, items=[dict(type='vo', clip='0003', text='A long line over a very short clip.'), nxt])
+        r = SPL.build(d, pack, [C1, C2, tiny], LIB, MUSIC, {0: 6.0, 1: 2.0}, st=CH.Settings(seed=1)); assert any('last frame is held' in w for w in r['warnings']) and not any('runs on' in w for w in r['warnings'])
+
+
+def test_a_generated_clip_after_long_narration_lends_its_picture_within_how_far_it_may_stretch():
+    tiny = clip(3, 6.0, [cand('X', 0, 0, 3.0)]); ps = [dict(kind='vo', clip=tiny['id'], seconds=6.5), dict(kind='synthetic', role='broll', text='', seconds=6.0, clip='G03')]
+    assert not SPL.borrow(ps, 0, 3.5, {}) and ps[1]['seconds'] == 6.0                                                            # a 6 s gap clip stretches to 9 s at most (flex)
+    assert SPL.borrow(ps, 0, 3.0, {}) and ps[1]['seconds'] == 9.0 and ps[1]['lent_s'] == 3.0
+    ps = [dict(kind='vo', seconds=6.5), dict(kind='synthetic', role='broll', text='', seconds=6.0, fixed=True)]; assert not SPL.borrow(ps, 0, 1.0, {}) and ps[1]['seconds'] == 6.0                   # a length you set stays
+    assert not SPL.borrow([dict(kind='vo', seconds=6.5)], 0, 1.0, {}) and not SPL.borrow([dict(kind='vo'), dict(kind='broll', sing='p1', seconds=4.0, clip='x')], 0, 1.0, {})
+
+
 # ---- the director's anchors and the music's singing
 
 def anchored(items): return dict(wpm=150, items=items)

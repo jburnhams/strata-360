@@ -180,6 +180,29 @@ def insert_synthetic(folder, ser, specs, beat_s):
     return out
 
 
+def beat_list(folder, settings, mus):
+    """dict(beats, downbeats) of the film's music in seconds of its file, or None: the uploaded track's from its beat tracker (music/grid.json, edit/music_build.grid), a built track's from the bar lines it was built on."""
+    from strata360.edit import beat_sync as BS, music as MU, music_build as MB
+    rd = config.race_dir(folder); rel = settings.get('music')
+    if not rel or not mus: return None
+    if mus.get('built'):
+        sc = MU.built_score(rd, rel); return dict(beats=BS.from_downbeats(sc['downbeats'], int(mus['bar_beats'])), downbeats=sc['downbeats']) if sc else None
+    g = MB.grid(rd, rel); return dict(beats=g['beats'], downbeats=g['downbeats'])
+
+
+def beat_sync(folder, settings, mus, ser, lines, clips, lib, warnings):
+    """The plan's cuts moved onto the music's real beats and the music's start chosen to suit them (edit/beat_sync.py, V5). Returns (segments, the report or None when there is no music or its beats cannot be found)."""
+    from strata360.edit import beat_sync as BS, voiceover as VO
+    if not mus or not ser: return ser, None
+    try: g = beat_list(folder, settings, mus)
+    except (RuntimeError, OSError, ValueError) as e: warnings.append(f'the beats of the music could not be found ({e}): the cuts stay on its average tempo'); return ser, None
+    if not g: return ser, None
+    spoken = [(l['film_start_s'] + VO.LEAD_S, l['film_start_s'] + VO.LEAD_S + float(l['speak_s']), l['text']) for l in lines if l.get('speak_s')]
+    out, rep = BS.sync(ser, g['beats'], g['downbeats'], float(mus['offset_s']), spoken, clip_len={c['id']: float(c['duration_s']) for c in clips}, dur_range={t.id: (t.dmin, t.dmax) for t in lib.values()}, settings=BS.SyncSettings(lead_s=VO.LEAD_S))
+    if rep: warnings.extend(rep.pop('warnings'))
+    return out, rep
+
+
 def plan_from_script(folder, draft_name=None, log=print):
     """Make the film's plan from the whole-race script (edit/script_draft.py, edit/script_plan.py) and save it as the plan: the script's dialogue, narration and b-roll in order, in windows of whole beats, the
     narration timed by how long the voice takes to say it. Also writes script2/lines.json, the narration the voice-over builder speaks and places. Raises O.Infeasible with the reason."""
@@ -202,13 +225,15 @@ def plan_from_script(folder, draft_name=None, log=print):
     ser = insert_synthetic(folder, ser, specs, music.beat_s)
     for g in ser:
         if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
+    ser, sync = beat_sync(folder, edit['settings'], mus, ser, res['lines'], clips, lib, res['warnings'])                       # the cuts moved onto the music's real beats (V5)
     PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
     now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    edit['plan'] = dict(generated_at=now, source='script', script=name, film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=bpm, bar_beats=bar, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
-                        segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [], fit=res.get('fit'), auto_gaps=res.get('auto_gaps') or [])
+    music_at = dict(file=edit['settings']['music'], offset_s=sync['seek_s'], delay_s=sync['delay_s'], synced=True) if sync else (dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)
+    edit['plan'] = dict(generated_at=now, source='script', script=name, film=dict(length_s=sync['length_s'] if sync else round(music.beats * music.beat_s, 3), beats=music.beats, bpm=bpm, bar_beats=bar, music=music_at),
+                        beat_sync=sync, segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [], fit=res.get('fit'), auto_gaps=res.get('auto_gaps') or [])
     save(folder, edit); rd = config.race_dir(folder); os.makedirs(os.path.join(rd, 'script2'), exist_ok=True); p = os.path.join(rd, VO.SCRIPT2_LINES); json.dump(dict(draft=name, generated_at=now, lines=res['lines']), open(p + '.tmp', 'w'), indent=1); os.replace(p + '.tmp', p)
     return edit
 

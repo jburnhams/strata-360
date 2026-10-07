@@ -43,6 +43,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `edit/blocks.py` | 99% | done: allocation, dropping, dialogue padding, automatic length, overrides (`unit/test_blocks.py`) |
 | `edit/script.py` | 88% | partial: the per-block writer done (`unit/test_script_blocks.py`, scripted model); the beat-window writer and `segment_facts` todo |
 | `edit/vo_measure.py` | 93% | done: speech extent, status checks, single and multi-line recordings, `vo.json` reuse (`unit/test_vo_measure.py`, scripted aligner; the real aligner is a manual check) |
+| `edit/beat_sync.py` | 97% | done: cuts on a drifting track's beats, music start and delay, words and lead-in kept, footage never twice, technique and generated-clip lengths, the film's end, runs of one clip (`unit/test_beat_sync.py`); with a real click track in `integration/test_script_plan_project.py` |
 | `edit/vo_fit.py` | 92% | done: block sizing, speed fallback, music placement, problems (`unit/test_vo_fit.py`); `respeak`/`fit_project` in `integration/test_voiceover.py` |
 | everything else | see `--cov-report=term-missing` | todo |
 
