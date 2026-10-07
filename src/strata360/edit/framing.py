@@ -196,9 +196,12 @@ PAN_MAX_DEG = 60.0           # by at most this much yaw: a drift, not a sweep
 PAN_KEEP = 0.85              # and only when both ends look at least this good compared with the best fixed view
 
 
-def _best_pose(grid, a, b, rng, k=3):
-    """The (score, yaw, pitch, hfov) of the view that looks best over [a, b], one of the top `k` picked at random (the seeded variety)."""
-    best = [(VQ.window_score(grid, a, b, yaw, pitch, hfov, 16 / 9, step=1.0)['score'], yaw, pitch, hfov) for yaw in range(-180, 180, 15) for pitch in FREE_PITCHES for hfov in FREE_HFOVS]
+def _best_pose(grid, a, b, rng, k=3, v=None):
+    """The (score, yaw, pitch, hfov) of the view that looks best over [a, b], one of the top `k` picked at random (the seeded variety). With `v` (clip_views.load's dict) the look is weighted by the scenes stage's rating of that direction at the middle of the window,
+    as the scenery camera does, so a close brick wall (all fine detail) does not beat a better-rated direction."""
+    prior, heading = (v or {}).get('prior'), (v or {}).get('heading'); mid = (a + b) / 2.0
+    def weight(yaw): return 1.0 if prior is None or heading is None else SC.Settings.prior_floor + (1 - SC.Settings.prior_floor) * prior(mid, float(SC.wrap(yaw - heading(mid))))
+    best = [(VQ.window_score(grid, a, b, yaw, pitch, hfov, 16 / 9, step=1.0)['score'] * weight(yaw), yaw, pitch, hfov) for yaw in range(-180, 180, 15) for pitch in FREE_PITCHES for hfov in FREE_HFOVS]
     best.sort(reverse=True); return best[int(rng.integers(0, min(k, len(best))))]
 
 
@@ -206,9 +209,9 @@ def free_path(g, T, t0, rng, v):
     """A free camera (edit/view_quality.py): a fixed pose, the view that looks best over the whole window, or, in a window of 3 s or more, a slow pan from the best pose at its start to the best pose at its end when those are different (15 to 60 degrees apart) and
     each looks nearly as good as the fixed one; one of the top few at random (the seeded variety). People are not avoided. None without a quality grid."""
     if not v or v.get('grid') is None: return None
-    grid = v['grid']; sc, yaw, pitch, hfov = _best_pose(grid, t0, t0 + T, rng); kf = lambda t, y, p, f: dict(t=round(float(t), 3), yaw=float(y), pitch=float(p), fov=float(f), ease='linear')
+    grid = v['grid']; sc, yaw, pitch, hfov = _best_pose(grid, t0, t0 + T, rng, v=v); kf = lambda t, y, p, f: dict(t=round(float(t), 3), yaw=float(y), pitch=float(p), fov=float(f), ease='linear')
     if T >= PAN_MIN_S:
-        win = min(1.5, T / 3.0); s0, y0, p0, f0 = _best_pose(grid, t0, t0 + win, rng, 1); s1, y1, p1, f1 = _best_pose(grid, t0 + T - win, t0 + T, rng, 1); d = abs(float(CV.wrap(y1 - y0)))
+        win = min(1.5, T / 3.0); s0, y0, p0, f0 = _best_pose(grid, t0, t0 + win, rng, 1, v); s1, y1, p1, f1 = _best_pose(grid, t0 + T - win, t0 + T, rng, 1, v); d = abs(float(CV.wrap(y1 - y0)))
         if 15.0 <= d <= PAN_MAX_DEG and min(s0, s1) >= PAN_KEEP * sc:
             return dict(ref='world', keyframes=[kf(0.0, y0, p0, f0), kf(T, y0 + float(CV.wrap(y1 - y0)), p1, f1)], subject='free', why=f'a slow pan of {d:.0f} degrees between the best pose at the start and at the end (score {min(s0, s1):.2f})')
     return dict(ref='world', keyframes=[kf(0.0, yaw, pitch, hfov), kf(T, yaw, pitch, hfov)], subject='free', why=f'a fixed view chosen for its detail and exposure (score {sc:.2f})')

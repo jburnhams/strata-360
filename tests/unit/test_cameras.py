@@ -119,3 +119,11 @@ def test_person_hold_frames_another_person_and_is_offered_only_where_a_person_ca
     for cams, want in (([dict(kind='person', start_s=0.0, end_s=40.0, score=1.0)], True), ([], False)):
         clips = [cl(cams)]; m = O.Music(bpm=120, beats=40, bar_beats=4, sections=[(0, 40, 0.5)])
         plan = CH.plan(clips, lib, m, CH.Settings(seed=1, w_camlist=20.0)); assert ('person_hold' in [s.tech.id for s in plan]) is want
+
+
+def test_free_cameras_prefer_the_direction_the_scenes_stage_rates_higher_even_when_another_has_more_detail():
+    g = grid(); g['tex'][:, :, 12:16] = 14.0                                                    # the most detail is east (a brick wall: columns 12 to 15 are yaw 0 to 60)
+    rated = lambda t, rel: 0.1 if -10 < rel < 70 else 0.9                                       # but the scenes stage rates that way poorly and the rest well
+    v = dict(view(g), prior=rated)
+    ys = [c['aim']['keyframes'][0]['yaw'] for c in CM.build(v) if c['kind'] == 'free']; assert ys and all(not (-10 < y < 70) for y in ys), ys
+    plain = [c['aim']['keyframes'][0]['yaw'] for c in CM.build(view(g)) if c['kind'] == 'free']; assert any(-10 < y < 70 for y in plain), plain         # without the rating the detail wins

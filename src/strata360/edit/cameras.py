@@ -87,7 +87,7 @@ def build(v, seed=0, max_free=MAX_FREE):
     for i in range(k):
         a, b = float(edges[i]), float(edges[i + 1]); T = b - a
         if T < MIN_S: continue
-        free = FR.free_path(g, T, a, rng, dict(grid=g))
+        free = FR.free_path(g, T, a, rng, v)
         if not free: continue
         k0 = free['keyframes'][0]; look = _looks(g, lambda t, k0=k0: k0['yaw'], lambda t, k0=k0: k0['pitch'], k0['fov'], n)
         cams.append(_camera(f'F{i + 1}', 'free', a, b, look, dur, dict(ref='world', t0=a, keyframes=free['keyframes']), free['why']))
