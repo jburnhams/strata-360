@@ -33,7 +33,7 @@ def _ranges(mask, gap):
 
 def _looks(g, yaws, pitches, fov, n):
     """The view's look (0..1) for each second 0..n-1: yaws and pitches are functions of the second."""
-    hz = float(g['hz']); return np.array([VQ.view_score(g, int(round((t + 0.5) * hz)), yaws(t + 0.5), pitches(t + 0.5), fov, ASPECT)['score'] for t in range(n)])
+    hz = float(g['hz']); return np.minimum([VQ.view_score(g, int(round((t + 0.5) * hz)), yaws(t + 0.5), pitches(t + 0.5), fov, ASPECT)['score'] for t in range(n)], 1.0)          # (a very detailed view can score a little over 1)
 
 
 def _trim(look, a, b):
