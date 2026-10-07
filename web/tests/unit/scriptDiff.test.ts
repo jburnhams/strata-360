@@ -24,5 +24,9 @@ describe('diffDrafts', () => {
     expect([...d.added]).toEqual([2]); expect(d.removed).toEqual([])
   })
 
+  it('keys a sing item by its picture and its phrase', () => {
+    const sing = (clip: string, phrase: string) => ({ type: 'sing', clip, phrase, seconds: 9.9 }) as never
+    expect(itemKey(sing('0002', 'L01'))).toBe(itemKey(sing('0002', 'L01'))); expect(itemKey(sing('0002', 'L01'))).not.toBe(itemKey(sing('0002', 'L02')))
+  })
   it('keys b-roll by whole seconds', () => { expect(itemKey(broll('0001', 4.4))).toBe(itemKey(broll('0001', 3.6))) })
 })

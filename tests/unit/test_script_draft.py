@@ -132,7 +132,7 @@ def test_notes_say_when_an_anchor_cannot_be_met_but_say_nothing_about_narration_
 def test_the_request_carries_the_music_and_the_gap_choices_and_the_prompt_explains_gap_items_and_anchors():
     msgs, text = SD.build_messages(DPACK, 245, 150); sys_, user = msgs[0]['content'], msgs[1]['content']
     assert 'THE MUSIC (times are FILM seconds' in user and 'Sung (en): 30-60 s' in user and '=== CLIP G01' in user and 'NO FOOTAGE: a gap of 1.0 h' in user and '"type": "gap"' in user and '"anchor"' in user
-    assert '"gap": a generated clip' in sys_ and 'do NOT choose how it is drawn' in sys_ and '"kind": "map"' not in sys_ and 'must approve' not in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 14 and 'paraphrase freely' in sys_
+    assert '"gap": a generated clip' in sys_ and 'do NOT choose how it is drawn' in sys_ and '"kind": "map"' not in sys_ and 'must approve' not in sys_ and 'THE MUSIC.' in sys_ and 'anchor' in sys_ and 'often unavoidable' in sys_ and SD.PROMPT_VERSION == 15 and 'paraphrase freely' in sys_
 
 
 def test_with_the_tempo_known_every_item_counts_in_whole_beats_so_the_writers_total_matches_the_plan():
@@ -175,7 +175,7 @@ def test_a_view_is_only_for_clip_and_broll_items_of_a_clip_that_has_it():
 
 
 def test_the_prompt_explains_the_views_of_you():
-    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 14
+    sys_ = SD.build_messages(PACK, 30, 150)[0][0]['content']; assert '"view": "mid"' in sys_ and '"close" (a face zoom' in sys_ and '"far" (ultra wide' in sys_ and SD.PROMPT_VERSION == 15
 
 
 def test_a_reply_with_raw_newlines_inside_strings_is_still_read():
@@ -202,3 +202,56 @@ def test_the_writer_is_asked_whether_the_length_suits_and_the_answer_is_kept_whe
     assert SD.length_note(dict(length_note=dict(verdict='too_long', ideal_s='210', why=' padding in the middle '))) == dict(verdict='too_long', ideal_s=210.0, why='padding in the middle')
     assert SD.length_note(dict(length_note=dict(verdict='fits'))) == dict(verdict='fits', ideal_s=None, why='') and SD.length_note(dict(length_note=dict(verdict='huge'))) is None and SD.length_note({}) is None and SD.length_note(dict(length_note='fine')) is None
     assert SD.length_note(dict(length_note=dict(verdict='too_short', ideal_s='soon'))) == dict(verdict='too_short', ideal_s=None, why='')
+
+
+# ---- the sing item (docs/ai-music.md 4.2a)
+
+def lyrics_pack(built=False):
+    ph = [dict(id='L01', t0=40.3, t1=44.2, text='no sleep till Brooklyn', doubtful=False, hook=True), dict(id='L02', t0=100.0, t1=103.0, text='a verse line', doubtful=False, hook=False),
+          dict(id='L03', t0=170.0, t1=172.0, text='unsure words', doubtful=True, hook=False), dict(id='L04', t0=200.5, t1=204.0, text='no sleep till Brooklyn', doubtful=False, hook=True)]
+    m = dict(length_s=245.0, bpm=97.0, bar_s=2.47, sections=[dict(t0=0.0, t1=245.0, energy=0.5)], lyrics=dict(language='en', vocal_spans=[[40.0, 45.0]], phrases=ph))
+    if built: m['built'] = True
+    return dict(PACK, music=m)
+
+
+def sing(c, phrase, **kw): return dict(type='sing', clip=c, phrase=phrase, why='w', **kw)
+
+
+def test_a_sing_item_is_as_long_as_its_phrase_in_whole_bars_with_a_bar_either_side():
+    ph = dict(t0=40.3, t1=44.2); bs = 2.47                                                    # sung from 0.2 bar into bar 16 for 1.6 bars: it ends in bar 17 (2 bars) plus the lead-in and lead-out
+    assert SD.sing_seconds(ph, bs) == pytest.approx(4 * bs) and SD.sing_start(ph, bs) == pytest.approx(15 * bs)
+    assert SD.sing_start(dict(t0=1.0, t1=2.0), bs) == 0.0
+
+
+def test_with_the_fixed_track_a_sing_item_must_be_anchored_where_the_track_sings_it():
+    pack = lyrics_pack(); at = SD.sing_start(dict(t0=40.3, t1=44.2), 2.47)
+    chk = lambda *its: SD.check(dict(items=list(its), skipped=[]), pack, 40, 150)[1]
+    assert any('must be anchored at 37 s' in p for p in chk(sing('0002', 'L01')))
+    assert any('anchor the item at 37 s, not 90 s' in p for p in chk(sing('0002', 'L01', anchor=dict(film_s=90, why='x'))))
+    assert not any('anchor' in p and 'sing' in p for p in chk(sing('0002', 'L01', anchor=dict(film_s=round(at), why='x'))))
+    assert not any('anchor' in p for p in SD.check(dict(items=[sing('0002', 'L01')], skipped=[]), lyrics_pack(built=True), 40, 150)[1])               # built music: placed wherever the item falls
+
+
+def test_sing_items_are_sent_back_for_an_unknown_or_doubtful_phrase_too_many_or_too_close():
+    pack = lyrics_pack(built=True); chk = lambda *its: SD.check(dict(items=list(its), skipped=[]), pack, 40, 150)[1]
+    assert any('no sung phrase L99' in p for p in chk(sing('0002', 'L99'))) and any('doubtful' in p for p in chk(sing('0002', 'L03')))
+    assert any('less than 30 s apart' in p for p in chk(sing('0002', 'L01'), sing('0002', 'L02')))
+    assert any('used twice and is not the hook' in p for p in chk(sing('0001', 'L02'), broll('0002', 40), sing('0003', 'L02'))) and not any('used twice' in p for p in chk(sing('0001', 'L01'), broll('0002', 40), sing('0003', 'L01')))
+    many = [sing('0001', 'L01'), broll('0001', 40), sing('0001', 'L02'), broll('0001', 40), sing('0001', 'L04'), broll('0001', 40), sing('0001', 'L01'), broll('0001', 40), sing('0001', 'L02')]
+    assert any('more than 4 sing items' in p for p in chk(*many)); assert any('no sung phrase' in p and 'this track has none' in p for p in SD.check(dict(items=[sing('0002', 'L01')], skipped=[]), PACK, 40, 150)[1])
+
+
+def test_a_sing_item_counts_as_picture_in_the_film_and_resolve_gives_it_its_length_and_words():
+    pack = lyrics_pack(built=True); s = dict(items=[sing('0002', 'L01')], skipped=[]); rep, _ = SD.check(s, pack, 40, 150); SD.resolve(s, pack, 150)
+    assert rep['sing_s'] == pytest.approx(4 * 2.47, abs=0.6) and s['items'][0]['seconds'] == pytest.approx(9.9, abs=0.1) and s['items'][0]['text'] == 'no sleep till Brooklyn'
+
+
+def test_the_prompt_and_pack_offer_the_phrases_with_ids_and_the_hook_flag():
+    msgs, text = SD.build_messages(lyrics_pack(), 245, 150); sys_ = msgs[0]['content']
+    assert '"sing"' in sys_ and 'at most 4 in a film' in sys_ and '"type": "sing"' in msgs[1]['content'] and 'L01 [40 s] no sleep till Brooklyn' in text and '(repeated: the hook?)' in text
+    assert SP.hooks([dict(text='Go go!'), dict(text='go go'), dict(text='other')])[0]['hook'] and not SP.hooks([dict(text='other')])[0]['hook']
+
+
+def test_a_notes_flags_the_hook_used_before_the_halfway_point_and_a_sing_item_becomes_picture_in_the_plan():
+    pack = lyrics_pack(built=True); s = dict(items=[sing('0002', 'L01'), broll('0003', 30), broll('0001', 30)], skipped=[]); SD.resolve(s, pack, 150)
+    assert any('the hook L01 is used at 0 s, before the halfway point' in n for n in SD.director_notes(s, pack))

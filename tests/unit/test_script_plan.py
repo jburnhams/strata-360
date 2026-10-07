@@ -310,3 +310,8 @@ class TestChainWindows:
 
     def test_a_shot_near_the_end_of_the_clip_is_moved_back_to_fit(self):
         out = SPL.chain_windows([('c', 9.5, 2.0)], self.B, 10.0, speech=True); assert out[0][1] == pytest.approx(10.0 - 4 * self.B)
+
+
+def test_a_sing_item_is_planned_as_picture_of_its_length_and_remembers_its_phrase():
+    d = dict(wpm=150, items=[item('sing', 2, phrase='L07', seconds=6.0, anchor=dict(film_s=0, why='x'))]); ps, warn = SPL.pieces(d, PACK, {}, 150.0)
+    assert not warn and ps[0]['kind'] == 'broll' and ps[0]['seconds'] == 6.0 and ps[0]['sing'] == 'L07' and ps[0]['clip'] == C2['id']

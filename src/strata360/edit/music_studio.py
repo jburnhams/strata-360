@@ -33,7 +33,7 @@ def grid_summary(g):
 def read_grid(rd, rel):
     try:
         g = json.load(open(os.path.join(rd, 'music', 'grid.json')))
-        return g if g.get('version') == 2 and g.get('file') == rel and g.get('sig') == MB.MU._sig(os.path.join(rd, rel)) else None
+        return g if g.get('version') == 3 and g.get('file') == rel and g.get('sig') == MB.MU._sig(os.path.join(rd, rel)) else None
     except (OSError, ValueError): return None
 
 
@@ -44,6 +44,26 @@ def read_built(rd):
 
 def state(rd, rel):
     g = read_grid(rd, rel); return dict(grid=grid_summary(g) if g else None, built=read_built(rd), stems=os.path.exists(os.path.join(rd, 'music', 'stems', 'stems.json')))
+
+
+def sing_pins(folder, g, bar_s, n_bars, lead=1):
+    """The sung moments the film's script asks for (its `sing` items), as pins for the build: ([(film_bar, source_bar, n_bars)], notes). The item's picture starts at its film second (the nearest bar line); the pin plays the bars of the original that hold the phrase, a bar of lead-in and a bar of lead-out, starting there, so the phrase keeps its own place in its bar. A phrase that is not in the lyrics, is doubtful or deleted, or that lies in the track's last bars is left out, with a note."""
+    from strata360.edit import script_draft as SD, lyrics as LY, layers, project as PJ
+    plan = PJ.load(folder).get('plan'); ly = LY.view(folder)
+    if not plan or plan.get('source') != 'script' or not ly: return [], []
+    draft = SD.load_draft(folder, plan.get('script'))
+    if not draft: return [], []
+    lib = {p['id']: p for p in ly['phrases']}; d = np.asarray(g['downbeats'], float); pins = []; notes = []
+    for n, it in enumerate(draft.get('items') or []):
+        if it.get('type') != 'sing': continue
+        segs = [x for x in plan['segments'] if x.get('item') == n]; ph = lib.get(str(it.get('phrase')))
+        if not segs: notes.append(f"item {n + 1}: not in the plan"); continue
+        if not ph or not ph['counts']: notes.append(f"item {n + 1}: phrase {it.get('phrase')} is not a trusted sung phrase"); continue
+        s0 = layers._bar_of(d, ph['t0']); s1 = layers._bar_of(d, ph['t1'], end=True); first = int(round(min(x['film_start_s'] for x in segs) / bar_s))
+        src = s0 - lead; count = (s1 - s0 + 1) + 2 * lead
+        if src < 0 or src + count > len(d) - 1 or first < 0 or first + count > n_bars: notes.append(f"item {n + 1}: {it['phrase']} does not fit (the track's own bars {src} to {src + count - 1}, the film's {first} to {first + count - 1} of {n_bars})"); continue
+        pins.append((first, src, count))
+    return pins, notes
 
 
 def windows_to_bars(spans, bar_s, n):
