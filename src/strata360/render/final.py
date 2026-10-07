@@ -13,7 +13,7 @@ from strata360.pipeline import guard
 import datetime as dt, hashlib, json, math, os, shutil, subprocess, sys, time
 import numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, flat, seam as SM, synthetic as SYN
+from strata360.render import camera as cam, flat, grade as GR, seam as SM, synthetic as SYN
 from strata360.render.film import pieces, render_piece, layout
 from strata360.render.preview import build_audio, proxy_of
 
@@ -58,7 +58,7 @@ def final_dir(folder, key): return os.path.join(config.race_dir(folder), 'final'
 def final_key(plan, size, fps, bitrate, folder):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
     h = hashlib.sha1(json.dumps([plan['segments'], size, fps, bitrate], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
-    h.update(_overlay_sig(folder).encode()); h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
+    h.update(_overlay_sig(folder).encode()); h.update(b'grade1' if GR.on(folder) else b''); h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
 
 
 def _overlay_sig(folder):
@@ -72,8 +72,8 @@ def _overlay_sig(folder):
 
 class FinalSource:
     """Frames of the planned windows from the original OSV files (uint16 RGB code values, like flat.main)."""
-    def __init__(self, folder, segs, framing, W, H, fps, interp='cubic', overlay=None):
-        self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp, self.overlay = folder, segs, framing, W, H, fps, interp, overlay; self.info = {}; self.done = 0
+    def __init__(self, folder, segs, framing, W, H, fps, interp='cubic', overlay=None, gains=None):
+        self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp, self.overlay, self.gains = folder, segs, framing, W, H, fps, interp, overlay, gains or {}; self.info = {}; self.done = 0      # gains: render/grade.py, the exposure match of each footage window
 
     def _boxes(self, clip, osv):
         """t -> [(yaw, pitch, height_deg)] of the people seen near t (edit/clip_views.py), for a seam that goes round them; None when off (`STRATA_SEAM_PEOPLE=0`) or the clip has no people records."""
@@ -95,7 +95,7 @@ class FinalSource:
             if self.overlay is None: yield from frames; return
             for i, img in enumerate(frames): yield self.overlay.apply(img, SYN.race_time(sg, a0 + i, self.fps))
             return
-        ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
+        gain = self.gains.get(sg['id']); ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
         path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
         pts = ci['pts']; ks = np.minimum(flat.frame_at(pts, t_abs), ci['n'] - 1); quat = ci['T']['quat']             # the frame shown at clip time t is found by the frame timestamps, not by t x fps (a clip whose camera dropped frames has timestamps that jump)
@@ -114,6 +114,7 @@ class FinalSource:
                 R.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], (float(pose_extra[i][3]) if pose_extra is not None and len(pose_extra[i]) > 3 and pose_extra[i][3] > 0 else (P['disc'][i] if P['use_disc'] else None)))
                 yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0); d = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); M = Ms[i]
                 img = R.render(cur_m, cur_s, d if P['ref'] == 'body' else M @ d, M @ ez, float(P['roll'][i]))
+                if gain is not None: img = GR.apply(img, gain(max(times[i], 0.0)))                  # the exposure match, before the overlay so the numbers are never graded
                 yield img if self.overlay is None else self.overlay.apply(img, utc0 + times[i])           # before any transition blend, so a dissolve cross-fades the two overlays too
         finally:
             for p in (dm, ds):
@@ -154,7 +155,7 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
     total = sum(p['frames'] for p in ps); t0 = time.time(); done_frames = 0
     def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=done_frames, frames_total=total, pieces_done=sum(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
     from strata360.overlay import for_project
-    src = FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H))); status('rendering')
+    src = FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H)), gains=GR.gains_for(folder, segs, framing)); status('rendering')
     for n, p in enumerate(ps):
         if limit_pieces is not None and n >= limit_pieces: break
         f = os.path.join(d, p['id'] + '.mov')

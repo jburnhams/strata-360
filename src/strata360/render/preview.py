@@ -13,7 +13,7 @@ from strata360.pipeline import guard
 import hashlib, json, math, os, shutil, subprocess, sys, time
 import cv2, numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, synthetic as SYN
+from strata360.render import camera as cam, grade as GR, synthetic as SYN
 from strata360.render.flat import Globe, projection, view_rays
 from strata360.render.film import compose, layout
 
@@ -26,7 +26,7 @@ def film_dir(folder, key): return os.path.join(config.race_dir(folder), 'preview
 def plan_key(folder, plan):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
     h = hashlib.sha1(json.dumps(plan['segments'], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
-    h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode())
+    h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); h.update(b'grade1' if GR.on(folder) else b'')
     try:
         from strata360 import overlay
         h.update(overlay.inputs_signature(folder).encode())                                      # the overlay is on every frame: new cut-offs or checkpoints make the preview out of date
@@ -76,8 +76,8 @@ def stab_matrices(osv):
 
 class PreviewSource:
     """Frames of the planned windows from the clips' proxies (upright equirect), through the real renderer's projection (EquirectView). A clip without a proxy gives a dark card."""
-    def __init__(self, folder, segs, framing, w, h, decode_w, overlay=None):
-        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w, self.overlay = folder, segs, framing, w, h, decode_w, overlay; self.V = EquirectView(w, h); self.info = {}; self.done = 0
+    def __init__(self, folder, segs, framing, w, h, decode_w, overlay=None, gains=None):
+        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w, self.overlay, self.gains = folder, segs, framing, w, h, decode_w, overlay, gains or {}; self.V = EquirectView(w, h); self.info = {}; self.done = 0
 
     def _clip(self, clip):
         if clip not in self.info:
@@ -99,7 +99,7 @@ class PreviewSource:
         sg = self.segs[k]; m = a1 - a0
         if m <= 0: return
         if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, FPS, self.w, self.h, 'bgr'); return           # a generated clip: its pictures as they are
-        clip = sg['clip']; ci = self._clip(clip)
+        clip = sg['clip']; ci = self._clip(clip); gain = self.gains.get(sg['id'])
         if not ci['proxy']:
             for _ in range(m): yield card(self.w, self.h, f'{clip[-9:]}: proxy not made yet')
             return
@@ -119,7 +119,8 @@ class PreviewSource:
                     if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3)
                     elif fr is None: fr = np.zeros((dh, dw, 3), np.uint8)                   # (past the end of the clip the last frame is held)
                 self.V.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], (float(pose_extra[i][3]) if pose_extra is not None and len(pose_extra[i]) > 3 and pose_extra[i][3] > 0 else (P['disc'][i] if P['use_disc'] else None))); yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0)
-                vdir = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); yield self.V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))
+                vdir = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); img = self.V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))
+                yield img if gain is None else GR.apply(img, gain(max((a0 + i) / FPS, 0.0)))                          # the exposure match (render/grade.py), the same maths as the final film
         finally:
             dec.stdout.close(); dec.terminate(); dec.wait()
 
@@ -248,7 +249,7 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
                             '-hls_segment_filename', os.path.join(d, 'seg%05d.ts'), os.path.join(d, 'index.m3u8')], stdin=subprocess.PIPE)
     from strata360.overlay import for_project
-    src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h))); last = [0.0]
+    src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h)), gains=GR.gains_for(folder, segs, framing)); last = [0.0]
     def emit(img):
         enc.stdin.write(img.tobytes()); src.done += 1
         if time.time() - last[0] > 1.0: last[0] = time.time(); status('rendering', src.done); progress and progress(src.done, total)
