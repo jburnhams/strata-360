@@ -74,6 +74,7 @@ def test_music_build_passes_the_score_settings_and_prints_each_generated_piece(t
     from strata360.pipeline import config
     from strata360.edit import music_build as MB, lyrics as LY
     f, rd = project(tmp_path); open(os.path.join(rd, 'music', 'track.mp3'), 'wb').write(b'x'); seen = {}
+    monkeypatch.setenv('STRATA_NO_RESOURCE_LIMITS', '1')                                                                   # (the build is faked: the machine's load and free memory are not what this test is about)
     monkeypatch.setattr(config, 'race_dir', lambda name: rd); monkeypatch.setattr(PJ, 'music_record', lambda folder, s: dict(file='music/track.mp3')); monkeypatch.setattr(LY, 'view', lambda folder: None)
     monkeypatch.setattr(MB, 'grid', lambda rd_, rel: dict(downbeats=[2.0 * i for i in range(30)]))
     json.dump(dict(style='rap rock'), open(os.path.join(rd, 'music', 'built.json'), 'w'))

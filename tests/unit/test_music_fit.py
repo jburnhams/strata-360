@@ -50,8 +50,8 @@ def test_the_wrong_tempo_is_made_again_and_a_take_off_the_beat_is_repainted():
 
 def test_the_fit_follows_the_planned_downbeats_not_an_even_grid():
     x = clicks(120, 4); marks = [0.0, 2.0, 4.0, 6.0, 8.0]
-    assert MF.tempo_fit(x, SR, 4, 2.0, marks=marks)[1]['action'] == 'as is'
-    assert MF.tempo_fit(x, SR, 4, 2.0, marks=[0.0, 2.0, 4.1, 6.1, 8.1])[1]['action'] == 'repaint'          # the last bars are planned 100 ms later than the take plays them
+    assert MF.tempo_fit(x, SR, 4, 2.0, marks=marks, stretch=resample_stretch)[1]['action'] == 'as is'
+    assert MF.tempo_fit(x, SR, 4, 2.0, marks=[0.0, 2.0, 4.1, 6.1, 8.1], stretchable=False)[1]['action'] == 'repaint'          # the last bars are planned 100 ms later than the take plays them (a section inside fixed bars cannot be stretched)
 
 
 def test_loudness_is_matched_to_the_bars_around():
