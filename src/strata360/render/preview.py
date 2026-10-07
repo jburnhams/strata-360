@@ -223,10 +223,10 @@ def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None):
     mus = (plan.get('film') or {}).get('music'); mp = os.path.join(config.race_dir(folder), mus['file']) if mus else None; has_mu = bool(mp and os.path.exists(mp)); has_vo = os.path.exists(vo); k = n
     tail = f'apad=whole_dur={total_s:.3f},atrim=0:{total_s:.3f},alimiter=limit=0.95[m]'
     if has_vo: inputs += ['-i', vo]; chain += f";[{k}:a]aresample=48000,aformat=channel_layouts=mono,{'asplit=2[vo][vokey]' if has_mu else 'anull[vo]'}"; k += 1
-    if has_mu:                                                                                        # the music from its first downbeat, ducked under the voice-over, fading out at the end
-        inputs += ['-ss', f"{mus['offset_s']:.3f}", '-t', f'{total_s:.3f}', '-i', mp]
-        duck = music_duck(plan); duck_f = f",volume='{duck}':eval=frame" if duck else ''
-        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono,volume={music_gain}{duck_f},afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
+    if has_mu:                                                                                        # the music from its first downbeat (or where the cuts put it: delayed when it starts after the film does), ducked under the voice-over, fading out at the end
+        inputs += ['-ss', f"{mus['offset_s']:.4f}", '-t', f'{total_s:.3f}', '-i', mp]
+        duck = music_duck(plan); duck_f = f",volume='{duck}':eval=frame" if duck else ''; delay = float(mus.get('delay_s') or 0.0); delay_f = f',adelay={delay * 1000:.1f}:all=1' if delay > 0 else ''
+        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono{delay_f},volume={music_gain}{duck_f},afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
         chain += (';[mu][vokey]sidechaincompress=threshold=0.02:ratio=6:attack=30:release=500[mud]' if has_vo else ';[mu]anull[mud]')
     mix = ['[nat]'] + (['[vo]'] if has_vo else []) + (['[mud]'] if has_mu else [])
     chain += f";{''.join(mix)}amix=inputs={len(mix)}:normalize=0:duration=longest,{tail}"

@@ -152,6 +152,32 @@ def test_narration_longer_than_the_clips_footage_gets_the_missing_time_held_with
     assert sum(s.dur_s for s in r['segs']) >= need - 1e-6 and any('narration needs' in w and 'shorten the line' in w and 'last frame is held' in w for w in r['warnings'])
 
 
+def test_narration_longer_than_its_clips_footage_runs_on_over_the_next_items_picture_instead_of_a_held_frame():
+    tiny = clip(3, 6.0, [cand('X', 0, 0, 3.0)]); pack = dict(race={}, clips=PACK['clips'] + [pc(tiny)])
+    d = dict(wpm=150, items=[dict(type='vo', clip='0003', text='A long line over a very short clip.'), item('broll', 2, seconds=4.0)])
+    r = SPL.build(d, pack, [C1, C2, tiny], LIB, MUSIC, {0: 6.0}, st=CH.Settings(seed=1)); need = 6.0 + SPL.LEAD_S + SPL.TAIL_S
+    assert not any('last frame is held' in w for w in r['warnings']) and any('runs on' in w and 'next item' in w for w in r['warnings'])
+    vo = [s for s, role in zip(r['segs'], r['roles']) if role == 'vo']; broll = [s for s, role in zip(r['segs'], r['roles']) if role == 'broll']
+    assert sum(s.dur_s for s in vo) < need - 1.0 and sum(s.dur_s for s in vo + broll) >= need - 1e-6                             # the line's own picture ends with its footage; the b-roll after it starts under the rest of it
+    assert sum(s.dur_s for s in broll) >= 4.0 + (need - 3.0) - BEAT - 1e-6 and r['pieces'][0]['borrowed_s'] == pytest.approx(r['pieces'][1]['lent_s'])
+    line = r['lines'][0]; assert line['speak_s'] == 6.0 and line['seconds'] < 6.0                                              # (the voice-over is placed by the next line's start, not by its window)
+
+
+def test_narration_is_never_run_on_over_the_runners_own_words_or_more_narration():
+    tiny = clip(3, 6.0, [cand('X', 0, 0, 3.0)]); pack = dict(race={}, clips=PACK['clips'] + [pc(tiny)])
+    for nxt in (item('clip', 1, lines=['0001.00']), item('vo', 2, text='And then another thing.')):
+        d = dict(wpm=150, items=[dict(type='vo', clip='0003', text='A long line over a very short clip.'), nxt])
+        r = SPL.build(d, pack, [C1, C2, tiny], LIB, MUSIC, {0: 6.0, 1: 2.0}, st=CH.Settings(seed=1)); assert any('last frame is held' in w for w in r['warnings']) and not any('runs on' in w for w in r['warnings'])
+
+
+def test_a_generated_clip_after_long_narration_lends_its_picture_within_how_far_it_may_stretch():
+    tiny = clip(3, 6.0, [cand('X', 0, 0, 3.0)]); ps = [dict(kind='vo', clip=tiny['id'], seconds=6.5), dict(kind='synthetic', role='broll', text='', seconds=6.0, clip='G03')]
+    assert not SPL.borrow(ps, 0, 3.5, {}) and ps[1]['seconds'] == 6.0                                                            # a 6 s gap clip stretches to 9 s at most (flex)
+    assert SPL.borrow(ps, 0, 3.0, {}) and ps[1]['seconds'] == 9.0 and ps[1]['lent_s'] == 3.0
+    ps = [dict(kind='vo', seconds=6.5), dict(kind='synthetic', role='broll', text='', seconds=6.0, fixed=True)]; assert not SPL.borrow(ps, 0, 1.0, {}) and ps[1]['seconds'] == 6.0                   # a length you set stays
+    assert not SPL.borrow([dict(kind='vo', seconds=6.5)], 0, 1.0, {}) and not SPL.borrow([dict(kind='vo'), dict(kind='broll', sing='p1', seconds=4.0, clip='x')], 0, 1.0, {})
+
+
 # ---- the director's anchors and the music's singing
 
 def anchored(items): return dict(wpm=150, items=items)
@@ -304,9 +330,17 @@ class TestChainWindows:
         assert out[0][1] == 10.0 and len(out) == 2 and out[1][1] == 12.6                                                       # the sliver is left out; the next shot starts where it was meant to (the pause)
 
     def test_b_roll_and_narration_keep_their_own_starts_and_only_dialogue_is_chained(self):
-        wins = [('c', 5.0, 2.0), ('c', 6.0, 2.0)]
-        assert [s for _, s, _, _ in SPL.chain_windows(wins, self.B, 60.0, speech=False)] == [5.0, 6.0]
+        wins = [('c', 5.0, 2.0), ('c', 9.0, 2.0)]
+        assert [s for _, s, _, _ in SPL.chain_windows(wins, self.B, 60.0, speech=False)] == [5.0, 9.0]
         assert [b for *_, b in SPL.chain_windows(wins, self.B, 60.0, speech=False, broll=True)] == [3, 3]                    # (b-roll is rounded to the nearest beat)
+
+    def test_picture_shots_rounded_up_to_whole_beats_never_run_into_footage_another_shot_shows(self):
+        out = SPL.chain_windows([('c', 5.0, 2.0), ('c', 6.0, 2.0)], self.B, 60.0, speech=False); (a, b) = [(s, s + n * self.B) for _, s, _, n in out]
+        assert a[0] == 5.0 and (b[0] >= a[1] - 1e-9 or b[1] <= a[0] + 1e-9)                                                  # the second slides clear of the first
+        out = SPL.chain_windows([('c', 0.0, 5.33)], 0.6186, 12.92, speech=False, busy=[(5.33, 10.9)]); s, n = out[0][1], out[0][3]
+        assert s + n * 0.6186 <= 5.33 + 1e-6 and n == 8                                                                    # no room to slide: one beat shorter (the Legends case, clip 0020)
+        out = SPL.chain_windows([('c', 3.0, 2.0)], self.B, 60.0, speech=False, busy=[(0.0, 3.0), (5.0, 9.0)]); s, n = out[0][1], out[0][3]
+        assert s >= 3.0 - 1e-9 and s + n * self.B <= 5.0 + 1e-9
 
     def test_a_shot_near_the_end_of_the_clip_is_moved_back_to_fit(self):
         out = SPL.chain_windows([('c', 9.5, 2.0)], self.B, 10.0, speech=True); assert out[0][1] == pytest.approx(10.0 - 4 * self.B)
@@ -315,3 +349,12 @@ class TestChainWindows:
 def test_a_sing_item_is_planned_as_picture_of_its_length_and_remembers_its_phrase():
     d = dict(wpm=150, items=[item('sing', 2, phrase='L07', seconds=6.0, anchor=dict(film_s=0, why='x'))]); ps, warn = SPL.pieces(d, PACK, {}, 150.0)
     assert not warn and ps[0]['kind'] == 'broll' and ps[0]['seconds'] == 6.0 and ps[0]['sing'] == 'L07' and ps[0]['clip'] == C2['id']
+
+
+def test_join_runs_closes_a_shot_that_starts_inside_the_one_before_but_leaves_one_from_earlier_in_the_clip():
+    from types import SimpleNamespace as NS
+    def pair(a0, b0):
+        c = NS(clip='c', start_s=0.0); segs = [NS(cand=c, clip_start_s=a0, beats=8, in_s=a0), NS(cand=c, clip_start_s=b0, beats=8, in_s=b0)]
+        wins = [NS(_piece=0, _start=a0), NS(_piece=0, _start=b0)]; SPL.join_runs(segs, wins, [dict(pause_spans=[])], BEAT); return segs[1].clip_start_s
+    assert pair(10.0, 13.8) == pytest.approx(14.0)                                       # 8 beats from 10.0 end at 14.0: the next shot picks up there
+    assert pair(5.33, 0.0) == 0.0                                                        # a shot from earlier in the clip is not a run: it stays clear of the first

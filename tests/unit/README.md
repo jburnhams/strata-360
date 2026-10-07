@@ -19,6 +19,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `gps/track.py` | 52% | partial: `at`, `to_gpx`, cache done; `load_fit`/`load_gpx` need fitdecode/gpxpy (add to requirements-test.txt to test them) |
 | `edit/llm_remote.py` | 81% | partial: Vertex/Gemini/Claude request shape, retries and tiers done |
 | `edit/remix.py`, `edit/layers.py`, `edit/intensity.py`, `edit/intensity_signals.py`, `edit/music_build.py`, `edit/music_studio.py` | 96-100% | done: synthetic audio and fakes only (clicks, drifting tempo, chord loops, a fake separator); the music-studio endpoints are in `test_music_studio.py` |
+| `edit/music_fit.py`, `audio/music_gen/__init__.py` | 98%, 86% | done: the fit and checks on synthetic clicks with the real beat tracker and a fake stretch; the generator with a fake backend and fake file I/O; the build end to end with a fake generator (`test_music_build.py`). `audio/music_gen/acestep_runner.py` and `acestep()`'s subprocess run only against the real model (by hand, progress.md) |
 | `edit/stems.py`, the beat tracker, key and bar features in `edit/music.py` | 67% | partial: the cache and separator contract, the tracker and bar features done; `demucs_separator` and the ffmpeg read/write need models and ffmpeg (an integration run on the PC), the rest of `music.py` is the integration owner's |
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
@@ -42,6 +43,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `edit/blocks.py` | 99% | done: allocation, dropping, dialogue padding, automatic length, overrides (`unit/test_blocks.py`) |
 | `edit/script.py` | 88% | partial: the per-block writer done (`unit/test_script_blocks.py`, scripted model); the beat-window writer and `segment_facts` todo |
 | `edit/vo_measure.py` | 93% | done: speech extent, status checks, single and multi-line recordings, `vo.json` reuse (`unit/test_vo_measure.py`, scripted aligner; the real aligner is a manual check) |
+| `edit/beat_sync.py` | 97% | done: cuts on a drifting track's beats, music start and delay, words and lead-in kept, footage never twice, technique and generated-clip lengths, the film's end, runs of one clip (`unit/test_beat_sync.py`); with a real click track in `integration/test_script_plan_project.py` |
 | `edit/vo_fit.py` | 92% | done: block sizing, speed fallback, music placement, problems (`unit/test_vo_fit.py`); `respeak`/`fit_project` in `integration/test_voiceover.py` |
 | everything else | see `--cov-report=term-missing` | todo |
 

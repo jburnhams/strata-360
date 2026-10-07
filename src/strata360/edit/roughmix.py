@@ -23,7 +23,8 @@ def _mtime(p): return os.path.getmtime(p) if p and os.path.exists(p) else 0
 def parts_of(folder, plan):
     """What the mix is made from, one short fingerprint per input: the windows (`plan`), the voice-over track (`voice-over`), the music file (`music`) and how it is made (`settings`: the version and the levels)."""
     rd = config.race_dir(folder); mus = (plan.get('film') or {}).get('music'); fp = lambda x: hashlib.sha1(str(x).encode()).hexdigest()[:8]
-    return dict(plan=fp(json.dumps(plan['segments'], sort_keys=True, default=str)), **{'voice-over': fp(_mtime(os.path.join(rd, 'voiceover', 'voiceover.wav')))}, music=fp(f"{mus['file'] if mus else ''}{_mtime(os.path.join(rd, mus['file']) if mus else None)}"), settings=fp([VERSION, MUSIC_GAIN, BG_GAIN]))
+    at = f"@{mus['offset_s']}+{mus.get('delay_s', 0)}" if mus and mus.get('synced') else ''                  # where the cuts put the music's start (edit/beat_sync.py), once they chose it
+    return dict(plan=fp(json.dumps(plan['segments'], sort_keys=True, default=str)), **{'voice-over': fp(_mtime(os.path.join(rd, 'voiceover', 'voiceover.wav')))}, music=fp(f"{mus['file'] if mus else ''}{_mtime(os.path.join(rd, mus['file']) if mus else None)}" + at), settings=fp([VERSION, MUSIC_GAIN, BG_GAIN]))
 
 
 def key_of(folder, plan): return hashlib.sha1(json.dumps(parts_of(folder, plan), sort_keys=True).encode()).hexdigest()[:12]

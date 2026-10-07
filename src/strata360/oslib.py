@@ -87,6 +87,11 @@ def windows_available_gb(): return _windows_memory().avail_phys / 1e9
 def windows_total_gb(): return _windows_memory().total_phys / 1e9
 
 
+def venv_python(venv):
+    """The interpreter of a virtual environment: bin/python on POSIX, Scripts\\python.exe on Windows."""
+    return os.path.join(venv, 'Scripts', 'python.exe') if WIN else os.path.join(venv, 'bin', 'python')
+
+
 def cli_command():
     """Command prefix that starts the strata360 CLI with the interpreter running this process (what the bash launcher does, minus bash, so it also works
     on Windows and without a .venv). Sets PYTHONPATH and PYTHONWARNINGS for the child like the launcher does."""
