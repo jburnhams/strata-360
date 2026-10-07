@@ -28,6 +28,7 @@ class Settings:
     beam: int = 30
     temperature: float = 0.15
     w_quality: float = 1.0; w_fit: float = 0.8; w_dur: float = 0.5; w_energy: float = 0.6; w_first: float = 0.4; w_glide: float = 0.3
+    w_camlist: float = 0.5                               # a technique that lies inside a good camera of its kind (the clip's camera list, edit/cameras.py) is favoured, per second of the window
     w_cam: float = 0.6                                   # a point camera you set up is favoured where a window lies inside it (per second of the window, like the other scores)
     w_establish: float = 0.6; pen_talk: float = 0.3          # the talking shot (dialogue_hold) is favoured where someone starts speaking in a clip, to show who it is, and is a little discouraged after that so the other views of you are cut in
     dur_power: float = 0.6
@@ -300,6 +301,16 @@ def cam_fits(t, clip_id, start_s, d):
     c = t.cam; return c['clip'] == clip_id and start_s >= c['t0'] - CAM_SLACK_S and start_s + d <= c['t1'] + CAM_SLACK_S
 
 
+TECH_KIND = {'follow_runner': 'heading', 'hold_wide': 'heading', 'selfie_hold': 'you', 'selfie_close': 'you', 'selfie_far': 'you', 'scenery': 'scenery', 'free_view': 'free'}          # the camera kind a technique shows (edit/cameras.py)
+
+
+def camera_share(cams, tech_id, start_s, d):
+    """0..1: how well a window of `d` seconds from `start_s` sits inside the best camera of the kind technique `tech_id` shows: the share of the window the camera covers times its score; 0 for a technique with no kind or a clip with no camera list."""
+    kind = TECH_KIND.get(tech_id)
+    if not cams or not kind or d <= 0: return 0.0
+    return max((max(0.0, min(start_s + d, c['end_s']) - max(start_s, c['start_s'])) / d * c['score'] for c in cams if c['kind'] == kind), default=0.0)
+
+
 def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
     """The beam search over an ordered list of windows for each window's technique; shared by the beat planner (`plan`) and the script planner (edit/script_plan.py). `windows` are in film order (their
     beats add up to `B`, default the music's); returns the ordered list of Seg."""
@@ -327,7 +338,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             if f is None and w.speech and tid in ('dialogue_hold', 'selfie_hold'): f = 0.2                    # the script plays these lines: a dialogue shot is allowed whatever the footage's own features say
             if f is None: continue
             sig = max((t.dmax - t.dmin) / 3.0, 0.4); durfit = math.exp(-0.5 * ((d - t.dideal) / sig) ** 2); scale = d ** st.dur_power
-            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en)) + st.tech_bias.get(tid, 0.0) * scale + (st.w_cam * scale if t.cam is not None else 0.0)
+            base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en)) + st.tech_bias.get(tid, 0.0) * scale + (st.w_cam * scale if t.cam is not None else 0.0) + st.w_camlist * scale * camera_share(clips[w.clip_index].get('cameras'), tid, w.abs_start, d)
             opts.append((tid, base))
         options.append(sorted(opts, key=lambda x: -x[1])[:8])
         want = w.tech_id if w.fixed else st.tech_force.get(wids[k])
