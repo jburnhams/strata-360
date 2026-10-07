@@ -94,5 +94,6 @@ def instantiate(t, dur, rng, look_yaw=0.0):
     if fam == 'planet_fill_zoom_out': return dict(ref='world', keyframes=[k(0, yaw=look_yaw, pitch=-90, fov=260, dist=1.0), k(T, yaw=look_yaw + s * 120, pitch=-8, fov=95, dist=0.0)])
     if fam == 'globe_shrink': return dict(ref='world', bg='blur', keyframes=[k(0, yaw=look_yaw, pitch=-90, disc=3.2), k(T, yaw=look_yaw + s * 90, pitch=-90, disc=0.46)])
     if fam == 'tunnel_up': turns = float(rng.choice([0.5, 1.0])); return dict(ref='world', keyframes=[k(0, yaw=look_yaw, pitch=90, fov=260, dist=1.0), k(T, yaw=look_yaw + s * 360 * turns, pitch=90, fov=260, dist=1.0)])
+    if fam == 'person_hold': return dict(ref='world', keyframes=[k(0, yaw=look_yaw, pitch=0, fov=75), k(T, yaw=look_yaw, pitch=0, fov=75)])        # another person: the framing aims it at them
     if fam == 'dialogue_hold': return dict(ref='world', keyframes=[k(0, yaw=look_yaw, pitch=0, fov=70), k(T, yaw=look_yaw, pitch=0, fov=68)])
     raise KeyError(t.id)

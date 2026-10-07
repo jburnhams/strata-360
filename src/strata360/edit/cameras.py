@@ -82,7 +82,7 @@ def build(v, seed=0, max_free=MAX_FREE):
     st = SC.Settings(); rng = np.random.default_rng([seed, 1]); path = SC.track(g, 0.0, float(n), heading, prior, boxes, st, rng)
     yaw_at = lambda t: float(np.interp(t, path['times'], np.unwrap(np.radians(path['yaw'])) * 180 / np.pi))
     look = _looks(g, yaw_at, lambda t: st.pitch, st.hfov, n); r = _trim(look, 0, n)
-    if r: cams.append(_camera('S', 'scenery', *r, look, dur, dict(track='scenery', fov=st.hfov, pitch=st.pitch, keyframes=SC.keyframes(path, path['times'][-1] - path['times'][0], st.pitch, st.hfov)), f"scenery with nobody in it ({len(path['jumps'])} cuts)"))
+    if r: cams.append(_camera('S', 'scenery', *r, look, dur, dict(track='scenery', t0=0.0, fov=st.hfov, pitch=st.pitch, keyframes=SC.keyframes(path, path['times'][-1] - path['times'][0], st.pitch, st.hfov)), f"scenery with nobody in it ({len(path['jumps'])} cuts)"))
     k = int(min(max_free, max(1, math.ceil(dur / FREE_EVERY_S)))); edges = np.linspace(0.0, float(n), k + 1); rng = np.random.default_rng([seed, 2])
     for i in range(k):
         a, b = float(edges[i]), float(edges[i + 1]); T = b - a
@@ -90,5 +90,5 @@ def build(v, seed=0, max_free=MAX_FREE):
         free = FR.free_path(g, T, a, rng, dict(grid=g))
         if not free: continue
         k0 = free['keyframes'][0]; look = _looks(g, lambda t, k0=k0: k0['yaw'], lambda t, k0=k0: k0['pitch'], k0['fov'], n)
-        cams.append(_camera(f'F{i + 1}', 'free', a, b, look, dur, dict(ref='world', keyframes=free['keyframes']), free['why']))
+        cams.append(_camera(f'F{i + 1}', 'free', a, b, look, dur, dict(ref='world', t0=a, keyframes=free['keyframes']), free['why']))
     return sorted(cams, key=lambda c: -c['score'])

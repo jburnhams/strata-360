@@ -18,7 +18,7 @@ from scipy.ndimage import gaussian_filter1d
 from strata360.pipeline import config
 from strata360.edit import techniques as TQ, aim as AIM, attention as AT, clip_views as CV, scenery as SC, view_quality as VQ
 
-FOLLOW = {'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold', 'selfie_close', 'selfie_far'}          # techniques that keep their subject in frame as it moves
+FOLLOW = {'person_hold', 'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold', 'selfie_close', 'selfie_far'}          # techniques that keep their subject in frame as it moves
 NO_SUBJECT = {'follow_runner', 'planet_fill', 'planet_globe', 'planet_fill_zoom_out', 'globe_shrink', 'tunnel_up', 'spin_roll'}
 TIGHT = {'push_in', 'dialogue_hold'}
 YOU_VIEWS = {'selfie_hold', 'selfie_close', 'selfie_far'}      # the three views of you (mid, close, far)
@@ -134,7 +134,10 @@ def clip_data(folder, clip, head=False):
     d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = cj['source_files']['osv']
     sp = os.path.join(d, 'speakers.json')
     from strata360.analysis.exposure import load_quality
-    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv), proxy=_proxy_info(d) if os.environ.get('STRATA_YOU_KLT') == '1' else None, head=_head_provider(d, views.focus_samples(d, osv), head))          # the frame-by-frame tracker (analysis/subject_track.py) is opt-in: on 0021 it did not predict a held-out detection better than a straight line (the detections' box and face centres are themselves inexact)
+    out = dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv), proxy=_proxy_info(d) if os.environ.get('STRATA_YOU_KLT') == '1' else None, head=_head_provider(d, views.focus_samples(d, osv), head))          # the frame-by-frame tracker (analysis/subject_track.py) is opt-in: on 0021 it did not predict a held-out detection better than a straight line (the detections' box and face centres are themselves inexact)
+    try: out['cameras'] = json.load(open(os.path.join(d, 'cameras.json'))).get('cameras') or []          # the clip's ranked cameras (edit/cameras.py): scenery and free views take their aim from them
+    except (OSError, ValueError): out['cameras'] = []
+    return out
 
 
 def choose_subject(g, tech, data):
@@ -145,6 +148,7 @@ def choose_subject(g, tech, data):
     if tech.id in YOU_VIEWS:
         what = {'selfie_hold': 'you, the wearer', 'selfie_close': 'you, close on the face', 'selfie_far': 'you, ultra wide: the whole body and the surroundings'}[tech.id]
         return (('you', what) if cy >= 0.3 else ('none', 'you are not found in this window: behind the runner'))
+    if tech.id == 'person_hold': return (('person', 'another person, kept in view (the clip\'s person camera)') if cp >= 0.3 else ('heading', 'no other person is found in this window: straight ahead'))
     kind = g.get('kind')                                                                 # the candidate the window was cut from says how it is meant to be seen
     if kind == 'person' and cp >= 0.3: return 'person', 'this stretch was chosen for the people in view'
     if kind == 'you' and cy >= 0.3: return 'you', 'this stretch was chosen for you in view'
@@ -167,6 +171,24 @@ def scenery_path(g, T, t0, rng, v):
     st = SC.Settings(); path = SC.track(v['grid'], t0, t0 + T, v['heading'], v['prior'], v['boxes'], st, rng); kf = SC.keyframes(path, T, st.pitch, st.hfov, t0=t0); cuts = len(path['jumps'])
     why = 'the best-looking scenery with nobody in view' + (f': {cuts} cut{"s" if cuts != 1 else ""} to a better direction' if cuts else ', held or panned slowly')
     return dict(ref='world', keyframes=kf, subject='scenery', why=why)
+
+
+CAMERA_SLACK_S = 0.3         # a window may run this far outside a camera's stretch (windows are whole beats) and still take its aim
+
+
+def camera_path(cams, kind, t0, T):
+    """The aim of the best camera of `kind` ('scenery' or 'free') in the clip's camera list (edit/cameras.py) whose stretch holds the window of `T` seconds from clip second `t0`, cut to the window (times from 0, jumps kept, ends interpolated); None when no
+    camera of that kind covers it, and the framing makes its own."""
+    best = None
+    for c in cams or []:
+        kf = (c.get('aim') or {}).get('keyframes')
+        if c.get('kind') == kind and kf and c['start_s'] - CAMERA_SLACK_S <= t0 and t0 + T <= c['end_s'] + CAMERA_SLACK_S and (best is None or c['score'] > best['score']): best = c
+    if best is None: return None
+    base = float(best['aim'].get('t0', best['start_s'])); kf = best['aim']['keyframes']; ts = np.array([base + k['t'] for k in kf]); a, b = t0, t0 + T
+    def at(t): return {key: float(np.interp(t, ts, [k[key] for k in kf])) for key in ('yaw', 'pitch', 'fov')}
+    pts = [(a, at(a))] + [(float(t), dict(yaw=k['yaw'], pitch=k['pitch'], fov=k['fov'])) for t, k in zip(ts, kf) if a < t < b] + [(b, at(b))]
+    out = [dict(t=round(t - a, 3), yaw=round(v['yaw'], 2), pitch=round(v['pitch'], 2), fov=round(v['fov'], 1), ease='linear') for t, v in pts]
+    return dict(ref='world', keyframes=out, subject=kind, why=f"camera {best['id']} of the clip's list (score {best['score']:.2f}): {best.get('why', '')}")
 
 
 PAN_MIN_S = 3.0              # a free view of at least this long may pan between two poses
@@ -208,7 +230,7 @@ def resolve_segment(g, lib, data):
     subject, why = choose_subject(g, tech, data)
     rng = np.random.default_rng(int(g.get('variant_seed') or 0)); heading = data['heading']
     if tech.id in ('scenery', 'free_view'):
-        made = (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
+        made = camera_path(data.get('cameras'), 'scenery' if tech.id == 'scenery' else 'free', t0, T) or (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
         if made is not None: return made
         why = 'there is no quality grid for this clip yet (the quality stage): looking straight ahead'; subject = 'heading'
     if subject in ('person', 'you'):

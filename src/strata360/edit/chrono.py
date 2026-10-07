@@ -301,7 +301,7 @@ def cam_fits(t, clip_id, start_s, d):
     c = t.cam; return c['clip'] == clip_id and start_s >= c['t0'] - CAM_SLACK_S and start_s + d <= c['t1'] + CAM_SLACK_S
 
 
-TECH_KIND = {'follow_runner': 'heading', 'hold_wide': 'heading', 'selfie_hold': 'you', 'selfie_close': 'you', 'selfie_far': 'you', 'scenery': 'scenery', 'free_view': 'free'}          # the camera kind a technique shows (edit/cameras.py)
+TECH_KIND = {'follow_runner': 'heading', 'hold_wide': 'heading', 'selfie_hold': 'you', 'selfie_close': 'you', 'selfie_far': 'you', 'scenery': 'scenery', 'free_view': 'free', 'person_hold': 'person'}          # the camera kind a technique shows (edit/cameras.py)
 
 
 def camera_share(cams, tech_id, start_s, d):
@@ -331,6 +331,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             if t.id == 'selfie_close' and st.tech_force.get(wids[k]) != 'selfie_close' and d > CLOSE_MAX_BUSY + (CLOSE_MAX_CALM - CLOSE_MAX_BUSY) * calm((getattr(c, 'features', None) or {}).get('steady')) + 1e-9: continue         # the busier the footage the shorter a close view may last: quick cuts, glided between
             if t.id == 'selfie_close' and getattr(w, 'face', None) is not None and w.face < FACE_MIN_SHARE and st.tech_force.get(wids[k]) != 'selfie_close': continue         # ... and only where the face is clear (not the top of the head): analysis/face_view.py
             if t.cam is not None and not cam_fits(t, clips[w.clip_index]['id'], w.abs_start, d): continue                 # a point camera is for windows inside the stretch it covers
+            if t.id == 'person_hold' and camera_share(clips[w.clip_index].get('cameras'), 'person_hold', w.abs_start, d) <= 0: continue          # another person is shown only where the clip's camera list has a person camera
             if not (t.dmin - 1e-9 <= d <= t.dmax + 1e-9): continue
             if t.beats == 'bar' and w.beats % music.bar_beats: continue
             f = O.fit(c, t)

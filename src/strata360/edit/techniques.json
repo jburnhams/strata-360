@@ -167,6 +167,30 @@
    }
   },
   {
+   "id": "person_hold",
+   "family": "hold",
+   "dur": [
+    2,
+    4,
+    10
+   ],
+   "energy": 0.4,
+   "hero": false,
+   "max_share": 0.15,
+   "cooldown": 1,
+   "max_consecutive": 1,
+   "max_uses": 99,
+   "beats": "beat",
+   "dialogue_ok": false,
+   "scale": "medium",
+   "needs": {
+    "subject": [
+     1.0,
+     0.3
+    ]
+   }
+  },
+  {
    "id": "follow_runner",
    "family": "follow",
    "dur": [
