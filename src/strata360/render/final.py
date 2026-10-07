@@ -18,6 +18,40 @@ from strata360.render.film import pieces, render_piece, layout
 from strata360.render.preview import build_audio, proxy_of
 
 
+def clip_rates(folder, plan):
+    """{clip id: source frame rate} of the footage clips the plan plays (`video.nominal_fps` of clip.json)."""
+    rd = config.race_dir(folder); out = {}
+    for g in plan['segments']:
+        c = g.get('clip')
+        if g.get('synthetic') or not c or c in out: continue
+        try: out[c] = float(json.load(open(os.path.join(rd, 'clips', c, 'clip.json')))['video']['nominal_fps'])
+        except (OSError, ValueError, KeyError): pass
+    return out
+
+
+def source_fps(folder, plan, default=50.0):
+    """The film's frame rate: the rate most of the plan's footage was shot at (by seconds played); the others are resampled by nearest source frame (the renderer finds each frame by its time). `default` when the plan has no footage."""
+    rates = clip_rates(folder, plan); secs = {}
+    for g in plan['segments']:
+        r = rates.get(g.get('clip'))
+        if r: secs[r] = secs.get(r, 0.0) + float(g.get('dur_s') or 0.0)
+    return max(secs, key=secs.get) if secs else float(default)
+
+
+def resolve_fps(folder, plan, fps=0.0, half_rate=False):
+    """The rate to render at: `fps` when given, else the source's; half of it with `half_rate` (every other source frame: faster, and the preview, overlay, time map and sound all follow the same rate)."""
+    base = float(fps) if fps else source_fps(folder, plan)
+    return base / 2.0 if half_rate else base
+
+
+def ffmpeg_rate(fps):
+    """`fps` as ffmpeg wants it: an integer or a rational (29.97 is 30000/1001), never a rounded decimal."""
+    from fractions import Fraction
+    for base in (24, 30, 48, 60, 120):                                                                    # the NTSC rates are n x 1000/1001 (29.97 is 30000/1001), however many digits were stored
+        if abs(float(fps) - base * 1000 / 1001) < 0.005: return f'{base * 1000}/1001'
+    f = Fraction(float(fps)).limit_denominator(1001); return str(f.numerator) if f.denominator == 1 else f'{f.numerator}/{f.denominator}'
+
+
 def final_dir(folder, key): return os.path.join(config.race_dir(folder), 'final', key)
 
 
@@ -94,7 +128,7 @@ def encoder_args(bitrate):
 
 def encode_piece(path, W, H, fps, bitrate, run):
     """run(emit) renders the piece's frames into emit; they are encoded to `path` (kept only when complete)."""
-    cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',
+    cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', ffmpeg_rate(fps), '-i', '-', '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',
            *encoder_args(bitrate), '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', path + '.part.mov']
     enc = guard.popen(cmd, stdin=subprocess.PIPE)
     try:
@@ -127,6 +161,7 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
         if os.path.exists(f + '.done'): done_frames += p['frames']; continue
         encode_piece(f, W, H, fps, bitrate, lambda emit, p=p: render_piece(p, segs, src, emit)); done_frames += p['frames']; status('rendering'); progress and progress(done_frames, total)
     if limit_pieces is not None: status('partial'); return d
+    from strata360.render import timemap; timemap.write(plan, fps, d)                                                                  # which footage is on screen at every frame (timemap.json and .csv beside the film)
     status('assembling'); audio = os.path.join(d, 'audio.wav'); build_audio(folder, plan, audio, total / fps)
     lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{os.path.join(d, p['id'] + '.mov')}'\n" for p in ps)); film = out or os.path.join(d, 'film.mp4')
     r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
@@ -137,13 +172,13 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
 def main():
     import argparse
     from strata360.edit import framing as FR, project as PJ
-    ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--size', default='3840x2160'); ap.add_argument('--fps', type=float, default=50.0); ap.add_argument('--bitrate', default='100M')
+    ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--size', default='3840x2160'); ap.add_argument('--fps', type=float, default=0.0, help='frames a second; 0 (the default) is the footage\'s own rate'); ap.add_argument('--half-rate', action='store_true', help='half the rate: every other source frame (faster)'); ap.add_argument('--bitrate', default='100M')
     ap.add_argument('--pieces', type=int, help='render only the first N pieces (a trial; nothing is assembled)'); ap.add_argument('--out'); a = ap.parse_args()
     from strata360 import oslib; oslib.lower_priority(19)
     plan = PJ.load(a.folder).get('plan')
     if not plan: sys.exit('no plan yet')
-    W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan, head=True)
-    print(render_final(a.folder, plan, fr, (W, H), a.fps, a.bitrate, a.pieces, a.out, progress=lambda i, n: print(f'\r{i}/{n} frames', end='', flush=True)))
+    W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan, head=True); fps = resolve_fps(a.folder, plan, a.fps, a.half_rate)
+    print(render_final(a.folder, plan, fr, (W, H), fps, a.bitrate, a.pieces, a.out, progress=lambda i, n: print(f'\r{i}/{n} frames', end='', flush=True)))
 
 
 if __name__ == '__main__': main()

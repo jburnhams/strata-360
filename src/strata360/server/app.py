@@ -547,7 +547,7 @@ def create_app(roots, token=None):
         from strata360.render import final as FN
         plan = PJ.load(f).get('plan'); s = final_settings(f)
         if not plan: return ''
-        w, h = map(int, s['size'].split('x')); return os.path.join(FN.final_dir(f, FN.final_key(plan, [w, h], s['fps'], s['bitrate'], f)), 'status.json')
+        w, h = map(int, s['size'].split('x')); return os.path.join(FN.final_dir(f, FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f)), 'status.json')
 
     @api.post('/api/film/start', dependencies=[Depends(auth)])
     def post_film_start(body: dict):                                                     # {folder}: render the preview of the saved plan (lowest priority, one at a time)
@@ -591,7 +591,7 @@ def create_app(roots, token=None):
         p = os.path.join(config.race_dir(f), 'final', 'settings.json')
         try: s = json.load(open(p))
         except (OSError, ValueError): s = {}
-        return dict(size=s.get('size', '3840x2160'), fps=float(s.get('fps', 50.0)), bitrate=s.get('bitrate', '100M'))
+        return dict(size=s.get('size', '3840x2160'), fps=float(s.get('fps', 0.0)), half_rate=bool(s.get('half_rate', False)), bitrate=s.get('bitrate', '100M'))      # fps 0 is the footage's own rate
 
     @api.get('/api/final', dependencies=[Depends(auth)])
     def get_final(folder: str):                                                          # state of the final render of the CURRENT plan with the saved settings
@@ -599,7 +599,7 @@ def create_app(roots, token=None):
         from strata360.render import final as FN
         f = folder_of(folder); plan = PJ.load(f).get('plan'); s = final_settings(f); j = FINAL_JOBS.get(f); running = bool(j and j.poll() is None)
         if not plan: return dict(state='noplan', running=False, settings=s)
-        w, h = map(int, s['size'].split('x')); key = FN.final_key(plan, [w, h], s['fps'], s['bitrate'], f); st = None
+        w, h = map(int, s['size'].split('x')); key = FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f); st = None
         try: st = json.load(open(os.path.join(FN.final_dir(f, key), 'status.json')))
         except (OSError, ValueError): pass
         running = running or bool(st and st['state'] in ('rendering', 'assembling') and alive(st.get('pid')))
@@ -614,10 +614,11 @@ def create_app(roots, token=None):
         if job_pid(f, FINAL_JOBS, final_status_path): return dict(started=False)
         s = final_settings(f)
         if body.get('size') in ('1920x1080', '2560x1440', '3840x2160'): s['size'] = body['size']
-        if body.get('fps') in (25, 25.0, 30, 30.0, 50, 50.0): s['fps'] = float(body['fps'])
+        if body.get('fps') in (0, 0.0, 25, 25.0, 30, 30.0, 50, 50.0): s['fps'] = float(body['fps'])
+        if 'half_rate' in body: s['half_rate'] = bool(body['half_rate'])
         d = os.path.join(config.race_dir(f), 'final'); os.makedirs(d, exist_ok=True); json.dump(s, open(os.path.join(d, 'settings.json'), 'w'))
         log = open(os.path.join(d, 'final_job.log'), 'wb')
-        FINAL_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'final', f, '--size', s['size'], '--fps', str(s['fps']), '--bitrate', s['bitrate']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+        FINAL_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'final', f, '--size', s['size'], '--fps', str(s['fps']), *(['--half-rate'] if s['half_rate'] else []), '--bitrate', s['bitrate']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.post('/api/final/stop', dependencies=[Depends(auth)])
     def post_final_stop(body: dict):
@@ -634,7 +635,7 @@ def create_app(roots, token=None):
         from strata360.render import final as FN
         f = folder_of(folder); plan = PJ.load(f).get('plan'); s = final_settings(f)
         if not plan: raise HTTPException(404)
-        w, h = map(int, s['size'].split('x')); d = FN.final_dir(f, FN.final_key(plan, [w, h], s['fps'], s['bitrate'], f))
+        w, h = map(int, s['size'].split('x')); d = FN.final_dir(f, FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f))
         try: film = json.load(open(os.path.join(d, 'status.json'))).get('film')
         except (OSError, ValueError): film = None
         if not film or not os.path.exists(film): raise HTTPException(404, 'not rendered yet')
