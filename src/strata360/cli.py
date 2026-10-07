@@ -160,6 +160,13 @@ def cmd_doctor(a):
             warnings.simplefilter('always'); r = np.random.default_rng(0); x = r.standard_normal((80, 513)).astype('float32') @ np.abs(r.standard_normal((513, 3000))).astype('float32')
         line('FAIL' if (w or not np.isfinite(x).all()) else 'ok', 'numpy matmul is clean (no BLAS warnings)', 'this Mac needs numpy\'s OpenBLAS wheel: scripts/setup_env.sh installs it')
     except Exception as e: line('warn', f'numpy check failed: {e}')
+    print('map overlay:')
+    try:
+        from strata360.edit.llm_remote import secret
+        from strata360.overlay import tiles as TL
+        key = secret('THUNDERFOREST_API_KEY'); line('ok' if key else 'warn', 'map key THUNDERFOREST_API_KEY ' + ('is set' if key else 'is not set (the film\'s maps need it; the numbers still draw)'), 'put THUNDERFOREST_API_KEY=... in secrets.env')
+        n = sum(len(f) for _, _, f in os.walk(TL.cache_root())) if os.path.isdir(TL.cache_root()) else 0; line('ok', f'{n} map tiles cached in {TL.cache_root()}')
+    except Exception as e: line('warn', f'overlay check failed: {e}')
     print('models (cached under ~/.cache/huggingface; downloaded on first use):')
     hf = os.path.expanduser('~/.cache/huggingface/hub')
     for name, pat in (('whisper large-v3-turbo', 'models--*large-v3-turbo*'), ('whisper small', 'models--Systran--faster-whisper-small'), ('OPUS-MT fr-en', 'models--Helsinki-NLP--opus-mt-fr-en'),
