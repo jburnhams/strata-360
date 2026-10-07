@@ -127,3 +127,14 @@ def test_free_cameras_prefer_the_direction_the_scenes_stage_rates_higher_even_wh
     v = dict(view(g), prior=rated)
     ys = [c['aim']['keyframes'][0]['yaw'] for c in CM.build(v) if c['kind'] == 'free']; assert ys and all(not (-10 < y < 70) for y in ys), ys
     plain = [c['aim']['keyframes'][0]['yaw'] for c in CM.build(view(g)) if c['kind'] == 'free']; assert any(-10 < y < 70 for y in plain), plain         # without the rating the detail wins
+
+
+def test_a_free_window_keeps_the_cameras_pose_when_it_looks_good_and_takes_its_own_when_the_camera_looks_worse_there():
+    from strata360.edit import framing as FR, techniques as TQ
+    lib = TQ.load(); g = grid(n=80); g['tex'][:, :, 12:16] = 14.0                                  # the best view is east (yaw 0 to 60)
+    v = dict(view(g)); data = lambda yaw: dict(person=[], you=[], heading=lambda t: 0.0, speakers=[], views=v, cameras=[aim_cam('free', 0.0, 30.0, [kf(0, yaw, 90), kf(30, yaw, 90)], 0.0, cid='CAM')])
+    seg = dict(id='c@10.00', clip='c', clip_start_s=10.0, dur_s=4.0, technique='free_view', variant_seed=3)
+    best = FR.free_path(seg, 4.0, 10.0, np.random.default_rng(3), v); d = data(30.0); d['cameras'] = [aim_cam('free', 0.0, 30.0, [dict(k, t=k['t'] + 10.0) for k in best['keyframes']], 0.0, cid='CAM')]
+    good = FR.resolve_segment(seg, lib, d); assert 'CAM' in good['why']                                # the camera looks as good on this window as the window's own pose: it is used
+    bad = FR.resolve_segment(seg, lib, data(-120.0)); assert 'CAM' not in bad['why'] and abs(bad['keyframes'][0]['yaw'] - 30) < 40         # it looks at a flat side: the window's own pose is used
+    assert FR.path_score(good, 4.0, 10.0, v) > FR.path_score(dict(keyframes=[kf(0, -120, 90), kf(4, -120, 90)]), 4.0, 10.0, v)

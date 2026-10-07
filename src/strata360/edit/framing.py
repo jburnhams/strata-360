@@ -196,11 +196,25 @@ PAN_MAX_DEG = 60.0           # by at most this much yaw: a drift, not a sweep
 PAN_KEEP = 0.85              # and only when both ends look at least this good compared with the best fixed view
 
 
+def _prior_weight(v, t, yaw):
+    """0.4..1: the scenes stage's rating of looking along `yaw` (the grid's frame) at clip second `t`, as the scenery camera weights its views; 1 without ratings."""
+    prior, heading = (v or {}).get('prior'), (v or {}).get('heading')
+    return 1.0 if prior is None or heading is None else SC.Settings.prior_floor + (1 - SC.Settings.prior_floor) * prior(t, float(SC.wrap(yaw - heading(t))))
+
+
+def path_score(path, T, t0, v, n=5):
+    """The mean look of a window's camera path (keyframes from 0 to T seconds in the grid's frame) at `n` moments of the window: the quality grid's view score weighted by the scenes stage's rating of the direction, so two ways of framing the same window can be compared."""
+    kf = path['keyframes']; ts = [k['t'] for k in kf]; hz = float(v['grid']['hz']); out = []
+    for x in np.linspace(0.0, T, n):
+        y, p, f = (float(np.interp(x, ts, [k[key] for k in kf])) for key in ('yaw', 'pitch', 'fov'))
+        out.append(VQ.view_score(v['grid'], int(round((t0 + x) * hz)), y, p, f, 16 / 9)['score'] * _prior_weight(v, t0 + x, y))
+    return float(np.mean(out))
+
+
 def _best_pose(grid, a, b, rng, k=3, v=None):
     """The (score, yaw, pitch, hfov) of the view that looks best over [a, b], one of the top `k` picked at random (the seeded variety). With `v` (clip_views.load's dict) the look is weighted by the scenes stage's rating of that direction at the middle of the window,
     as the scenery camera does, so a close brick wall (all fine detail) does not beat a better-rated direction."""
-    prior, heading = (v or {}).get('prior'), (v or {}).get('heading'); mid = (a + b) / 2.0
-    def weight(yaw): return 1.0 if prior is None or heading is None else SC.Settings.prior_floor + (1 - SC.Settings.prior_floor) * prior(mid, float(SC.wrap(yaw - heading(mid))))
+    mid = (a + b) / 2.0; weight = lambda yaw: _prior_weight(v, mid, yaw)
     best = [(VQ.window_score(grid, a, b, yaw, pitch, hfov, 16 / 9, step=1.0)['score'] * weight(yaw), yaw, pitch, hfov) for yaw in range(-180, 180, 15) for pitch in FREE_PITCHES for hfov in FREE_HFOVS]
     best.sort(reverse=True); return best[int(rng.integers(0, min(k, len(best))))]
 
@@ -233,7 +247,11 @@ def resolve_segment(g, lib, data):
     subject, why = choose_subject(g, tech, data)
     rng = np.random.default_rng(int(g.get('variant_seed') or 0)); heading = data['heading']
     if tech.id in ('scenery', 'free_view'):
-        made = camera_path(data.get('cameras'), 'scenery' if tech.id == 'scenery' else 'free', t0, T) or (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
+        made = camera_path(data.get('cameras'), 'scenery' if tech.id == 'scenery' else 'free', t0, T); own = None
+        if tech.id == 'free_view' and made is not None and data.get('views') and data['views'].get('grid') is not None:      # a free camera is one pose for its whole stretch, which may suit this window badly (the people moved, a wall is in the way): the window's own best pose is taken when it looks better on this window
+            own = free_path(g, T, t0, np.random.default_rng(int(g.get('variant_seed') or 0)), data['views'])
+            if own is not None and path_score(own, T, t0, data['views']) > path_score(made, T, t0, data['views']): made = own
+        elif made is None: made = (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
         if made is not None: return made
         why = 'there is no quality grid for this clip yet (the quality stage): looking straight ahead'; subject = 'heading'
     if subject in ('person', 'you'):
