@@ -66,4 +66,5 @@ def test_the_music_is_turned_down_under_the_runners_own_speech_and_only_there(tm
     raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', out, '-f', 'f32le', '-ac', '1', '-ar', '8000', '-'], capture_output=True).stdout; a = np.frombuffer(raw, np.float32)
     rms = lambda t0, t1: float(np.sqrt(np.mean(a[int(t0 * 8000):int(t1 * 8000)] ** 2)))
     assert rms(4.5, 7.5) < 0.6 * rms(0.5, 3.5) and rms(8.5, 11.0) > 0.7 * rms(0.5, 3.5)                       # down by about 8 dB inside the window, back up after it
-    assert PV.music_duck(dict(segments=[])) == '' and PV.music_duck(plan).count('clip(') == 1
+    from strata360.audio import duck, mix
+    assert mix.film_starts(plan) == [(0.0, 4.0), (4.0, 4.0), (8.0, 4.0)] and mix.joins(dict(segments=[plan['segments'][0]]))[0] == (0.0, False)

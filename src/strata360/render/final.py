@@ -18,6 +18,14 @@ from strata360.render.film import pieces, render_piece, layout
 from strata360.render.preview import build_audio, proxy_of
 
 
+LOUDNESS_LUFS = -14.0       # the delivered film's integrated loudness (a streaming-platform level); race.json `audio.loudness_lufs` changes it
+
+
+def loudness_target(folder):
+    try: return float((config.load(folder).get('audio') or {}).get('loudness_lufs', LOUDNESS_LUFS))
+    except (FileNotFoundError, ValueError, TypeError): return LOUDNESS_LUFS
+
+
 def clip_rates(folder, plan):
     """{clip id: source frame rate} of the footage clips the plan plays (`video.nominal_fps` of clip.json)."""
     rd = config.race_dir(folder); out = {}
@@ -163,11 +171,11 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
         encode_piece(f, W, H, fps, bitrate, lambda emit, p=p: render_piece(p, segs, src, emit)); done_frames += p['frames']; status('rendering'); progress and progress(done_frames, total)
     if limit_pieces is not None: status('partial'); return d
     from strata360.render import timemap; timemap.write(plan, fps, d)                                                                  # which footage is on screen at every frame (timemap.json and .csv beside the film)
-    status('assembling'); audio = os.path.join(d, 'audio.wav'); build_audio(folder, plan, audio, total / fps)
+    status('assembling'); audio = os.path.join(d, 'audio.wav'); sound = build_audio(folder, plan, audio, total / fps, loudness=loudness_target(folder))          # the film's sound, to its loudness target
     lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{os.path.join(d, p['id'] + '.mov')}'\n" for p in ps)); film = out or os.path.join(d, 'film.mp4')
     r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
     if r.returncode: status('error', error=r.stderr[-300:]); raise RuntimeError(r.stderr[-300:])
-    status('done', finished=time.time(), film=film); return film
+    status('done', finished=time.time(), film=film, sound=sound); return film
 
 
 def main():

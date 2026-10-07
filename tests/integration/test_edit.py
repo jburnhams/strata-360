@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 import numpy as np
 from strata360.edit import techniques as T, optimise as O
 
-LIB = T.load()
+LIB = {k: v for k, v in T.load().items() if k != 'person_hold'}      # person_hold is offered only where a clip's camera list has a person camera (chrono.assign_techniques); this older optimiser has no camera lists
 
 
 def music(bpm=120, seconds=64):
