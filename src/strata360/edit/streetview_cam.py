@@ -134,11 +134,20 @@ def Ry(a): c, s = math.cos(a), math.sin(a); return np.array([[c, 0, s], [0, 1, 0
 def Rx(a): c, s = math.cos(a), math.sin(a); return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
 
 
+class Windowed(np.ndarray):
+    """A piece of an equirectangular picture: `box` = (x0, x1, y0, y1) in the pixels of the whole picture of `whole` = (w, h); the array itself may be enlarged (`reproject` finds its way by the ratio)."""
+    def __new__(cls, a, box, whole): o = np.asarray(a).view(cls); o.box, o.whole = tuple(box), tuple(whole); return o
+    def __array_finalize__(self, o): self.box, self.whole = getattr(o, 'box', None), getattr(o, 'whole', None)
+
+
 def reproject(img, R, fov=FOV, size=OUT):
-    """A flat view out of an equirectangular picture; R turns the view camera (x right, y up, z forward) into the picture's own frame (its centre column is straight ahead)."""
+    """A flat view out of an equirectangular picture; R turns the view camera (x right, y up, z forward) into the picture's own frame (its centre column is straight ahead). A `Windowed` picture holds only part of the sphere (what the shot looks at)."""
     W, H = size; h, w = img.shape[:2]; f = (W / 2) / math.tan(math.radians(fov) / 2)
     xs, ys = np.meshgrid(np.arange(W) - W / 2 + 0.5, np.arange(H) - H / 2 + 0.5); ray = np.stack([xs / f, -ys / f, np.ones_like(xs)], -1) @ R.T
     lon = np.arctan2(ray[..., 0], ray[..., 2]); lat = np.arctan2(ray[..., 1], np.hypot(ray[..., 0], ray[..., 2]))
+    if getattr(img, 'box', None) is not None:
+        x0, x1, y0, y1 = img.box; ww, hh = img.whole; k = w / (x1 - x0); a = np.asarray(img)
+        return cv2.remap(a, ((((lon / (2 * math.pi) + 0.5) * ww - x0) % ww) * k).astype(np.float32), ((((0.5 - lat / math.pi) * hh) - y0) * k).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     return cv2.remap(img, ((lon / (2 * math.pi) + 0.5) * w).astype(np.float32), ((0.5 - lat / math.pi) * h).astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 
 
@@ -274,7 +283,7 @@ def road_xy(line):
 
 class Rig:
     """What a section's camera needs: the pictures facing the way the runner went (`items`), how far along each is (`prog`, metres), the heading wanted at each (`hs`) and `view(i, yaw)`, the steady view out of picture i looking at compass `yaw`."""
-    def __init__(self, items, prog, hs, view, rot=None, img=None): self.items, self.prog, self.hs, self.view, self.n, self.rot, self.img = items, prog, hs, view, len(items), rot, img         # rot(i, yaw, pitch): the turn for a level view of picture i (360 sections only); img(i) the picture
+    def __init__(self, items, prog, hs, view, rot=None, img=None): self.items, self.prog, self.hs, self.view, self.n, self.rot, self.img, self.orig = items, prog, hs, view, len(items), rot, img, img         # rot(i, yaw, pitch): the turn for a level view of picture i (360 sections only); img(i) the picture
 
 
 def headings(rd, section, road=None):
@@ -297,14 +306,22 @@ def build(rd, section, road=None, size=OUT, preview=False, pano=False, grid='std
     """The camera rig for a section (see Rig); the maths depends on the kind of picture (module notes). Raises ValueError when there are too few pictures, RuntimeError when one has not been fetched."""
     its = forward_items(section)
     if len(its) < 8: raise ValueError(f"{section['id']}: only {len(its)} pictures face the way the runner went")
-    prov = section['provider']; imgs = {}
-    def img(i):
+    prov = section['provider']; imgs = {}; enhanced = {}; enhance = [None]
+    def path_of(i): return pano_path(rd, section, its[i]['id'], grid) if pano and prov == 'google' else src_path(rd, section, its[i]['id'], preview)
+    def orig(i):
         if i not in imgs:
             if len(imgs) > 4: imgs.clear()
-            im = cv2.imread(pano_path(rd, section, its[i]['id'], grid) if pano and prov == 'google' else src_path(rd, section, its[i]['id'], preview))
+            im = cv2.imread(path_of(i))
             if im is None: raise RuntimeError(f"{section['id']}: picture {its[i]['id']} has not been fetched")
             imgs[i] = im
         return imgs[i]
+    def img(i):
+        """The picture as the views are made from it: the original, or (`rig.enhance(fn)`) what fn(i, path) makes of it (the enlarged piece the shot looks at)."""
+        if enhance[0] is None: return orig(i)
+        if i not in enhanced:
+            if len(enhanced) > 4: enhanced.clear()
+            enhanced[i] = enhance[0](i, path_of(i), orig)
+        return enhanced[i]
     km = np.array([it['km'] for it in its]) * 1000.0; n = len(its); view = rot = None
     if prov == 'google' and pano:                                                                             # the stitched 360 pictures (north in the centre column): levelled to the road like the others
         prog = km; hs = smooth_heading([it['b'] for it in its], 3.0); rot = lambda i, yaw, pitch=PITCH: PANO_TO_PIC @ level_view(yaw, pitch); view = lambda i, yaw: reproject(img(i), rot(i, yaw), FOV, size)
@@ -323,7 +340,7 @@ def build(rd, section, road=None, size=OUT, preview=False, pano=False, grid='std
     else:
         prog = km; shifts = steady_flat([img(i) for i in range(n)]); view = lambda i, yaw: flat_view(img(i), shifts[i], size)
         hs = np.zeros(n)
-    return Rig(its, prog, hs, view, rot, img)
+    rig = Rig(its, prog, hs, view, rot, img); rig.orig = orig; rig.enhance = lambda fn: (enhance.__setitem__(0, fn), enhanced.clear()); return rig
 
 
 def render_pano(rd, section, seconds, out, road=None, size=None, log=print, preview=True, grid='std'):
@@ -417,7 +434,7 @@ def dolly_plan(rig, log=print):
     def small(k):
         if k not in small_imgs:
             if len(small_imgs) > 4: small_imgs.clear()
-            small_imgs[k] = cv2.resize(rig.img(k), (3840, 1920), interpolation=cv2.INTER_AREA)
+            small_imgs[k] = cv2.resize(rig.orig(k), (3840, 1920), interpolation=cv2.INTER_AREA)
         return small_imgs[k]
     steps = []
     for k in range(n - 1):
@@ -455,14 +472,60 @@ def dolly_frame(rig, plan, i, a, size, flow=True):
     return flow_blend(A, B, w, plan['flow_F'])
 
 
+# ---- upscaling: one factor for the whole section, and only the part of each panorama the section looks at -------------------------------------------------------------------------------------
+WINDOW_MARGIN = (8.0, 6.0)                           # degrees of margin round what the views reach: the turn and tilt towards the road (`dyaw`, `dpitch`), and the flow blend's reach
+
+
+def plan_zoom(plan):
+    """The most the section zooms in (a view's field is narrowed by this) anywhere in it."""
+    return max([math.exp(st['gap'] * (st['r0'] + st['r1']) / 2) for st in plan['steps'] if st['gap'] > 0.5] or [1.0])
+
+
+def picture_window(rig, i, yaws, fov_wide, size, whole):
+    """The part of picture i's panorama (pixels (x0, x1, y0, y1) of `whole` = (w, h); x may run past the edges) that views of up to `fov_wide` degrees across at any of the compass headings `yaws` can reach, with a margin. None when that is nearly all of it."""
+    W, H = size; f = (W / 2) / math.tan(math.radians(fov_wide) / 2); u = np.linspace(-W / 2, W / 2, 9); v = np.linspace(-H / 2, H / 2, 5); xs, ys = np.meshgrid(u, v); base = np.stack([xs / f, -ys / f, np.ones_like(xs)], -1).reshape(-1, 3)
+    lons, lats = [], []
+    for y in yaws:
+        for dy in (-WINDOW_MARGIN[0], WINDOW_MARGIN[0]):
+            for dp in (-WINDOW_MARGIN[1], WINDOW_MARGIN[1]):
+                ray = base @ rig.rot(i, (y + dy) % 360, PITCH + dp).T; lons.append(np.arctan2(ray[:, 0], ray[:, 2])); lats.append(np.arctan2(ray[:, 1], np.hypot(ray[:, 0], ray[:, 2])))
+    lon = np.concatenate(lons); lat = np.concatenate(lats); c = math.atan2(np.sin(lon).mean(), np.cos(lon).mean()); off = (lon - c + math.pi) % (2 * math.pi) - math.pi; w, h = whole
+    x0 = math.floor(((c + off.min()) / (2 * math.pi) + 0.5) * w) - 4; x1 = math.ceil(((c + off.max()) / (2 * math.pi) + 0.5) * w) + 4
+    y0 = max(0, math.floor((0.5 - lat.max() / math.pi) * h) - 4); y1 = min(h, math.ceil((0.5 - lat.min() / math.pi) * h) + 4)
+    return None if (x1 - x0) > 0.9 * w else (x0, x1, y0, y1)
+
+
+def enlarge(rig, plan, section, size, grid, preview, log=print):
+    """Make the section's pictures sharper where the output needs more pixels than they hold. ONE factor for the whole section, from the tightest zoom anywhere in it (so the look is the same all through: a zoom that is only tight for a moment still enlarges every picture), and,
+    for panoramas, only the window of each that the section's views reach. Returns the factor (1: nothing done)."""
+    from strata360.edit import upscale
+    if preview: return 1
+    if rig.rot is None:                                                                                    # a flat view: always the whole of it
+        if section['provider'] != 'google': return 1
+        f = upscale.factor_for(PANO_TILE_PX / FOV, size[0], FOV)
+        if f > 1: rig.enhance(lambda i, path, orig: upscale.cached(path, f, log=log))
+        return f
+    zmax = plan_zoom(plan) if plan else 1.0; width = PANO_GRIDS[grid]['size'][0] if section['provider'] == 'google' else 5760
+    f = upscale.factor_for(width / 360.0, size[0], zoom_fov(zmax))
+    if f == 1: return 1
+    wide = min(zoom_fov(1 / zmax), 150.0) if plan else FOV; n = rig.n
+    def yaws_of(i):
+        if plan: return [float(plan['yaw'](t)) % 360 for t in np.linspace(max(i - 1, 0), min(i + 1, n - 1), 7)]
+        return [float(rig.hs[k]) % 360 for k in range(max(i - 1, 0), min(i + 2, n))]
+    def fn(i, path, orig):
+        h, w = orig(i).shape[:2]; box = picture_window(rig, i, yaws_of(i), wide, size, (w, h)); up = upscale.cached(path, f, box, log=log)
+        return Windowed(up, box, (w, h)) if box else up
+    rig.enhance(fn); return f
+
+
 def default_blend(section, grid): return 'dollyflow' if grid and section['provider'] == 'google' else 'flow'                # (the stitched panoramas of a hires Google section can be zoomed into; the others are blended along their flow)
 
 
-def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False, grid=None, blend=None):
+def render(rd, section, seconds, out, road=None, fps=30, size=OUT, encode_size=None, log=print, preview=False, grid=None, blend=None, upscale=False):
     """Write the clip of `section` (an entry of streetview.annotate with `items`) lasting `seconds` to `out` (H.264). The whole section is played through, so its pictures per second follow from the length. `road` is the stretch
     {line: [[lat, lon], ...], km0} (for Panoramax headings). `encode_size`, e.g. (3840, 2160), scales the finished picture; `preview` uses the smaller copies of the pictures."""
     rig = build(rd, section, road, size, preview, pano=bool(grid), grid=grid or 'std'); prog, hs, view, n = rig.prog, rig.hs, rig.view, rig.n          # (grid: a Google section made from its stitched 360 pictures instead of the one flat view along the road)
-    L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); w, h = encode_size or size; blend = blend or default_blend(section, grid); steps = dolly_plan(rig, log) if blend in ('dolly', 'dollyflow') and rig.rot is not None else None      # blend: None (a Google section made from stitched panoramas, `grid`, uses 'dollyflow', every other 'flow'), 'flow' (the pictures moved along their flow and mixed), 'dolly' (zoom towards the next picture, a short cross-fade), 'dollyflow' (the same with the flow after the zoom)
+    L = prog[-1] - prog[0]; N = max(2, int(seconds * fps)); w, h = encode_size or size; blend = blend or default_blend(section, grid); steps = dolly_plan(rig, log) if blend in ('dolly', 'dollyflow') and rig.rot is not None else None; factor = enlarge(rig, steps, section, size, grid or 'std', preview, log) if upscale else 1; view = rig.view      # blend: None (a Google section made from stitched panoramas, `grid`, uses 'dollyflow', every other 'flow'), 'flow' (the pictures moved along their flow and mixed), 'dolly' (zoom towards the next picture, a short cross-fade), 'dollyflow' (the same with the flow after the zoom)
     cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{size[0]}x{size[1]}', '-r', str(fps), '-i', '-'] + (['-vf', f'scale={w}:{h}:flags=lanczos'] if (w, h) != tuple(size) else []) + ['-c:v', 'libx264', '-crf', '17', '-pix_fmt', 'yuv420p', out + '.part.mp4']
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     try:

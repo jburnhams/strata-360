@@ -192,3 +192,42 @@ class TestDolly:
 
     def test_a_section_made_from_panoramas_uses_the_dolly_and_the_others_the_flow_blend(self):
         assert CAM.default_blend(dict(provider='google'), 'hi') == 'dollyflow' and CAM.default_blend(dict(provider='google'), None) == 'flow' and CAM.default_blend(dict(provider='mapillary'), None) == 'flow'
+
+
+class TestWindowedPictures:
+    """Upscaling only the part of a panorama the shot looks at (`Windowed`, `picture_window`, `plan_zoom`)."""
+    def test_a_view_from_a_window_matches_the_view_from_the_whole_picture(self):
+        src = equirect(); R = CAM.Ry(math.radians(20)); box = (200, 520, 60, 300)
+        win = CAM.Windowed(np.ascontiguousarray(src[box[2]:box[3], box[0]:box[1]]), box, (720, 360))
+        a = CAM.reproject(src, R, 40.0, (64, 36)); b = CAM.reproject(win, R, 40.0, (64, 36))
+        assert np.abs(a.astype(int) - b.astype(int)).max() <= 2
+
+    def test_an_enlarged_window_is_found_by_its_ratio(self):
+        src = equirect(); box = (200, 520, 60, 300); small = np.ascontiguousarray(src[box[2]:box[3], box[0]:box[1]]); big = cv2.resize(small, None, fx=3, fy=3, interpolation=cv2.INTER_LINEAR)
+        a = CAM.reproject(CAM.Windowed(small, box, (720, 360)), np.eye(3), 40.0, (64, 36)); b = CAM.reproject(CAM.Windowed(big, box, (720, 360)), np.eye(3), 40.0, (64, 36))
+        assert np.abs(a.astype(int) - b.astype(int)).max() <= 3
+
+    def test_a_window_may_run_past_the_seam(self):
+        src = equirect(); R = CAM.Ry(math.radians(180)); full = CAM.reproject(src, R, 30.0, (48, 27))     # looking at the picture's edge
+        w, h = 720, 360; box = (-80, 80, 100, 260); win = CAM.Windowed(np.ascontiguousarray(np.take(src[100:260], np.arange(-80, 80), axis=1, mode='wrap')), box, (w, h))
+        assert np.abs(full.astype(int) - CAM.reproject(win, R, 30.0, (48, 27)).astype(int)).max() <= 3
+
+    def rig(self):
+        class R: pass
+        r = R(); r.rot = lambda i, yaw, pitch=CAM.PITCH: CAM.PANO_TO_PIC @ CAM.level_view(yaw, pitch); return r
+
+    def test_the_window_covers_the_views_and_is_a_part_of_the_picture(self):
+        box = CAM.picture_window(self.rig(), 0, [0.0, 10.0], 85.0, (1920, 1080), (3840, 1920))
+        assert box is not None and 0 < box[1] - box[0] < 0.5 * 3840 and box[3] - box[2] < 0.7 * 1920
+        centre = 3840 // 2; assert box[0] < centre < box[1]                                   # straight ahead (yaw 0) is in it
+
+    def test_a_wider_turn_makes_a_wider_window(self):
+        a = CAM.picture_window(self.rig(), 0, [0.0], 85.0, (1920, 1080), (3840, 1920)); b = CAM.picture_window(self.rig(), 0, [0.0, 60.0], 85.0, (1920, 1080), (3840, 1920))
+        assert b[1] - b[0] > a[1] - a[0]
+
+    def test_nearly_all_the_picture_means_no_window(self):
+        assert CAM.picture_window(self.rig(), 0, [0.0, 120.0, 240.0], 85.0, (1920, 1080), (3840, 1920)) is None
+
+    def test_the_most_zoom_in_the_plan(self):
+        plan = dict(steps=[dict(gap=10.0, r0=0.01, r1=0.01), dict(gap=10.0, r0=0.03, r1=0.03), dict(gap=0.2, r0=5.0, r1=5.0)])
+        assert CAM.plan_zoom(plan) == pytest.approx(math.exp(0.3))                              # (a step with almost no gap is ignored)

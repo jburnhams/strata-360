@@ -76,7 +76,7 @@ export const makeGap = (o: Partial<Gap> = {}): Gap => ({
   daylight: 'twilight->night', before: 'a', after: 'b', default_seconds: 14, clips: [], ...o,
 })
 export const makeFilmState = (o: Partial<FilmState> = {}): FilmState => ({ state: 'none', running: false, ...o })
-export const makeFinalState = (o: Partial<FinalState> = {}): FinalState => ({ state: 'none', running: false, settings: { size: '1080p', fps: 30, half_rate: false, bitrate: '20M' }, ...o })
+export const makeFinalState = (o: Partial<FinalState> = {}): FinalState => ({ state: 'none', running: false, settings: { size: '1080p', fps: 30, half_rate: false, bitrate: '20M', upscale: 'off' }, ...o })
 export const makeRoughMix = (o: Partial<RoughMix> = {}): RoughMix => ({ has_plan: true, exists: false, stale: false, stale_because: [], length_s: null, made_at: null, source: 'script', building: false, error: '', log: '', ...o })
 export const makeScriptState = (o: Partial<import('../../src/api').ScriptState> = {}): import('../../src/api').ScriptState => ({ key_configured: true, providers: { anthropic: { models: ['claude-3'], default: 'claude-3', configured: true } }, models: ['claude-3'], llm: { provider: 'anthropic', model: 'claude-3' }, running: false, last_exit: null, log: '', latest: null, scripts: 0, ...o })
 export const makeVoiceoverState = (o: Partial<import('../../src/api').VoiceoverState> = {}): import('../../src/api').VoiceoverState => ({ engines: [{ id: 'e1', label: 'Engine 1', voices: [{ name: 'v1', lang: 'en' }] }], state: { engine: 'e1', voice: 'v1', rate: 100, use: {} }, timings: null, script: null, cached: [], lines: 0, building: false, error: null, ...o })
@@ -114,3 +114,17 @@ export const makePointCams = (cams: import('../../src/api').PointCam[] = [], o: 
 export const makeObject = (o: Partial<DetectedObject> = {}): DetectedObject => ({ id: 0, label: 'goat', word: 'goat', kind: 'named', source: 'vlm', yoloe: 'cow', conf: 0.8, lon: -90, lat: -5, deg: 4, best_t: 1, seen: [1, 8.5], crop: true, ...o })
 export const makeRegion = (o: Partial<Region> = {}): Region => ({ kind: 'snow', lon: 40, lat: -30, w_deg: 30, h_deg: 10, polygon: [[25, -25], [55, -25], [55, -35], [25, -35]], seen: [1], n: 2, ...o })
 export const makeObjects = (o: Partial<ObjectsInfo> = {}): ObjectsInfo => ({ skipped: null, model: 'Qwen3.5', moments: 4, objects: [makeObject()], regions: [], areas: {}, scenery_labels: {}, counts: {}, ...o })
+
+export const makeStillState = (o: Partial<import('../../src/api').StillState> = {}): import('../../src/api').StillState => ({ name: 'a1b2c3d4e5_f004170.png', state: 'rendering', ...o })
+
+export const makeRenderProgress = (o: Partial<import('../../src/api').RenderProgress> = {}): import('../../src/api').RenderProgress => ({
+  state: 'done', started: 1000, updated: 1010, error: null,
+  stages: [{ name: 'prepare', state: 'done', started: 1000, seconds: 3.2, detail: 'glides, exposure match, overlay' }, { name: 'load model', state: 'done', started: 1003.2, seconds: 1.5, detail: 'realplksr-nomos' }, { name: 'render', state: 'done', started: 1004.7, seconds: 75, detail: 'frame 5 of 5' }],
+  timings: { project: { seconds: 1.0, calls: 5 }, upscale: { seconds: 20.0, calls: 5 }, overlay: { seconds: 0.5, calls: 5 } },
+  log: [[0.1, 'prepare: glides, exposure match, overlay'], [3.0, 'shot w3 enlarged x4 (narrowest view 45 degrees)']], ...o })
+
+export const makeStillMeta = (o: Partial<import('../../src/api').StillMeta> = {}): import('../../src/api').StillMeta => ({
+  name: 'a1b2c3d4e5_f004170.png', key: 'a1b2c3d4e5', t: 83.4, frame: 4170, fps: 50, size: [3840, 2160], upscale: 'off', model: null, piece: 'plain',
+  shots: [{ id: 'CAM_1@3.44', clip: 'CAM_20260222081045_0021_D', fov: 58, factor: 1, note: '' }], rendered: '2026-10-08T09:30:00Z', seconds: 14.2,
+  stages: { prepare: 1.5, render: 12.6, write: 0.1 }, timings: { decode: 2.3, project: 0.02, overlay: 0.7 }, current: true, bytes: 4_800_000, modified: 1_790_000_000, ...o })
+export const makeStillList = (o: Partial<import('../../src/api').StillList> = {}): import('../../src/api').StillList => ({ stills: [], active: [], auto_count: 4, ...o })

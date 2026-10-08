@@ -18,7 +18,7 @@ STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 JOBS = {}                     # folder -> [Popen] of workers started by this server (workers started elsewhere are found through the project's registry)
 MAX_WORKERS = 3
-FINAL_JOBS = {}; FILM_JOBS = {}
+FINAL_JOBS = {}; FILM_JOBS = {}; STILL_JOBS = {}; STILL_REQ = {}
 TILES = {}                    # map style -> overlay.tiles.Tiles (one per style, shared by every request)
 TILE_FETCH = None             # tests replace this: fetch(url) -> bytes
 _NOISE = ('unsupported hash type', 'code for hash', 'hashlib.py', 'globals()[__func_name]', '__get_builtin_constructor', '__get_openssl_constructor')
@@ -547,7 +547,7 @@ def create_app(roots, token=None):
         from strata360.render import final as FN
         plan = PJ.load(f).get('plan'); s = final_settings(f)
         if not plan: return ''
-        w, h = map(int, s['size'].split('x')); return os.path.join(FN.final_dir(f, FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f)), 'status.json')
+        w, h = map(int, s['size'].split('x')); return os.path.join(FN.final_dir(f, FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f, s['upscale'])), 'status.json')
 
     @api.post('/api/film/start', dependencies=[Depends(auth)])
     def post_film_start(body: dict):                                                     # {folder}: render the preview of the saved plan (lowest priority, one at a time)
@@ -587,26 +587,34 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404)
         return FileResponse(p, media_type='video/mp2t', headers={'Cache-Control': 'max-age=3600'})
 
+    def upscale_mode(v):
+        """A mode of edit/upscale.py from a request or a saved setting (an old saved True is 'full'); a bad value in a request is a 400, in a saved file it is 'off'."""
+        from strata360.edit import upscale as UP
+        try: return UP.normalize(v)
+        except ValueError: raise HTTPException(400, 'enlarge must be one of ' + ', '.join(UP.MODES))
+
     def final_settings(f):
         p = os.path.join(config.race_dir(f), 'final', 'settings.json')
         try: s = json.load(open(p))
         except (OSError, ValueError): s = {}
-        return dict(size=s.get('size', '3840x2160'), fps=float(s.get('fps', 0.0)), half_rate=bool(s.get('half_rate', False)), bitrate=s.get('bitrate', '100M'))      # fps 0 is the footage's own rate
+        try: up = upscale_mode(s.get('upscale'))
+        except HTTPException: up = 'off'                                                    # (a bad value in a saved file is not a bad request)
+        return dict(size=s.get('size', '3840x2160'), fps=float(s.get('fps', 0.0)), half_rate=bool(s.get('half_rate', False)), bitrate=s.get('bitrate', '100M'), upscale=up)      # fps 0 is the footage's own rate
 
     @api.get('/api/final', dependencies=[Depends(auth)])
     def get_final(folder: str):                                                          # state of the final render of the CURRENT plan with the saved settings
         from strata360.edit import project as PJ
-        from strata360.render import final as FN
+        from strata360.render import final as FN, progress as PG
         f = folder_of(folder); plan = PJ.load(f).get('plan'); s = final_settings(f); j = FINAL_JOBS.get(f); running = bool(j and j.poll() is None)
         if not plan: return dict(state='noplan', running=False, settings=s)
-        w, h = map(int, s['size'].split('x')); key = FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f); st = None
+        w, h = map(int, s['size'].split('x')); key = FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f, s['upscale']); st = None
         try: st = json.load(open(os.path.join(FN.final_dir(f, key), 'status.json')))
         except (OSError, ValueError): pass
         running = running or bool(st and st['state'] in ('rendering', 'assembling') and alive(st.get('pid')))
         state = st['state'] if st else ('starting' if running else 'none')
         if st and st['state'] in ('rendering', 'assembling') and not running: state = 'stopped'
         return dict(state=state, running=running, settings=s, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), pieces_done=(st or {}).get('pieces_done', 0), pieces_total=(st or {}).get('pieces_total', 0),
-                    started=(st or {}).get('started'), error=(st or {}).get('error'), has_file=bool(st and st['state'] == 'done' and os.path.exists(st.get('film', ''))))
+                    started=(st or {}).get('started'), error=(st or {}).get('error'), has_file=bool(st and st['state'] == 'done' and os.path.exists(st.get('film', ''))), progress=PG.load(os.path.join(FN.final_dir(f, key), 'progress.json')))
 
     @api.post('/api/final/start', dependencies=[Depends(auth)])
     def post_final_start(body: dict):                                                    # {folder, size?, fps?, bitrate?}: start or continue the final render (lowest priority; finished pieces are kept)
@@ -616,9 +624,10 @@ def create_app(roots, token=None):
         if body.get('size') in ('1920x1080', '2560x1440', '3840x2160'): s['size'] = body['size']
         if body.get('fps') in (0, 0.0, 25, 25.0, 30, 30.0, 50, 50.0): s['fps'] = float(body['fps'])
         if 'half_rate' in body: s['half_rate'] = bool(body['half_rate'])
+        if 'upscale' in body: s['upscale'] = upscale_mode(body['upscale'])
         d = os.path.join(config.race_dir(f), 'final'); os.makedirs(d, exist_ok=True); json.dump(s, open(os.path.join(d, 'settings.json'), 'w'))
         log = open(os.path.join(d, 'final_job.log'), 'wb')
-        FINAL_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'final', f, '--size', s['size'], '--fps', str(s['fps']), *(['--half-rate'] if s['half_rate'] else []), '--bitrate', s['bitrate']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
+        FINAL_JOBS[f] = subprocess.Popen([*oslib.cli_command(), 'final', f, '--size', s['size'], '--fps', str(s['fps']), *(['--half-rate'] if s['half_rate'] else []), *(['--upscale', s['upscale']] if s['upscale'] != 'off' else []), '--bitrate', s['bitrate']], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True); return dict(started=True)
 
     @api.post('/api/final/stop', dependencies=[Depends(auth)])
     def post_final_stop(body: dict):
@@ -635,11 +644,121 @@ def create_app(roots, token=None):
         from strata360.render import final as FN
         f = folder_of(folder); plan = PJ.load(f).get('plan'); s = final_settings(f)
         if not plan: raise HTTPException(404)
-        w, h = map(int, s['size'].split('x')); d = FN.final_dir(f, FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f))
+        w, h = map(int, s['size'].split('x')); d = FN.final_dir(f, FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f, s['upscale']))
         try: film = json.load(open(os.path.join(d, 'status.json'))).get('film')
         except (OSError, ValueError): film = None
         if not film or not os.path.exists(film): raise HTTPException(404, 'not rendered yet')
         return FileResponse(film, media_type='video/mp4', filename='film.mp4')
+
+    STILL_NAME = re.compile(r'^[0-9a-f]{10}_f\d{6}\.png$')
+
+    def still_target(f, t, size, upscale=None):
+        """(plan, name, path, settings) of the still of the film at time t: the same key as the film at that size and frame rate, so a changed plan, voice-over or overlay is a new picture."""
+        from strata360.edit import project as PJ
+        from strata360.render import final as FN, still as ST
+        plan = PJ.load(f).get('plan')
+        if not plan: raise HTTPException(400, 'make a plan first')
+        s = final_settings(f); w, h = map(int, size.split('x')); fps = FN.resolve_fps(f, plan, s['fps'], s['half_rate']); up = s['upscale'] if upscale is None else upscale_mode(upscale); name = ST.still_name(FN.final_key(plan, [w, h], fps, '100M', f, up), ST.frame_for(plan, t, fps))
+        return plan, name, os.path.join(ST.still_dir(f), name), dict(s, upscale=up)
+
+    def still_state(f, name, path):
+        from strata360.render import progress as PG, still as ST
+        j = STILL_JOBS.get((f, name)); pg = PG.load(ST.progress_path(path))                 # what the render is doing and how long each step took (render/progress.py)
+        if os.path.exists(path): return dict(name=name, state='done', progress=pg)
+        if j and j.poll() is None: return dict(name=name, state='rendering' if pg else 'queued', progress=pg)                 # (a batch renders one after the other: the ones not started have no progress file yet)
+        if j:                                                                            # it ended without making the picture
+            try: err = open(getattr(j, 'log_path', path + '.log')).read()[-300:]
+            except OSError: err = ''
+            return dict(name=name, state='error', error=(pg or {}).get('error') or err or 'the render failed', progress=pg)
+        return dict(name=name, state='none', progress=pg)
+
+    @api.post('/api/film/still', dependencies=[Depends(auth)])
+    def post_film_still(body: dict):                                                     # {folder, size, upscale?, and t | times | auto}: render the film's frame at film time t (the player position), several times, or a series of differing moments (auto), through the final render's own pipeline, as PNGs (one worker at the lowest priority renders them one after the other; a still that exists is not made again)
+        from strata360.edit import framing as FR
+        from strata360.render import still as ST
+        f = folder_of(body.get('folder')); size = body.get('size', '3840x2160')
+        if size not in ST.SIZES: raise HTTPException(400, 'size must be one of ' + ', '.join(ST.SIZES))
+        up = upscale_mode(body['upscale']) if 'upscale' in body else None; moments = None
+        if body.get('auto'):
+            from strata360.edit import project as PJ
+            plan = PJ.load(f).get('plan')
+            if not plan: raise HTTPException(400, 'make a plan first')
+            moments = ST.pick_moments(plan, FR.resolve(f, plan, head=True), body.get('count'))
+            if not moments: raise HTTPException(400, 'the plan has no shots')
+            times = [m['t'] for m in moments]
+        elif 'times' in body:
+            try: times = [float(x) for x in body['times']]
+            except (TypeError, ValueError): raise HTTPException(400, 'times must be numbers (seconds of the film)')
+            if not times or len(times) > 20: raise HTTPException(400, 'give between 1 and 20 times')
+        else:
+            try: times = [float(body.get('t'))]
+            except (TypeError, ValueError): raise HTTPException(400, 't (seconds of the film) is needed')
+        if any(not t >= 0 for t in times): raise HTTPException(400, 't must be 0 or more')
+        out = []; todo = []
+        for i, t in enumerate(times):
+            plan, name, path, s = still_target(f, t, size, up); st = still_state(f, name, path); out.append(dict(st, t=t, **({k: moments[i][k] for k in ('label', 'why')} if moments else {})))
+            STILL_REQ[(f, name)] = dict(t=t, size=size, upscale=s['upscale'], **({k: moments[i][k] for k in ('label', 'why')} if moments else {}))
+            if st['state'] in ('none', 'error') and name not in [n for n, _ in todo]: todo.append((name, t))
+        if todo:
+            os.makedirs(os.path.dirname(path), exist_ok=True); log_path = os.path.join(os.path.dirname(path), todo[0][0] + '.log'); log = open(log_path, 'wb')
+            for n, _ in todo:                                                                                          # (what an earlier failed try left would read as this render already running)
+                try: os.remove(ST.progress_path(os.path.join(os.path.dirname(path), n)))
+                except OSError: pass
+            j = subprocess.Popen([*oslib.cli_command(), 'still', f, *[x for _, t in todo for x in ('--t', str(t))], '--size', size, '--fps', str(s['fps']), *(['--half-rate'] if s['half_rate'] else []), *(['--upscale', s['upscale']] if s['upscale'] != 'off' else [])], stdout=log, stderr=subprocess.STDOUT, cwd=ROOT_DIR, start_new_session=True)
+            j.log_path = log_path
+            for n, _ in todo: STILL_JOBS[(f, n)] = j
+            for o in out:
+                if o['name'] in [n for n, _ in todo]: o.update(state='rendering' if o['name'] == todo[0][0] else 'queued', progress=None)
+        if len(times) == 1 and not moments and 'times' not in body: return {k: v for k, v in out[0].items() if k != 't'}
+        return dict(moments=out)
+
+    @api.get('/api/film/still', dependencies=[Depends(auth)])
+    def get_film_still(folder: str, name: str):                                          # state of one still: none | rendering | done | error
+        from strata360.render import still as ST
+        if not STILL_NAME.match(name): raise HTTPException(400, 'not a still')
+        f = folder_of(folder); return still_state(f, name, os.path.join(ST.still_dir(f), name))
+
+    @api.get('/api/film/still/file')
+    def get_film_still_file(request: Request, folder: str, name: str):                   # the picture (to show, or to download)
+        auth(request)
+        from strata360.render import still as ST
+        if not STILL_NAME.match(name): raise HTTPException(400, 'not a still')
+        p = os.path.join(ST.still_dir(folder_of(folder)), name)
+        if not os.path.exists(p): raise HTTPException(404, 'not rendered yet')
+        return FileResponse(p, media_type='image/png', filename=name)
+
+    @api.get('/api/film/stills', dependencies=[Depends(auth)])
+    def get_film_stills(folder: str):                                                    # every still made so far with what is kept about each, and the renders in progress; `current`: made from the plan as it is now (any size or enlarge mode)
+        from strata360.edit import project as PJ, upscale as UP
+        from strata360.render import final as FN, still as ST
+        f = folder_of(folder); plan = PJ.load(f).get('plan'); d = ST.still_dir(f); s = final_settings(f); keys = set(); n_auto = 0
+        if plan:
+            fps = FN.resolve_fps(f, plan, s['fps'], s['half_rate']); n_auto = ST.moment_count(max(g['film_start_s'] + g['dur_s'] for g in plan['segments']) if plan['segments'] else 0)
+            keys = {FN.final_key(plan, [int(x) for x in size.split('x')], fps, '100M', f, m) for size in ST.SIZES for m in UP.MODES}
+        stills = []
+        for name in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+            if not STILL_NAME.match(name): continue
+            path = os.path.join(d, name); meta = ST.read_meta(path) or dict(name=name, key=name[:10], frame=int(name[12:18]), t=None, size=None, upscale=None, legacy=True)             # (stills made before the metadata was kept)
+            st = os.stat(path); stills.append(dict(meta, current=name[:10] in keys, bytes=st.st_size, modified=int(st.st_mtime)))
+        active = []
+        for (ff, name), j in list(STILL_JOBS.items()):
+            if ff != f or os.path.exists(os.path.join(d, name)): continue
+            active.append(dict(still_state(f, name, os.path.join(d, name)), **STILL_REQ.get((f, name), {})))
+        return dict(stills=stills, active=active, auto_count=n_auto)
+
+    @api.get('/api/film/still/thumb')
+    def get_film_still_thumb(request: Request, folder: str, name: str, w: int = 320):    # a small JPEG of a still for the grid (made once, kept beside the stills)
+        auth(request)
+        import cv2
+        from strata360.render import still as ST
+        if not STILL_NAME.match(name): raise HTTPException(400, 'not a still')
+        w = max(64, min(int(w), 1280)); src = os.path.join(ST.still_dir(folder_of(folder)), name); out = os.path.join(ST.still_dir(folder_of(folder)), '.thumbs', f'{name}.{w}.jpg')
+        if not os.path.exists(src): raise HTTPException(404, 'not rendered yet')
+        if not os.path.exists(out):
+            im = cv2.imread(src)
+            if im is None: raise HTTPException(404, 'the picture cannot be read')
+            w = min(w, im.shape[1]); os.makedirs(os.path.dirname(out), exist_ok=True); tmp = out + '.part.jpg'; cv2.imwrite(tmp, cv2.resize(im, (w, max(1, round(im.shape[0] * w / im.shape[1]))), interpolation=cv2.INTER_AREA), [cv2.IMWRITE_JPEG_QUALITY, 85]); os.replace(tmp, out)         # (never enlarged)
+        return FileResponse(out, media_type='image/jpeg', headers={'Cache-Control': 'max-age=3600'})
 
     @api.get('/api/who', dependencies=[Depends(auth)])
     def get_who(folder: str, refresh: bool = False):                                     # the face clusters found in the footage, the suggested one for the wearer, and whether a profile is saved

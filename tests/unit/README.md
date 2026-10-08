@@ -16,6 +16,10 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | Module | Cover | Status / notes |
 | --- | --- | --- |
 | `server/app.py` | 60% | partial: auth, browse, last, open, notes, log, clips, clock, who done; the rest of the endpoints todo (transcript, script, voiceover, film, final, music, track, edit, state/clear/stop) |
+| `edit/upscale.py` | 75% | factor choice, tiling, windows, cache and the night gate with a stand-in network; todo: `load` (needs `spandrel` and weights, run by hand) and `streetview_cam.enlarge`/`render(upscale=True)` (only run by hand on the Legends street view clips) |
+| `render/progress.py` | 100% | steps and their times, time by kind of work, the log, the throttled atomic file, a file that cannot be written |
+| `render/final.py` (enlarging) | partial | per-shot factor, the renderer size, fitting the enlarged picture, warm-up frames, the key; the render loop itself is covered by `tests/integration/test_render.py` |
+| `render/still.py` | ~90% | frame and piece lookup, the choice and count of auto moments, picture conversion, the file name, the metadata, several times in one worker, the endpoints (start, batch, list, thumbnail; worker faked); the render itself is covered by running it on the footage by hand |
 | `gps/track.py` | 52% | partial: `at`, `to_gpx`, cache done; `load_fit`/`load_gpx` need fitdecode/gpxpy (add to requirements-test.txt to test them) |
 | `edit/llm_remote.py` | 81% | partial: Vertex/Gemini/Claude request shape, retries and tiers done |
 | `edit/remix.py`, `edit/layers.py`, `edit/intensity.py`, `edit/intensity_signals.py`, `edit/music_build.py`, `edit/music_studio.py` | 96-100% | done: synthetic audio and fakes only (clicks, drifting tempo, chord loops, a fake separator); the music-studio endpoints are in `test_music_studio.py` |
