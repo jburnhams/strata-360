@@ -128,3 +128,10 @@ export const makeStillMeta = (o: Partial<import('../../src/api').StillMeta> = {}
   shots: [{ id: 'CAM_1@3.44', clip: 'CAM_20260222081045_0021_D', fov: 58, factor: 1, note: '' }], rendered: '2026-10-08T09:30:00Z', seconds: 14.2,
   stages: { prepare: 1.5, render: 12.6, write: 0.1 }, timings: { decode: 2.3, project: 0.02, overlay: 0.7 }, current: true, bytes: 4_800_000, modified: 1_790_000_000, ...o })
 export const makeStillList = (o: Partial<import('../../src/api').StillList> = {}): import('../../src/api').StillList => ({ stills: [], active: [], auto_count: 4, ...o })
+
+export const makeClipDetail = (o: Partial<import('../../src/api').ClipDetail> = {}): import('../../src/api').ClipDetail => ({
+  id: 'CAM_1_D', note: '', time: { start_utc: '2026-02-22T19:00:00Z', utc_status: 'ok' }, video: { source_frames: 300, nominal_fps: 30, dropped_frames: 0 }, camera: {},
+  motion: { steady: 0.9, median_shake_dps: 1.5, cadence_hz: 2.8, total_turn_deg: 45 }, audio: { summary: {}, segments: [] },
+  transcript: [], scenes: null, identity: null, candidates: null, preview: true, heading: null, unusable: null, thresholds: null,
+  objects: null, places: null, exposure: { mean_lin_range_stops: 3.2 }, thumb: { kind: 'center', t_s: 5, why: 'default' }, track: {}, track_text: 'Track A', ...o
+})
