@@ -47,4 +47,5 @@ def load(clip_dir, osv=None):
         try: return json.load(open(os.path.join(clip_dir, n)))
         except (OSError, ValueError): return None
     scale = QS.project_scale(os.path.dirname(os.path.abspath(clip_dir)))
-    return dict(grid=grid, heading=heading, boxes=boxes_fn(j('identity.json'), heading, j('people.json')), prior=prior_fn(j('scenes.json'), scale, heading))
+    idn = j('identity.json')
+    return dict(grid=grid, heading=heading, identity=(idn or {}).get('samples') or [], boxes=boxes_fn(idn, heading, j('people.json')), prior=prior_fn(j('scenes.json'), scale, heading))

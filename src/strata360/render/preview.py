@@ -13,7 +13,7 @@ from strata360.pipeline import guard
 import hashlib, json, math, os, shutil, subprocess, sys, time
 import cv2, numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, synthetic as SYN
+from strata360.render import camera as cam, grade as GR, synthetic as SYN
 from strata360.render.flat import Globe, projection, view_rays
 from strata360.render.film import compose, layout
 
@@ -26,7 +26,7 @@ def film_dir(folder, key): return os.path.join(config.race_dir(folder), 'preview
 def plan_key(folder, plan):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
     h = hashlib.sha1(json.dumps(plan['segments'], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
-    h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode())
+    h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); h.update(b'grade1' if GR.on(folder) else b'')
     try:
         from strata360 import overlay
         h.update(overlay.inputs_signature(folder).encode())                                      # the overlay is on every frame: new cut-offs or checkpoints make the preview out of date
@@ -76,8 +76,8 @@ def stab_matrices(osv):
 
 class PreviewSource:
     """Frames of the planned windows from the clips' proxies (upright equirect), through the real renderer's projection (EquirectView). A clip without a proxy gives a dark card."""
-    def __init__(self, folder, segs, framing, w, h, decode_w, overlay=None):
-        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w, self.overlay = folder, segs, framing, w, h, decode_w, overlay; self.V = EquirectView(w, h); self.info = {}; self.done = 0
+    def __init__(self, folder, segs, framing, w, h, decode_w, overlay=None, gains=None):
+        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w, self.overlay, self.gains = folder, segs, framing, w, h, decode_w, overlay, gains or {}; self.V = EquirectView(w, h); self.info = {}; self.done = 0
 
     def _clip(self, clip):
         if clip not in self.info:
@@ -99,7 +99,7 @@ class PreviewSource:
         sg = self.segs[k]; m = a1 - a0
         if m <= 0: return
         if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, FPS, self.w, self.h, 'bgr'); return           # a generated clip: its pictures as they are
-        clip = sg['clip']; ci = self._clip(clip)
+        clip = sg['clip']; ci = self._clip(clip); gain = self.gains.get(sg['id'])
         if not ci['proxy']:
             for _ in range(m): yield card(self.w, self.h, f'{clip[-9:]}: proxy not made yet')
             return
@@ -119,7 +119,8 @@ class PreviewSource:
                     if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3)
                     elif fr is None: fr = np.zeros((dh, dw, 3), np.uint8)                   # (past the end of the clip the last frame is held)
                 self.V.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], (float(pose_extra[i][3]) if pose_extra is not None and len(pose_extra[i]) > 3 and pose_extra[i][3] > 0 else (P['disc'][i] if P['use_disc'] else None))); yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0)
-                vdir = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); yield self.V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))
+                vdir = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); img = self.V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))
+                yield img if gain is None else GR.apply(img, gain(max((a0 + i) / FPS, 0.0)))                          # the exposure match (render/grade.py), the same maths as the final film
         finally:
             dec.stdout.close(); dec.terminate(); dec.wait()
 
@@ -138,100 +139,7 @@ def proxy_of(folder, clip):
     p = os.path.join(config.race_dir(folder), 'clips', clip, 'proxy.mp4'); return p if os.path.exists(p) and os.path.exists(os.path.splitext(p)[0] + '.json') else None
 
 
-def has_audio(p):
-    r = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', p], capture_output=True, text=True); return bool(r.stdout.strip())
-
-
-def window_gain(folder, g):
-    """Linear gain for a window's own sound: you speaking is full volume; otherwise what the sound classifier found decides (analysis/sound_events.window_mix); without it the old rule (1.0 speech, 0.25 else)."""
-    from strata360.analysis import sound_events as SE
-    try: doc = json.load(open(os.path.join(config.race_dir(folder), 'clips', g['clip'], 'audio_events.json')))
-    except (OSError, ValueError): return 1.0 if g.get('speech') else 0.25
-    return 10 ** (SE.window_mix(doc, g['clip_start_s'], g['clip_start_s'] + g['dur_s'], bool(g.get('speech')))['gain_db'] / 20.0)
-
-
-MUTE_PAD_S = 0.04            # a never-say word is silenced from this long before it starts to this long after it ends
-
-
-def never_spans(folder, clip, start_s, dur_s):
-    """[(a, b)] seconds inside the window [start_s, start_s + dur_s) of a clip where the wearer says something marked NEVER USE (red words, analysis/transcript_marks.py), as times from the window's start,
-    padded a little. The clip's own sound is silenced there whatever the script plays."""
-    from strata360.edit import script_pack as SP
-    cdir = os.path.join(config.race_dir(folder), 'clips', clip); out = []
-    for l in SP.transcript_lines(cdir, SP.label_of(clip)):
-        if l.get('mark') != 'never': continue
-        a, b = l['t0'] - MUTE_PAD_S - start_s, l['t1'] + MUTE_PAD_S - start_s
-        if b > 0 and a < dur_s: out.append((max(a, 0.0), min(b, dur_s)))
-    return out
-
-
-def role_has_speech(role): return role not in ('vo', 'broll')           # the speech-free background track has nothing to silence
-
-
-def mute_filter(spans):
-    """The ffmpeg filter that silences `spans` ([(a, b)] seconds), or '' for none."""
-    return ''.join(f",volume=enable='between(t,{a:.3f},{b:.3f})':volume=0" for a, b in spans)
-
-
-def audio_of(folder, clip, role=None):
-    """The sound to use for a clip in the film: the cleaned audio, else the original, else the proxy's own sound; None if there is none. In a plan made from the script (windows have a `role`) the clip's voice is
-    heard ONLY in dialogue windows (role 'clip', the lines the script plays); narration and b-roll windows use the speech-free background track (audio_background.flac) or, until that exists, no sound of their own."""
-    d = os.path.join(config.race_dir(folder), 'clips', clip)
-    if role in ('vo', 'broll'):
-        b = os.path.join(d, 'audio_background.flac'); return b if os.path.exists(b) else None
-    for n in ('audio_clean.flac', 'audio_original.flac'):
-        if os.path.exists(os.path.join(d, n)): return os.path.join(d, n)
-    p = proxy_of(folder, clip); return p if p and has_audio(p) else None
-
-
-DUCK_GAIN = 0.4              # the music's level under the runner's own speech (the voice-over ducks it through the side chain instead)
-DUCK_RAMP_S = 0.25
-
-
-def music_duck(plan):
-    """An ffmpeg `volume` expression (per frame, `t` in film seconds) that turns the music down to DUCK_GAIN, with a short ramp each side, wherever the script plays the runner's own words (windows with role `clip`); '' when there are none."""
-    parts = []; run = 0.0
-    for g in plan['segments']:
-        a = float(g['film_start_s']) if g.get('film_start_s') is not None else run; b = a + float(g['dur_s']); run = b                    # (a plan without film_start_s is read as windows end to end)
-        if g.get('role') == 'clip': parts.append(f"(1-{1 - DUCK_GAIN:g}*clip(min((t-{a:.3f})/{DUCK_RAMP_S},({b:.3f}-t)/{DUCK_RAMP_S}),0,1))")
-    return _nest(parts) if parts else ''
-
-
-def _nest(parts): return parts[0] if len(parts) == 1 else f'min({parts[0]},{_nest(parts[1:])})'
-
-
-def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None):
-    """The film's sound: each window's own audio (0.25 gain, 1.0 where people speak) in order, mixed with the voice-over track. `music_gain` is the music's level; `bg_gain`, when given, is the level of the clips' own
-    background sound in narration and b-roll windows (the rough mix plays it quietly)."""
-    inputs = []; chains = []; outs = []; n = 0                                                        # n counts the inputs, outs the windows' sounds in order
-    for g in plan['segments']:
-        p = audio_of(folder, g['clip'], g.get('role')); d = g['dur_s']; gain = bg_gain if bg_gain is not None and not role_has_speech(g.get('role')) else window_gain(folder, g)
-        span = g.get('voice_span')
-        if p and span and g.get('role') == 'clip':                                                       # the clip's voice only over the lines the script wants; the rest of the window is the speech-free background (a window run on past the wanted words must not play the next sentence)
-            a, b = max(float(span[0]), 0.0), min(float(span[1]), d); outside = [x for x in ((0.0, a), (b, d)) if x[1] - x[0] > 1e-3]; bgp = audio_of(folder, g['clip'], 'broll'); bg_level = bg_gain if bg_gain is not None else window_gain(folder, dict(g, speech=False))
-            inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]
-            voice = f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain}{mute_filter(sorted(set(outside) | set(never_spans(folder, g['clip'], g['clip_start_s'], d))))},apad=whole_dur={d:.3f},atrim=0:{d:.3f}"
-            if bgp and outside:
-                inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', bgp]
-                chains.append(voice + f"[v{n}];[{n + 1}:a]aresample=48000,aformat=channel_layouts=mono,volume={bg_level}{mute_filter([(a, b)])},apad=whole_dur={d:.3f},atrim=0:{d:.3f}[b{n}];[v{n}][b{n}]amix=inputs=2:normalize=0:duration=longest[s{n}]"); outs.append(f's{n}'); n += 2
-            else: chains.append(voice + f'[s{n}]'); outs.append(f's{n}'); n += 1
-            continue
-        if p: inputs += ['-ss', f"{g['clip_start_s']:.3f}", '-t', f'{d:.3f}', '-i', p]; chains.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=mono,volume={gain}{mute_filter(never_spans(folder, g['clip'], g['clip_start_s'], d) if role_has_speech(g.get('role')) else [])},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:d=0.01,afade=t=out:st={max(d - 0.01, 0):.3f}:d=0.01[s{n}]")
-        else: inputs += ['-f', 'lavfi', '-t', f'{d:.3f}', '-i', 'anullsrc=r=48000:cl=mono']; chains.append(f'[{n}:a]anull[s{n}]')
-        outs.append(f's{n}'); n += 1
-    vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); chain = ';'.join(chains) + ';' + ''.join(f'[{o}]' for o in outs) + f'concat=n={len(outs)}:v=0:a=1[nat]'
-    mus = (plan.get('film') or {}).get('music'); mp = os.path.join(config.race_dir(folder), mus['file']) if mus else None; has_mu = bool(mp and os.path.exists(mp)); has_vo = os.path.exists(vo); k = n
-    tail = f'apad=whole_dur={total_s:.3f},atrim=0:{total_s:.3f},alimiter=limit=0.95[m]'
-    if has_vo: inputs += ['-i', vo]; chain += f";[{k}:a]aresample=48000,aformat=channel_layouts=mono,{'asplit=2[vo][vokey]' if has_mu else 'anull[vo]'}"; k += 1
-    if has_mu:                                                                                        # the music from its first downbeat (or where the cuts put it: delayed when it starts after the film does), ducked under the voice-over, fading out at the end
-        inputs += ['-ss', f"{mus['offset_s']:.4f}", '-t', f'{total_s:.3f}', '-i', mp]
-        duck = music_duck(plan); duck_f = f",volume='{duck}':eval=frame" if duck else ''; delay = float(mus.get('delay_s') or 0.0); delay_f = f',adelay={delay * 1000:.1f}:all=1' if delay > 0 else ''
-        chain += f';[{k}:a]aresample=48000,aformat=channel_layouts=mono{delay_f},volume={music_gain}{duck_f},afade=t=out:st={max(total_s - 2.5, 0):.3f}:d=2.5[mu]'
-        chain += (';[mu][vokey]sidechaincompress=threshold=0.02:ratio=6:attack=30:release=500[mud]' if has_vo else ';[mu]anull[mud]')
-    mix = ['[nat]'] + (['[vo]'] if has_vo else []) + (['[mud]'] if has_mu else [])
-    chain += f";{''.join(mix)}amix=inputs={len(mix)}:normalize=0:duration=longest,{tail}"
-    r = subprocess.run(['ffmpeg', '-y', '-v', 'error', *inputs, '-filter_complex', chain, '-map', '[m]', '-ar', '48000', '-ac', '1', out], capture_output=True, text=True)
-    if r.returncode: raise RuntimeError('audio: ' + r.stderr[-300:])
+from strata360.audio.mix import (MUTE_PAD_S, audio_of, build_audio, has_audio, mute_filter, never_spans, role_has_speech, window_gain)      # the film's sound lives in audio/mix.py; these names stay here for the callers that used them from the preview
 
 
 def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
@@ -248,7 +156,7 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
                             '-hls_segment_filename', os.path.join(d, 'seg%05d.ts'), os.path.join(d, 'index.m3u8')], stdin=subprocess.PIPE)
     from strata360.overlay import for_project
-    src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h))); last = [0.0]
+    src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h)), gains=GR.gains_for(folder, segs, framing)); last = [0.0]
     def emit(img):
         enc.stdin.write(img.tobytes()); src.done += 1
         if time.time() - last[0] > 1.0: last[0] = time.time(); status('rendering', src.done); progress and progress(src.done, total)

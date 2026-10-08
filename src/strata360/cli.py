@@ -160,6 +160,13 @@ def cmd_doctor(a):
             warnings.simplefilter('always'); r = np.random.default_rng(0); x = r.standard_normal((80, 513)).astype('float32') @ np.abs(r.standard_normal((513, 3000))).astype('float32')
         line('FAIL' if (w or not np.isfinite(x).all()) else 'ok', 'numpy matmul is clean (no BLAS warnings)', 'this Mac needs numpy\'s OpenBLAS wheel: scripts/setup_env.sh installs it')
     except Exception as e: line('warn', f'numpy check failed: {e}')
+    print('map overlay:')
+    try:
+        from strata360.edit.llm_remote import secret
+        from strata360.overlay import tiles as TL
+        key = secret('THUNDERFOREST_API_KEY'); line('ok' if key else 'warn', 'map key THUNDERFOREST_API_KEY ' + ('is set' if key else 'is not set (the film\'s maps need it; the numbers still draw)'), 'put THUNDERFOREST_API_KEY=... in secrets.env')
+        n = sum(len(f) for _, _, f in os.walk(TL.cache_root())) if os.path.isdir(TL.cache_root()) else 0; line('ok', f'{n} map tiles cached in {TL.cache_root()}')
+    except Exception as e: line('warn', f'overlay check failed: {e}')
     print('models (cached under ~/.cache/huggingface; downloaded on first use):')
     hf = os.path.expanduser('~/.cache/huggingface/hub')
     for name, pat in (('whisper large-v3-turbo', 'models--*large-v3-turbo*'), ('whisper small', 'models--Systran--faster-whisper-small'), ('OPUS-MT fr-en', 'models--Helsinki-NLP--opus-mt-fr-en'),
@@ -585,7 +592,7 @@ def cmd_voiceover(a):
 
 def cmd_final(a):
     from strata360.render import final
-    sys.argv = ['final', a.name, '--size', a.size, '--fps', str(a.fps), '--bitrate', a.bitrate] + (['--pieces', str(a.pieces)] if a.pieces else []) + (['--out', a.out] if a.out else []); final.main()
+    sys.argv = ['final', a.name, '--size', a.size, '--fps', str(a.fps), '--bitrate', a.bitrate] + (['--half-rate'] if a.half_rate else []) + (['--pieces', str(a.pieces)] if a.pieces else []) + (['--out', a.out] if a.out else []); final.main()
 
 
 def cmd_film(a):
@@ -711,7 +718,7 @@ def main():
     p = sub.add_parser('music-build', help='build music of a given length from the music track: its bars re-sequenced, stems layered, vocals only in the windows'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--length-s', type=float, help='film length in seconds (default: the film plan\'s)'); p.add_argument('--track', help='the track inside the race dir (default: the project\'s)'); p.add_argument('--vocals', action='append', metavar='START-END', help='film seconds where the original\'s vocals play (repeat for several)'); p.add_argument('--preset', choices=('flat', 'arc', 'build', 'quiet', 'footage'), default='flat', help='the intensity over the film'); p.add_argument('--levels', help='a 0..1 level per film bar, comma separated (overrides --preset)'); p.add_argument('--no-sing', action='store_true', help='ignore the script\'s sing items'); p.add_argument('--use', action='store_true', help='then use the built track as the film\'s music and plan the film again around it'); p.add_argument('--fidelity', type=float, default=0.75, help='1 = only the track\'s own audio, 0 = all generated in its style (default 0.75, "extended")'); p.add_argument('--pin', action='append', metavar='BAR=original|generate', help='pin the score section starting at this film bar (0-based)'); p.add_argument('--style', help='the track\'s genre and instruments, for the generated sections\' caption (remembered)'); p.add_argument('--take', action='append', metavar='KEY=SEED', help='use this take of a generated piece'); p.add_argument('--no-generate', action='store_true', help='keep the track\'s own bars where the score asks for generated ones'); p.set_defaults(fn=cmd_music_build)
     p = sub.add_parser('rough-mix', help='the rough mix of the film plan: the sound only, music and background quiet, voice-over and speech up'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--reset', action='store_true', help='forget the earlier mix first (it is also made again by itself when its inputs change)'); p.set_defaults(fn=cmd_rough_mix)
     p = sub.add_parser('coverage', help='which analysis artefacts exist per clip and which decisions the missing ones block (--json for the GUI)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--json', action='store_true'); p.set_defaults(fn=cmd_coverage)
-    p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=50.0); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
+    p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default='3840x2160'); p.add_argument('--fps', type=float, default=0.0, help="frames a second; 0 (the default) is the footage's own rate"); p.add_argument('--half-rate', action='store_true', help='half the rate: every other source frame (faster)'); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
     p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.add_argument('--reload', action='store_true', help='restart on code changes'); p.set_defaults(fn=cmd_serve)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)

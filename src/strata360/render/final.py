@@ -13,9 +13,51 @@ from strata360.pipeline import guard
 import datetime as dt, hashlib, json, math, os, shutil, subprocess, sys, time
 import numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, flat, seam as SM, synthetic as SYN
+from strata360.render import camera as cam, flat, grade as GR, seam as SM, synthetic as SYN
 from strata360.render.film import pieces, render_piece, layout
 from strata360.render.preview import build_audio, proxy_of
+
+
+LOUDNESS_LUFS = -14.0       # the delivered film's integrated loudness (a streaming-platform level); race.json `audio.loudness_lufs` changes it
+
+
+def loudness_target(folder):
+    try: return float((config.load(folder).get('audio') or {}).get('loudness_lufs', LOUDNESS_LUFS))
+    except (FileNotFoundError, ValueError, TypeError): return LOUDNESS_LUFS
+
+
+def clip_rates(folder, plan):
+    """{clip id: source frame rate} of the footage clips the plan plays (`video.nominal_fps` of clip.json)."""
+    rd = config.race_dir(folder); out = {}
+    for g in plan['segments']:
+        c = g.get('clip')
+        if g.get('synthetic') or not c or c in out: continue
+        try: out[c] = float(json.load(open(os.path.join(rd, 'clips', c, 'clip.json')))['video']['nominal_fps'])
+        except (OSError, ValueError, KeyError): pass
+    return out
+
+
+def source_fps(folder, plan, default=50.0):
+    """The film's frame rate: the rate most of the plan's footage was shot at (by seconds played); the others are resampled by nearest source frame (the renderer finds each frame by its time). `default` when the plan has no footage."""
+    rates = clip_rates(folder, plan); secs = {}
+    for g in plan['segments']:
+        r = rates.get(g.get('clip'))
+        if r: secs[r] = secs.get(r, 0.0) + float(g.get('dur_s') or 0.0)
+    return max(secs, key=secs.get) if secs else float(default)
+
+
+def resolve_fps(folder, plan, fps=0.0, half_rate=False):
+    """The rate to render at: `fps` when given, else the source's; half of it with `half_rate` (every other source frame: faster, and the preview, overlay, time map and sound all follow the same rate)."""
+    base = float(fps) if fps else source_fps(folder, plan)
+    return base / 2.0 if half_rate else base
+
+
+def ffmpeg_rate(fps):
+    """`fps` as ffmpeg wants it: an integer or a rational (29.97 is 30000/1001), never a rounded decimal."""
+    from fractions import Fraction
+    for base in (24, 30, 48, 60, 120):                                                                    # the NTSC rates are n x 1000/1001 (29.97 is 30000/1001), however many digits were stored
+        if abs(float(fps) - base * 1000 / 1001) < 0.005: return f'{base * 1000}/1001'
+    f = Fraction(float(fps)).limit_denominator(1001); return str(f.numerator) if f.denominator == 1 else f'{f.numerator}/{f.denominator}'
 
 
 def final_dir(folder, key): return os.path.join(config.race_dir(folder), 'final', key)
@@ -24,7 +66,7 @@ def final_dir(folder, key): return os.path.join(config.race_dir(folder), 'final'
 def final_key(plan, size, fps, bitrate, folder):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
     h = hashlib.sha1(json.dumps([plan['segments'], size, fps, bitrate], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
-    h.update(_overlay_sig(folder).encode()); h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
+    h.update(_overlay_sig(folder).encode()); h.update(b'grade1' if GR.on(folder) else b''); h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
 
 
 def _overlay_sig(folder):
@@ -38,8 +80,8 @@ def _overlay_sig(folder):
 
 class FinalSource:
     """Frames of the planned windows from the original OSV files (uint16 RGB code values, like flat.main)."""
-    def __init__(self, folder, segs, framing, W, H, fps, interp='cubic', overlay=None):
-        self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp, self.overlay = folder, segs, framing, W, H, fps, interp, overlay; self.info = {}; self.done = 0
+    def __init__(self, folder, segs, framing, W, H, fps, interp='cubic', overlay=None, gains=None):
+        self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp, self.overlay, self.gains = folder, segs, framing, W, H, fps, interp, overlay, gains or {}; self.info = {}; self.done = 0      # gains: render/grade.py, the exposure match of each footage window
 
     def _boxes(self, clip, osv):
         """t -> [(yaw, pitch, height_deg)] of the people seen near t (edit/clip_views.py), for a seam that goes round them; None when off (`STRATA_SEAM_PEOPLE=0`) or the clip has no people records."""
@@ -61,7 +103,7 @@ class FinalSource:
             if self.overlay is None: yield from frames; return
             for i, img in enumerate(frames): yield self.overlay.apply(img, SYN.race_time(sg, a0 + i, self.fps))
             return
-        ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
+        gain = self.gains.get(sg['id']); ci = self._clip(sg['clip']); R = ci['R']; R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
         path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
         pts = ci['pts']; ks = np.minimum(flat.frame_at(pts, t_abs), ci['n'] - 1); quat = ci['T']['quat']             # the frame shown at clip time t is found by the frame timestamps, not by t x fps (a clip whose camera dropped frames has timestamps that jump)
@@ -80,6 +122,7 @@ class FinalSource:
                 R.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], (float(pose_extra[i][3]) if pose_extra is not None and len(pose_extra[i]) > 3 and pose_extra[i][3] > 0 else (P['disc'][i] if P['use_disc'] else None)))
                 yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0); d = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); M = Ms[i]
                 img = R.render(cur_m, cur_s, d if P['ref'] == 'body' else M @ d, M @ ez, float(P['roll'][i]))
+                if gain is not None: img = GR.apply(img, gain(max(times[i], 0.0)))                  # the exposure match, before the overlay so the numbers are never graded
                 yield img if self.overlay is None else self.overlay.apply(img, utc0 + times[i])           # before any transition blend, so a dissolve cross-fades the two overlays too
         finally:
             for p in (dm, ds):
@@ -94,7 +137,7 @@ def encoder_args(bitrate):
 
 def encode_piece(path, W, H, fps, bitrate, run):
     """run(emit) renders the piece's frames into emit; they are encoded to `path` (kept only when complete)."""
-    cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-', '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',
+    cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', ffmpeg_rate(fps), '-i', '-', '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',
            *encoder_args(bitrate), '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', path + '.part.mov']
     enc = guard.popen(cmd, stdin=subprocess.PIPE)
     try:
@@ -120,30 +163,31 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
     total = sum(p['frames'] for p in ps); t0 = time.time(); done_frames = 0
     def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=done_frames, frames_total=total, pieces_done=sum(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
     from strata360.overlay import for_project
-    src = FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H))); status('rendering')
+    src = FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H)), gains=GR.gains_for(folder, segs, framing)); status('rendering')
     for n, p in enumerate(ps):
         if limit_pieces is not None and n >= limit_pieces: break
         f = os.path.join(d, p['id'] + '.mov')
         if os.path.exists(f + '.done'): done_frames += p['frames']; continue
         encode_piece(f, W, H, fps, bitrate, lambda emit, p=p: render_piece(p, segs, src, emit)); done_frames += p['frames']; status('rendering'); progress and progress(done_frames, total)
     if limit_pieces is not None: status('partial'); return d
-    status('assembling'); audio = os.path.join(d, 'audio.wav'); build_audio(folder, plan, audio, total / fps)
+    from strata360.render import timemap; timemap.write(plan, fps, d)                                                                  # which footage is on screen at every frame (timemap.json and .csv beside the film)
+    status('assembling'); audio = os.path.join(d, 'audio.wav'); sound = build_audio(folder, plan, audio, total / fps, loudness=loudness_target(folder))          # the film's sound, to its loudness target
     lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{os.path.join(d, p['id'] + '.mov')}'\n" for p in ps)); film = out or os.path.join(d, 'film.mp4')
     r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
     if r.returncode: status('error', error=r.stderr[-300:]); raise RuntimeError(r.stderr[-300:])
-    status('done', finished=time.time(), film=film); return film
+    status('done', finished=time.time(), film=film, sound=sound); return film
 
 
 def main():
     import argparse
     from strata360.edit import framing as FR, project as PJ
-    ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--size', default='3840x2160'); ap.add_argument('--fps', type=float, default=50.0); ap.add_argument('--bitrate', default='100M')
+    ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--size', default='3840x2160'); ap.add_argument('--fps', type=float, default=0.0, help='frames a second; 0 (the default) is the footage\'s own rate'); ap.add_argument('--half-rate', action='store_true', help='half the rate: every other source frame (faster)'); ap.add_argument('--bitrate', default='100M')
     ap.add_argument('--pieces', type=int, help='render only the first N pieces (a trial; nothing is assembled)'); ap.add_argument('--out'); a = ap.parse_args()
     from strata360 import oslib; oslib.lower_priority(19)
     plan = PJ.load(a.folder).get('plan')
     if not plan: sys.exit('no plan yet')
-    W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan, head=True)
-    print(render_final(a.folder, plan, fr, (W, H), a.fps, a.bitrate, a.pieces, a.out, progress=lambda i, n: print(f'\r{i}/{n} frames', end='', flush=True)))
+    W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan, head=True); fps = resolve_fps(a.folder, plan, a.fps, a.half_rate)
+    print(render_final(a.folder, plan, fr, (W, H), fps, a.bitrate, a.pieces, a.out, progress=lambda i, n: print(f'\r{i}/{n} frames', end='', flush=True)))
 
 
 if __name__ == '__main__': main()

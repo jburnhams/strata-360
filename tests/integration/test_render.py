@@ -168,3 +168,47 @@ def test_preview_from_proxy_render(processed, cli, monkeypatch):
     assert video_stream['codec_name'] == 'h264'
     assert video_stream['width'] == 64
     assert video_stream['height'] == 32
+
+
+def two_window_project(processed, monkeypatch):
+    """The synthetic project with a two-window plan (a dissolve between them), saved; returns (plan, the clip ids)."""
+    patch_for_synthetic(monkeypatch, processed)
+    from strata360.edit import project as PJ
+    from strata360.pipeline import config
+    c1, c2 = 'CAM_20260221120007_0019_D', 'CAM_20260221120107_0020_D'
+    plan = {'film': {'length_s': 1.0, 'bpm': 120, 'music': None}, 'segments': [
+        {'id': 'S1', 'clip': c1, 'clip_start_s': 0.0, 'film_start_s': 0.0, 'dur_s': 0.5, 'utc_start': '2026-02-21T12:00:07Z', 'utc_end': '2026-02-21T12:00:07.5Z', 'transition': {'type': 'cut', 'dur_s': 0.0}, 'technique': 'hold_wide', 'subject': 'front'},
+        {'id': 'S2', 'clip': c2, 'clip_start_s': 0.0, 'film_start_s': 0.5, 'dur_s': 0.5, 'utc_start': '2026-02-21T12:01:07Z', 'utc_end': '2026-02-21T12:01:07.5Z', 'transition': {'type': 'dissolve', 'dur_s': 0.2}, 'technique': 'hold_wide', 'subject': 'front'}]}
+    for c in (c1, c2):
+        json.dump({"start_utc": "2026-02-21T12:00:07Z", "duration_s": 1.2, "dt": 0.1, "t": [0.0, 0.1, 0.2, 0.3], "world_heading_deg": [0, 0, 0, 0], "smooth_heading_deg": [0, 0, 0, 0], "bank_deg": [0, 0, 0, 0], "v_ground_ms": [0, 0, 0, 0], "v_up_ms": [0, 0, 0, 0]}, open(os.path.join(config.race_dir(processed), 'clips', c, 'motion.json'), 'w'))
+    PJ.save(processed, {'plan': plan, 'framing': {g: {'mode': 'body', 'fov': 90, 'pitch': 0, 'yaw': 0, 'roll': 0} for g in ('S1', 'S2')}})
+    return plan, (c1, c2)
+
+
+def test_the_final_film_takes_the_footages_frame_rate_and_writes_a_time_map_that_the_overlay_clock_agrees_with(processed, cli, monkeypatch):
+    """A2: no --fps means the clips' own rate (and half of it with --half-rate); each window's overlay clock is its clip's UTC to within a frame; the time map says the same."""
+    import datetime as dt
+    plan, (c1, c2) = two_window_project(processed, monkeypatch)
+    from strata360.pipeline import config
+    from strata360 import overlay as OV
+    from strata360.render import timemap as TM
+    src_fps = float(json.load(open(os.path.join(config.race_dir(processed), 'clips', c1, 'clip.json')))['video']['nominal_fps'])
+    seen = []
+    class Rec:
+        def apply(self, img, t): seen.append(t); return img
+    monkeypatch.setattr(OV, 'for_project', lambda folder, size, tiles=None: Rec())
+    r = cli('final', processed, '--size', '128x64', '--bitrate', '1M'); assert r.code == 0
+    d = os.path.join(processed, 'strata360', 'final'); key = next(x for x in os.listdir(d) if len(x) == 10); out = os.path.join(d, key)
+    tm = json.load(open(os.path.join(out, 'timemap.json'))); assert tm['fps'] == pytest.approx(src_fps) and tm['frames'] == round(src_fps) and os.path.exists(os.path.join(out, 'timemap.csv'))
+    probe = library.ffprobe(os.path.join(out, 'film.mp4')); vs = next(s for s in probe['streams'] if s['codec_type'] == 'video'); num, den = map(int, vs['avg_frame_rate'].split('/')); assert num / den == pytest.approx(src_fps, rel=0.01)
+    ts = lambda s: dt.datetime.fromisoformat(s.replace('Z', '+00:00')).timestamp()
+    w0, w1 = tm['windows']; frame = 1.0 / src_fps
+    assert any(abs(t - ts('2026-02-21T12:00:07Z')) <= frame for t in seen) and any(abs(t - ts('2026-02-21T12:01:07Z')) <= frame for t in seen)                        # each window drew its own clip's clock from its first frame
+    assert abs(ts(TM.utc_at(tm, 0)) - ts(w0['utc_in'])) < 1e-6 and tm['transitions'][0]['incoming']['clip'] == c2 and w1['film_in'] == w0['film_out']
+    seen.clear(); shutil_rmtree(out)
+    r = cli('final', processed, '--size', '128x64', '--bitrate', '1M', '--half-rate'); assert r.code == 0
+    key2 = next(x for x in os.listdir(d) if len(x) == 10 and x != key); assert json.load(open(os.path.join(d, key2, 'timemap.json')))['fps'] == pytest.approx(src_fps / 2)
+
+
+def shutil_rmtree(p):
+    import shutil; shutil.rmtree(p)

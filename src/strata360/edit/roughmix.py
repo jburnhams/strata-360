@@ -6,7 +6,7 @@ import hashlib, json, os, subprocess, time
 
 from strata360.pipeline import config
 
-VERSION = 1                  # bump when the way the mix is made changes what it sounds like: every earlier mix is then out of date
+VERSION = 2                  # bump when the way the mix is made changes what it sounds like: every earlier mix is then out of date
 MUSIC_GAIN = 0.25            # the music, quietly (the film's own mix has it at 0.5)
 BG_GAIN = 0.3                # a clip's background sound under narration and b-roll
 

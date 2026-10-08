@@ -76,7 +76,7 @@ export const makeGap = (o: Partial<Gap> = {}): Gap => ({
   daylight: 'twilight->night', before: 'a', after: 'b', default_seconds: 14, clips: [], ...o,
 })
 export const makeFilmState = (o: Partial<FilmState> = {}): FilmState => ({ state: 'none', running: false, ...o })
-export const makeFinalState = (o: Partial<FinalState> = {}): FinalState => ({ state: 'none', running: false, settings: { size: '1080p', fps: 30, bitrate: '20M' }, ...o })
+export const makeFinalState = (o: Partial<FinalState> = {}): FinalState => ({ state: 'none', running: false, settings: { size: '1080p', fps: 30, half_rate: false, bitrate: '20M' }, ...o })
 export const makeRoughMix = (o: Partial<RoughMix> = {}): RoughMix => ({ has_plan: true, exists: false, stale: false, stale_because: [], length_s: null, made_at: null, source: 'script', building: false, error: '', log: '', ...o })
 export const makeScriptState = (o: Partial<import('../../src/api').ScriptState> = {}): import('../../src/api').ScriptState => ({ key_configured: true, providers: { anthropic: { models: ['claude-3'], default: 'claude-3', configured: true } }, models: ['claude-3'], llm: { provider: 'anthropic', model: 'claude-3' }, running: false, last_exit: null, log: '', latest: null, scripts: 0, ...o })
 export const makeVoiceoverState = (o: Partial<import('../../src/api').VoiceoverState> = {}): import('../../src/api').VoiceoverState => ({ engines: [{ id: 'e1', label: 'Engine 1', voices: [{ name: 'v1', lang: 'en' }] }], state: { engine: 'e1', voice: 'v1', rate: 100, use: {} }, timings: null, script: null, cached: [], lines: 0, building: false, error: null, ...o })

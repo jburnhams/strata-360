@@ -114,3 +114,21 @@ def test_millisecond_rounding_of_back_to_back_windows_is_not_an_overlap():
     a, b = pairs[0]; end = a.clip_start_s + a.beats * m.beat_s
     b.clip_start_s = round(end - 0.0008, 3); assert C.violations(p, LIB, m, clips) == []                      # 0.8 ms: what rounding to the millisecond produces (seen on Legends at 97 bpm)
     b.clip_start_s = end - 0.02; assert any('overlap or disorder' in v for v in C.violations(p, LIB, m, clips))   # a real overlap is still caught
+
+
+def test_camera_share_is_the_covered_part_of_the_window_times_the_cameras_score():
+    cams = [dict(kind='scenery', start_s=10.0, end_s=20.0, score=0.8), dict(kind='free', start_s=0.0, end_s=100.0, score=0.5)]
+    assert abs(C.camera_share(cams, 'scenery', 12.0, 4.0) - 0.8) < 1e-9                              # inside: the score
+    assert abs(C.camera_share(cams, 'scenery', 18.0, 4.0) - 0.4) < 1e-9                              # half of it sticks out
+    assert C.camera_share(cams, 'scenery', 30.0, 4.0) == 0.0 and C.camera_share(cams, 'follow_runner', 12.0, 4.0) == 0.0     # outside, or no camera of that kind
+    assert C.camera_share(None, 'scenery', 12.0, 4.0) == 0.0 and C.camera_share(cams, 'pan_reveal', 12.0, 4.0) == 0.0         # no list, or a technique that shows no camera kind
+
+
+def test_a_clips_camera_list_pulls_the_plan_towards_the_techniques_of_its_good_cameras():
+    m = music(); base = make_clips([60, 60, 60, 60]); ids = lambda cl, **kw: [s.tech.id for s in C.plan(cl, LIB, m, C.Settings(seed=1, **kw))]
+    assert ids(base) == ids(base, w_camlist=5.0)                                                     # no camera lists: the weight changes nothing
+    for c in base:
+        c['cameras'] = [dict(kind='scenery', start_s=0.0, end_s=60.0, score=1.0)]
+        for cd in c['candidates']: cd['features']['scenery_ok'] = 1.0                                   # scenery is possible everywhere, so only the camera list tips the choice
+    plain = ids(base, w_camlist=0.0).count('scenery'); pulled = ids(base, w_camlist=5.0).count('scenery')
+    assert pulled > plain, (plain, pulled)

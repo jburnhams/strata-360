@@ -108,7 +108,9 @@ def timeline(d):
     except ImportError: pass
     if vq is not None and len(vq['t']):                                                               # a double check on "the lens is blocked or fogged": the vision model says so AND most of the sphere has no detail or contrast; if the picture as a whole still has something in it, the stretch stays usable
         grid_low = at(vq['t'], low_fraction(vq), 0.0); hard = blocked > 0.5; blocked = np.where(hard & (grid_low > GRID_BAD_FRAC), blocked, np.where(hard, 0.4, blocked))
-    return dict(n=n, t=t, dur=dur, grid_low=grid_low, has_quality=vq is not None, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, you_close=you_close, you_far=you_far, scenery_ok=scenery_ok, free_ok=free_ok, people=people, scenic=scenic, scenery10=scenery10, blocked=blocked, canopy=canopy, open_ground=open_ground,
+    from strata360.analysis import lens_check as LC
+    lens = LC.blocked(_load(d, LC.FILE), t)                                                           # how much one lens is covered (a hand, fog, water), from the lens pictures: it lowers clear_nadir only, as a plain wall fills a lens too
+    return dict(n=n, t=t, dur=dur, lens=lens, grid_low=grid_low, has_quality=vq is not None, shake=shake, chatter=chatter, steady=steady, energy=0.6 * energy + 0.4 * sen, expo=expo, speech=speech, me=me, you_close=you_close, you_far=you_far, scenery_ok=scenery_ok, free_ok=free_ok, people=people, scenic=scenic, scenery10=scenery10, blocked=blocked, canopy=canopy, open_ground=open_ground,
                 setting=setting, missing=missing, clip=clip, tr=tr, al=al, sc=sc, mo=mo)
 
 
@@ -184,7 +186,7 @@ def build(d, thr=None):
                     cur = j
     order = {'span': 0, 'best': 1, 'speech': 2, 'you': 3, 'person': 4, 'scene': 5}; found.sort(key=lambda x: (x[0], order[x[2]], x[1])); cands = []
     for c, (i0, i1, kind, k) in enumerate(found):
-        sl = slice(i0, i1); qq = float(q[sl].mean()); s_ = float(T['steady'][sl].mean()); nad = float(np.clip(1.0 - T['blocked'][sl].max() * 0.8, 0, 1)); sp = kind == 'speech'
+        sl = slice(i0, i1); qq = float(q[sl].mean()); s_ = float(T['steady'][sl].mean()); nad = float(np.clip(1.0 - np.maximum(T['blocked'], T['lens'])[sl].max() * 0.8, 0, 1)); sp = kind == 'speech'
         feats = dict(steady=round(s_, 3), clear_nadir=round(nad, 3), open_ground=round(float(T['open_ground'][sl].mean()), 3), canopy=round(float(T['canopy'][sl].mean()), 3),
                      subject=round(float(np.clip(T['me'][sl].mean() * 0.7 + min(T['people'][sl].mean(), 3) / 3 * 0.5, 0, 1)), 3), speech=1.0 if sp else 0.0, protagonist=round(float(T['me'][sl].mean()), 3), you_close=round(float(T['you_close'][sl].mean()), 3), you_far=round(float(T['you_far'][sl].mean()), 3), scenery_ok=round(float(T['scenery_ok'][sl].mean()), 3), free_ok=round(float(T['free_ok'][sl].mean()), 3),
                      low_obstruction=round(float(1 - T['blocked'][sl].mean()), 3), chatter=round(float(T['chatter'][sl].mean()), 3), resolution=round(float(np.clip(0.55 + 0.45 * T['expo'][sl].mean(), 0, 1)), 3))

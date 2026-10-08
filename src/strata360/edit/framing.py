@@ -18,7 +18,7 @@ from scipy.ndimage import gaussian_filter1d
 from strata360.pipeline import config
 from strata360.edit import techniques as TQ, aim as AIM, attention as AT, clip_views as CV, scenery as SC, view_quality as VQ
 
-FOLLOW = {'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold', 'selfie_close', 'selfie_far'}          # techniques that keep their subject in frame as it moves
+FOLLOW = {'person_hold', 'hold_wide', 'dialogue_hold', 'push_in', 'pull_out', 'selfie_hold', 'selfie_close', 'selfie_far'}          # techniques that keep their subject in frame as it moves
 NO_SUBJECT = {'follow_runner', 'planet_fill', 'planet_globe', 'planet_fill_zoom_out', 'globe_shrink', 'tunnel_up', 'spin_roll'}
 TIGHT = {'push_in', 'dialogue_hold'}
 YOU_VIEWS = {'selfie_hold', 'selfie_close', 'selfie_far'}      # the three views of you (mid, close, far)
@@ -134,7 +134,10 @@ def clip_data(folder, clip, head=False):
     d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = cj['source_files']['osv']
     sp = os.path.join(d, 'speakers.json')
     from strata360.analysis.exposure import load_quality
-    return dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv), proxy=_proxy_info(d) if os.environ.get('STRATA_YOU_KLT') == '1' else None, head=_head_provider(d, views.focus_samples(d, osv), head))          # the frame-by-frame tracker (analysis/subject_track.py) is opt-in: on 0021 it did not predict a held-out detection better than a straight line (the detections' box and face centres are themselves inexact)
+    out = dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv), proxy=_proxy_info(d) if os.environ.get('STRATA_YOU_KLT') == '1' else None, head=_head_provider(d, views.focus_samples(d, osv), head))          # the frame-by-frame tracker (analysis/subject_track.py) is opt-in: on 0021 it did not predict a held-out detection better than a straight line (the detections' box and face centres are themselves inexact)
+    try: out['cameras'] = json.load(open(os.path.join(d, 'cameras.json'))).get('cameras') or []          # the clip's ranked cameras (edit/cameras.py): scenery and free views take their aim from them
+    except (OSError, ValueError): out['cameras'] = []
+    return out
 
 
 def choose_subject(g, tech, data):
@@ -145,6 +148,7 @@ def choose_subject(g, tech, data):
     if tech.id in YOU_VIEWS:
         what = {'selfie_hold': 'you, the wearer', 'selfie_close': 'you, close on the face', 'selfie_far': 'you, ultra wide: the whole body and the surroundings'}[tech.id]
         return (('you', what) if cy >= 0.3 else ('none', 'you are not found in this window: behind the runner'))
+    if tech.id == 'person_hold': return (('person', 'another person, kept in view (the clip\'s person camera)') if cp >= 0.3 else ('heading', 'no other person is found in this window: straight ahead'))
     kind = g.get('kind')                                                                 # the candidate the window was cut from says how it is meant to be seen
     if kind == 'person' and cp >= 0.3: return 'person', 'this stretch was chosen for the people in view'
     if kind == 'you' and cy >= 0.3: return 'you', 'this stretch was chosen for you in view'
@@ -169,14 +173,49 @@ def scenery_path(g, T, t0, rng, v):
     return dict(ref='world', keyframes=kf, subject='scenery', why=why)
 
 
+CAMERA_SLACK_S = 0.3         # a window may run this far outside a camera's stretch (windows are whole beats) and still take its aim
+
+
+def camera_path(cams, kind, t0, T):
+    """The aim of the best camera of `kind` ('scenery' or 'free') in the clip's camera list (edit/cameras.py) whose stretch holds the window of `T` seconds from clip second `t0`, cut to the window (times from 0, jumps kept, ends interpolated); None when no
+    camera of that kind covers it, and the framing makes its own."""
+    best = None
+    for c in cams or []:
+        kf = (c.get('aim') or {}).get('keyframes')
+        if c.get('kind') == kind and kf and c['start_s'] - CAMERA_SLACK_S <= t0 and t0 + T <= c['end_s'] + CAMERA_SLACK_S and (best is None or c['score'] > best['score']): best = c
+    if best is None: return None
+    base = float(best['aim'].get('t0', best['start_s'])); kf = best['aim']['keyframes']; ts = np.array([base + k['t'] for k in kf]); a, b = t0, t0 + T
+    def at(t): return {key: float(np.interp(t, ts, [k[key] for k in kf])) for key in ('yaw', 'pitch', 'fov')}
+    pts = [(a, at(a))] + [(float(t), dict(yaw=k['yaw'], pitch=k['pitch'], fov=k['fov'])) for t, k in zip(ts, kf) if a < t < b] + [(b, at(b))]
+    out = [dict(t=round(t - a, 3), yaw=round(v['yaw'], 2), pitch=round(v['pitch'], 2), fov=round(v['fov'], 1), ease='linear') for t, v in pts]
+    return dict(ref='world', keyframes=out, subject=kind, why=f"camera {best['id']} of the clip's list (score {best['score']:.2f}): {best.get('why', '')}")
+
+
 PAN_MIN_S = 3.0              # a free view of at least this long may pan between two poses
 PAN_MAX_DEG = 60.0           # by at most this much yaw: a drift, not a sweep
 PAN_KEEP = 0.85              # and only when both ends look at least this good compared with the best fixed view
 
 
-def _best_pose(grid, a, b, rng, k=3):
-    """The (score, yaw, pitch, hfov) of the view that looks best over [a, b], one of the top `k` picked at random (the seeded variety)."""
-    best = [(VQ.window_score(grid, a, b, yaw, pitch, hfov, 16 / 9, step=1.0)['score'], yaw, pitch, hfov) for yaw in range(-180, 180, 15) for pitch in FREE_PITCHES for hfov in FREE_HFOVS]
+def _prior_weight(v, t, yaw):
+    """0.4..1: the scenes stage's rating of looking along `yaw` (the grid's frame) at clip second `t`, as the scenery camera weights its views; 1 without ratings."""
+    prior, heading = (v or {}).get('prior'), (v or {}).get('heading')
+    return 1.0 if prior is None or heading is None else SC.Settings.prior_floor + (1 - SC.Settings.prior_floor) * prior(t, float(SC.wrap(yaw - heading(t))))
+
+
+def path_score(path, T, t0, v, n=5):
+    """The mean look of a window's camera path (keyframes from 0 to T seconds in the grid's frame) at `n` moments of the window: the quality grid's view score weighted by the scenes stage's rating of the direction, so two ways of framing the same window can be compared."""
+    kf = path['keyframes']; ts = [k['t'] for k in kf]; hz = float(v['grid']['hz']); out = []
+    for x in np.linspace(0.0, T, n):
+        y, p, f = (float(np.interp(x, ts, [k[key] for k in kf])) for key in ('yaw', 'pitch', 'fov'))
+        out.append(VQ.view_score(v['grid'], int(round((t0 + x) * hz)), y, p, f, 16 / 9)['score'] * _prior_weight(v, t0 + x, y))
+    return float(np.mean(out))
+
+
+def _best_pose(grid, a, b, rng, k=3, v=None):
+    """The (score, yaw, pitch, hfov) of the view that looks best over [a, b], one of the top `k` picked at random (the seeded variety). With `v` (clip_views.load's dict) the look is weighted by the scenes stage's rating of that direction at the middle of the window,
+    as the scenery camera does, so a close brick wall (all fine detail) does not beat a better-rated direction."""
+    mid = (a + b) / 2.0; weight = lambda yaw: _prior_weight(v, mid, yaw)
+    best = [(VQ.window_score(grid, a, b, yaw, pitch, hfov, 16 / 9, step=1.0)['score'] * weight(yaw), yaw, pitch, hfov) for yaw in range(-180, 180, 15) for pitch in FREE_PITCHES for hfov in FREE_HFOVS]
     best.sort(reverse=True); return best[int(rng.integers(0, min(k, len(best))))]
 
 
@@ -184,9 +223,9 @@ def free_path(g, T, t0, rng, v):
     """A free camera (edit/view_quality.py): a fixed pose, the view that looks best over the whole window, or, in a window of 3 s or more, a slow pan from the best pose at its start to the best pose at its end when those are different (15 to 60 degrees apart) and
     each looks nearly as good as the fixed one; one of the top few at random (the seeded variety). People are not avoided. None without a quality grid."""
     if not v or v.get('grid') is None: return None
-    grid = v['grid']; sc, yaw, pitch, hfov = _best_pose(grid, t0, t0 + T, rng); kf = lambda t, y, p, f: dict(t=round(float(t), 3), yaw=float(y), pitch=float(p), fov=float(f), ease='linear')
+    grid = v['grid']; sc, yaw, pitch, hfov = _best_pose(grid, t0, t0 + T, rng, v=v); kf = lambda t, y, p, f: dict(t=round(float(t), 3), yaw=float(y), pitch=float(p), fov=float(f), ease='linear')
     if T >= PAN_MIN_S:
-        win = min(1.5, T / 3.0); s0, y0, p0, f0 = _best_pose(grid, t0, t0 + win, rng, 1); s1, y1, p1, f1 = _best_pose(grid, t0 + T - win, t0 + T, rng, 1); d = abs(float(CV.wrap(y1 - y0)))
+        win = min(1.5, T / 3.0); s0, y0, p0, f0 = _best_pose(grid, t0, t0 + win, rng, 1, v); s1, y1, p1, f1 = _best_pose(grid, t0 + T - win, t0 + T, rng, 1, v); d = abs(float(CV.wrap(y1 - y0)))
         if 15.0 <= d <= PAN_MAX_DEG and min(s0, s1) >= PAN_KEEP * sc:
             return dict(ref='world', keyframes=[kf(0.0, y0, p0, f0), kf(T, y0 + float(CV.wrap(y1 - y0)), p1, f1)], subject='free', why=f'a slow pan of {d:.0f} degrees between the best pose at the start and at the end (score {min(s0, s1):.2f})')
     return dict(ref='world', keyframes=[kf(0.0, yaw, pitch, hfov), kf(T, yaw, pitch, hfov)], subject='free', why=f'a fixed view chosen for its detail and exposure (score {sc:.2f})')
@@ -208,7 +247,11 @@ def resolve_segment(g, lib, data):
     subject, why = choose_subject(g, tech, data)
     rng = np.random.default_rng(int(g.get('variant_seed') or 0)); heading = data['heading']
     if tech.id in ('scenery', 'free_view'):
-        made = (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
+        made = camera_path(data.get('cameras'), 'scenery' if tech.id == 'scenery' else 'free', t0, T); own = None
+        if tech.id == 'free_view' and made is not None and data.get('views') and data['views'].get('grid') is not None:      # a free camera is one pose for its whole stretch, which may suit this window badly (the people moved, a wall is in the way): the window's own best pose is taken when it looks better on this window
+            own = free_path(g, T, t0, np.random.default_rng(int(g.get('variant_seed') or 0)), data['views'])
+            if own is not None and path_score(own, T, t0, data['views']) > path_score(made, T, t0, data['views']): made = own
+        elif made is None: made = (scenery_path if tech.id == 'scenery' else free_path)(g, T, t0, rng, data.get('views'))
         if made is not None: return made
         why = 'there is no quality grid for this clip yet (the quality stage): looking straight ahead'; subject = 'heading'
     if subject in ('person', 'you'):

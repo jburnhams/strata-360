@@ -12,7 +12,7 @@ it('renders a skeleton while loading or no plan', async () => {
 })
 
 it('shows settings and start button when ready to render', async () => {
-  mockGet('/api/final', () => makeFinalState({ state: 'none', settings: { size: '1920x1080', fps: 30, bitrate: 'test' } }))
+  mockGet('/api/final', () => makeFinalState({ state: 'none', settings: { size: '1920x1080', fps: 30, half_rate: false, bitrate: 'test' } }))
   const { findByLabelText, findByRole } = setup(<FinalRender folder="/f" />)
 
   expect(await findByLabelText(/Size/i)).toBeInTheDocument()
@@ -21,7 +21,7 @@ it('shows settings and start button when ready to render', async () => {
 })
 
 it('can trigger a render with changed settings', async () => {
-  mockGet('/api/final', () => makeFinalState({ state: 'none', settings: { size: '1920x1080', fps: 30, bitrate: 'test' } }))
+  mockGet('/api/final', () => makeFinalState({ state: 'none', settings: { size: '1920x1080', fps: 30, half_rate: false, bitrate: 'test' } }))
   const { user, findByRole, findByLabelText } = setup(<FinalRender folder="/f" />)
 
   const reqs = recordRequests('/api/final/start')
@@ -29,12 +29,13 @@ it('can trigger a render with changed settings', async () => {
 
   await user.selectOptions(await findByLabelText(/Size/i), '3840x2160')
   await user.selectOptions(await findByLabelText(/Frames\/s/i), '50')
+  await user.click(await findByLabelText(/Half frame rate/i))
 
   await user.click(await findByRole('button', { name: 'Render final film' }))
 
   const { waitFor } = await import('@testing-library/react')
   await waitFor(() => expect(reqs.find(r => r.method === 'POST')).toBeTruthy())
-  expect(reqs[0].body).toMatchObject({ folder: '/f', size: '3840x2160', fps: 50 })
+  expect(reqs[0].body).toMatchObject({ folder: '/f', size: '3840x2160', fps: 50, half_rate: true })
 })
 
 it('shows progress and stop button while rendering', async () => {
@@ -53,7 +54,7 @@ it('shows progress and stop button while rendering', async () => {
 })
 
 it('has no accessibility violations', async () => {
-  mockGet('/api/final', () => makeFinalState({ state: 'none', settings: { size: '1920x1080', fps: 30, bitrate: 'test' } }))
+  mockGet('/api/final', () => makeFinalState({ state: 'none', settings: { size: '1920x1080', fps: 30, half_rate: false, bitrate: 'test' } }))
   const { container, findByRole } = setup(<FinalRender folder="/f" />)
   await findByRole('button', { name: 'Render final film' }) // wait for load
   expect(await axe(container)).toHaveNoViolations()

@@ -134,7 +134,7 @@ export interface EditState {
 export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
 export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
 export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | 'rendering' | 'done' | 'error'; running: boolean; key?: string; frames_done?: number; frames_total?: number; placeholders?: string[]; error?: string | null; length_s?: number }
-export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; bitrate: string }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean }
+export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; half_rate: boolean; bitrate: string }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean }
 export interface MusicAnalysis { bpm: number; offset_s: number; bar_beats?: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number }
 export interface MusicState { file: string | null; name?: string | null; analysis: MusicAnalysis | null; waveform?: number[] | null; spectrogram?: boolean }
 export interface StudioGrid { bpm: number; key: { tonic: number; mode: string; name: string; confidence: number }; bars: number; duration_s: number; bar_s: number; downbeats: number[]; energy: number[] }
@@ -314,7 +314,7 @@ export const api = {
   stopFilm: (folder: string) => call<{ ok: boolean }>('/api/film/stop', { folder }),
   filmUrl: (folder: string) => '/api/film/index.m3u8?' + q({ folder }),
   final: (folder: string) => call<FinalState>('/api/final?' + q({ folder })),
-  startFinal: (folder: string, o: { size?: string; fps?: number } = {}) => call<{ started: boolean }>('/api/final/start', { folder, ...o }),
+  startFinal: (folder: string, o: { size?: string; fps?: number; half_rate?: boolean } = {}) => call<{ started: boolean }>('/api/final/start', { folder, ...o }),
   stopFinal: (folder: string) => call<{ ok: boolean }>('/api/final/stop', { folder }),
   finalUrl: (folder: string) => '/api/final/file?' + q({ folder }),
   music: (folder: string) => call<MusicState>('/api/music?' + q({ folder })),
