@@ -4,16 +4,21 @@ import json
 import cv2
 import numpy as np
 import pytest
-import torch
+try: import torch
+except ImportError: torch = None                                    # (the CI unit environment has no torch: the tests that run a network are skipped there)
 
 from strata360.edit import upscale as UP
 
 
-class Nearest4(torch.nn.Module):
-    def forward(self, x): return torch.nn.functional.interpolate(x, scale_factor=4, mode='nearest')
+needs_torch = pytest.mark.skipif(torch is None, reason='torch is not installed')
+if torch is not None:
+    class Nearest4(torch.nn.Module):
+        def forward(self, x): return torch.nn.functional.interpolate(x, scale_factor=4, mode='nearest')
 
+    class NoRed(torch.nn.Module):                                   # the model's own first (red) channel is zeroed, and the picture is enlarged 4x
+        def forward(self, x): y = torch.nn.functional.interpolate(x, scale_factor=4, mode='nearest').clone(); y[:, 0] = 0; return y
 
-FAKE = (Nearest4(), 'cpu')
+    FAKE = (Nearest4(), 'cpu')
 
 
 def picture(h=70, w=130):
@@ -39,6 +44,7 @@ class TestFactorFor:
         assert UP.factor_for(16.0, 1920, 85.0) == 1                 # ratio 1.41, under MIN_RATIO
 
 
+@needs_torch
 class TestUpscale:
     @pytest.mark.parametrize('factor', [2, 3, 4])
     def test_size_is_factor_times_the_input(self, factor):
@@ -54,19 +60,17 @@ class TestUpscale:
         assert np.array_equal(two, np.repeat(np.repeat(im, 2, 0), 2, 1))        # nearest 4x then area 2x of a nearest image is nearest 2x
 
 
+@needs_torch
 class TestPrecisionAndOrder:
-    class NoRed(torch.nn.Module):                                   # the model's own first (red) channel is zeroed, and the picture is enlarged 4x
-        def forward(self, x): y = torch.nn.functional.interpolate(x, scale_factor=4, mode='nearest').clone(); y[:, 0] = 0; return y
-
     def test_sixteen_bit_pictures_stay_sixteen_bit_with_their_values(self):
         im = np.random.default_rng(2).integers(0, 65535, (12, 20, 3), dtype=np.uint16); out = UP.upscale(im, 2, model=FAKE, bgr=False)
         assert out.dtype == np.uint16 and np.abs(out.astype(int) - np.repeat(np.repeat(im, 2, 0), 2, 1)).max() <= 1       # (no rounding down to 8 bits: a sky would band)
 
     def test_bgr_pictures_are_shown_to_the_model_as_rgb(self):
-        out = UP.upscale(np.full((8, 8, 3), 200, np.uint8), 2, model=(self.NoRed(), 'cpu'), bgr=True); assert out[..., 2].max() == 0 and out[..., 0].min() == 200      # red is the last channel of BGR
+        out = UP.upscale(np.full((8, 8, 3), 200, np.uint8), 2, model=(NoRed(), 'cpu'), bgr=True); assert out[..., 2].max() == 0 and out[..., 0].min() == 200      # red is the last channel of BGR
 
     def test_rgb_pictures_are_given_as_they_are(self):
-        out = UP.upscale(np.full((8, 8, 3), 200, np.uint8), 2, model=(self.NoRed(), 'cpu'), bgr=False); assert out[..., 0].max() == 0 and out[..., 2].min() == 200
+        out = UP.upscale(np.full((8, 8, 3), 200, np.uint8), 2, model=(NoRed(), 'cpu'), bgr=False); assert out[..., 0].max() == 0 and out[..., 2].min() == 200
 
 
 class TestCached:
@@ -88,11 +92,11 @@ class TestCached:
 class TestLoad:
     def test_a_missing_package_says_what_to_install(self, monkeypatch):
         import sys; monkeypatch.setitem(sys.modules, 'spandrel', None); monkeypatch.setattr(UP, '_model', {})
-        with pytest.raises(RuntimeError, match='pip install -r requirements.txt'): UP.load()
+        with pytest.raises(RuntimeError, match='torch and spandrel packages.*pip install -r requirements.txt'): UP.load()
 
     def test_missing_weights_say_where_to_get_them(self, tmp_path, monkeypatch):
         monkeypatch.setattr(UP, '_model', {}); monkeypatch.setattr(UP, 'weights_path', lambda name=None, root=None: str(tmp_path / 'none.pth'))
-        pytest.importorskip('spandrel')
+        pytest.importorskip('torch'); pytest.importorskip('spandrel')
         with pytest.raises(FileNotFoundError, match='github.com'): UP.load()
 
 

@@ -1,4 +1,6 @@
 """Enlarging shots in the final render (render/final.py `FinalSource`): one factor for a whole shot from its narrowest view, none for night footage or a generated clip, a renderer at 1/factor of the output size, and the enlarged picture fitted to the output."""
+import os
+
 import numpy as np
 import pytest
 
@@ -36,7 +38,7 @@ class TestShotFactor:
 
     def test_the_clip_folder_is_what_the_night_test_reads(self, monkeypatch):
         seen = []; monkeypatch.setattr(UP, 'skip_reason', lambda d: seen.append(d)); source({'w1': path(40)}).shot_factor(dict(id='w1', clip='CAM_1'))
-        assert seen[0].endswith('clips/CAM_1')
+        assert seen[0].endswith(os.path.join('clips', 'CAM_1'))
 
     def test_a_generated_clip_is_never_enlarged(self): assert source({'w1': path(40)}).shot_factor(dict(id='w1', clip='C', synthetic='x.mp4')) == 1
 

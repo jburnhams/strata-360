@@ -54,9 +54,10 @@ def factor_for(source_px_per_deg, out_px, narrowest_fov):
 def load(name=None):
     name = name or MODEL
     if name not in _model:
-        import torch
-        try: from spandrel import ModelLoader
-        except ImportError as e: raise RuntimeError('enlarging needs the spandrel package: pip install -r requirements.txt') from e
+        try:
+            import torch
+            from spandrel import ModelLoader
+        except ImportError as e: raise RuntimeError(f'enlarging needs the torch and spandrel packages ({e.name} is missing): pip install -r requirements.txt') from e
         p = weights_path(name)
         if not os.path.exists(p): raise FileNotFoundError(f'{p} is missing: download {MODELS[name][2]}')
         dev = 'mps' if torch.backends.mps.is_available() else 'cpu'
