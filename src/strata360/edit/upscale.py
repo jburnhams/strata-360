@@ -22,6 +22,8 @@ MODES = {'off': 0, '1080p': 1920, '1440p': 2560, 'full': None}     # how far the
 LABELS = {'off': 'No enlarging', '1080p': 'Model to 1080p, then resample', '1440p': 'Model to 1440p, then resample', 'full': 'Model to the full output size'}
 MIN_RATIO = 1.5                     # upscale only when the output would need at least this many times the source's pixels per degree (below that a plain scaler is as good)
 MAX_FACTOR = 4
+MIN_ZOOM = 2.5                      # a shot is enlarged only when MORE than MIN_SECONDS of it need at least this many times the source's pixels per degree (zoom); the whole shot is then enlarged, so the look does not change part way through. 2.5 leaves the 85 degree views (2.26x) alone and takes the 80 degree and tighter ones
+MIN_SECONDS = 0.5
 _model = {}
 
 
@@ -49,6 +51,13 @@ def factor_for(source_px_per_deg, out_px, narrowest_fov):
     Pass the narrowest FOV of the whole shot, so one tight moment upscales the entire shot."""
     ratio = (out_px / narrowest_fov) / source_px_per_deg
     return 1 if ratio < MIN_RATIO else int(min(MAX_FACTOR, max(2, round(ratio))))
+
+
+def seconds_over(t, fov, dur_s, out_w, source_px_per_deg, min_zoom, step=0.05):
+    """How many seconds of a shot need at least `min_zoom`: its camera path (keyframe times `t`, horizontal fields of view `fov` in degrees) is read every `step` seconds over `dur_s` (the whole shot when it has one keyframe or no length), and the zoom at each is (out_w / fov) / source_px_per_deg."""
+    t = np.asarray(t, float); fov = np.asarray(fov, float); need = lambda f: (out_w / f) / source_px_per_deg >= min_zoom - 1e-9
+    if len(t) < 2 or not dur_s: return float(dur_s or 1.0) if need(float(fov.min())) else 0.0
+    ts = np.arange(0.0, float(dur_s), step) + step / 2; f = np.interp(ts, t - t[0], fov); return float(need(f).sum() * step)
 
 
 def load(name=None):

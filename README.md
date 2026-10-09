@@ -10,7 +10,7 @@ scripts/setup_env.sh --fetch-models      # once per machine: environment, pinned
 ./strata360 serve --root ~/footage       # the web app: pick a footage folder, process it, edit, render
 ```
 
-Command-line equivalents (`open`, `run`, `progress`, `script`, `voiceover`, `film`, `final`, ...) are in [overview section 0](docs/overview.md#0-quick-start-running-the-pipeline-on-a-new-race-collection). On Windows use `python -m strata360` instead of `./strata360`.
+Command-line equivalents (`open`, `run`, `progress`, `script`, `voiceover`, `film`, `final`, ...) are in [overview section 0](docs/overview/00-quick-start-running-the-pipeline-on-a-ne.md). On Windows use `python -m strata360` instead of `./strata360`.
 
 ## Documentation
 

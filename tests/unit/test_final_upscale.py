@@ -54,7 +54,7 @@ class TestModes:
         assert f('full', 45) == 4 and f('1440p', 45) == 3 and f('1080p', 45) == 2          # 3840, 2560 and 1920 wide wanted from 20 px/degree at 45 degrees
 
     def test_a_wide_shot_the_lower_mode_already_satisfies_is_not_enlarged_at_all(self):
-        assert source({'w1': path(90)}, upscale='1080p').shot_factor(self.sg()) == 1 and source({'w1': path(90)}, upscale='full').shot_factor(self.sg()) == 2
+        assert source({'w1': path(90)}, upscale='1080p').shot_factor(self.sg()) == 1 and source({'w1': path(90)}, upscale='full', up_min_zoom=2.0).shot_factor(self.sg()) == 2
 
     def test_the_renderer_makes_the_picture_for_the_modes_width(self, monkeypatch):
         made = []
@@ -148,3 +148,30 @@ class TestWarmUpFrames:
 
     def test_for_a_still_only_the_last_frame_gets_them(self, monkeypatch):
         frames, calls = self.run(monkeypatch, True); assert len(frames) == 4 and calls == dict(enlarge=1, grade=1, overlay=1)
+
+
+class TestSelective:
+    """A shot is enlarged only when more than half a second of it needs the threshold zoom (2.5x: a view of 76.8 degrees or tighter at 3840 wide); then all of it is."""
+    def timed(self, fovs, dur): return dict(ref='world', keyframes=[dict(t=dur * i / (len(fovs) - 1), yaw=0.0, pitch=0.0, roll=0.0, fov=float(f)) for i, f in enumerate(fovs)])
+
+    def sg(self, dur): return dict(id='w1', clip='C', dur_s=dur)
+
+    def test_the_85_degree_views_are_left_alone(self): assert source({'w1': self.timed([85, 85], 6)}).shot_factor(self.sg(6)) == 1
+
+    def test_a_58_degree_close_view_is_enlarged_all_through(self): assert source({'w1': self.timed([58, 58], 3)}).shot_factor(self.sg(3)) == 3
+
+    def test_a_tight_moment_under_half_a_second_does_not_count(self):
+        dip = dict(ref='world', keyframes=[dict(t=t, yaw=0.0, pitch=0.0, roll=0.0, fov=float(f)) for t, f in ((0, 85), (3.8, 85), (4.0, 60), (4.2, 85), (8, 85))])
+        s = source({'w1': dip}); assert s.shot_factor(self.sg(8)) == 1 and 'need 2.5x' in s.why['w1']          # (a dip to 60 degrees that stays under 76.8 degrees for about a quarter of a second)
+
+    def test_a_longer_tight_stretch_enlarges_the_whole_shot(self): assert source({'w1': self.timed([85, 60, 60, 60, 85], 4)}).shot_factor(self.sg(4)) == 3
+
+    def test_the_threshold_can_be_changed(self): assert source({'w1': self.timed([85, 85], 6)}, up_min_zoom=2.0).shot_factor(self.sg(6)) == 2
+
+    def test_seconds_over_reads_the_path(self):
+        assert UP.seconds_over([0, 4], [60, 60], 4, 3840, 20.0, 2.5) == pytest.approx(4.0, abs=0.06) and UP.seconds_over([0, 4], [85, 85], 4, 3840, 20.0, 2.5) == 0.0
+        assert UP.seconds_over([0], [58], None, 3840, 20.0, 2.5) == 1.0                              # (one keyframe, no length: the whole shot, a second by convention)
+
+    def test_the_film_key_follows_the_threshold(self):
+        plan = dict(segments=[dict(id='a')]); import strata360.render.final as F
+        assert F.final_key(plan, [3840, 2160], 50.0, '100M', '/f', '1440p', 2.5) != F.final_key(plan, [3840, 2160], 50.0, '100M', '/f', '1440p', 2.0)

@@ -270,14 +270,14 @@ class TestBatch:
         assert client.post('/api/film/still', json=dict(folder=project.folder, auto=True)).status_code == 400
 
     def test_the_command_line_takes_several_times(self, monkeypatch, tmp_path):
-        calls = []; monkeypatch.setattr(ST, 'render_still', lambda folder, plan, fr, t, size, fps, out, upscale='off': calls.append((t, out)) or f'p{t}.png')
+        calls = []; monkeypatch.setattr(ST, 'render_still', lambda folder, plan, fr, t, size, fps, out, upscale='off', min_zoom=None: calls.append((t, out)) or f'p{t}.png')
         import strata360.edit.framing as FR; monkeypatch.setattr(FR, 'resolve', lambda *a, **k: {}); monkeypatch.setattr(PJ, 'load', lambda f: dict(plan=plan())); monkeypatch.setattr(FN, 'resolve_fps', lambda *a: 50.0)
         import sys; monkeypatch.setattr(sys, 'argv', ['still', str(tmp_path), '--t', '1', '--t', '2.5', '--size', '1920x1080', '--out', 'ignored.png']); ST.main()
         assert calls == [(1.0, None), (2.5, None)]                       # (one --out cannot hold several pictures)
 
     def test_a_failure_does_not_stop_the_next_one_but_ends_with_an_error(self, monkeypatch, tmp_path):
         done = []
-        def fake(folder, plan, fr, t, size, fps, out, upscale='off'):
+        def fake(folder, plan, fr, t, size, fps, out, upscale='off', min_zoom=None):
             if t == 1.0: raise RuntimeError('boom')
             done.append(t); return 'ok.png'
         monkeypatch.setattr(ST, 'render_still', fake); import strata360.edit.framing as FR; monkeypatch.setattr(FR, 'resolve', lambda *a, **k: {}); monkeypatch.setattr(PJ, 'load', lambda f: dict(plan=plan())); monkeypatch.setattr(FN, 'resolve_fps', lambda *a: 50.0)

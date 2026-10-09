@@ -95,10 +95,10 @@ class Dec:
 
 def test_the_previews_pose_offsets_are_degrees_added_to_the_cameras_radians(monkeypatch):
     from strata360.render import preview as PV, camera as cam
-    sg = dict(id='w0', clip='c', clip_start_s=1.0, dur_s=2.0); src = PV.PreviewSource('x', [sg], {'w0': path(0.0, fov=90.0)}, 64, 32, 64); src.V = Recorder()
-    src.info['c'] = dict(proxy='p.mp4', side=dict(frames=[dict(t_s=0.04 * i, source_frame=i) for i in range(100)], size=[64, 32]), ts=None, stab=None); monkeypatch.setattr(PV.guard, 'popen', lambda *a, **k: Dec())
-    list(src.frames(0, 0, 3)); base = list(src.V.dirs); src.V.dirs.clear(); src.V.fov.clear()
-    list(src.frames(0, 0, 3, pose_extra=np.array([[10.0, 5.0, 20.0, 0.0]] * 3))); assert np.allclose(src.V.fov, 110.0) and np.allclose(src.V.dirs[0], cam.direction(np.radians(10.0), np.radians(5.0))) and np.allclose(base[0], cam.direction(0.0, 0.0))
+    sg = dict(id='w0', clip='c', clip_start_s=1.0, dur_s=2.0); src = PV.PreviewSource('x', [sg], {'w0': path(0.0, fov=90.0)}, 64, 32, 64); src._eq = Recorder()
+    src._pinfo['c'] = dict(proxy='p.mp4', side=dict(frames=[dict(t_s=0.04 * i, source_frame=i) for i in range(100)], size=[64, 32]), stab=None); monkeypatch.setattr(PV.guard, 'popen', lambda *a, **k: Dec())
+    list(src.frames(0, 0, 3)); base = list(src._eq.dirs); src._eq.dirs.clear(); src._eq.fov.clear()
+    list(src.frames(0, 0, 3, pose_extra=np.array([[10.0, 5.0, 20.0, 0.0]] * 3))); assert np.allclose(src._eq.fov, 110.0) and np.allclose(src._eq.dirs[0], cam.direction(np.radians(10.0), np.radians(5.0))) and np.allclose(base[0], cam.direction(0.0, 0.0))
 
 
 def globe_path(): return dict(ref='world', bg='blur', subject='heading', keyframes=[dict(t=0, yaw=0.0, pitch=-90, disc=3.2), dict(t=4.0, yaw=90.0, pitch=-90, disc=0.46)])

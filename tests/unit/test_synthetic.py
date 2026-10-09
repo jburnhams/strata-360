@@ -35,3 +35,22 @@ class TestGapSettings:
         from strata360.pipeline import config
         monkeypatch.setattr(config, 'race_dir', lambda f: str(tmp_path)); SY.set_settings('f', 'G01', must=True)
         gap = dict(id='G01', t0=0.0, t1=7200.0); SY.upsert('f', SY.make(gap, seconds=10)); assert SY.settings('f')['G01']['must'] is True and [c['id'] for c in SY.load('f')['clips']] == ['G01']
+
+
+def test_footage_fps_is_the_majority_rate_of_the_clips(tmp_path, monkeypatch):
+    import json
+    from strata360.pipeline import config
+    monkeypatch.setattr(config, 'race_dir', lambda folder: str(tmp_path))
+    for i, r in enumerate([50.0, 50.0, 30.0]):
+        d = tmp_path / 'clips' / f'{i:04d}'; d.mkdir(parents=True); (d / 'clip.json').write_text(json.dumps({'video': {'nominal_fps': r}}))
+    assert SY.footage_fps('x') == 50.0
+    gap = dict(id='G01', t0=0.0, t1=3600.0)
+    assert SY.make(gap, seconds=5, folder='x')['fps'] == 50.0
+    assert SY.make(gap, seconds=5, folder='x', fps=25)['fps'] == 25.0
+    assert SY.make(gap, seconds=5)['fps'] == 30.0
+
+
+def test_footage_fps_without_clips_is_the_default(tmp_path, monkeypatch):
+    from strata360.pipeline import config
+    monkeypatch.setattr(config, 'race_dir', lambda folder: str(tmp_path))
+    assert SY.footage_fps('x') == 30.0

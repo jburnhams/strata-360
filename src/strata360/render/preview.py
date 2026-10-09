@@ -13,7 +13,7 @@ from strata360.pipeline import guard
 import hashlib, json, math, os, shutil, subprocess, sys, time
 import cv2, numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, grade as GR, synthetic as SYN
+from strata360.render import camera as cam, final as FN, grade as GR, synthetic as SYN
 from strata360.render.flat import Globe, projection, view_rays
 from strata360.render.film import compose, layout
 
@@ -74,55 +74,13 @@ def stab_matrices(osv):
     return lambda k: B.T @ quat_to_R(np.asarray(T['quat'][min(k, len(T['quat']) - 1)])).T @ P.T
 
 
-class PreviewSource:
-    """Frames of the planned windows from the clips' proxies (upright equirect), through the real renderer's projection (EquirectView). A clip without a proxy gives a dark card."""
-    def __init__(self, folder, segs, framing, w, h, decode_w, overlay=None, gains=None):
-        self.folder, self.segs, self.framing, self.w, self.h, self.decode_w, self.overlay, self.gains = folder, segs, framing, w, h, decode_w, overlay, gains or {}; self.V = EquirectView(w, h); self.info = {}; self.done = 0
-
-    def _clip(self, clip):
-        if clip not in self.info:
-            p = proxy_of(self.folder, clip); side = json.load(open(os.path.splitext(p)[0] + '.json')) if p else None
-            self.info[clip] = dict(proxy=p, side=side, ts=np.array([f['t_s'] for f in side['frames']]) if side else None, stab=None)
-        return self.info[clip]
+class PreviewSource(FN.FinalSource):
+    """The preview's (and the point camera clips') frames: the film's OWN renderer (render/final.py `FinalSource`: windows, camera paths, exposure match, race overlay, generated clips, point cameras) with preview parameters, as 8-bit BGR. `source` 'proxy' takes the footage from the clips' proxy videos (upright equirect, quick, rough: a clip without a proxy gives a dark card), 'osv' from the original recordings like the final film. Generated clips are taken as already made (the film's, else the planner's)."""
+    def __init__(self, folder, segs, framing, w, h, decode_w, overlay=None, gains=None, fps=FPS, source='proxy'):
+        super().__init__(folder, segs, framing, w, h, fps, interp='linear', overlay=overlay, gains=gains, source=source, decode_w=decode_w); self.cached_only = True; self.done = 0
 
     def frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
-        """The frames a0..a1 of window k as BGR; with an overlay the film's race overlay (clock, numbers, maps, as in the final film) is drawn on each at the race time it shows, before any blend between shots."""
-        it = self._frames(k, a0, a1, yaw_extra, pose_extra)
-        if self.overlay is None: yield from it; return
-        import datetime as dt
-        sg = self.segs[k]; utc0 = None if sg.get('synthetic') else dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp()
-        for i, img in enumerate(it):
-            t = SYN.race_time(sg, a0 + i, FPS) if utc0 is None else utc0 + (a0 + i) / FPS
-            yield np.ascontiguousarray(self.overlay.apply(np.ascontiguousarray(img[..., ::-1]), t)[..., ::-1])                 # (the overlay draws RGB)
-
-    def _frames(self, k, a0, a1, yaw_extra=None, pose_extra=None):
-        sg = self.segs[k]; m = a1 - a0
-        if m <= 0: return
-        if sg.get('synthetic'): yield from SYN.frames(sg['synthetic'], sg['clip_start_s'], a0, a1, FPS, self.w, self.h, 'bgr'); return           # a generated clip: its pictures as they are
-        clip = sg['clip']; ci = self._clip(clip); gain = self.gains.get(sg['id'])
-        if not ci['proxy']:
-            for _ in range(m): yield card(self.w, self.h, f'{clip[-9:]}: proxy not made yet')
-            return
-        path = cam.CameraPath.from_dict(self.framing[sg['id']]); self.V.set_background(path.bg, **path.bg_opts); side = ci['side']; ez = np.array([0.0, 0.0, 1.0])
-        t_from = sg['clip_start_s'] + a0 / FPS; fr_n = len(side['frames']); Ms = None
-        if path.ref != 'world':                                                          # heading-follow and body paths need the stabilisation of each frame (as the real renderer)
-            if ci['stab'] is None: ci['stab'] = stab_matrices(json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json')))['source_files']['osv'])
-            idx = np.clip(np.round(np.maximum(t_from + np.arange(m) / FPS, 0.0) * FPS).astype(int), 0, fr_n - 1); Ms = [ci['stab'](side['frames'][j]['source_frame']) for j in idx]
-        P = path.evaluate(np.arange(a0, a1) / FPS, Ms, FPS)
-        W0, H0 = side['size']; dw = min(self.decode_w, W0); dh = dw // 2; lead = max(-t_from, 0.0)                       # time before the clip starts: the first frame is held
-        dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0):.3f}', '-i', ci['proxy'], '-t', f'{(m / FPS) + 0.2:.3f}', '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', str(FPS), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        fr = None; skip = int(round(lead * FPS))
-        try:
-            for i in range(m):
-                if i >= skip or fr is None:                                                  # before the clip starts (skip frames) the first frame is held
-                    buf = dec.stdout.read(dw * dh * 3)
-                    if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3)
-                    elif fr is None: fr = np.zeros((dh, dw, 3), np.uint8)                   # (past the end of the clip the last frame is held)
-                self.V.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], (float(pose_extra[i][3]) if pose_extra is not None and len(pose_extra[i]) > 3 and pose_extra[i][3] > 0 else (P['disc'][i] if P['use_disc'] else None))); yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0)
-                vdir = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); img = self.V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))
-                yield img if gain is None else GR.apply(img, gain(max((a0 + i) / FPS, 0.0)))                          # the exposure match (render/grade.py), the same maths as the final film
-        finally:
-            dec.stdout.close(); dec.terminate(); dec.wait()
+        for img in super().frames(k, a0, a1, yaw_extra, pose_extra): yield to_bgr8(img)
 
 
 def encoder_args():
@@ -135,15 +93,28 @@ def card(w, h, text):
     im = np.full((h, w, 3), 24, np.uint8); cv2.putText(im, text, (24, h // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1, cv2.LINE_AA); return im
 
 
-def proxy_of(folder, clip):
-    p = os.path.join(config.race_dir(folder), 'clips', clip, 'proxy.mp4'); return p if os.path.exists(p) and os.path.exists(os.path.splitext(p)[0] + '.json') else None
+proxy_of = FN.proxy_of
 
 
 from strata360.audio.mix import (MUTE_PAD_S, audio_of, build_audio, has_audio, mute_filter, never_spans, role_has_speech, window_gain)      # the film's sound lives in audio/mix.py; these names stay here for the callers that used them from the preview
 
 
-def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
-    """Render the film into film_dir (see the module docstring). Blocks until done; progress(frames_done, frames_total) is called about once a second."""
+def to_bgr8(img):
+    """The final renderer's RGB picture (uint16 code values) as the 8-bit BGR the HLS encoder takes."""
+    a = np.asarray(img)
+    if a.dtype != np.uint8: a = np.clip((a.astype(np.uint32) + 128) >> 8, 0, 255).astype(np.uint8)
+    return np.ascontiguousarray(a[..., ::-1])
+
+
+def render(folder, plan, framing, px=960, decode_w=3072, progress=None, source='proxy'):
+    """Render the film into film_dir (see the module docstring). Blocks until done; progress(frames_done, frames_total) is called about once a second. The film is made by the final renderer's own code (render/final.py) at the preview's size and half the footage's frame rate; `source` 'proxy' takes the footage from the clips' proxy videos (quick), 'osv' from the original recordings."""
+    fps = FN.resolve_fps(folder, plan, 0.0, half_rate=True)
+    if source == 'osv':
+        with guard.heavy('film preview', 3.0): return _render(folder, plan, framing, px, decode_w, progress, source, fps)
+    return _render(folder, plan, framing, px, decode_w, progress, source, fps)
+
+
+def _render(folder, plan, framing, px, decode_w, progress, source, FPS):
     from strata360.analysis import views
     from strata360.edit import pans as PN
     key = plan_key(folder, plan)                                                                                 # of the plan as saved (the server looks the film up by it); the glides below follow from the plan, so they need no part in it
@@ -156,7 +127,8 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
                             '-hls_segment_filename', os.path.join(d, 'seg%05d.ts'), os.path.join(d, 'index.m3u8')], stdin=subprocess.PIPE)
     from strata360.overlay import for_project
-    src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h)), gains=GR.gains_for(folder, segs, framing)); last = [0.0]
+    gains = GR.gains_for(folder, segs, framing); last = [0.0]
+    src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h)), gains=gains, fps=FPS, source=source)
     def emit(img):
         enc.stdin.write(img.tobytes()); src.done += 1
         if time.time() - last[0] > 1.0: last[0] = time.time(); status('rendering', src.done); progress and progress(src.done, total)
@@ -173,7 +145,7 @@ def render(folder, plan, framing, px=960, decode_w=3072, progress=None):
 def main():
     import argparse
     from strata360.edit import framing as FR, project as PJ
-    ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--px', type=int, default=960); ap.add_argument('--force', action='store_true', help='render again even if this plan was already rendered'); a = ap.parse_args()
+    ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--px', type=int, default=960); ap.add_argument('--force', action='store_true', help='render again even if this plan was already rendered'); ap.add_argument('--source', choices=('proxy', 'osv'), default='proxy', help="where the footage comes from: the clips' proxy videos (default, quick) or the original recordings (the final film's source); the rest of the pipeline is the final film's"); a = ap.parse_args()
     cv2.setNumThreads(2)
     from strata360 import oslib; oslib.lower_priority(10)                                                                          # started by the user and waited for: a little above the background processing, well below the desktop
     edit = PJ.load(a.folder); plan = edit.get('plan')
@@ -184,7 +156,7 @@ def main():
         if n.startswith('film-') and n != f'film-{key}': shutil.rmtree(os.path.join(root, n), ignore_errors=True)
     d = film_dir(a.folder, key)
     if not a.force and os.path.exists(os.path.join(d, 'status.json')) and json.load(open(os.path.join(d, 'status.json'))).get('state') == 'done': print('already rendered', d); return
-    shutil.rmtree(d, ignore_errors=True); print(render(a.folder, plan, fr, px=a.px, progress=lambda i, n: print(f'\r{i}/{n}', end='', flush=True)))
+    shutil.rmtree(d, ignore_errors=True); print(render(a.folder, plan, fr, px=a.px, source=a.source, progress=lambda i, n: print(f'\r{i}/{n}', end='', flush=True)))
 
 
 if __name__ == '__main__': main()

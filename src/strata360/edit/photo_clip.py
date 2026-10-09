@@ -11,12 +11,12 @@ from strata360.pipeline import config
 def is_photo_label(label): return str(label).upper().startswith('P') and str(label)[1:].isdigit()
 
 
-def render(folder, entry, seconds, motion, path, log=print):
-    """Write the move over the photo for `seconds` to `path` (3840x2160, 30 fps). The target is what the analysis found in the photo (`focals`), the style and seed the photo's own settings."""
+def render(folder, entry, seconds, motion, path, log=print, fps=30.0, out_size=None, crf=17):
+    """Write the move over the photo for `seconds` to `path` (3840x2160, 30 fps unless `fps` and `out_size` say otherwise: the film's own, for the final render). The target is what the analysis found in the photo (`focals`), the style and seed the photo's own settings."""
     from strata360.analysis import photo_analysis as PA
     rd = config.race_dir(folder); src = os.path.join(rd, entry['file']); size = PH.oriented_size(src); img = PA.read_bgr(src, 4000)
     pl = PM.plan(size, seconds, motion['style'], PM.focals(PA.load_doc(rd, entry['id']), PA.read_bgr(src, 480)), motion['seed'], out_w=3840)
-    os.makedirs(os.path.dirname(path), exist_ok=True); tmp = path + '.part.mp4'; w, h = (int(x) for x in SY.PHOTO_SIZE.split('x')); n = PM.write_video(tmp, img, pl, (w, h), fps=30.0, crf=17); os.replace(tmp, path)
+    os.makedirs(os.path.dirname(path), exist_ok=True); tmp = path + '.part.mp4'; w, h = out_size or (int(x) for x in SY.PHOTO_SIZE.split('x')); n = PM.write_video(tmp, img, pl, (w, h), fps=fps, crf=crf); os.replace(tmp, path)
     log(f"rendered the {pl['style']} move over {entry['id']} for {seconds:g} s ({n} frames)"); return pl
 
 
