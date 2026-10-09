@@ -129,13 +129,13 @@ def _render_clip(folder, cam, pl, out, size, decode_w, crf, log):
     os.replace(out + '.part.mp4', out); log(f"{cam['id']}: {n} frames of clip {clip} ({T:.1f} s) aimed at the point"); return dict(frames=n, fps=PV.FPS)
 
 
-def _render_sv(folder, cam, pl, out, size, encode_size, crf, log, seconds, preview):
+def _render_sv(folder, cam, pl, out, size, encode_size, crf, log, seconds, preview, fps=30):
     """The street view shot: each output frame looks at the point from the interpolated camera position, blending the two pictures it falls between."""
     from strata360.edit import streetview_cam as CAM
     rd = config.race_dir(folder); sec = pl['extra']; hires = bool(sec.get('hires')) and sec['provider'] == 'google'
     if sec['provider'] == 'google': CAM.fetch_google_pano(rd, sec, road=SV.road_of(rd, sec), log=log, grid='hi' if hires else 'std')                 # (the 360 pictures, asked for only now)
     else: CAM.fetch(rd, sec, token=SV._key('MAPILLARY_TOKEN'), log=log, preview=preview)
-    fps = 30; N = max(2, int(seconds * fps)); items = CAM.forward_items(sec); p = pl['poly']; ts = np.linspace(pl['t0'], pl['t1'], N); sm = PC.samples(p, cam, pl['t0'], pl['t1'], step=(pl['t1'] - pl['t0']) / (N - 1)); idx = np.interp(ts, p['t'], np.arange(len(items)))
+    N = max(2, int(seconds * fps)); items = CAM.forward_items(sec); p = pl['poly']; ts = np.linspace(pl['t0'], pl['t1'], N); sm = PC.samples(p, cam, pl['t0'], pl['t1'], step=(pl['t1'] - pl['t0']) / (N - 1)); idx = np.interp(ts, p['t'], np.arange(len(items)))
     return CAM.render_point(rd, sec, idx, sm['bearing'], sm['pitch'], sm['fov'], out, road=SV.road_of(rd, sec), fps=fps, size=size, encode_size=encode_size, log=log, preview=preview, grid='hi' if hires else 'std')
 
 
@@ -146,11 +146,11 @@ def render_preview(folder, cam, out, log=print):
     return _render_sv(folder, cam, pl, out, (960, 540), None, 23, log, pl['seconds'], True)
 
 
-def render(folder, cam, seconds, out, log=print):
-    """The shot for the film: picture only, `seconds` long (a clip's shot is trimmed round the closest approach when shorter than its stretch)."""
+def render(folder, cam, seconds, out, log=print, fps=30, size=None):
+    """The shot for the film: picture only, `seconds` long (a clip's shot is trimmed round the closest approach when shorter than its stretch). `fps` and `size` are the film's own for the final render (street view shots; a clip's shot is cut from the footage by the final renderer itself)."""
     pl = plan(folder, cam, seconds); os.makedirs(os.path.dirname(out), exist_ok=True)
     if cam['source']['kind'] == 'clip': return _render_clip(folder, cam, pl, out, CLIP_SIZE, 3840, 17, log)
-    return _render_sv(folder, cam, pl, out, (1920, 1080), tuple(int(x) for x in SY.STREETVIEW_SIZE.split('x')), 17, log, float(seconds), False)
+    return _render_sv(folder, cam, pl, out, (1920, 1080), tuple(size or (int(x) for x in SY.STREETVIEW_SIZE.split('x'))), 17, log, float(seconds), False, fps)
 
 
 def progress(lines, cam_source, google=False):

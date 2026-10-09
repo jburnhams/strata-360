@@ -106,12 +106,12 @@ def shot_fov(framing, g):
     except (KeyError, ValueError, TypeError, IndexError): return None
 
 
-def render_still(folder, plan, framing, t, size=(3840, 2160), fps=50.0, out=None, upscale='off', pg=None):
+def render_still(folder, plan, framing, t, size=(3840, 2160), fps=50.0, out=None, upscale='off', pg=None, min_zoom=None):
     """Render the film's frame at time `t` at `size`; returns the path of the PNG (an existing one for the same plan, size, frame and upscaling is returned at once). `upscale`: a mode of edit/upscale.py (off, 1080p, 1440p, full): enlarge the shot with the local model if it needs it, as the film does.
     What it is doing and how long each step takes goes to `pg` (render/progress.py; default a file beside the picture, which the page shows)."""
     from strata360.edit import pans as PN, upscale as UP
     from strata360.render.progress import Progress
-    W, H = size; key = FN.final_key(plan, [W, H], fps, '100M', folder, upscale); n0 = frame_for(plan, t, fps)
+    W, H = size; key = FN.final_key(plan, [W, H], fps, '100M', folder, upscale, min_zoom); n0 = frame_for(plan, t, fps)
     out = out or os.path.join(still_dir(folder), still_name(key, n0))
     if os.path.exists(out): return out
     pg = pg or Progress(progress_path(out)); got = []
@@ -119,7 +119,7 @@ def render_still(folder, plan, framing, t, size=(3840, 2160), fps=50.0, out=None
         with pg.stage('prepare', 'glides, exposure match, overlay'):
             plan = dict(plan, segments=PN.apply_pans(plan['segments'], framing, scorer=PN.looker(folder))[0]); segs = plan['segments']; ps = pieces(segs, fps); piece, j = locate(ps, n0)
             from strata360.overlay import for_project
-            src = FN.FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H)), gains=GR.gains_for(folder, segs, framing), upscale=upscale, progress=pg)
+            src = FN.FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H)), gains=GR.gains_for(folder, segs, framing), upscale=upscale, up_min_zoom=min_zoom, progress=pg)
             piece_kind = piece['kind']; shots = [piece['k']] + ([piece['k'] + 1] if piece['kind'] != 'plain' else []); factors = [src.shot_factor(segs[k]) for k in shots]
             pg.note(f"frame {n0} of the film: {piece['kind']} piece, shot{'s' if len(shots) > 1 else ''} " + ', '.join(segs[k]['id'] for k in shots))
         with guard.heavy('final still', 4.0):
@@ -149,14 +149,14 @@ def render_still(folder, plan, framing, t, size=(3840, 2160), fps=50.0, out=None
 def main():
     from strata360.edit import framing as FR, project as PJ
     ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--t', type=float, required=True, action='append', help='film time in seconds (the preview player position); give it more than once to render several stills one after the other in this process'); ap.add_argument('--size', default='3840x2160', choices=SIZES)
-    ap.add_argument('--fps', type=float, default=0.0, help="frames a second the film is made at; 0 (the default) is the footage's own rate"); ap.add_argument('--half-rate', action='store_true'); ap.add_argument('--out'); ap.add_argument('--upscale', nargs='?', const='full', default='off', choices=['off', '1080p', '1440p', 'full'], help='enlarge the shot with the local model if it holds too few pixels, as the film does: to the output size, or to 1080p / 1440p and then resample'); a = ap.parse_args()
+    ap.add_argument('--fps', type=float, default=0.0, help="frames a second the film is made at; 0 (the default) is the footage's own rate"); ap.add_argument('--half-rate', action='store_true'); ap.add_argument('--out'); ap.add_argument('--upscale-min-zoom', type=float, default=None, help='enlarge a shot only if more than 0.5 s of it need at least this zoom (default: the film setting)'); ap.add_argument('--upscale', nargs='?', const='full', default='off', choices=['off', '1080p', '1440p', 'full'], help='enlarge the shot with the local model if it holds too few pixels, as the film does: to the output size, or to 1080p / 1440p and then resample'); a = ap.parse_args()
     from strata360 import oslib; oslib.lower_priority(19)
     plan = PJ.load(a.folder).get('plan')
     if not plan: sys.exit('no plan yet')
     W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan, head=True); fps = FN.resolve_fps(a.folder, plan, a.fps, a.half_rate)
     failed = 0
     for t in a.t:                                                                                                      # one after the other: the model and the clips' data stay loaded between them
-        try: print(render_still(a.folder, plan, fr, t, (W, H), fps, a.out if len(a.t) == 1 else None, upscale=a.upscale), flush=True)
+        try: print(render_still(a.folder, plan, fr, t, (W, H), fps, a.out if len(a.t) == 1 else None, upscale=a.upscale, min_zoom=a.upscale_min_zoom), flush=True)
         except Exception as e: failed += 1; print(f'still at {t:g} s failed: {e}', flush=True)                       # (its progress file says why; the next one still gets its turn)
     if failed: sys.exit(1)
 

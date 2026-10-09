@@ -144,7 +144,7 @@ def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
         else:
             sec = SPL.gap_choice(dict(seconds=round(float(it.get('seconds') or 0), 2)), SY.gap_settings(folder, gid))['seconds']; kind = kind_of(old, gaps[gid], sec)                        # (the length you set or the least you gave)
             if old and old['kind'] == kind and abs(old['seconds'] - sec) < 0.05: continue
-        try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind, by='user' if SY.gap_settings(folder, gid)['kind'] else 'planner')
+        try: clip = SY.make(gaps[gid], seconds=min(max(sec, SY.MIN_SECONDS), SPL.MAX_GAP_S), kind=kind, folder=folder, by='user' if SY.gap_settings(folder, gid)['kind'] else 'planner')
         except ValueError as e: log(f'item {n + 1}: {gid}: {e}; skipped'); continue
         made.append(SY.upsert(folder, clip)); log(f"planned {kind} clip {gid} for {clip['seconds']:g} s"); docs[gid] = made[-1]
     return made
@@ -163,7 +163,7 @@ def sync_gap_clips(folder, specs, log=print):
         old = docs.get(sp['clip']); sec = min(max(round(sp['seconds'], 2), SY.MIN_SECONDS), 45.0)
         kind = SY.gap_settings(folder, sp['clip'])['kind'] or (old['kind'] if old and (old.get('by') == 'user' or old.get('file')) else SY.choose_kind(gaps[sp['clip']], sec, last))           # the planner chooses again for the new length (a clip shortened to 4 s is a map), unless it is rendered or yours
         last = kind
-        clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind, by='user' if SY.gap_settings(folder, sp['clip'])['kind'] else 'planner'); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
+        clip = SY.make(gaps[sp['clip']], seconds=sec, kind=kind, folder=folder, by='user' if SY.gap_settings(folder, sp['clip'])['kind'] else 'planner'); made.append(SY.upsert(folder, clip)); log(f"{'planned' if not old else 'replanned'} {kind} clip {sp['clip']} for {sec:g} s to fit the music")
     return made
 
 

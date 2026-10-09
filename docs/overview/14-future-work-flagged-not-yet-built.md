@@ -1,0 +1,58 @@
+## 14. Future work (flagged, not yet built)
+
+Items known from the M0 spike (`progress.md`), roughly in priority order. None blocks the v1 pipeline; each is a quality or convenience improvement.
+
+### 14.1 Stitching quality: OpenOSV stages not yet ported
+Our stitch (calibration-based, linear-light, occlusion-aware, 16-bit) matches DJI's raw export closely (correlation 0.97–0.98) but only applies OpenOSV's *basic* blend. The stages below exist in [OpenOSV](https://github.com/Kemerd/OpenOSV) (Apache-2.0) and are the main remaining differences. They matter most for a selfie-stick clip, where the user's hand and body sit right at the seam.
+
+| Stage (OpenOSV) | Purpose | Expected benefit here | Notes |
+|---|---|---|---|
+| **Parallax warp** (DIS optical flow, `ParallaxWarp`) — **implemented** (`render/parallax.py`, on by default; far-field only, near objects are left to the carved seam) | 2-D correction of parallax in the seam band | **Highest**: the hand and arm next to the lens show ghosting or doubling at the seam | GPU friendly; biggest single piece of work |
+| **Seam disparity search** + 1-D seam shift (`searchSeam`) | Align the lenses for close objects, per column and per bucket | High, and a prerequisite for the warp | Per bucket of 8 frames |
+| **Carved seam** (dynamic-programming seam carving, `SeamCarve`) — **implemented** (`render/seam.py`, on by default; a DP seam through where the lenses agree, narrow feather where they do not) | Choose where the two lenses meet, avoiding faces, hands and edges | High for shots framed across the seam | Rendering only |
+| **Photometric seam field** (`PhotoSeam`) | Rim-aware weights plus a 2-D log-gain field, SSIM-gated | **Measured (progress.md): lens-to-lens exposure in the overlap is within about 0.1 stop on 7 clips, so low.** Originally: medium/high: the proper fix for lens gain mismatch, which the simple exposure match cannot do on wet-lens, near-object clips | Would replace the (currently disabled) exposure-match gain |
+| **Lens shading correction** (`LensShading`) | Adds back missing veiling glare near the rim, per lens | Medium | Measured from each lens's own sky |
+| **Flare removal** (`Flare`) | Sun ghosts | Low for this clip | Optional |
+| **Two-band seam smoothing** (`SeamTools`) | Glide the low-frequency difference across a wide band | Would hide the edge between a fogged lens and a clear one (clip 0023). **Tried (progress.md): a local gain and offset fit between the lenses, glided over 6-14 deg: the edge softened but a halo appeared, it cost 1 s a frame and the fit is noisy on ordinary scenes. Not shipped.** | Optional |
+| **Clip-steady mode** (`ClipSteady`) | One correction per clip instead of per bucket | Not applicable to a hand-held stick (near objects move) | Useful for rigid mounts |
+| **D-Log M / HLG decoding and the DJI Rec.709 look** | Non-Normal colour modes | Only if footage is shot in D-Log M | Curves and LUTs are published in OpenOSV (`luts/`) |
+
+Alternative for all of the above: build OpenOSV (Metal backend, community-tested on Apple Silicon) and use its stitch, then reframe from its equirect output. The cost is a large build (vcpkg compiles ffmpeg and about eight libraries), the loss of the single-resample fisheye renderer for the stitched part, and its CLI cannot do animated reframing. Decision deferred until we know how much the seam quality matters for the final film.
+
+### 14.2 Stabilisation and camera behaviour
+- **Heading-follow stabilisation: implemented (v1), `spike/camera.py`, `render4k.py --mode heading`.** Definition: keep the horizon level (remove roll and pitch shake, as world-lock does) but let the view's left–right direction follow where the runner is heading, smoothed so it turns gently through bends and ignores arm swing and wrist twist. The two extremes it sits between: *body-locked* (fixed to the camera, shakes and turns with the stick) and *world-locked* (fixed in the world, points the wrong way once you turn). v1: the heading is the horizontal direction of a chosen body axis (default the front lens, i.e. away from the user on a selfie stick, so it works even when the camera is tilted down about 57° as in the sample), smoothed with a zero-phase Gaussian (default σ 2 s) on the unwrapped angle (offline, no lag); frames where the axis is nearly vertical are filled from their neighbours (never spun); the ends of the clip use a trend-preserving extension. Measured: arm swing (8° at 1.8 Hz) leaks 0.05° in the interior and 0.6° at the clip ends. Still to do: automatic choice of the heading axis; a heading from motion cues (GPS-free velocity, or the GPX when the clip is aligned) instead of the camera axis; a causal version for live previews; a maximum turn rate; a lock-to-target mode (keep the user or another subject centred) once identity tracks exist.
+- **Keyframed camera paths: implemented (v1)**, JSON with yaw, pitch, roll, field of view and easing per keyframe, relative to the world, the smoothed heading, or the camera body (format in `spike/camera.py`, example `spike/example_path.json`). Interpolation: monotone cubic spline (default, continuous velocity), smoothstep or linear; yaw takes the short way round the ±180° seam; optional extra smoothing; a limits report (peak speed, acceleration, field-of-view rate) and warnings, which caught abrupt velocity changes from mixing easing types at a key. Still to do: the framing solver (Phase 6) that generates these paths from the attention map, per-path speed and acceleration limits enforced automatically, and a subject-aware zoom.
+- **Rolling shutter and sub-frame interpolation**: attitude is used per frame; the 20 higher-rate quaternions per frame (`FrameMeta.3`) could correct rolling-shutter skew and fast rotations.
+
+### 14.3 Rendering
+- **Audio: implemented (v1).** A whole-clip render copies the OSV's AAC bit-exactly; a sub-range (segment) is cut accurately and re-encoded as AAC 256 kbit/s. Verified sample-exact against the source (lag 0 samples, correlation 1.0000) and the output length matches the video. Still to do: music mixing and ducking, crossfades between segments, loudness normalisation, and 4-microphone/spatial audio handling.
+- **Performance:** about 10 fps at 4K looking at the user, about 5 fps for a stabilised view across the seam, on an M4 in Python/OpenCV. Options: a Metal port of the per-pixel kernel (as OpenOSV does), cutting the 16-bit read (88 MB per lens frame) by decoding YUV directly and converting on the GPU, and skipping the second lens when the view is inside one lens.
+- **Resampling quality:** bicubic is used; Lanczos is 5× slower. Compare sharpness against DJI at full resolution.
+- **HDR and log:** the pipeline is SDR BT.709 (Normal mode). D-Log M and HLG inputs need the transfer functions above.
+
+### 14.4 Colour and exposure
+- **Auto gain / exposure matching in the final render**, driven by `exposure.json` (§5.9): per-shot exposure and tone adjustment, temporal smoothing, consistency across neighbouring shots, highlight protection. OpenOSV-style lens-to-lens gain is implemented (`spike/photo.py: estimate_gain`) but disabled because it is unreliable on this footage until the photometric seam field exists.
+- **A "match DJI look" option** is not planned: DJI Studio's export applies an undocumented, scene-adaptive lift (measured 5–13% in linear light), which is not a good absolute reference.
+- **10-bit end to end:** the encode is 10-bit Main 10 from a 16-bit render. If a future step needs more range, keep floating point in the render.
+
+### 14.5 Data and analysis
+- **Detector benchmark to finalise the proxy settings.** The proxy defaults (3840×1920, 12.5 fps, about 80–100 Mbit/s) are provisional: the sample clip contains too few people and faces (3 and 3 in 24 frames) to measure detection recall against resolution and bitrate. Once real detectors and the identity model exist, run them on lossless renders versus each candidate proxy on several race clips, then fix resolution, fps and bitrate.
+- **On-demand frame and crop API** (`recrop(clip, source_frame, yaw, pitch, fov, size)`), rendering straight from the source lens frames, for identity, vision-model stills and the framing verification loop.
+- **Use the camera's `.LRF` only as a fast triage source.** It is frame-synchronous with the OSV (correlation 0.998–0.999 at zero frame offset), tiny and instantly decodable, but soft (about half the detail of our render at 3840×1920) and H.264 8-bit, so it suits cheap jobs (exposure statistics, shot and motion detection, cut proposals) and never detection or recognition. It is dual-fisheye and needs our own projection anyway; other cameras' proxies differ.
+- Per-clip export of **view-level** statistics from the actual render (every frame) to complement the sphere-level `exposure.json`.
+- **Exposure metadata semantics:** `FrameMeta.2.15` (values such as 10.75, 181.65, 1.114 ×3, 8.04, 2.0) and the accelerometer block are undecoded; they may hold digital gains or white balance.
+- Verify the IMU-offset matrices (`osmo360_imu_offsets.npy`) on a second clip and on the Insta360 (different camera, different conventions).
+
+### 14.6 Audio: what is left
+Implemented (v1): analysis and labelling (§5.10), the three conditioning chains, loudness and true-peak measurement, the mix planner, a recogniser and two neural enhancers installed and evaluated, multilingual transcription with per-segment language identification, English translation and hallucination flags (§5.11). Still to do:
+- **Choose enhancement per segment.** Enhancers helped only against wind and hurt in babble, so the chain should pick per segment from the labels (§5.10): wind-dominant speech gets DeepFilterNet3 (or MossFormer2) for the *mix*, babble and ambience are left alone, and recognition always uses raw audio.
+- **Evaluate on real speech.** The WER numbers use synthetic (text-to-speech) speech in real noise. Build a small hand-checked transcript set from the library (the English clips with the most speech, and the French clip) and measure WER on it.
+- **Translation quality.** OPUS-MT is fast and reasonable but not perfect (French sentences read well; "on va faire depuis les joueurs qui sont longs" translated literally is a recognition error upstream). Options: NLLB-200, or a local LLM, for better English, especially Dutch (Flemish) which whisper handles less well. Have a native speaker check a sample.
+- **Whose voice: done** (the `speakers` stage labels each phrase wearer or other; 18.4g). Originally: speaker embeddings to tell the wearer from bystanders (shares the identity profile with the face work). Today "speech" means clear close voiced speech.
+- **Better classification: done** (`audio_events`: an AudioSet sound-event model, 527 classes in 16 categories, with a role and level for each; and an opt-in `audio_background` stem that classifies the place without the speech, 18.4p). Still open: wind detection that works on dual-mono audio (no stereo cues). The Osmo 360's own wind processing visibly gates high frequencies on and off; handle that before judging bandwidth.
+- **Spatial audio:** the OSV stores a stereo AAC mix of what may be four microphones; check whether the raw microphone channels are recoverable and useful for directional voice pickup and beamforming toward the wearer.
+- **Segment joins:** crossfades between clips' audio, room-tone fill, and matching the ambience across cuts.
+- **Music analysis link:** feed `music.json` (beats and sections) into the mix plan so swells and ducks land on bars.
+- **Speed:** large-v3-turbo on the CPU transcribes about 1× real time; a Metal-accelerated build (whisper.cpp) would be faster.
+
+---

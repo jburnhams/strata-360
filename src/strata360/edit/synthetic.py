@@ -36,8 +36,22 @@ def key_of(c):
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=30.0, t0=None, t1=None, id=None, size=None, approved=True, by='planner'):
-    """The clip for a gap (or for a stretch of it: `t0` and `t1` in epoch seconds), by length in the film or by speed-up (not both; neither gives the default)."""
+def footage_fps(folder, default=30.0):
+    """The frame rate most of the project's footage was shot at (`video.nominal_fps` of each clip.json, by clip count), so a generated clip moves at the rate of the film and is not resampled unevenly; `default` when no clip says."""
+    from strata360.pipeline import config
+    rates = {}
+    try: rd = config.race_dir(folder); names = os.listdir(os.path.join(rd, 'clips'))
+    except OSError: return float(default)
+    for n in names:
+        try: r = float(json.load(open(os.path.join(rd, 'clips', n, 'clip.json')))['video']['nominal_fps'])
+        except (OSError, ValueError, KeyError, TypeError): continue
+        rates[r] = rates.get(r, 0) + 1
+    return max(rates, key=rates.get) if rates else float(default)
+
+
+def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=None, t0=None, t1=None, id=None, size=None, approved=True, by='planner', folder=None):
+    """The clip for a gap (or for a stretch of it: `t0` and `t1` in epoch seconds), by length in the film or by speed-up (not both; neither gives the default). `fps` None: the footage's own rate when the `folder` is given (else 30), so the map moves at the film's frame rate."""
+    if fps is None: fps = footage_fps(folder) if folder else 30.0
     if kind not in KINDS: raise ValueError(f'kind: one of {KINDS}')
     if seconds is not None and speedup is not None: raise ValueError('give the length in the film or the speed-up, not both')
     a, b = float(gap['t0'] if t0 is None else t0), float(gap['t1'] if t1 is None else t1)
