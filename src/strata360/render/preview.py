@@ -130,7 +130,7 @@ def _render(folder, plan, framing, px, decode_w, progress, source, FPS):
     gains = GR.gains_for(folder, segs, framing); last = [0.0]
     src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h)), gains=gains, fps=FPS, source=source)
     from strata360.render import captions as CP
-    caps = CP.Captions.for_project(folder, plan, w, h, FPS, key=key); CP.write_srt(caps.cues, os.path.join(d, 'subtitles.srt'))                    # the subtitle track: voice-over and speech, drawn by film time
+    caps = CP.Captions.for_project(folder, plan, w, h, FPS, key=key); CP.write_srt(caps.cues, os.path.join(d, 'subtitles.srt')); CP.write_vtt(caps.cues, os.path.join(d, 'subtitles.vtt'))                    # the subtitle track: voice-over and speech, drawn by film time
     def emit(img):
         enc.stdin.write(caps.apply(img, src.done, bgr=True).tobytes()); src.done += 1
         if time.time() - last[0] > 1.0: last[0] = time.time(); status('rendering', src.done); progress and progress(src.done, total)

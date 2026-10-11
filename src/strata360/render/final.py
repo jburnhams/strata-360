@@ -78,9 +78,9 @@ def final_key(plan, size, fps, bitrate, folder, upscale='off', min_zoom=None):
 
 
 def _text_sig(folder):
-    """The part of the key for the text drawn on the pieces: the word-art cards (film_text.json) and whether the subtitles are on (empty when there are none, so earlier keys hold)."""
+    """The part of the key for the text drawn on the pieces: the word-art cards (film_text.json) and whether the subtitles are burned in (empty otherwise)."""
     p = os.path.join(config.race_dir(folder), 'film_text.json'); sig = f'cards:{os.path.getmtime(p):.0f}' if os.path.exists(p) else ''
-    return sig + ('nosubs' if os.environ.get('STRATA_SUBTITLES') == '0' else 'subs')
+    return sig + ('burnedsubs' if os.environ.get('STRATA_SUBTITLES') == 'burn' else '')
 
 
 def _overlay_sig(folder):
@@ -411,7 +411,7 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
         if limit_pieces is not None: status('partial'); pg.finish(); return d
         with pg.stage('bookends'): bk = render_bookends(folder, d, size, fps, bitrate, pg)
         lead = bk['intro'][1] if 'intro' in bk else 0.0; tail = bk['outro'][1] if 'outro' in bk else 0.0
-        from strata360.render import captions as CP; CP.write_srt([dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'subtitles.srt'))                  # the subtitles as a file too, beside the film (after the opening); not named like the film: a player would load it and show every line twice, over the words burned into the picture
+        from strata360.render import captions as CP; CP.write_srt([dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'subtitles.srt'))                  # the subtitles (after the opening): embedded in the film as a track below, and as a file
         with pg.stage('timemap'):
             from strata360.render import timemap; timemap.write(plan, fps, d)                                                         # which footage is on screen at every frame (timemap.json and .csv beside the film)
         status('assembling')
@@ -422,8 +422,9 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
                 if r.returncode: raise RuntimeError(r.stderr[-300:])
                 audio = padded
         with pg.stage('assemble'):
+            srt = os.path.join(d, 'subtitles.srt'); srt = srt if os.path.exists(srt) and os.path.getsize(srt) else None
             lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{m}'\n" for m in [bk[w][0] for w in ('intro',) if w in bk] + [os.path.join(d, p['id'] + '.mov') for p in ps] + [bk[w][0] for w in ('outro',) if w in bk])); film = out or os.path.join(d, 'film.mp4')
-            r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
+            r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, *(['-i', srt, '-map', '2:s', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Subtitles', '-disposition:s:0', 'default'] if srt else []), '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
             if r.returncode: status('error', error=r.stderr[-300:]); raise RuntimeError(r.stderr[-300:])
         status('done', finished=time.time(), film=film, sound=sound); pg.finish(); return film
     except BaseException as e:

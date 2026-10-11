@@ -23,12 +23,21 @@ def test_corrections_replace_or_remove_words():
 
 
 def test_a_cue_is_drawn_only_while_it_is_on_and_the_frame_is_otherwise_untouched():
-    cap = C.Captions([dict(t0=1.0, t1=3.0, text='Four days across the Ardennes', kind='vo')], 640, 360, 25.0); img = np.full((360, 640, 3), 80, np.uint8)
+    cap = C.Captions([dict(t0=1.0, t1=3.0, text='Four days across the Ardennes', kind='vo')], 640, 360, 25.0, burn=True); img = np.full((360, 640, 3), 80, np.uint8)
     assert cap.apply(img, 10) is img and cap.apply(img, 100) is img                                              # before and after: the same array
     on = cap.apply(img, 50); assert on is not img and (on != img).any() and (on[:200] == img[:200]).all() and on[300:].max() > 200      # drawn along the bottom only, with light letters
     assert cap.apply(img, 50, bgr=True).shape == img.shape and not (C.Captions(cap.cues, 640, 360, 25.0, burn=False).apply(img, 50) != img).any()
 
 
 def test_a_voice_over_and_a_speech_cue_at_once_are_stacked_with_the_voice_over_lower():
-    cap = C.Captions([dict(t0=0, t1=5, text='Speech line', kind='speech'), dict(t0=0, t1=5, text='Voice over line', kind='vo')], 640, 360, 25.0); img = np.zeros((360, 640, 3), np.uint8); out = cap.apply(img, 50)
+    cap = C.Captions([dict(t0=0, t1=5, text='Speech line', kind='speech'), dict(t0=0, t1=5, text='Voice over line', kind='vo')], 640, 360, 25.0, burn=True); img = np.zeros((360, 640, 3), np.uint8); out = cap.apply(img, 50)
     rows = np.where(out.max(axis=(1, 2)) > 200)[0]; assert rows.max() > 300 and rows.min() < rows.max() - 20 and (np.diff(rows) > 1).any()       # two separate bands of text
+
+
+def test_subtitles_are_a_track_and_not_burned_in_unless_asked_but_the_cards_are_in_the_picture(monkeypatch, tmp_path):
+    monkeypatch.delenv('STRATA_SUBTITLES', raising=False)
+    cues = [dict(t0=0.0, t1=5.0, text='Said aloud', kind='speech')]; img = np.full((180, 320, 3), 60, np.uint8)
+    assert not (C.Captions(cues, 320, 180, 25.0).apply(img, 50) != img).any()
+    monkeypatch.setenv('STRATA_SUBTITLES', 'burn'); assert (C.Captions(cues, 320, 180, 25.0).apply(img, 50) != img).any()
+    v = C.write_vtt(cues + [dict(t0=61.5, t1=63.25, text='Later', kind='vo')], str(tmp_path / 's.vtt')); txt = open(v, encoding='utf-8').read()
+    assert txt.startswith('WEBVTT') and '00:00:00.000 --> 00:00:05.000' in txt and '00:01:01.500 --> 00:01:03.250' in txt

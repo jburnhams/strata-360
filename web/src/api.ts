@@ -321,6 +321,7 @@ export const api = {
   startFilm: (folder: string, force = false) => call<{ started: boolean }>('/api/film/start', { folder, force }),
   stopFilm: (folder: string) => call<{ ok: boolean }>('/api/film/stop', { folder }),
   filmUrl: (folder: string) => '/api/film/index.m3u8?' + q({ folder }),
+  filmSubtitlesUrl: (folder: string) => '/api/film/subtitles.vtt?' + q({ folder }),
   startFilmStill: (folder: string, t: number, size: string, upscale: EnlargeMode = 'off') => call<StillState>('/api/film/still', { folder, t, size, upscale }),
   startFilmStills: (folder: string, o: { size: string; upscale: EnlargeMode; auto?: boolean; times?: number[] }) => call<{ moments: (StillState & { t: number; label?: string; why?: string })[] }>('/api/film/still', { folder, ...o }),
   filmStills: (folder: string) => call<StillList>('/api/film/stills?' + q({ folder })),

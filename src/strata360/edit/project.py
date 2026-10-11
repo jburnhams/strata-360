@@ -113,6 +113,39 @@ def serialise(segs, clips, music, lib, locked_wids=()):
     return out
 
 
+REPLAY_S = 0.05             # the least overlap of a window with the one before it (in the same clip) that counts as played twice
+
+
+def no_replay(segs, clip_len=None):
+    """The planner never goes back in a clip: when a window starts before the window just ahead of it (in the same clip) has ended, which happens when a talking stretch is rounded up to whole beats and the next item of the script starts inside that,
+    the footage and the words in the overlap would be seen and heard twice. The window is moved on to where the last one ended (its length, and so the film's timing, is unchanged; its voice span, the lines the script plays, moves with it), as far as the clip has footage.
+    A window that starts EARLIER in the clip than the one before it is the script's own order and is left. Works on the serialised segments; returns [(id, seconds moved)]."""
+    moved = []
+    for k in range(1, len(segs)):
+        a, b = segs[k - 1], segs[k]
+        if a.get('synthetic') or b.get('synthetic') or not a.get('clip') or a['clip'] != b['clip']: continue
+        a0 = float(a['clip_start_s']); b0 = float(b['clip_start_s']); ov = a0 + float(a['dur_s']) - b0
+        if ov <= REPLAY_S or b0 < a0: continue
+        room = (float(clip_len[b['clip']]) - (b0 + float(b['dur_s']))) if clip_len and b['clip'] in clip_len else ov
+        shift = round(min(ov, max(room, 0.0)), 3)
+        if shift <= 0: continue
+        b['clip_start_s'] = round(b0 + shift, 3); b['in_s'] = round(float(b.get('in_s') or 0.0) + shift, 3)
+        for key in ('utc_start', 'utc_end'):
+            if b.get(key): b[key] = (dt.datetime.fromisoformat(b[key].replace('Z', '+00:00')) + dt.timedelta(seconds=shift)).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        if b.get('voice_span'): v = b['voice_span']; b['voice_span'] = [round(max(float(v[0]) - shift, 0.0), 3), round(max(float(v[1]) - shift, 0.0), 3)]
+        moved.append((b['id'], shift))
+    return moved
+
+
+def fix_replays(folder):
+    """`no_replay` on the saved plan (a plan made before the rule); saves it when anything moved. Returns what moved."""
+    edit = load(folder); plan = edit.get('plan')
+    if not plan: return []
+    clips, _ = load_clips(folder); moved = no_replay(plan['segments'], {c['id']: float(c['duration_s']) for c in clips})
+    if moved: save(folder, edit)
+    return moved
+
+
 def apply_gap_items(folder, draft, log=print, voice_s=None, wpm=150.0):
     """Plan, in synthetic.json, the generated clip every item of the draft that uses a gap needs, so that it can be rendered afterwards (rendering is its own step, started from the Gaps panel):
       a `gap` item       the length it names; HOW it is drawn (2D map or 3D flyover) is the planner's choice (`synthetic.choose_kind`), not the script's, except that a clip already rendered, or one you made by hand, keeps its kind;
@@ -228,6 +261,7 @@ def plan_from_script(folder, draft_name=None, log=print):
     for g in ser:
         if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
     ser, sync = beat_sync(folder, edit['settings'], mus, ser, res['lines'], clips, lib, res['warnings'])                       # the cuts moved onto the music's real beats (V5)
+    for wid, s in no_replay(ser, {c['id']: float(c['duration_s']) for c in clips}): res['warnings'].append(f'{wid}: starts {s:.2f} s later in its clip, where the window before it ended (no footage or words played twice)')
     PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}

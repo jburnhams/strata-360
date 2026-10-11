@@ -576,6 +576,16 @@ def create_app(roots, token=None):
         txt = ''.join((f'/api/film/seg?folder={quote(folder)}&name={ln.strip()}\n' if ln.strip().endswith('.ts') else ln) for ln in open(p).readlines())
         return Response(txt, media_type='application/vnd.apple.mpegurl', headers={'Cache-Control': 'no-cache'})
 
+    @api.get('/api/film/subtitles.vtt')
+    def get_film_subtitles(request: Request, folder: str):                               # the subtitle track of the preview (the player shows it; it is not in the picture)
+        auth(request)
+        from strata360.edit import project as PJ
+        from strata360.render import preview as PV
+        f = folder_of(folder); plan = PJ.load(f).get('plan')
+        p = os.path.join(PV.film_dir(f, PV.plan_key(f, plan)), 'subtitles.vtt') if plan else ''
+        if not os.path.exists(p): raise HTTPException(404, 'no subtitles')
+        return FileResponse(p, media_type='text/vtt', headers={'Cache-Control': 'no-cache'})
+
     @api.get('/api/film/seg')
     def get_film_seg(request: Request, folder: str, name: str):
         auth(request)

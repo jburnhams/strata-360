@@ -5,7 +5,7 @@ Cues come from two places and are in FILM time:
   speech       the transcript of each footage window of the plan (clip times become film times through the segment's film_start_s), English where the clip is in another language, with the Gemini word corrections applied;
                segments flagged as hallucinated or suspect are left out
 `Captions.apply(img, frame)` draws the cue of that film frame (a copy; unchanged when there is none): white, outlined and shadowed, wrapped to two lines, faded in and out over a tenth of a second. A voice-over cue and a speech cue at the same
-moment are stacked (the voice-over lower). STRATA_SUBTITLES=off turns the burned-in text off (the .srt is still written)."""
+moment are stacked (the voice-over lower). The subtitles are a TRACK the player shows (an embedded mov_text track in the final film's mp4, WebVTT beside the preview), never burned into the picture unless STRATA_SUBTITLES=burn; the word-art cards are part of the picture."""
 import json, os, re
 import numpy as np
 
@@ -91,6 +91,17 @@ def srt_time(t):
     t = max(t, 0.0); h, r = divmod(int(round(t * 1000)), 3600000); m, r = divmod(r, 60000); s, ms = divmod(r, 1000); return f'{h:02d}:{m:02d}:{s:02d},{ms:03d}'
 
 
+def vtt_time(t): return srt_time(t).replace(',', '.')
+
+
+def write_vtt(cues, path):
+    """The cues as WebVTT, which a browser's video element shows as a track."""
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('WEBVTT\n\n')
+        for c in cues: f.write(f"{vtt_time(c['t0'])} --> {vtt_time(c['t1'])}\n{c['text']}\n\n")
+    return path
+
+
 def write_srt(cues, path):
     with open(path, 'w', encoding='utf-8') as f:
         for i, c in enumerate(cues, 1): f.write(f"{i}\n{srt_time(c['t0'])} --> {srt_time(c['t1'])}\n{c['text']}\n\n")
@@ -115,7 +126,7 @@ class Cards:
 
 class Captions:
     def __init__(self, cues, W, H, fps, burn=None, cards=None):
-        self.cues, self.W, self.H, self.fps, self.cards = cues, W, H, fps, cards; self.burn = (os.environ.get('STRATA_SUBTITLES', 'burn') != 'off') if burn is None else burn; self._t0 = np.array([c['t0'] for c in cues] or [0.0]); self._cache = {}
+        self.cues, self.W, self.H, self.fps, self.cards = cues, W, H, fps, cards; self.burn = (os.environ.get('STRATA_SUBTITLES') == 'burn') if burn is None else burn; self._t0 = np.array([c['t0'] for c in cues] or [0.0]); self._cache = {}
 
     @classmethod
     def for_project(cls, folder, plan, W, H, fps, key=None):
@@ -156,8 +167,8 @@ class Captions:
         self._cache[key] = lines; return lines
 
     def apply(self, img, frame, bgr=False):
-        """img: (H, W, 3) uint8 or uint16 (RGB, or BGR with `bgr`); returns it with the subtitle of film frame `frame` drawn (the same array when there is none)."""
-        if self.cards is not None and self.burn: img = self.cards.apply(img, frame, bgr)
+        """img: (H, W, 3) uint8 or uint16 (RGB, or BGR with `bgr`); returns it with the word-art cards of film frame `frame` drawn and, only when subtitles are burned in (`burn`), its subtitle (the same array when there is nothing to draw)."""
+        if self.cards is not None: img = self.cards.apply(img, frame, bgr)
         if not self.burn or not self.cues: return img
         t = frame / self.fps; act = self.active(t)
         if not act: return img
