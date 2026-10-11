@@ -411,7 +411,7 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
         if limit_pieces is not None: status('partial'); pg.finish(); return d
         with pg.stage('bookends'): bk = render_bookends(folder, d, size, fps, bitrate, pg)
         lead = bk['intro'][1] if 'intro' in bk else 0.0; tail = bk['outro'][1] if 'outro' in bk else 0.0
-        from strata360.render import captions as CP; CP.write_srt([dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'film.srt'))                  # the subtitles as a file too, beside the film (after the opening)
+        from strata360.render import captions as CP; CP.write_srt([dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'subtitles.srt'))                  # the subtitles as a file too, beside the film (after the opening); not named like the film: a player would load it and show every line twice, over the words burned into the picture
         with pg.stage('timemap'):
             from strata360.render import timemap; timemap.write(plan, fps, d)                                                         # which footage is on screen at every frame (timemap.json and .csv beside the film)
         status('assembling')

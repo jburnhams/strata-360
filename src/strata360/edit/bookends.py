@@ -106,7 +106,7 @@ def _series(motion, key):
 
 def candidates(folder, per=6, gap=12.0):
     """{'intro': [...], 'outro': [...]}: candidate dicts (id, kind, where, clip, clip_start_s, dur_s, technique, score, why, features), best first, at most `per` of each kind. Openings come from the first fifth of the race's clips, endings from the last fifth
-    (and the globe shots from anywhere in the first or last half), so a crowd is the start line's or the finish's."""
+    (and the globe shots from anywhere in the first half), so a crowd is the start line's; the ending is always the race's last clip (the film ends where the race does), its last seconds when nothing there is striking."""
     from strata360.pipeline import config
     clips = _race_clips(folder); n = len(clips); rd = os.path.join(config.race_dir(folder), 'clips'); found = {(w, k): [] for w in ('intro', 'outro') for k in KINDS}
     for i, (c, _) in enumerate(clips):
@@ -116,7 +116,7 @@ def candidates(folder, per=6, gap=12.0):
         scenery = lambda t0, t1: float(np.mean([it['scenery'] for it in items if t0 - 3 <= it['t_s'] <= t1 + 3 and isinstance(it.get('scenery'), (int, float))] or [4.0])) / 10.0
         if fv and fv.get('samples'):
             s = fv['samples']; t = [x['t'] for x in s]; score = [x['score'] for x in s]; total = GLOBE_S + FACE_S
-            for where, ok, late in (('intro', pos <= 0.5, pos), ('outro', pos >= 0.5, 1 - pos)):
+            for where, ok, late in (('intro', pos <= 0.5, pos), ('outro', i == n - 1, 0.0)):
                 if not ok: continue
                 for t0, m in pick_windows(t, score, FACE_S, MIN_FACE, MIN_EACH, extra=lambda a, b: (0.6 + 0.4 * steady(a, b)) * (0.7 + 0.3 * scenery(a, b))):
                     # an opening starts the globe `GLOBE_S` before the face hold, an ending runs the globe after it
@@ -131,7 +131,7 @@ def candidates(folder, per=6, gap=12.0):
             def weight(a, b, where):
                 ppl = crowd_near(a - SEQ_P, a) if where == 'intro' else crowd_near(b, b + SEQ_P)
                 return None if ppl < CROWD_PEOPLE / 2 else (0.5 + 0.5 * min(ppl / 15.0, 1.0)) * (0.6 + 0.4 * steady(a, b))
-            for where, ok in (('intro', pos <= 0.25), ('outro', pos >= 0.75)):
+            for where, ok in (('intro', pos <= 0.25), ('outro', i == n - 1)):
                 if not ok: continue
                 for t0, m in pick_windows(t, score, SEQ_FACE, MIN_FACE, MIN_EACH, extra=lambda a, b, where=where: weight(a, b, where)):
                     start = t0 - SEQ_G - SEQ_P if where == 'intro' else t0
@@ -141,7 +141,7 @@ def candidates(folder, per=6, gap=12.0):
         if items:
             front = [it for it in items if it.get('view') == 'front']
             t = [it['t_s'] for it in front]; pe = [min(float(it.get('people') or 0) / 12.0, 1.0) + (0.3 if it.get('crowd') == 'many' else 0.0) for it in front]
-            for where, pre in (('intro', pos <= 0.2), ('outro', pos >= 0.8)):
+            for where, pre in (('intro', pos <= 0.2), ('outro', i == n - 1)):
                 if not pre: continue
                 for j, it in enumerate(front):
                     if (it.get('people') or 0) < CROWD_PEOPLE and it.get('crowd') != 'many': continue
@@ -149,6 +149,9 @@ def candidates(folder, per=6, gap=12.0):
                     if dur and t0 + CROWD_S > dur: t0 = max(dur - CROWD_S, 0.0)
                     w = (min((it.get('people') or 0) / 15.0, 1.0) * 0.4 + (it.get('scenery') or 4) / 10.0 * 0.25 + (it.get('clarity') or 3) / 5.0 * 0.15 + steady(t0, t0 + CROWD_S) * 0.2) * (1.15 if it.get('setting') in SETTINGS else 1.0)
                     found[(where, 'crowd')].append((w, dict(clip=c, clip_start_s=round(t0, 2), dur_s=CROWD_S, technique='push_in', people=it.get('people'), setting=it.get('setting'), steady=round(steady(t0, t0 + CROWD_S), 2))))
+    if clips and not any(found[('outro', k)] for k in KINDS):                                                         # the last clip has nothing striking: its last seconds, as a slow push in, are the ending all the same
+        c = clips[-1][0]; mo = _load(os.path.join(rd, c), 'motion.json'); dur = float((mo or {}).get('duration_s') or 0.0)
+        if dur > CROWD_S: found[('outro', 'crowd')].append((0.1, dict(clip=c, clip_start_s=round(dur - CROWD_S, 2), dur_s=CROWD_S, technique='push_in', steady=0.5)))
     out = {'intro': [], 'outro': []}
     for (where, kind), lst in found.items():
         for rank, (sc, it) in enumerate(spread(lst, gap)[:per]):
@@ -222,12 +225,13 @@ def rank(cands, jpgs, where, kind, server):
     best = ans.get('best'); return out, (cands[best]['id'] if isinstance(best, int) and 0 <= best < len(cands) else None)
 
 
-def run(folder, per=6, out_dir=None, render=True, choose=True, log=print):
+def run(folder, per=6, out_dir=None, render=True, choose=True, log=print, only=None):
     """The whole thing for a project: candidates, previews and the vision model's choice, written to <project>/strata360/bookends/bookends.json (returned)."""
     from strata360.pipeline import config
     from strata360.edit import framing as FR, techniques as TQ
     from strata360.analysis import vlm
     out_dir = out_dir or os.path.join(config.race_dir(folder), 'bookends'); os.makedirs(out_dir, exist_ok=True); t0 = time.time(); cs = candidates(folder, per=per); lib = TQ.with_cams(TQ.load(), folder); cache = {}
+    if only: cs = {only: cs[only]}                                                                                        # one end of the film again; the other is kept as it was
     log(f"{sum(len(v) for v in cs.values())} candidates: " + ', '.join(f"{w} {k} {sum(1 for c in cs[w] if c['kind'] == k)}" for w in cs for k in KINDS))
     for where in cs:
         for c in cs[where]:
@@ -246,6 +250,8 @@ def run(folder, per=6, out_dir=None, render=True, choose=True, log=print):
                     scores, best = rank(group, [os.path.join(out_dir, c['picture']) for c in group], where, kind, srv)
                     for c in group: c.update(scores.get(c['id'], {}))
                     chosen[f'{where}-{kind}'] = best; log(f"{where} {kind}: best {best}")
+    if only and _load(out_dir, 'bookends.json'):
+        old = _load(out_dir, 'bookends.json'); cs = {**old['candidates'], **cs}; chosen = {**{k: v for k, v in old['chosen'].items() if not k.startswith(only + '-')}, **chosen}
     doc = dict(schema=1, generated=time.strftime('%Y-%m-%dT%H:%M:%S'), seconds=round(time.time() - t0, 1), candidates=cs, chosen=chosen)
     json.dump(doc, open(os.path.join(out_dir, 'bookends.json'), 'w'), indent=1); return doc
 

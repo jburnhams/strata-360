@@ -106,6 +106,13 @@ def joins(plan):
     return out
 
 
+def replayed_s(a, b):
+    """How long the start of window `b` repeats what the window `a` before it ended on: seconds of the same clip played twice in a row (the planner returned to an earlier point of the clip), 0 when the two are one stretch, apart, or not both the clip's own voice. The voice of `b` skips that stretch rather than say it again."""
+    if not (a.get('clip') and a.get('clip') == b.get('clip') and not a.get('synthetic') and not b.get('synthetic') and a.get('role') == 'clip' and b.get('role') == 'clip'): return 0.0
+    end = float(a['clip_start_s']) + float(a['dur_s']); ov = end - float(b['clip_start_s'])
+    return ov if ov > 0.05 and float(b['clip_start_s']) >= float(a['clip_start_s']) else 0.0                                              # (only when b starts inside what a played)
+
+
 def _to_stereo(p, speech):
     """The ffmpeg filter that makes a window's sound stereo: a voice (or any mono source) is centred by copying it to both sides, a stereo source stays stereo unless it carries the voice (then it is centred too)."""
     if speech or channels(p) == 1: return 'aformat=channel_layouts=mono,pan=stereo|c0=c0|c1=c0'
@@ -176,7 +183,10 @@ def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None, loudne
     for k, g in enumerate(segs):
         hin = jn[k][0] if k > 0 else 0.0; hout = jn[k + 1][0] if k + 1 < len(segs) else 0.0; cs = float(g['clip_start_s']); hin_eff = min(hin, max(cs, 0.0)) if not g.get('synthetic') else hin
         d = float(g['dur_s']) + hin_eff + hout; ext = dict(g, clip_start_s=cs - hin_eff, dur_s=d)
-        if g.get('voice_span'): ext['voice_span'] = [float(g['voice_span'][0]) + hin_eff, float(g['voice_span'][1]) + hin_eff]
+        if g.get('voice_span'):
+            v0, v1 = float(g['voice_span'][0]), float(g['voice_span'][1]); ov = replayed_s(segs[k - 1], g) if k > 0 else 0.0
+            if ov > 0: v0 = min(max(v0, ov), v1)                                                                                         # the first stretch of this window was just heard (the planner went back in the clip): its voice starts after it
+            ext['voice_span'] = [v0 + hin_eff, v1 + hin_eff]
         ins, ch, lab, n = _window(folder, ext, n, bg_gain); inputs += ins; chains += ch
         fin = 2 * hin_eff; fout = 2 * hout; cin = 'tri' if jn[k][1] and k > 0 else 'qsin'; cout = 'tri' if k + 1 < len(segs) and jn[k + 1][1] else 'qsin'; f = []
         if fin > 1e-3: f.append(f'afade=t=in:st=0:d={fin:.4f}:curve={cin}')
