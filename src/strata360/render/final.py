@@ -9,6 +9,7 @@ stopped or crashed render continues where it left off. The pieces are joined wit
   <project>/final/<key>/film.mp4           the result
 
 Cost: 4K at 50 frames a second takes of the order of a second per frame on this kind of Mac; the preview (render/preview.py) is for judging the cut, this for delivering it."""
+from strata360 import oslib as _oslib
 from strata360.pipeline import guard
 import datetime as dt, hashlib, json, math, os, shutil, subprocess, sys, time
 import cv2
@@ -393,7 +394,7 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
             plan0 = plan; plan, segs, ps, src, caps = _prepare(folder, plan, framing, size, fps, upscale, min_zoom, pg); total = sum(p['frames'] for p in ps); t0 = time.time()
             pg.note(f'{len(ps)} pieces, {total} frames at {W}x{H}, {fps:g} frames a second' + (f', enlarging the shots that need it ({UP.LABELS[UP.normalize(upscale)].lower()})' if UP.normalize(upscale) != 'off' else ''))
         def finished(): return [p for p in ps if os.path.exists(os.path.join(d, p['id'] + '.mov.done'))]
-        def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=sum(p['frames'] for p in finished()), frames_total=total, pieces_done=len(finished()), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
+        def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=sum(p['frames'] for p in finished()), frames_total=total, pieces_done=len(finished()), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); _oslib.replace_file(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
         status('rendering')
         n_run = len(ps) if limit_pieces is None else min(limit_pieces, len(ps)); nw = min(workers or render_workers(size), max(n_run, 1))
         def tick(): status('rendering'); progress and progress(sum(p['frames'] for p in finished()), total)
@@ -431,7 +432,7 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
         with pg.stage('assemble'):
             srt = os.path.join(d, 'subtitles.srt'); srt = srt if os.path.exists(srt) and os.path.getsize(srt) else None
             lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{m}'\n" for m in [bk[w][0] for w in ('intro',) if w in bk] + [os.path.join(d, p['id'] + '.mov') for p in ps] + [bk[w][0] for w in ('outro',) if w in bk])); film = out or os.path.join(d, 'film.mp4')
-            r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, *(['-i', srt, '-map', '2:s', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Subtitles', '-disposition:s:0', 'default'] if srt else []), '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
+            r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, *(['-i', srt, '-map', '2:s', '-c:s', 'mov_text', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Subtitles', '-disposition:s:0', 'default'] if srt else []), '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-t', f'{lead + total / fps + tail:.3f}', '-movflags', '+faststart', film], capture_output=True, text=True)
             if r.returncode: status('error', error=r.stderr[-300:]); raise RuntimeError(r.stderr[-300:])
         status('done', finished=time.time(), film=film, sound=sound); pg.finish(); return film
     except BaseException as e:

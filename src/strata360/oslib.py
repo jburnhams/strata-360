@@ -121,3 +121,13 @@ def cli_command():
     on Windows and without a .venv). Sets PYTHONPATH and PYTHONWARNINGS for the child like the launcher does."""
     os.environ['PYTHONPATH'] = os.path.join(ROOT_DIR, 'src') + os.pathsep + os.environ.get('PYTHONPATH', ''); os.environ.setdefault('PYTHONWARNINGS', 'ignore')
     return [sys.executable, '-m', 'strata360']
+
+
+def replace_file(src, dst, tries=40, wait=0.05):
+    """os.replace that waits a moment when Windows refuses because another process has the destination open (the server reads the status files while a render rewrites them)."""
+    import time
+    for i in range(tries):
+        try: os.replace(src, dst); return
+        except PermissionError:
+            if i == tries - 1: raise
+            time.sleep(wait)
