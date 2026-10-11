@@ -5,6 +5,8 @@ import { usePoll } from '../usePoll'
 import StepVideo from './FrameStep'
 import FilmStill from './FilmStill'
 import FilmText from './FilmText'
+import TextOverlay from './TextOverlay'
+import { useFilmText } from '../useFilmText'
 
 // A rough preview of the whole planned film (cuts, camera moves, the voice-over track). It is rendered on the server as a stream and starts playing after the first couple of seconds;
 // it keeps buffering while the rest is made. A new plan or voice-over means a new preview.
@@ -12,16 +14,19 @@ export default function FilmPreview({ folder }: { folder: string }) {
   const st = usePoll(() => api.film(folder), 1500, [folder])
   const video = useRef<HTMLVideoElement>(null)
   const [err, setErr] = useState<string>()
-  const key = st?.key, live = st && (st.state === 'rendering' || st.state === 'done') && (st.frames_done ?? 0) > 50
+  const text = useFilmText(folder)
+  const key = st?.key, base = !!st?.base, live = st && (st.state === 'rendering' || st.state === 'done') && (st.frames_done ?? 0) > 50
   useEffect(() => {
     const v = video.current; if (!v || !live || !key) return
     setErr(undefined); let hls: Hls | null = null, t = 0
-    if (Hls.isSupported()) {
+    if (base) {                                                                                  // the text-free film with its sound, whole: the cards are drawn over it by the page (TextOverlay)
+      const at = v.currentTime, was = !v.paused; v.src = api.filmBaseUrl(folder, key); v.addEventListener('loadedmetadata', () => { if (at > 0) v.currentTime = at; if (was) void v.play?.()?.catch?.(() => {}) }, { once: true })
+    } else if (Hls.isSupported()) {
       hls = new Hls({ startPosition: 0, liveDurationInfinity: false, maxBufferLength: 60, backBufferLength: 120, manifestLoadingMaxRetry: 10, levelLoadingMaxRetry: 10 })
       hls.loadSource(api.filmUrl(folder)); hls.attachMedia(v); hls.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) setErr(d.details) })
     } else if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = api.filmUrl(folder) }
     return () => { clearTimeout(t); hls?.destroy() }
-  }, [live, key, folder])
+  }, [live, key, folder, base])
   if (!st) return null
   const pct = st.frames_total ? Math.round(100 * (st.frames_done ?? 0) / st.frames_total) : 0
   const busy = st.state === 'starting' || st.state === 'audio' || st.state === 'rendering'
@@ -37,9 +42,9 @@ export default function FilmPreview({ folder }: { folder: string }) {
         {err && <span className="text-sm text-red-600">player: {err}</span>}
       </div>
       {!!st.placeholders?.length && <p className="mb-2 text-xs text-amber-700">{st.placeholders.length} clip(s) have no proxy video yet and show as dark cards: {st.placeholders.map(c => c.slice(-9)).join(', ')}. Run the processing to finish them, then render again.</p>}
-      {live ? <StepVideo videoRef={video} playsInline className="aspect-video w-full max-w-3xl rounded-lg bg-black"><track key={key} kind="subtitles" src={api.filmSubtitlesUrl(folder)} srcLang="en" label="Subtitles" default /></StepVideo> : <div className="aspect-video w-full max-w-3xl rounded-lg bg-stone-100 dark:bg-stone-950" />}
+      {live ? <div className="relative w-full max-w-3xl"><StepVideo videoRef={video} playsInline className="aspect-video w-full rounded-lg bg-black"><track key={key} kind="subtitles" src={api.filmSubtitlesUrl(folder)} srcLang="en" label="Subtitles" default /></StepVideo>{base && text.list && <TextOverlay folder={folder} video={video} list={text.list} reload={text.reload} />}</div> : <div className="aspect-video w-full max-w-3xl rounded-lg bg-stone-100 dark:bg-stone-950" />}
       {live && <FilmStill folder={folder} video={video} planKey={key} />}
-      {st.state !== 'noplan' && <FilmText folder={folder} video={video} />}
+      {st.state !== 'noplan' && <FilmText folder={folder} video={video} list={text.list} reload={text.reload} />}
     </section>
   )
 }

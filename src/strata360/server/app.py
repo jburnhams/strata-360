@@ -525,7 +525,7 @@ def create_app(roots, token=None):
         running = running or bool(st and st['state'] in ('rendering', 'audio') and alive(st.get('pid')))
         state = st['state'] if st else ('starting' if running else 'none')
         if st and st['state'] in ('rendering', 'audio') and not running: state = 'error'; st['error'] = 'the preview was stopped'
-        return dict(state=state, running=running, key=key, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), placeholders=(st or {}).get('placeholders', []), error=(st or {}).get('error'), length_s=plan['film']['length_s'])
+        return dict(state=state, running=running, key=key, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), placeholders=(st or {}).get('placeholders', []), base=os.path.exists(os.path.join(PV.film_dir(f, key), 'base.mp4')), error=(st or {}).get('error'), length_s=plan['film']['length_s'])
 
     def job_pid(f, jobs, status_path_fn):
         """pid of the running job for folder f: our own child, or (after a restart of the server) the pid its status file names."""
@@ -618,6 +618,24 @@ def create_app(roots, token=None):
         try: png = FE.picture(f, plan, card, mode, int(min(max(w, 160), 1920)))
         except FileNotFoundError as e: raise HTTPException(404, str(e))
         return Response(png, media_type='image/png', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/film/base.mp4')
+    def get_film_base(request: Request, folder: str):                                    # the preview without any text, with its sound (the page draws the cards over it); served with ranges so it can be seeked
+        auth(request)
+        from strata360.edit import project as PJ
+        from strata360.render import preview as PV
+        f = folder_of(folder); plan = PJ.load(f).get('plan')
+        p = os.path.join(PV.film_dir(f, PV.plan_key(f, plan)), 'base.mp4') if plan else ''
+        if not os.path.exists(p): raise HTTPException(404, 'no text-free preview yet')
+        return FileResponse(p, media_type='video/mp4', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/film/text/sheet')
+    def get_film_text_sheet(request: Request, folder: str, id: str, v: str = ''):        # the card's frames over transparency in one PNG (a grid): what the page draws over the preview
+        auth(request)
+        from strata360.edit import film_text_edit as FE, project as PJ
+        f = folder_of(folder); plan = PJ.load(f).get('plan'); card = next((c for c in FE.load(f, plan)['cards'] if c['id'] == id), None)
+        if card is None: raise HTTPException(404, 'no such card')
+        return Response(FE.sheet(f, card), media_type='image/png', headers={'Cache-Control': 'max-age=3600'})
 
     @api.get('/api/film/seg')
     def get_film_seg(request: Request, folder: str, name: str):

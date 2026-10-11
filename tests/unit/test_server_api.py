@@ -1038,3 +1038,16 @@ class TestFilmTextApi:
         alone = client.get('/api/film/text/still', params=dict(folder=f, id=made['id'], mode='text', w=320)); assert alone.status_code == 200 and alone.headers['content-type'] == 'image/png' and alone.content[:4] == b'\x89PNG'
         assert client.get('/api/film/text/still', params=dict(folder=f, id=made['id'], mode='still')).status_code == 404            # no preview yet
         assert client.get('/api/film/text/still', params=dict(folder=f, id='nope', mode='text')).status_code == 404 and client.get('/api/film/text/still', params=dict(folder=f, id=made['id'], mode='x')).status_code == 400
+
+
+class TestFilmTextOverlayApi(TestFilmTextApi):
+    def test_the_sheet_is_a_png_and_the_text_free_film_is_served_with_ranges_once_made(self, client, project):
+        self.plan(project); f = project.folder; made = client.post('/api/film/text/save', json=dict(folder=f, card=dict(t=12.0, dur_s=1.0, texts=['GO']))).json()
+        r = client.get('/api/film/text/sheet', params=dict(folder=f, id=made['id'])); assert r.status_code == 200 and r.headers['content-type'] == 'image/png' and r.content[:4] == b'\x89PNG'
+        assert client.get('/api/film/text/sheet', params=dict(folder=f, id='nope')).status_code == 404 and client.get('/api/film/base.mp4', params=dict(folder=f)).status_code == 404
+        from strata360.edit import project as PJ
+        from strata360.render import preview as PV
+        d = PV.film_dir(f, PV.plan_key(f, PJ.load(f)['plan'])); os.makedirs(d, exist_ok=True); open(os.path.join(d, 'base.mp4'), 'wb').write(bytes(range(256)) * 4)
+        assert client.get('/api/film', params=dict(folder=f)).json()['base'] is True
+        full = client.get('/api/film/base.mp4', params=dict(folder=f)); assert full.status_code == 200 and full.headers['content-type'] == 'video/mp4' and len(full.content) == 1024
+        part = client.get('/api/film/base.mp4', params=dict(folder=f), headers={'Range': 'bytes=10-19'}); assert part.status_code == 206 and part.content == bytes(range(10, 20))

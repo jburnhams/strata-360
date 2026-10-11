@@ -45,7 +45,7 @@ def _write(folder, doc):
 def public(card):
     """A card as the page needs it."""
     spec = card.get('spec') or {}
-    return dict(id=card['id'], type=card.get('type') or 'note', t=card['t'], dur_s=card['dur_s'], lines=card.get('lines') or [], elements=spec.get('elements') or [], start_s=(spec.get('timing') or {}).get('start_s', 0.0), user=str(card['id']).startswith('u'),
+    return dict(id=card['id'], type=card.get('type') or 'note', t=card['t'], dur_s=card['dur_s'], lines=card.get('lines') or [], elements=spec.get('elements') or [], start_s=(spec.get('timing') or {}).get('start_s', 0.0), boxes=boxes_of(card), user=str(card['id']).startswith('u'),
                 score=card.get('score'), worth_why=card.get('worth_why') or '', blocking=card.get('blocking'), shot=card.get('shot'), why=spec.get('why') or '', changes=card.get('changes') or [])
 
 
@@ -54,7 +54,7 @@ def listing(folder, plan=None):
     from strata360.render import preview as PVW, titles as TT
     doc = load(folder, plan); key = PVW.plan_key(folder, plan) if plan else None
     return dict(cards=[public(c) for c in sorted(doc['cards'], key=lambda c: c['t'])], stale=bool(plan and doc.get('plan_key') not in (None, key)), edited=doc.get('edited') or 0.0, length_s=float((plan or {}).get('film', {}).get('length_s') or 0.0),
-                fonts=[dict(id=k, note=v[1]) for k, v in TT.FONTS.items()], presets_in=list(TT.PRESETS_IN), presets_out=list(TT.PRESETS_OUT), has_preview=base_source(folder, plan) is not None)
+                fonts=[dict(id=k, note=v[1]) for k, v in TT.FONTS.items()], presets_in=list(TT.PRESETS_IN), presets_out=list(TT.PRESETS_OUT), has_preview=base_source(folder, plan) is not None, sheet=dict(fps=SHEET_FPS, cols=SHEET_COLS))
 
 
 def default_elements(texts):
@@ -133,6 +133,44 @@ def frame_at(folder, plan, t):
 
 def checker(W, H, cell=24):
     ys, xs = np.mgrid[0:H, 0:W]; g = np.where(((xs // cell) + (ys // cell)) % 2 == 0, 58, 84).astype(np.uint8); return np.stack([g, g, g], -1)
+
+
+SHEET_FPS, SHEET_W, SHEET_COLS = 20.0, 480, 10                      # the overlay sheet: frames a second, the width of one frame (16:9), frames to a row
+
+
+def sheet_frames(dur): return max(int(np.ceil(dur * SHEET_FPS - 1e-9)), 1)
+
+
+def sheet(folder, card):
+    """PNG bytes of every frame of a card over transparency, in a grid of SHEET_COLS columns (frame k is the card at t + k / SHEET_FPS): the page draws the right square over the preview, so a changed card shows at once on the text-free film.
+    Transparency is found by drawing each frame over black and over white; the picture is kept for the same card."""
+    import cv2
+    from strata360.render import captions as CP
+    spec = card.get('spec') or {}; t0, dur = float(card['t']), float(card['dur_s']); W = SHEET_W; H = W * 9 // 16; n = sheet_frames(dur)
+    sig = hashlib.sha1(json.dumps([t0, dur, spec, W], sort_keys=True, default=str).encode()).hexdigest()[:16]; d = os.path.join(config.race_dir(folder), 'film_text_stills'); os.makedirs(d, exist_ok=True); path = os.path.join(d, f'sheet-{sig}.png')
+    if os.path.exists(path): return open(path, 'rb').read()
+    cards = CP.Cards([dict(t=t0, dur_s=dur, spec=spec)], W, H, SHEET_FPS); black = np.zeros((H, W, 3), np.uint8); white = np.full((H, W, 3), 255, np.uint8); rows = (n + SHEET_COLS - 1) // SHEET_COLS
+    out = np.zeros((rows * H, SHEET_COLS * W, 4), np.uint8)
+    for k in range(n):
+        f = int(round((t0 + k / SHEET_FPS) * SHEET_FPS)); ob = cards.apply(black, f).astype(np.float32); ow = cards.apply(white, f).astype(np.float32)
+        a = np.clip(1.0 - (ow - ob).mean(axis=2) / 255.0, 0.0, 1.0); rgb = np.where(a[..., None] > 0.004, ob / np.maximum(a[..., None], 0.004), 0.0)
+        r, c = divmod(k, SHEET_COLS); out[r * H:(r + 1) * H, c * W:(c + 1) * W] = np.dstack([np.clip(rgb, 0, 255), a * 255.0]).astype(np.uint8)
+    ok, buf = cv2.imencode('.png', np.ascontiguousarray(out[..., [2, 1, 0, 3]]))
+    if not ok: raise RuntimeError('could not encode the sheet')
+    tmp = f'{path}.{os.getpid()}.part'; open(tmp, 'wb').write(buf.tobytes()); os.replace(tmp, path); return buf.tobytes()
+
+
+def boxes_of(card):
+    """[(x0, y0, x1, y1) as fractions of the frame, or None] for each element of a card: where its letters are (what the page lets you grab)."""
+    from strata360.render import titles as TT
+    spec = card.get('spec') or {}; els = spec.get('elements') or []
+    if not els: return []
+    got = {}
+    try:
+        for i, b in TT.piece_boxes(TT.Title(spec, 960, 540, float(card['dur_s']))):                                  # (an element in several pieces, a word each: the box round them all)
+            o = got.get(i); got[i] = tuple(b) if o is None else (min(o[0], b[0]), min(o[1], b[1]), max(o[2], b[2]), max(o[3], b[3]))
+    except Exception: got = {}
+    return [[round(float(v), 4) for v in got[i]] if i in got else None for i in range(len(els))]
 
 
 def picture(folder, plan, card, mode='still', w=640):

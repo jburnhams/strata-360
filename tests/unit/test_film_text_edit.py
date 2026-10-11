@@ -65,3 +65,18 @@ def test_a_picture_of_a_card_is_drawn_once_on_the_frame_or_alone_and_again_when_
     FE.picture(folder, PLAN, dict(card, spec=_spec('OTHER')), 'still', 480); assert len(frames) == 2
     monkeypatch.setattr(FE, 'base_source', lambda f, p=None: None)
     with pytest.raises(FileNotFoundError): FE.picture(folder, PLAN, dict(card, t=11.0), 'still')
+
+
+def test_the_overlay_sheet_has_every_frame_over_transparency_and_is_kept(folder, tmp_path):
+    import cv2
+    card = dict(id='o1', t=10.0, dur_s=1.0, spec=_spec('GO')); png = FE.sheet(folder, card); n = FE.sheet_frames(1.0); assert n == 20 and png == FE.sheet(folder, card)
+    img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_UNCHANGED); W = FE.SHEET_W; H = W * 9 // 16
+    assert img.shape == (2 * H, FE.SHEET_COLS * W, 4) and img[..., 3].max() > 200                                                          # 20 frames in 2 rows; the words are opaque
+    assert img[H:2 * H, :W, 3].max() > 0                                                                                                    # frame 10 (the first of row 2): the word is on
+    assert np.count_nonzero(img[..., 3] == 0) > 0.9 * img[..., 3].size                                                                     # and almost everything else is clear
+
+
+def test_the_boxes_of_a_card_are_where_its_words_are(folder):
+    spec = _spec('GO'); spec['elements'].append(dict(spec['elements'][0], text='AND LATER', y=0.8, size=0.08)); b = FE.boxes_of(dict(id='o1', t=1.0, dur_s=3.0, spec=spec))
+    assert len(b) == 2 and all(0.0 <= v <= 1.0 for box in b for v in box) and b[0][1] < b[1][1] and b[0][2] > b[0][0] and FE.boxes_of(dict(id='x', t=0, dur_s=1.0, spec={})) == []
+    assert FE.public(dict(id='o1', t=1.0, dur_s=3.0, spec=spec))['boxes'] == b

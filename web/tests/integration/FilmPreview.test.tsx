@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest'
+import { waitFor } from '@testing-library/react'
 import { axe } from 'vitest-axe'
 import { mockGet, mockPending, mockError, mockPost, recordRequests } from '../utils/api'
 import { setup } from '../utils/render'
@@ -66,4 +67,14 @@ it('has no accessibility violations', async () => {
   const { container, findByRole } = setup(<FilmPreview folder="/f" />)
   await findByRole('button', { name: 'Render again' }) // Wait for load
   expect(await axe(container)).toHaveNoViolations()
+})
+
+it('plays the text-free film when there is one, and the stream while the preview is still being made', async () => {
+  mockGet('/api/film', () => makeFilmState({ state: 'done', key: 'k1', base: true, frames_done: 100, frames_total: 100 }))
+  const { container, unmount } = setup(<FilmPreview folder="/f" />)
+  await waitFor(() => expect(container.querySelector('video')?.getAttribute('src') ?? '').toContain('/api/film/base.mp4'))
+  unmount()
+  mockGet('/api/film', () => makeFilmState({ state: 'rendering', key: 'k1', base: false, frames_done: 100, frames_total: 200 }))
+  const second = setup(<FilmPreview folder="/f" />)
+  await waitFor(() => expect(second.container.querySelector('video')).toBeTruthy()); expect(second.container.querySelector('video')?.getAttribute('src') ?? '').not.toContain('base.mp4')
 })

@@ -14,7 +14,7 @@ def test_extra_workers_need_plenty_of_free_memory_and_an_idle_machine():
 
 
 def test_a_worker_waits_for_memory_and_load_before_starting_an_item():
-    seen = []; R.time.sleep = lambda s: seen.append(s)
+    seen = []; R.time.sleep = lambda s: seen.append(s); R.vram_free_gb = lambda: None
     R.busy = lambda cfg=None: False; mem = iter([2.0, 2.0, 20.0]); R.mem_available_gb = lambda: next(mem)
     assert R.wait_for_headroom('scenes', None, None, lambda m: None) and len(seen) == 2                                              # scenes needs about 9 GB: waited twice, then went
     R.mem_available_gb = lambda: 20.0; loads = iter([True, False]); R.busy = lambda cfg=None: next(loads); seen.clear()

@@ -1,6 +1,5 @@
 import { useState, type RefObject } from 'react'
 import { api, type FilmTextState, type TextCard, type TextCardEdit, type TextElement } from '../api'
-import { usePoll } from '../usePoll'
 import { clock } from './stillModes'
 
 // The film's on-screen text (the word-art cards): each one listed under the preview with when it is, what it says and why, a picture of it on the film's frame and the words by themselves. Click the time to
@@ -12,9 +11,8 @@ type Draft = { id?: string; t: number; dur_s: number; start_s: number; elements:
 
 const toDraft = (c: TextCard): Draft => ({ id: c.id, t: c.t, dur_s: c.dur_s, start_s: c.start_s, elements: c.elements.map(e => ({ ...e, fill: { ...e.fill } })), texts: [] })
 
-export default function FilmText({ folder, video }: { folder: string; video: RefObject<HTMLVideoElement | null> }) {
-  const [version, setVersion] = useState(0), [shown, setShown] = useState<Record<string, number>>({}), [draft, setDraft] = useState<Draft | null>(null), [err, setErr] = useState<string>(), [busy, setBusy] = useState(false), [note, setNote] = useState<string>()
-  const list = usePoll(() => api.filmText(folder), 6000, [folder, version])
+export default function FilmText({ folder, video, list, reload }: { folder: string; video: RefObject<HTMLVideoElement | null>; list?: FilmTextState; reload: () => void }) {
+  const [shown, setShown] = useState<Record<string, number>>({}), [draft, setDraft] = useState<Draft | null>(null), [err, setErr] = useState<string>(), [busy, setBusy] = useState(false), [note, setNote] = useState<string>()
   if (!list) return null
   const now = () => Math.round((video.current?.currentTime ?? 0) * 10) / 10
   const go = (t: number) => { const v = video.current; if (!v) return; v.currentTime = t; v.scrollIntoView?.({ block: 'nearest' }); void v.play?.()?.catch?.(() => {}) }
@@ -24,11 +22,11 @@ export default function FilmText({ folder, video }: { folder: string; video: Ref
     if (!draft) return
     setErr(undefined); setBusy(true)
     const card: TextCardEdit = draft.id ? { id: draft.id, t: draft.t, dur_s: draft.dur_s, start_s: draft.start_s, elements: draft.elements } : { t: draft.t, dur_s: draft.dur_s, start_s: draft.start_s, texts: draft.texts.filter(x => x.trim()) }
-    api.saveFilmText(folder, card).then(c => { setBusy(false); setDraft(null); setNote(`Saved ${c.lines.map(l => l.text).join(' / ')}`); redraw(c.id); setVersion(n => n + 1) }).catch(fail)
+    api.saveFilmText(folder, card).then(c => { setBusy(false); setDraft(null); setNote(`Saved ${c.lines.map(l => l.text).join(' / ')}`); redraw(c.id); reload() }).catch(fail)
   }
   const remove = (c: TextCard) => {
     if (!window.confirm(`Delete the text “${c.lines.map(l => l.text).join(' / ')}” at ${clock(c.t)}?`)) return
-    setErr(undefined); api.deleteFilmText(folder, c.id).then(() => { setNote('Deleted'); setVersion(n => n + 1) }).catch(fail)
+    setErr(undefined); api.deleteFilmText(folder, c.id).then(() => { setNote('Deleted'); reload() }).catch(fail)
   }
   const edit = (patch: Partial<Draft>) => setDraft(d => d && { ...d, ...patch })
   const editEl = (i: number, patch: Partial<TextElement>) => setDraft(d => d && { ...d, elements: d.elements.map((e, k) => k === i ? { ...e, ...patch } : e) })
@@ -76,7 +74,7 @@ export default function FilmText({ folder, video }: { folder: string; video: Ref
           )
         })}
       </ul>
-      <p className="mt-2 max-w-3xl text-xs text-stone-500">The pictures are drawn from the preview’s frames at once, on every save and with Preview. The film itself shows a change when the preview (or the final film) is rendered again.</p>
+      <p className="mt-2 max-w-3xl text-xs text-stone-500">The pictures are drawn at once, on every save and with Preview. Over the preview film the cards are drawn live from what is saved here (drag a word on the picture to move it); the final film shows a change when it is rendered again, and only the pieces the change touches are made again.</p>
     </div>
   )
 }
