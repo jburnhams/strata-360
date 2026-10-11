@@ -78,3 +78,10 @@ def test_worker_count_is_capped_by_the_free_gpu_memory(monkeypatch):
     monkeypatch.setattr(torch.cuda, 'mem_get_info', lambda: (15.7e9, 16e9))
     assert FN.render_workers((3840, 2160)) == 2 and FN.render_workers((1920, 1080)) == 6
     monkeypatch.setattr(gpu, 'available', lambda: False); assert FN.vram_workers(3840, 2160) is None and FN.render_workers((3840, 2160)) == 6
+
+
+def test_a_finished_piece_is_kept_only_while_the_text_on_it_is_the_same(tmp_path):
+    from strata360.render import final as FN
+    f = str(tmp_path / 'p0001.mov'); assert not FN._kept(f, '')                                                  # not made yet
+    open(f + '.done', 'w').write('abc'); assert FN._kept(f, 'abc') and not FN._kept(f, '') and not FN._kept(f, 'xyz')
+    open(f + '.done', 'w').close(); assert FN._kept(f, '')                                                       # a piece made before the cards were tracked has none

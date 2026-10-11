@@ -4,6 +4,7 @@ import { api } from '../api'
 import { usePoll } from '../usePoll'
 import StepVideo from './FrameStep'
 import FilmStill from './FilmStill'
+import FilmText from './FilmText'
 
 // A rough preview of the whole planned film (cuts, camera moves, the voice-over track). It is rendered on the server as a stream and starts playing after the first couple of seconds;
 // it keeps buffering while the rest is made. A new plan or voice-over means a new preview.
@@ -38,6 +39,7 @@ export default function FilmPreview({ folder }: { folder: string }) {
       {!!st.placeholders?.length && <p className="mb-2 text-xs text-amber-700">{st.placeholders.length} clip(s) have no proxy video yet and show as dark cards: {st.placeholders.map(c => c.slice(-9)).join(', ')}. Run the processing to finish them, then render again.</p>}
       {live ? <StepVideo videoRef={video} playsInline className="aspect-video w-full max-w-3xl rounded-lg bg-black"><track key={key} kind="subtitles" src={api.filmSubtitlesUrl(folder)} srcLang="en" label="Subtitles" default /></StepVideo> : <div className="aspect-video w-full max-w-3xl rounded-lg bg-stone-100 dark:bg-stone-950" />}
       {live && <FilmStill folder={folder} video={video} planKey={key} />}
+      {st.state !== 'noplan' && <FilmText folder={folder} video={video} />}
     </section>
   )
 }

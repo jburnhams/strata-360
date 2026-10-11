@@ -78,9 +78,8 @@ def final_key(plan, size, fps, bitrate, folder, upscale='off', min_zoom=None):
 
 
 def _text_sig(folder):
-    """The part of the key for the text drawn on the pieces: the word-art cards (film_text.json) and whether the subtitles are burned in (empty otherwise)."""
-    p = os.path.join(config.race_dir(folder), 'film_text.json'); sig = f'cards:{os.path.getmtime(p):.0f}' if os.path.exists(p) else ''
-    return sig + ('burnedsubs' if os.environ.get('STRATA_SUBTITLES') == 'burn' else '')
+    """The part of the key for the text drawn on the pieces: only whether the subtitles are burned in (empty otherwise). The word-art cards are not in it: each finished piece records the cards on it and is made again when they change."""
+    return 'burnedsubs' if os.environ.get('STRATA_SUBTITLES') == 'burn' else ''
 
 
 def _overlay_sig(folder):
@@ -255,7 +254,7 @@ def encoder_args(bitrate):
     return ['-c:v', 'libx265', '-crf', '17', '-preset', 'medium', '-tag:v', 'hvc1', '-pix_fmt', 'yuv420p10le']
 
 
-def encode_piece(path, W, H, fps, bitrate, run, pg=None, post=None):
+def encode_piece(path, W, H, fps, bitrate, run, pg=None, post=None, sig=''):
     """run(emit) renders the piece's frames into emit; they are encoded to `path` (kept only when complete). `pg`: a render/progress.py recorder that is told how long the encoder takes to accept the frames."""
     native = GPU.available() and W % 2 == 0 and H % 2 == 0 and os.environ.get('STRATA_GPU_DECODE') != '0'          # the RGB to YUV conversion on the GPU too (ffmpeg's takes a core per encoder): the pipe carries p010
     src_args = ['-pix_fmt', 'p010le', '-color_range', 'tv', '-colorspace', 'bt709'] if native else ['-pix_fmt', 'rgb48le']
@@ -278,7 +277,7 @@ def encode_piece(path, W, H, fps, bitrate, run, pg=None, post=None):
         try: enc.kill()
         except OSError: pass
         raise
-    os.replace(path + '.part.mov', path); open(path + '.done', 'w').close()
+    os.replace(path + '.part.mov', path); open(path + '.done', 'w').write(sig)                                    # (what is drawn on the piece: `_work` makes it again when that has changed)
 
 
 def render_final(*a, **k):
@@ -346,17 +345,25 @@ def _prepare(folder, plan, framing, size, fps, upscale, min_zoom, pg):
     return plan, segs, ps, src, Captions.for_project(folder, plan, W, H, fps, key=PVW.plan_key(folder, plan0))                                          # (the subtitle track: voice-over and speech, in film time)
 
 
+def _kept(f, sig):
+    """True when the piece `f` is finished with exactly the text `sig` on it."""
+    try: return open(f + '.done').read() == sig
+    except OSError: return False
+
+
 def _work(d, ps, segs, src, W, H, fps, bitrate, pg, on_done=None, limit_pieces=None, caps=None):
     """Render the pieces nobody else has claimed or finished, in order; returns the number rendered here."""
     mine = 0; base = {}; acc = 0
     for p in ps: base[p['id']] = acc; acc += p['frames']                                                       # the film frame each piece starts at: the subtitles are drawn by film time
     for n, p in enumerate(ps):
         if limit_pieces is not None and n >= limit_pieces: break
-        f = os.path.join(d, p['id'] + '.mov')
-        if os.path.exists(f + '.done') or not _claim(f + '.claim'): continue
+        f = os.path.join(d, p['id'] + '.mov'); sig = caps.signature(base[p['id']], p['frames']) if caps is not None else ''
+        if _kept(f, sig) or not _claim(f + '.claim'): continue
         try:
+            if _kept(f, sig): continue                                                                              # (another process made it while we claimed)
+            if os.path.exists(f + '.done'): os.remove(f + '.done')                                                  # made with other text on it: again
             t_piece = time.time(); pg.detail(f'piece {n + 1} of {len(ps)}')
-            encode_piece(f, W, H, fps, bitrate, lambda emit, p=p: render_piece(p, segs, src, emit), pg, post=(lambda im, i, b=base[p['id']]: caps.apply(im, b + i)) if caps is not None else None); mine += 1
+            encode_piece(f, W, H, fps, bitrate, lambda emit, p=p: render_piece(p, segs, src, emit), pg, post=(lambda im, i, b=base[p['id']]: caps.apply(im, b + i)) if caps is not None else None, sig=sig); mine += 1
             pg.note(f"piece {n + 1} of {len(ps)} ({p['kind']}, {p['frames']} frames) in {time.time() - t_piece:.0f} s")
         finally:
             try: os.remove(f + '.claim')

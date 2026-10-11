@@ -142,7 +142,9 @@ def fix_replays(folder):
     edit = load(folder); plan = edit.get('plan')
     if not plan: return []
     clips, _ = load_clips(folder); moved = no_replay(plan['segments'], {c['id']: float(c['duration_s']) for c in clips})
-    if moved: save(folder, edit)
+    if moved:
+        from strata360.edit import film_text
+        save(folder, edit); film_text.rekey(folder, edit['plan'])                                                      # every window is still where it was on the film's clock: the text cards stay right
     return moved
 
 

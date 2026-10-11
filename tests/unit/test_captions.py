@@ -41,3 +41,12 @@ def test_subtitles_are_a_track_and_not_burned_in_unless_asked_but_the_cards_are_
     monkeypatch.setenv('STRATA_SUBTITLES', 'burn'); assert (C.Captions(cues, 320, 180, 25.0).apply(img, 50) != img).any()
     v = C.write_vtt(cues + [dict(t0=61.5, t1=63.25, text='Later', kind='vo')], str(tmp_path / 's.vtt')); txt = open(v, encoding='utf-8').read()
     assert txt.startswith('WEBVTT') and '00:00:00.000 --> 00:00:05.000' in txt and '00:01:01.500 --> 00:01:03.250' in txt
+
+
+def test_a_piece_knows_which_cards_are_on_it_so_only_a_changed_one_is_made_again(monkeypatch):
+    monkeypatch.delenv('STRATA_SUBTITLES', raising=False)
+    spec = dict(elements=[dict(text='GO', font='anton', size=0.2, x=0.5, y=0.4)], timing=dict(start_s=0.0, end_s=2.0)); cards = C.Cards([dict(t=10.0, dur_s=2.0, spec=spec)], 320, 180, 25.0)
+    assert cards.signature(0, 100) == '' and cards.signature(240, 20) != '' and cards.signature(240, 20) == cards.signature(250, 100)               # none on frames 0 to 100; the same card on any piece it touches
+    other = C.Cards([dict(t=10.0, dur_s=2.0, spec=dict(spec, elements=[dict(spec['elements'][0], text='STOP')]))], 320, 180, 25.0); assert other.signature(240, 20) != cards.signature(240, 20)
+    cap = C.Captions([dict(t0=0.0, t1=5.0, text='Said aloud', kind='speech')], 320, 180, 25.0, cards=cards); assert cap.signature(0, 100) == '' and cap.signature(240, 20) == cards.signature(240, 20)   # subtitles are a track: not part of the picture
+    assert C.Captions(cap.cues, 320, 180, 25.0, burn=True).signature(0, 100) != ''

@@ -126,20 +126,22 @@ def _render(folder, plan, framing, px, decode_w, progress, source, FPS):
     enc = guard.popen(['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', str(FPS), '-i', '-', '-i', os.path.join(d, 'audio.wav'), '-map', '0:v', '-map', '1:a', *encoder_args(),
                             '-pix_fmt', 'yuv420p', '-g', str(int(FPS * 2)), '-force_key_frames', 'expr:gte(t,n_forced*2)', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0', '-hls_playlist_type', 'event', '-hls_flags', 'independent_segments',
                             '-hls_segment_filename', os.path.join(d, 'seg%05d.ts'), os.path.join(d, 'index.m3u8')], stdin=subprocess.PIPE)
+    base = guard.popen(['ffmpeg', '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-s', f'{w}x{h}', '-r', str(FPS), '-i', '-', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '24', '-pix_fmt', 'yuv420p', '-g', str(int(FPS)), os.path.join(d, 'base.part.mp4')], stdin=subprocess.PIPE)       # the same picture without the word art or subtitles: the cards page draws a card on it (edit/film_text_edit.py)
     from strata360.overlay import for_project
     gains = GR.gains_for(folder, segs, framing); last = [0.0]
     src = PreviewSource(folder, segs, framing, w, h, decode_w, overlay=for_project(folder, (w, h)), gains=gains, fps=FPS, source=source)
     from strata360.render import captions as CP
     caps = CP.Captions.for_project(folder, plan, w, h, FPS, key=key); CP.write_srt(caps.cues, os.path.join(d, 'subtitles.srt')); CP.write_vtt(caps.cues, os.path.join(d, 'subtitles.vtt'))                    # the subtitle track: voice-over and speech, drawn by film time
     def emit(img):
-        enc.stdin.write(caps.apply(img, src.done, bgr=True).tobytes()); src.done += 1
+        base.stdin.write(img.tobytes()); enc.stdin.write(caps.apply(img, src.done, bgr=True).tobytes()); src.done += 1
         if time.time() - last[0] > 1.0: last[0] = time.time(); status('rendering', src.done); progress and progress(src.done, total)
     done = 0
     try:
-        done = compose(segs, src, FPS, emit); enc.stdin.close(); enc.wait(); status('done', total, finished=time.time())
+        done = compose(segs, src, FPS, emit); enc.stdin.close(); enc.wait(); base.stdin.close(); base.wait(); os.replace(os.path.join(d, 'base.part.mp4'), os.path.join(d, 'base.mp4')); status('done', total, finished=time.time())
     except BaseException as e:
-        try: enc.kill()
-        except OSError: pass
+        for p in (enc, base):
+            try: p.kill()
+            except OSError: pass
         status('error', src.done, error=f'{type(e).__name__}: {e}'); raise
     return d
 

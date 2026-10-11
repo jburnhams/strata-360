@@ -219,6 +219,19 @@ def for_plan(folder, plan):
     return dict(text_options=opts, text_cards=[o['id'] for o in opts if o['picked']])
 
 
+def rekey(folder, plan):
+    """The cards of film_text.json (and the options) made for this plan's film times, kept for the plan as it is now: for a change that leaves every window where it is on the film's clock (the footage a window plays moved on, say), so the cards are still right. Returns whether anything was saved."""
+    from strata360.pipeline import config
+    from strata360.render import preview as PVW
+    key = PVW.plan_key(folder, plan); did = False
+    for name in ('film_text.json', 'film_text_options.json'):
+        p = os.path.join(config.race_dir(folder), name)
+        try: doc = json.load(open(p))
+        except (OSError, ValueError): continue
+        if doc.get('plan_key') not in (None, key): doc['plan_key'] = key; json.dump(doc, open(p, 'w'), indent=1); did = True
+    return did
+
+
 def attach(folder):
     """Put the options (and the planner's picks) into the saved plan, without planning again."""
     from strata360.edit import project as PJ

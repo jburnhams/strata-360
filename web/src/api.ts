@@ -134,6 +134,11 @@ export interface EditState {
 export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
 export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
 export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | 'rendering' | 'done' | 'error'; running: boolean; key?: string; frames_done?: number; frames_total?: number; placeholders?: string[]; error?: string | null; length_s?: number }
+/** One word of a word-art card (render/titles.py ELEMENT: the fields the editor shows; the rest is kept as it is). */
+export interface TextElement { text: string; font: string; size: number; x: number; y: number; rot: number; fill: { c1: string; [k: string]: unknown }; in: string; out: string; delay: number; in_s: number; [k: string]: unknown }
+export interface TextCard { id: string; type: string; t: number; dur_s: number; lines: { role: string; text: string }[]; elements: TextElement[]; start_s: number; user: boolean; score?: number | null; worth_why: string; blocking?: { score: number; what: string } | null; shot?: { verdict: string; excitement: number; obscure_risk: number; why?: string } | null; why: string; changes: string[] }
+export interface FilmTextState { cards: TextCard[]; stale: boolean; edited: number; length_s: number; fonts: { id: string; note: string }[]; presets_in: string[]; presets_out: string[]; has_preview: boolean }
+export interface TextCardEdit { id?: string; t: number; dur_s: number; start_s?: number; type?: string; elements?: TextElement[]; texts?: string[] }
 /** What a render is doing and how long each part takes (render/progress.py): the steps in order, the time spent so far in each kind of work, and the last lines of its log. */
 export interface RenderProgress { state: 'running' | 'done' | 'error'; started: number; updated: number; error?: string | null; stages: { name: string; state: 'running' | 'done' | 'error'; started: number; seconds: number; detail: string }[]; timings: Record<string, { seconds: number; calls: number }>; log: [number, string][] }
 export type EnlargeMode = 'off' | '1080p' | '1440p' | 'full'
@@ -321,6 +326,10 @@ export const api = {
   startFilm: (folder: string, force = false) => call<{ started: boolean }>('/api/film/start', { folder, force }),
   stopFilm: (folder: string) => call<{ ok: boolean }>('/api/film/stop', { folder }),
   filmUrl: (folder: string) => '/api/film/index.m3u8?' + q({ folder }),
+  filmText: (folder: string) => call<FilmTextState>('/api/film/text?' + q({ folder })),
+  saveFilmText: (folder: string, card: TextCardEdit) => call<TextCard>('/api/film/text/save', { folder, card }),
+  deleteFilmText: (folder: string, id: string) => call<{ ok: boolean }>('/api/film/text/delete', { folder, id }),
+  filmTextStillUrl: (folder: string, id: string, mode: 'still' | 'text', v = 0, w = 640) => '/api/film/text/still?' + q({ folder, id, mode, w: String(w), v: String(v) }),
   filmSubtitlesUrl: (folder: string) => '/api/film/subtitles.vtt?' + q({ folder }),
   startFilmStill: (folder: string, t: number, size: string, upscale: EnlargeMode = 'off') => call<StillState>('/api/film/still', { folder, t, size, upscale }),
   startFilmStills: (folder: string, o: { size: string; upscale: EnlargeMode; auto?: boolean; times?: number[] }) => call<{ moments: (StillState & { t: number; label?: string; why?: string })[] }>('/api/film/still', { folder, ...o }),

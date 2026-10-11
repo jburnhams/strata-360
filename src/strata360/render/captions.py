@@ -6,7 +6,7 @@ Cues come from two places and are in FILM time:
                segments flagged as hallucinated or suspect are left out
 `Captions.apply(img, frame)` draws the cue of that film frame (a copy; unchanged when there is none): white, outlined and shadowed, wrapped to two lines, faded in and out over a tenth of a second. A voice-over cue and a speech cue at the same
 moment are stacked (the voice-over lower). The subtitles are a TRACK the player shows (an embedded mov_text track in the final film's mp4, WebVTT beside the preview), never burned into the picture unless STRATA_SUBTITLES=burn; the word-art cards are part of the picture."""
-import json, os, re
+import hashlib, json, os, re
 import numpy as np
 
 MAX_CHARS = 64                      # a cue's text, before it is cut into two
@@ -113,6 +113,11 @@ class Cards:
     def __init__(self, cards, W, H, fps):
         self.cards = [(float(c['t']), float(c['t']) + float(c['dur_s']), c['spec'], float(c['dur_s'])) for c in cards if c.get('spec')]; self.W, self.H, self.fps = W, H, fps; self._t = {}
 
+    def signature(self, f0, n):
+        """What the cards put on film frames f0 to f0 + n (empty when none is on): a piece made with other cards is made again, one with the same is kept."""
+        t0, t1 = f0 / self.fps, (f0 + n) / self.fps; on = [(a, b, spec) for a, b, spec, _ in self.cards if a < t1 and b > t0]
+        return hashlib.sha1(json.dumps(on, sort_keys=True, default=str).encode()).hexdigest()[:12] if on else ''
+
     def apply(self, img, frame, bgr=False):
         t = frame / self.fps
         for i, (a, b, spec, dur) in enumerate(self.cards):
@@ -139,6 +144,14 @@ class Captions:
             if doc and (key is None or doc.get('plan_key') in (None, key)): cards = Cards(doc.get('cards') or [], W, H, fps)
             elif doc: print('film_text.json was made for another plan: its cards are not drawn (strata360 filmtext makes them again)')
         return cls(build_cues(folder, plan), W, H, fps, cards=cards)
+
+    def signature(self, f0, n):
+        """What this track draws on film frames f0 to f0 + n, as a short text (empty when nothing): the cards, and the subtitles when they are burned in."""
+        sig = self.cards.signature(f0, n) if self.cards is not None else ''
+        if self.burn and self.cues:
+            t0, t1 = f0 / self.fps, (f0 + n) / self.fps; got = [(c['t0'], c['t1'], c['text'], c['kind']) for c in self.cues if c['t0'] < t1 and c['t1'] > t0]
+            if got: sig += hashlib.sha1(json.dumps(got).encode()).hexdigest()[:12]
+        return sig
 
     def active(self, t):
         return [c for c in self.cues if c['t0'] <= t < c['t1']]

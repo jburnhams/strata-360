@@ -586,6 +586,39 @@ def create_app(roots, token=None):
         if not os.path.exists(p): raise HTTPException(404, 'no subtitles')
         return FileResponse(p, media_type='text/vtt', headers={'Cache-Control': 'no-cache'})
 
+    @api.get('/api/film/text', dependencies=[Depends(auth)])
+    def get_film_text(folder: str):                                                      # the word-art cards in film order, with the fonts and animations the editor offers (edit/film_text_edit.py)
+        from strata360.edit import film_text_edit as FE, project as PJ
+        f = folder_of(folder); return FE.listing(f, PJ.load(f).get('plan'))
+
+    @api.post('/api/film/text/save', dependencies=[Depends(auth)])
+    def post_film_text_save(body: dict):                                                 # {folder, card: {id?, t, dur_s, elements | texts, ...}}: change a card, or make one (no id)
+        from strata360.edit import film_text_edit as FE, project as PJ
+        f = folder_of(body.get('folder')); plan = PJ.load(f).get('plan')
+        if not plan: raise HTTPException(400, 'make a plan first')
+        try: return FE.save(f, plan, body.get('card') or {})
+        except FE.Invalid as e: raise HTTPException(400, str(e))
+        except KeyError as e: raise HTTPException(404, str(e).strip("'\""))
+
+    @api.post('/api/film/text/delete', dependencies=[Depends(auth)])
+    def post_film_text_delete(body: dict):
+        from strata360.edit import film_text_edit as FE, project as PJ
+        f = folder_of(body.get('folder'))
+        try: FE.delete(f, PJ.load(f).get('plan'), str(body.get('id') or ''))
+        except KeyError as e: raise HTTPException(404, str(e).strip("'\""))
+        return dict(ok=True)
+
+    @api.get('/api/film/text/still')
+    def get_film_text_still(request: Request, folder: str, id: str, mode: str = 'still', w: int = 640):          # the card on the film's frame ('still') or alone ('text'), PNG
+        auth(request)
+        from strata360.edit import film_text_edit as FE, project as PJ
+        f = folder_of(folder); plan = PJ.load(f).get('plan'); card = next((c for c in FE.load(f, plan)['cards'] if c['id'] == id), None)
+        if card is None: raise HTTPException(404, 'no such card')
+        if mode not in ('still', 'text'): raise HTTPException(400, 'mode must be still or text')
+        try: png = FE.picture(f, plan, card, mode, int(min(max(w, 160), 1920)))
+        except FileNotFoundError as e: raise HTTPException(404, str(e))
+        return Response(png, media_type='image/png', headers={'Cache-Control': 'no-cache'})
+
     @api.get('/api/film/seg')
     def get_film_seg(request: Request, folder: str, name: str):
         auth(request)

@@ -1011,3 +1011,30 @@ class TestObjectHiding:
         post(label='Goat '); assert get() == [(0, 'label'), (1, 'label'), (2, None), (3, 'stop')]; assert json.load(open(os.path.join(p.clip_dir(), '..', '..', 'vocab_local.json')))['hide'] == ['goat']
         post(label='goat', hide=False); assert get()[0] == (0, None) and open(os.path.join(p.clip_dir(), 'objects.json')).read() == before
         assert post(clip=CLIP_ID).status_code == 400 and post(label='  ').status_code == 400 and post(clip='nope', id=0).status_code == 404
+
+
+class TestFilmTextApi:
+    def plan(self, project):
+        project.write_json('project.json', dict(edit=dict(plan=dict(source='script', film=dict(length_s=60.0), segments=[dict(clip='X', clip_start_s=0.0, dur_s=60.0)]))))
+
+    def test_without_a_plan_a_card_cannot_be_made_but_the_list_is_empty(self, client, project):
+        f = project.folder; assert client.get('/api/film/text', params=dict(folder=f)).json()['cards'] == []
+        assert client.post('/api/film/text/save', json=dict(folder=f, card=dict(t=1.0, texts=['A']))).status_code == 400
+
+    def test_a_card_is_made_listed_changed_and_deleted(self, client, project):
+        self.plan(project); f = project.folder
+        made = client.post('/api/film/text/save', json=dict(folder=f, card=dict(t=12.0, dur_s=3.0, texts=['LOADS OF IT']))).json(); assert made['user'] and made['lines'][0]['text'] == 'LOADS OF IT'
+        got = client.get('/api/film/text', params=dict(folder=f)).json(); assert [c['id'] for c in got['cards']] == [made['id']] and got['length_s'] == 60.0 and 'anton' in [x['id'] for x in got['fonts']]
+        els = made['elements']; els[0]['text'] = 'GO'; r = client.post('/api/film/text/save', json=dict(folder=f, card=dict(id=made['id'], t=13.0, dur_s=3.0, elements=els))).json(); assert r['t'] == 13.0 and r['lines'][0]['text'] == 'GO'
+        assert client.post('/api/film/text/delete', json=dict(folder=f, id=made['id'])).json() == dict(ok=True) and client.get('/api/film/text', params=dict(folder=f)).json()['cards'] == []
+
+    def test_what_is_wrong_with_a_card_is_a_400_and_an_unknown_card_a_404(self, client, project):
+        self.plan(project); f = project.folder
+        r = client.post('/api/film/text/save', json=dict(folder=f, card=dict(t=500.0, texts=['A']))); assert r.status_code == 400 and 'inside the film' in r.json()['detail']
+        assert client.post('/api/film/text/save', json=dict(folder=f, card=dict(id='nope', t=1.0))).status_code == 404 and client.post('/api/film/text/delete', json=dict(folder=f, id='nope')).status_code == 404
+
+    def test_the_pictures_are_png_text_alone_needs_no_preview_the_film_frame_does(self, client, project):
+        self.plan(project); f = project.folder; made = client.post('/api/film/text/save', json=dict(folder=f, card=dict(t=12.0, dur_s=3.0, texts=['GO']))).json()
+        alone = client.get('/api/film/text/still', params=dict(folder=f, id=made['id'], mode='text', w=320)); assert alone.status_code == 200 and alone.headers['content-type'] == 'image/png' and alone.content[:4] == b'\x89PNG'
+        assert client.get('/api/film/text/still', params=dict(folder=f, id=made['id'], mode='still')).status_code == 404            # no preview yet
+        assert client.get('/api/film/text/still', params=dict(folder=f, id='nope', mode='text')).status_code == 404 and client.get('/api/film/text/still', params=dict(folder=f, id=made['id'], mode='x')).status_code == 400
