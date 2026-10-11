@@ -86,7 +86,8 @@ def status(folder):
 def _transcribe(path):
     """faster-whisper on the track, word times on, no voice-activity filter: ([{t0, t1, text, avg_logprob, no_speech, words}], {language, language_probability, duration_s})."""
     from faster_whisper import WhisperModel
-    segs, info = WhisperModel(MODEL, device='cpu', compute_type='int8').transcribe(path, word_timestamps=True, vad_filter=False, beam_size=5, condition_on_previous_text=False)
+    from strata360 import hw as _hw
+    segs, info = WhisperModel(MODEL, device=_hw.whisper_args()[0], compute_type=_hw.whisper_args()[1]).transcribe(path, word_timestamps=True, vad_filter=False, beam_size=5, condition_on_previous_text=False)
     out = [dict(t0=round(s.start, 2), t1=round(s.end, 2), text=s.text.strip(), avg_logprob=round(s.avg_logprob, 3), no_speech=round(s.no_speech_prob, 3),
                 words=[dict(w=w.word.strip(), t0=round(w.start, 2), t1=round(w.end, 2), p=round(w.probability, 2)) for w in (s.words or [])]) for s in segs if s.text.strip()]
     return out, dict(language=info.language, language_probability=round(info.language_probability, 2), duration_s=round(info.duration, 1))

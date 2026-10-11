@@ -69,5 +69,5 @@ def build(cfg, track, size, tiles=None, maps=True):
 def for_project(folder, size, tiles=None):
     from strata360.pipeline import config
     cfg = config.load(folder); path = config.track_path(folder, cfg)
-    if not (cfg.get('overlay') or {}).get('enabled', True) or not path: return None
+    if os.environ.get('STRATA_NO_OVERLAY') or not (cfg.get('overlay') or {}).get('enabled', True) or not path: return None            # STRATA_NO_OVERLAY=1: no race overlay (trial renders on a machine without the map key)
     return build(cfg, path, size, tiles)

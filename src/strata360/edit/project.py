@@ -261,6 +261,10 @@ def propose(folder, settings=None, overrides=None, keep=True):
     edit['plan'] = dict(generated_at=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=music.bpm, bar_beats=music.bar_beats, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
                         segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=orphaned, technique_seconds={k: round(v, 2) for k, v in used.items()},
                         warnings=(segs[0].parts.get('warnings') if segs else []) or [])
+    try:                                                                                                          # the text options the local models made for this plan, if any (edit/film_text.py): the planner is shown them
+        from strata360.edit import film_text
+        edit['plan'].update(film_text.for_plan(folder, edit['plan']))
+    except Exception: pass
     return save(folder, edit)
 
 

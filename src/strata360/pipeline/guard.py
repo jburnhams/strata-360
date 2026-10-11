@@ -11,6 +11,7 @@
   panic()              kill every ffmpeg/ffprobe/pytest/strata360 process of this user except the server and this one (`./strata360 stop-all`).
 STRATA_NO_RESOURCE_LIMITS=1 turns all of it off (tests, CI). Limits can be set per call."""
 import atexit, contextlib, os, signal, subprocess, sys, threading, time
+from strata360 import oslib
 from strata360.pipeline import resources as RS
 
 MAX_FFMPEG = 8; KILL_LOAD = 1.5; KILL_FREE_GB = 1.5; KILL_SWAP_PCT = 30.0; POLL_S = 2.0; START_SWAP_PCT = 25.0
@@ -114,7 +115,15 @@ def popen(cmd, *a, **k):
         cap = int(_env_f('STRATA_MAX_FFMPEG', MAX_FFMPEG)); ff = ffmpeg_processes()
         if len(ff) >= cap: raise ResourceBusy(f'not starting {os.path.basename(str(cmd[0]))}: {len(ff)} ffmpeg/ffprobe processes are already running (limit {cap}), pids {[r[0] for r in ff[:6]]}: pkill ffmpeg clears leftovers')
     if os.path.basename(str(cmd[0])) == 'ffmpeg' and '-threads' not in cmd: cmd = [cmd[0], '-threads', str(int(RS.cfg_values(None)['threads']))] + list(cmd[1:])          # a decoder or encoder must not take every core
-    p = subprocess.Popen(cmd, *a, **k)
+    big = {}
+    if oslib.WIN and 'rawvideo' in cmd:                                                              # raw frames through a 4 KB anonymous pipe crawl on Windows: use a big named pipe (oslib.big_pipe)
+        for key, reads in (('stdout', True), ('stdin', False)):
+            if k.get(key) == subprocess.PIPE and not a: big[key] = oslib.big_pipe(reads); k[key] = big[key][1]
+    try: p = subprocess.Popen(cmd, *a, **k)
+    except BaseException:
+        for f, fd in big.values(): f.close(); os.close(fd)
+        raise
+    for key, (f, fd) in big.items(): os.close(fd); setattr(p, key, f)
     with _LOCK: _CHILDREN[:] = [c for c in _CHILDREN if c.poll() is None] + [p]
     return p
 

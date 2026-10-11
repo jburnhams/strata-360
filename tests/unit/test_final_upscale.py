@@ -139,7 +139,7 @@ class TestWarmUpFrames:
         s._enlarge = lambda img, f: calls.__setitem__('enlarge', calls['enlarge'] + 1) or np.zeros((6, 8, 3), np.uint16); s.shot_factor = lambda sg: 2; s._renderer = lambda ci, f: ci['R']
         ci = dict(osv='x', R=Renderer(), Rs={}, boxes=None, n=100, pts=np.arange(100) / 50.0, T=dict(quat=np.zeros((100, 4))), src_fps=50.0); ci['Rs'][(8, 6)] = ci['R']; s.info['C'] = ci
         s.segs = [dict(id='w1', clip='C', clip_start_s=0.0, utc_start='2026-02-21T12:00:00Z')]
-        monkeypatch.setattr(flat, 'decoder', lambda *a, **k: types.SimpleNamespace(kill=lambda: None, wait=lambda: None)); monkeypatch.setattr(flat, 'read_frame', lambda p: np.zeros((2, 2, 3), np.uint16)); monkeypatch.setattr(flat, 'frame_at', lambda pts, t: np.arange(len(t)))
+        monkeypatch.setattr(flat, 'decoder', lambda *a, **k: types.SimpleNamespace(kill=lambda: None, wait=lambda: None)); monkeypatch.setattr(flat, 'read_frame', lambda p, native=False: np.zeros((2, 2, 3), np.uint16)); monkeypatch.setattr(flat, 'frame_at', lambda pts, t: np.arange(len(t)))
         monkeypatch.setattr(FN.SM, 'people_in_layout', lambda *a, **k: None)
         frames = list(s.frames(0, 0, m)); return frames, calls
 

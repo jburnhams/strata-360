@@ -14,6 +14,18 @@ def no_resource_waits(monkeypatch):
     monkeypatch.setenv('STRATA_NO_RESOURCE_LIMITS', '1')
 
 
+@pytest.fixture(autouse=True)
+def software_encoder(monkeypatch):
+    """The synthetic clips are a few dozen pixels wide, below what NVENC accepts (hevc_nvenc: 144 px; "Frame dimensions are less than the minimum supported value"), so a Windows machine with an NVIDIA GPU encodes them in software."""
+    monkeypatch.setenv('STRATA_ENCODER', 'software')
+
+
+@pytest.fixture(autouse=True)
+def one_render_process(monkeypatch):
+    """The tests shrink the lens size (flat.LS) in their own process; a helper process of a parallel render would not see that, so a test render uses one process (the claim logic has its own unit tests)."""
+    monkeypatch.setenv('STRATA_RENDER_WORKERS', '1')
+
+
 @dataclass
 class Result:
     stdout: str; stderr: str; code: int

@@ -67,7 +67,13 @@ class Tiles:
             except (urllib.error.URLError, OSError) as e: raise TileError(f'map tile {self.style} {z}/{x}/{y}: {getattr(e, "reason", e)}') from None
             try: Image.open(io.BytesIO(data)).verify()
             except Exception: raise TileError(f'map tile {self.style} {z}/{x}/{y}: not an image') from None
-            os.makedirs(os.path.dirname(p), exist_ok=True); open(p + '.part', 'wb').write(data); os.replace(p + '.part', p); self.fetched += 1
+            os.makedirs(os.path.dirname(p), exist_ok=True); part = f'{p}.{os.getpid()}.part'; open(part, 'wb').write(data)                    # (a part file of its own: render workers fetch the same tile at the same time)
+            try: os.replace(part, p)
+            except OSError:                                                                                              # another process put the tile there first (Windows refuses to replace a file that is being read)
+                try: os.remove(part)
+                except OSError: pass
+                if not os.path.exists(p): raise
+            self.fetched += 1
         im = Image.open(p).convert('RGB'); im = im if im.size == (self.px, self.px) else im.resize((self.px, self.px), Image.LANCZOS)
         self._mem[(z, x, y)] = im
         if len(self._mem) > self.MEM: self._mem.popitem(last=False)

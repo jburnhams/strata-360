@@ -311,7 +311,7 @@ def update(root, ask, vocab=None):
 def ask_with_runner(prompts, models=None):
     """The real model: the prompts through analysis/vocab_llm.py (a local Qwen in `.venv-vision`), answers in the same order."""
     import subprocess, tempfile
-    py = os.environ.get('STRATA_VISION_PYTHON') or os.path.join(HERE, '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(HERE, '..', '..'); d = tempfile.mkdtemp(prefix='s360voc_'); rq, rs = os.path.join(d, 'q.json'), os.path.join(d, 'a.json')
+    from strata360.analysis.vlm import vision_python; py = vision_python(); src = os.path.join(HERE, '..', '..'); d = tempfile.mkdtemp(prefix='s360voc_'); rq, rs = os.path.join(d, 'q.json'), os.path.join(d, 'a.json')
     json.dump(prompts, open(rq, 'w')); subprocess.run([py, '-m', 'strata360.analysis.vocab_llm', rq, rs] + (['--model', models] if models else []), check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
     return json.load(open(rs))
 

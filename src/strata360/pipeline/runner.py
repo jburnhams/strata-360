@@ -266,7 +266,7 @@ def work(race, stages=None, clip_glob=None, log=print, fail_fast=False, max_item
             st = STAGES[name]
             for n, c in enumerate(cl, 1):
                 if (c.id, name) in tried: continue
-                cap = resources.STAGE_MAX_CONCURRENT.get(name)
+                cap = resources.concurrent_caps(cfg).get(name)
                 if cap and _stage_count(race, name) >= cap: break                                               # a heavy stage runs once at a time: look at the next stage
                 state = load_state(race, c.id); done, key, blocked = _cached(race, st, c, cfg, state, clip_dir(race, c.id), names)
                 if done or blocked: continue

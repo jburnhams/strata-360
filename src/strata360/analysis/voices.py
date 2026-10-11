@@ -19,7 +19,7 @@ def analyse(osv, transcript, work_dir, models=None):
     tmp = tempfile.mkdtemp(prefix='s360voice_', dir=work_dir)
     try:
         sj, npy, oj = os.path.join(tmp, 'segs.json'), os.path.join(tmp, 'emb.npy'), os.path.join(tmp, 'stats.json'); json.dump(segs, open(sj, 'w'))
-        py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..')
+        from strata360.analysis.vlm import vision_python; py = vision_python(); src = os.path.join(os.path.dirname(__file__), '..', '..')
         subprocess.run([py, '-m', 'strata360.analysis.voices_embed', osv, sj, npy, oj] + (['--model', models] if models else []), check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         emb = np.load(npy); stats = json.load(open(oj))
     finally:

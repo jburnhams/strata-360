@@ -6,7 +6,7 @@ from strata360.pipeline import resources as R, runner, config
 
 
 def test_extra_workers_need_plenty_of_free_memory_and_an_idle_machine():
-    R.mem_available_gb = lambda: 30.0; R.busy = lambda cfg=None: False
+    R.mem_available_gb = lambda: 30.0; R.busy = lambda cfg=None: False; R.DEFAULTS = dict(R.DEFAULTS, max_workers=2)                  # (a big NVIDIA machine defaults to more)
     assert R.may_start_extra_worker(0)[0] and R.may_start_extra_worker(1)[0] and not R.may_start_extra_worker(2)[0]                # first always; a second with 30 GB free; not beyond the limit of 2
     R.mem_available_gb = lambda: 6.0; ok, why = R.may_start_extra_worker(1); assert not ok and 'free' in why and R.may_start_extra_worker(0)[0]
     R.mem_available_gb = lambda: 30.0; R.busy = lambda cfg=None: True; ok, why = R.may_start_extra_worker(1); assert not ok and 'busy' in why
@@ -58,3 +58,18 @@ def test_the_cli_does_not_start_a_second_worker_without_the_memory_for_it(monkey
     monkeypatch.setattr(R, 'mem_available_gb', lambda: 5.0); monkeypatch.setattr(R, 'busy', lambda cfg=None: False)
     assert not cli.worker_allowed('p') and 'already running (pid 4242)' in capsys.readouterr().out
     monkeypatch.setattr(runner, 'workers', lambda name: []); assert cli.worker_allowed('p')                                          # the first worker is always allowed
+
+
+def test_a_big_nvidia_machine_gets_more_workers_and_the_light_stages_run_in_copies(monkeypatch):
+    import os, sys
+    monkeypatch.setattr(sys, 'platform', 'win32'); monkeypatch.setattr(os, 'cpu_count', lambda: 32); monkeypatch.setattr(R, 'vram_free_gb', lambda: 14.0); monkeypatch.setattr(R, 'mem_total_gb', lambda: 64.0)
+    d = R.machine_defaults(); assert d['max_workers'] == 4 and d['threads'] == 4
+    monkeypatch.setattr(R, 'DEFAULTS', d); caps = R.concurrent_caps(); assert caps['proxy'] == 4 and caps['transcribe'] == 2 and caps['scenes'] == 1
+    monkeypatch.setattr(R, 'vram_free_gb', lambda: None); assert R.machine_defaults()['max_workers'] == 2                                  # no NVIDIA GPU: the Mac numbers
+    monkeypatch.setattr(sys, 'platform', 'darwin'); monkeypatch.setattr(R, 'vram_free_gb', lambda: 14.0); assert R.machine_defaults()['max_workers'] == 2
+
+
+def test_a_stage_waits_for_free_gpu_memory(monkeypatch):
+    monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS', raising=False); monkeypatch.setattr(R, 'mem_available_gb', lambda: 30.0); monkeypatch.setattr(R, 'busy', lambda cfg=None: False); free = iter([2.0, 9.0]); seen = []
+    monkeypatch.setattr(R, 'vram_free_gb', lambda: next(free)); monkeypatch.setattr(R.time, 'sleep', lambda s: None)
+    assert R.wait_for_headroom('scenes', log=seen.append) and any('GPU memory' in m for m in seen)

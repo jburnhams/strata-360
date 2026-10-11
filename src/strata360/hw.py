@@ -16,9 +16,9 @@ def has_encoder(name): return f' {name} ' in _ffmpeg_list('encoders')
 
 
 def hwaccel_args():
-    """Input option for decoding the lens streams: VideoToolbox on macOS, otherwise software decode (always works)."""
+    """Input option for decoding the lens streams: VideoToolbox on macOS, D3D11VA on Windows, otherwise software decode (always works)."""
     want = os.environ.get('STRATA_HWACCEL')
-    if want is None: want = 'videotoolbox' if sys.platform == 'darwin' else 'none'
+    if want is None: want = {'darwin': 'videotoolbox', 'win32': 'd3d11va'}.get(sys.platform, 'none')       # d3d11va is NVDEC on NVIDIA, and measured 3x faster than software on the 3840x3840 10-bit HEVC lenses
     return [] if want in ('', 'none') else ['-hwaccel', want]
 
 
@@ -52,6 +52,33 @@ def live_h264_args():
     return ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '26', '-threads', '2']
 
 
+@functools.lru_cache(maxsize=None)
+def _cuda_dll_dirs():
+    """Windows: ctranslate2 loads cuBLAS and cuDNN by name; the pip packages nvidia-cublas-cu12 / nvidia-cudnn-cu12 keep their DLLs under site-packages/nvidia/*/bin, which is on no search path, so add them."""
+    if sys.platform != 'win32': return
+    import glob, site
+    for base in site.getsitepackages():
+        for d in glob.glob(os.path.join(base, 'nvidia', '*', 'bin')):
+            os.add_dll_directory(d); os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
+
+
+def whisper_args():
+    """(device, compute_type) for faster-whisper: CUDA with float16 when ctranslate2 sees a GPU (STRATA_GPU=0 forces the CPU), else int8 on the CPU."""
+    if os.environ.get('STRATA_GPU') != '0':
+        _cuda_dll_dirs()
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0: return 'cuda', 'float16'
+        except Exception: pass
+    return 'cpu', 'int8'
+
+
+def default_whisper_model():
+    """The Whisper model a NEW project starts with: the full large-v3 where there is a CUDA GPU (on the RTX 5070 Ti it took 17 percent longer than large-v3-turbo on the Legends speech, 63 s against 54 s for 571 s, and reproduced 7 of the 25 Gemini word corrections against 5), else large-v3-turbo (on a CPU
+    large-v3 is several times slower). A project keeps what its race.json says; `init --whisper-model` sets it."""
+    return 'large-v3' if whisper_args()[0] == 'cuda' else 'large-v3-turbo'
+
+
 GPU_DUTY = 0.6          # the share of the time a GPU job may keep the GPU busy; the rest is left for the screen (STRATA_GPU_DUTY, 0.1 to 1)
 
 
@@ -67,8 +94,10 @@ def gpu_device():
 
 
 def gpu_duty():
-    try: return min(max(float(os.environ.get('STRATA_GPU_DUTY', GPU_DUTY)), 0.1), 1.0)
-    except ValueError: return GPU_DUTY
+    """The share of the time a GPU job may keep the GPU busy. 0.6 on a Mac, where the same GPU draws the screen and has no priorities; flat out (1.0) on CUDA, where Windows shares the card between processes (the 5070 Ti ran six renders and the desktop at once)."""
+    default = 1.0 if gpu_device() == 'cuda' else GPU_DUTY
+    try: return min(max(float(os.environ.get('STRATA_GPU_DUTY', default)), 0.1), 1.0)
+    except ValueError: return default
 
 
 def gpu_pause(worked_s, sleep=None):

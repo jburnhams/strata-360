@@ -29,3 +29,4 @@ torch_complex
 typeguard<3
 spandrel==0.4.2       # loads the upscaling models (edit/upscale.py); optional: only an upscaled render needs it
 einops                # (needed by some spandrel architectures)
+numba                 # compiles the seam solver (render/seam.py solve_dp); optional: without it the numpy version is used (72 ms instead of 2 ms a frame)

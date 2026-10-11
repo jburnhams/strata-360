@@ -17,14 +17,19 @@ def clean(text):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('images'); ap.add_argument('out'); ap.add_argument('--model'); a = ap.parse_args()
-    from mlx_vlm import load, generate
-    from mlx_vlm.prompt_utils import apply_chat_template
-    from mlx_vlm.utils import load_config
-    path = os.path.abspath(a.model or default_model()); model, proc = load(path); cfg = load_config(path); t0 = time.time()
-    try: prompt = apply_chat_template(proc, cfg, PROMPT, num_images=1, enable_thinking=False)
-    except TypeError: prompt = apply_chat_template(proc, cfg, PROMPT, num_images=1)
-    extra = dict(repetition_penalty=1.05) if 'qwen3' in path.lower() else {}
-    ask = lambda p: clean((lambda r: r.text if hasattr(r, 'text') else str(r))(generate(model, proc, prompt, image=[p], max_tokens=24, temperature=0.0, verbose=False, **extra)))
+    from strata360.analysis import vlm
+    t0 = time.time(); srv = None
+    if vlm.use_llama():                                                                                      # no MLX (not a Mac): llama.cpp (analysis/vlm.py)
+        srv = vlm.Server().__enter__(); name = vlm.label(srv.weights); ask = lambda p: clean(srv.ask(PROMPT, p, 24))
+    else:
+        from mlx_vlm import load, generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+        from mlx_vlm.utils import load_config
+        path = os.path.abspath(a.model or default_model()); model, proc = load(path); cfg = load_config(path); name = model_label(path)
+        try: prompt = apply_chat_template(proc, cfg, PROMPT, num_images=1, enable_thinking=False)
+        except TypeError: prompt = apply_chat_template(proc, cfg, PROMPT, num_images=1)
+        extra = dict(repetition_penalty=1.05) if 'qwen3' in path.lower() else {}
+        ask = lambda p: clean((lambda r: r.text if hasattr(r, 'text') else str(r))(generate(model, proc, prompt, image=[p], max_tokens=24, temperature=0.0, verbose=False, **extra)))
     out = {}
     for fn in sorted(glob.glob(os.path.join(a.images, '*.jpg'))):
         txt = ask(fn)
@@ -32,7 +37,8 @@ def main():
             if txt and not set(txt) <= {'!', ' '}: break
             tmp = reencoded(fn, q, s); txt = ask(tmp); os.remove(tmp)
         out[os.path.basename(fn)] = txt or 'unclear'
-    json.dump(dict(schema=1, model=model_label(path), seconds=round(time.time() - t0, 1), labels=out), open(a.out, 'w')); print(f'{len(out)} crops in {time.time() - t0:.1f} s')
+    if srv: srv.__exit__()
+    json.dump(dict(schema=1, model=name, seconds=round(time.time() - t0, 1), labels=out), open(a.out, 'w')); print(f'{len(out)} crops in {time.time() - t0:.1f} s')
 
 
 if __name__ == '__main__':

@@ -146,6 +146,11 @@ def cmd_doctor(a):
         p = shutil.which(t); line('ok' if p else ('FAIL' if need else 'warn'), f'{t}: {p or "not found"}', install_hint() if t != 'say' else 'optional: the macOS voice-over engine')
     enc = subprocess.run(['ffmpeg', '-hide_banner', '-encoders'], capture_output=True, text=True).stdout if shutil.which('ffmpeg') else ''
     from strata360 import hw
+    try:
+        import torch
+        if torch.cuda.is_available(): p = torch.cuda.get_device_properties(0); line('ok', f'GPU: {p.name}, {p.total_memory / 2 ** 30:.0f} GB (CUDA {torch.version.cuda}); decode {hw.hwaccel_args()[1] if hw.hwaccel_args() else "software"}; whisper {hw.default_whisper_model()}; render workers {__import__("strata360.render.final", fromlist=["x"]).render_workers()}')
+        else: line('warn', 'no CUDA GPU: the models run on the CPU (or MPS on a Mac)', 'on Windows: scripts/setup_env.ps1 installs the CUDA build of torch')
+    except Exception as e: line('warn', f'GPU check failed: {type(e).__name__}')
     hwenc = hw._hardware('hevc'); line('ok' if hwenc else 'warn', f'hardware HEVC encoder ({sys.platform}): {hwenc or "none, using software libx265"}', '' if hwenc else 'renders use libx265 (slower but works everywhere)')
     line('ok' if 'libx265' in enc else 'FAIL', 'libx265 encoder', 'install an ffmpeg build with libx265' if 'libx265' not in enc else '')
     try: import hashlib; hashlib.blake2b(); line('ok', 'python hashlib has blake2 (OpenSSL build)')
@@ -169,11 +174,11 @@ def cmd_doctor(a):
     except Exception as e: line('warn', f'overlay check failed: {e}')
     print('models (cached under ~/.cache/huggingface; downloaded on first use):')
     hf = os.path.expanduser('~/.cache/huggingface/hub')
-    for name, pat in (('whisper large-v3-turbo', 'models--*large-v3-turbo*'), ('whisper small', 'models--Systran--faster-whisper-small'), ('OPUS-MT fr-en', 'models--Helsinki-NLP--opus-mt-fr-en'),
+    for name, pat in (('whisper large-v3-turbo', 'models--*large-v3-turbo*'), ('whisper large-v3 (the default with a CUDA GPU)', 'models--Systran--faster-whisper-large-v3'), ('whisper small', 'models--Systran--faster-whisper-small'), ('OPUS-MT fr-en', 'models--Helsinki-NLP--opus-mt-fr-en'),
                       ('OPUS-MT nl-en', 'models--Helsinki-NLP--opus-mt-nl-en'), ('OPUS-MT de-en', 'models--Helsinki-NLP--opus-mt-de-en'), ('wav2vec2 English aligner', 'models--facebook--wav2vec2-base-960h')):
         line('ok' if glob.glob(os.path.join(hf, pat)) else 'warn', name, 'downloads automatically the first time a run needs it')
     line('ok' if os.path.isdir(os.path.expanduser('~/Library/Caches/DeepFilterNet')) or glob.glob(os.path.join(os.path.dirname(sys.executable), '..', 'lib', '*', 'site-packages', 'df')) else 'warn', 'DeepFilterNet (optional enhancer)')
-    line('ok' if os.path.exists(os.path.join(os.path.dirname(__file__), '..', '..', '.venv-cv', 'bin', 'python')) else 'warn', 'MossFormer2 environment .venv-cv (optional enhancer)', 'scripts/setup_env.sh --with-cv')
+    line('ok' if os.path.exists(oslib.venv_python(os.path.join(os.path.dirname(__file__), '..', '..', '.venv-cv'))) else 'warn', 'MossFormer2 environment .venv-cv (optional enhancer)', 'scripts/setup_env.sh --with-cv')
     print('races folder:'); rr = config.races_root(); os.makedirs(rr, exist_ok=True); free = shutil.disk_usage(rr).free / 1e9
     line('ok' if free > 50 else 'warn', f'{os.path.abspath(rr)}: {free:.0f} GB free', 'proxies are about 37 GB per hour of footage')
     print('all required checks passed' if ok else 'some required checks FAILED'); sys.exit(0 if ok else 1)
@@ -184,7 +189,8 @@ def cmd_fetch_models(a):
     import warnings; warnings.filterwarnings('ignore')
     cfg = config.load(a.race) if a.race else config.DEFAULTS
     from faster_whisper import WhisperModel
-    print('whisper', cfg['whisper_model']); WhisperModel(cfg['whisper_model'], device='cpu', compute_type='int8')
+    from strata360 import hw
+    print('whisper', cfg['whisper_model']); WhisperModel(cfg['whisper_model'], device=hw.whisper_args()[0], compute_type=hw.whisper_args()[1])
     from transformers import MarianMTModel, MarianTokenizer, Wav2Vec2ForCTC, Wav2Vec2Processor
     for lang in [l for l in cfg['languages'] if l != 'en']:
         print('OPUS-MT', lang); n = f'Helsinki-NLP/opus-mt-{lang}-en'; MarianTokenizer.from_pretrained(n); MarianMTModel.from_pretrained(n)
@@ -656,6 +662,35 @@ def cmd_set_key(a):
     k = getpass.getpass(f'{a.provider} API key (input hidden): '); L.set_key(k, a.provider); print('saved to secrets.env (gitignored)')
 
 
+def cmd_bookends(a):
+    """Candidate openings and endings (edit/bookends.py): previews and the local vision model's choice, in <project>/strata360/bookends/."""
+    from strata360.edit import bookends
+    doc = bookends.run(a.name, per=a.per, render=not a.no_render, choose=not a.no_choose)
+    for k, v in doc['chosen'].items(): print(f'{k}: {v}')
+    print(os.path.join(config.race_dir(a.name), 'bookends', 'bookends.json'))
+
+
+def cmd_titles(a):
+    """Design and render the animated title of a bookend candidate with the local vision model (edit/bookends.py title_candidate)."""
+    from strata360.edit import bookends
+    lines = None
+    if a.title or a.subtitle or a.meta: lines = [dict(role=r, text=t) for r, t in (('title', a.title), ('subtitle', a.subtitle), ('meta', a.meta)) if t]
+    spec, report = bookends.title_candidate(a.name, a.id, lines)
+    print(json.dumps(dict(elements=[dict(text=e['text'], font=e['font'], size=e['size'], fill=e['fill']['c1'] + ('>' + e['fill']['c2'] if e['fill']['type'] == 'gradient' else ''), at=[round(e['x'], 2), round(e['y'], 2)], rot=e['rot'], animation=e['in']) for e in (spec['elements'] or [])], why=spec.get('why'), changed_by_the_checks=report['changes']), indent=1))
+
+
+def cmd_filmtext(a):
+    """Word-art cards through the film (edit/film_text.py): the local models propose options and rate the shots under them, the planner picks, the vision model designs the picked cards. Needs a rendered preview."""
+    from strata360.edit import film_text
+    if a.options_only: odoc = film_text.options(a.name, n=a.n); docs = None
+    else: odoc, docs = film_text.run(a.name, n=a.n, per_minute=a.per_minute, reuse=a.reuse)
+    for o in sorted(odoc['options'], key=lambda o: -o['score']): print(f"{o['score']:5.1f}  {o['t']:7.1f} s  {o['type']:8} worth {o['worth']:.0f}  shot: {o['shot']['verdict']:5} ({o['shot']['excitement']:.0f} exciting, {o['shot']['obscure_risk']:.0f} risk)  {' / '.join(l['text'] for l in o['lines'])}")
+    if docs:
+        print('chosen:')
+        for c in docs['cards']: print(f"{c['t']:7.1f} s  {c['type']:8}  {' / '.join(l['text'] for l in c['lines'])}")
+    print(os.path.join(config.race_dir(a.name), 'film_text_options.json') + ('' if not docs else ' and film_text.json'))
+
+
 def cmd_render(a):
     from strata360.render import flat
     sys.argv = ['render'] + a.args; flat.main()
@@ -728,6 +763,9 @@ def main():
     p = sub.add_parser('clear', help='forget the status of a stage so it is processed again (with the stages that depend on it)'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('stage')
     p.add_argument('--clip', help='comma-separated full clip ids (default all)'); p.add_argument('--no-cascade', action='store_true'); p.set_defaults(fn=cmd_clear)
     p = sub.add_parser('set-key', help='store an API key for the voice-over script writer in secrets.env (gitignored)'); p.add_argument('--provider', choices=['vertex', 'gemini', 'anthropic'], default='vertex'); p.add_argument('--clear', action='store_true'); p.set_defaults(fn=cmd_set_key)
+    p = sub.add_parser('bookends', help='find candidate openings and endings (a globe zooming onto your face, the start or finish crowd), render previews and let the local vision model choose'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--per', type=int, default=6, help='candidates of each kind'); p.add_argument('--no-render', action='store_true'); p.add_argument('--no-choose', action='store_true'); p.set_defaults(fn=cmd_bookends)
+    p = sub.add_parser('titles', help='design and render the animated title of a bookend candidate (see bookends) with the local vision model'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--id', required=True, help='candidate id, for instance intro-sequence-0'); p.add_argument('--title'); p.add_argument('--subtitle'); p.add_argument('--meta'); p.set_defaults(fn=cmd_titles)
+    p = sub.add_parser('filmtext', help='choose and design word-art cards through the film (progress updates, partial quotes) with the local models; render the preview first'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--n', type=int, default=24, help='how many options to ask the text model for'); p.add_argument('--per-minute', type=float, default=2.0, help='cards the planner may pick per minute of film'); p.add_argument('--reuse', action='store_true', help='pick from the stored options without asking the models again'); p.add_argument('--options-only', action='store_true'); p.set_defaults(fn=cmd_filmtext)
     p = sub.add_parser('render', help='render a flat 4K view (arguments as for the renderer)'); p.add_argument('args', nargs=argparse.REMAINDER); p.set_defaults(fn=cmd_render)
     a = ap.parse_args(); a.fn(a)
 

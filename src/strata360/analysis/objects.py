@@ -162,7 +162,11 @@ def _env():
 
 
 def _py():
-    return os.environ.get('STRATA_VISION_PYTHON') or os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python')
+    from strata360.analysis.vlm import vision_python; return vision_python()
+
+
+def _vlm_py():
+    from strata360.analysis import vlm; return vlm.vision_python()                 # the labelling model also runs from the main environment (llama.cpp, analysis/vlm.py)
 
 
 def run_detector(images, words, out, models=None):
@@ -174,13 +178,13 @@ def run_detector(images, words, out, models=None):
 
 def run_labeller(images, out, models=None):
     """The labelling model over every crop in `images`: {'model': ..., 'labels': {file: text}}."""
-    subprocess.run([_py(), '-m', 'strata360.analysis.objects_vlm', images, out] + (['--model', models] if models else []), check=True, env=_env(), stdout=subprocess.PIPE)
+    subprocess.run([_vlm_py(), '-m', 'strata360.analysis.objects_vlm', images, out] + (['--model', models] if models else []), check=True, env=_env(), stdout=subprocess.PIPE)
     return json.load(open(out))
 
 
 def run_regions(images, out, models=None):
     """The labelling model's boxes for snow and water on the wide views in `images` (with jobs.json): {'model', 'seconds', 'answers': {file: text}}."""
-    subprocess.run([_py(), '-m', 'strata360.analysis.regions_vlm', images, out] + (['--model', models] if models else []), check=True, env=_env(), stdout=subprocess.PIPE)
+    subprocess.run([_vlm_py(), '-m', 'strata360.analysis.regions_vlm', images, out] + (['--model', models] if models else []), check=True, env=_env(), stdout=subprocess.PIPE)
     return json.load(open(out))
 
 

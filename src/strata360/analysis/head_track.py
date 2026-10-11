@@ -75,7 +75,7 @@ def head_positions(proxy_path, proxy_frames, t0, t1, centre, work_dir=None, keep
             cv2.imwrite(os.path.join(tmp, f'c{i:05d}.jpg'), cv2.remap(fr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP), [cv2.IMWRITE_JPEG_QUALITY, 92])
     finally: dec.stdout.close(); dec.terminate(); dec.wait()
     if n == 0: return None
-    py = py or os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..'); out_json = os.path.join(tmp, 'det.json')
+    from strata360.analysis.vlm import vision_python; py = py or vision_python(); src = os.path.join(os.path.dirname(__file__), '..', '..'); out_json = os.path.join(tmp, 'det.json')
     subprocess.run([py, '-m', 'strata360.analysis.head_detect', tmp, out_json], check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
     det = json.load(open(out_json))['frames']; yaw = np.full(n, np.nan); pitch = np.full(n, np.nan); used = np.zeros(n, int)
     for i in range(n):

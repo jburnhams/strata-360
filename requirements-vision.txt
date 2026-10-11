@@ -1,0 +1,4 @@
+# The detector, speaker and face models of the people, face_view, objects and speakers stages. On a Mac they live in their own .venv-vision; on Windows (scripts/setup_env.ps1) and Linux they go in the main environment.
+ultralytics                # YOLO11 pose, YOLOE (fetches its own weights and the CLIP text encoder on first use)
+speechbrain                # ECAPA speaker embeddings (fetched on first use)
+insightface                # faces: detection and ArcFace embeddings (buffalo_l)

@@ -54,7 +54,9 @@ def _model():
     if 'm' not in _M:
         import torch
         from transformers import ASTFeatureExtractor, ASTForAudioClassification
-        torch.set_num_threads(2); _M['fe'] = ASTFeatureExtractor.from_pretrained(MODEL_DIR); _M['m'] = ASTForAudioClassification.from_pretrained(MODEL_DIR).eval()
+        from strata360 import hw
+        if not model_ready(): fetch_model()                                                           # downloaded on first use, like the other models
+        torch.set_num_threads(2); _M['dev'] = hw.gpu_device(); _M['fe'] = ASTFeatureExtractor.from_pretrained(MODEL_DIR); _M['m'] = ASTForAudioClassification.from_pretrained(MODEL_DIR).eval().to(_M['dev'])
         _M['labels'] = [_M['m'].config.id2label[i] for i in range(len(_M['m'].config.id2label))]
         idx = {l: i for i, l in enumerate(_M['labels'])}; _M['cat_idx'] = {c: [idx[n] for n in names if n in idx] for c, names in CATEGORIES.items()}
     return _M
@@ -68,7 +70,7 @@ def classify(path, win_s=WIN_S, hop_s=HOP_S, batch=8, progress=None):
     starts = [0.0] if dur <= win_s else list(np.arange(0.0, max(dur - win_s, 0.0) + 1e-6, hop_s)) + ([] if abs((dur - win_s) % hop_s) < 1e-6 else [dur - win_s]); wins = []
     for b in range(0, len(starts), batch):
         chunk = starts[b:b + batch]; feats = M['fe']([x[int(s * 16000):int((s + win_s) * 16000)] for s in chunk], sampling_rate=16000, return_tensors='pt')
-        with torch.no_grad(): p = torch.sigmoid(M['m'](**feats).logits).numpy()
+        with torch.no_grad(): p = torch.sigmoid(M['m'](**{k: v.to(M['dev']) for k, v in feats.items()}).logits).cpu().numpy()
         for s, pr in zip(chunk, p):
             cats = {c: round(float(pr[ix].max()), 3) for c, ix in M['cat_idx'].items() if len(ix)}; top = np.argsort(-pr)[:5]
             wins.append(dict(t0=round(float(s), 2), t1=round(float(min(s + win_s, dur)), 2), cats=cats, top=[[M['labels'][i], round(float(pr[i]), 3)] for i in top]))

@@ -18,7 +18,8 @@ def weights_dir(given=None):
     while True:
         p = os.path.join(d, 'models', 'yoloe')
         if os.path.isdir(p): return p
-        if os.path.dirname(d) == d: raise SystemExit('no YOLOE weights: put yoloe-26s-seg.pt, yoloe-26s-seg-pf.pt and mobileclip2_b.ts in models/yoloe (or set STRATA_YOLOE_DIR)')
+        if os.path.dirname(d) == d:                                                        # none anywhere: models/yoloe of the repository, which ultralytics fills on first use (the weights and mobileclip2_b.ts)
+            p = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'models', 'yoloe'); os.makedirs(p, exist_ok=True); return os.path.abspath(p)
         d = os.path.dirname(d)
 
 
@@ -28,7 +29,8 @@ def main():
     import torch
     from ultralytics import YOLOE
     dev = 'mps' if torch.backends.mps.is_available() else 0 if torch.cuda.is_available() else 'cpu'
-    tx = YOLOE(os.path.join(wd, TEXT)); tx.set_classes(words, tx.get_text_pe(words)); pf = YOLOE(os.path.join(wd, PF)); t0 = time.time(); out = {}
+    tx = YOLOE(TEXT); tx.set_classes(words, tx.get_text_pe(words)); pf = YOLOE(PF);                                     # (the working folder is the weights folder: a missing file is downloaded there)
+    t0 = time.time(); out = {}
     def preds(model, fn, conf):
         r = model.predict(fn, imgsz=a.imgsz, conf=conf, iou=0.5, agnostic_nms=True, device=dev, verbose=False)[0]
         return [[model.names[int(r.boxes.cls[j])], round(float(r.boxes.conf[j]), 3), [round(float(z), 1) for z in r.boxes.xyxy[j]]] for j in range(len(r.boxes))]

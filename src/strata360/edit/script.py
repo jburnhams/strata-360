@@ -112,7 +112,7 @@ def run_llm(messages, model=None, max_tokens=1600, temperature=0.7, work_dir=Non
         r = llm_remote.chat(messages, model or default, max(max_tokens, 16000), temperature, provider=provider); r['parsed'] = _parse_json(r['text']); return r      # generous: a reasoning model's hidden thinking counts against the limit
     tmp = tempfile.mkdtemp(prefix='s360llm_', dir=work_dir)
     rq, out = os.path.join(tmp, 'req.json'), os.path.join(tmp, 'out.json'); json.dump(dict(messages=messages, max_tokens=max_tokens, temperature=temperature, json=True), open(rq, 'w'))
-    py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..')
+    from strata360.analysis.vlm import vision_python; py = vision_python(); src = os.path.join(os.path.dirname(__file__), '..', '..')
     subprocess.run([py, '-m', 'strata360.edit.llm_cli', rq, out] + (['--model', model] if model else []), check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     r = json.load(open(out))
     for f in (rq, out): os.remove(f)
