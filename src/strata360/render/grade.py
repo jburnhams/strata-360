@@ -105,7 +105,7 @@ def plan_gains(folder, segs, framing, heading_of=None):
 
 
 def _heading(rd, clip, views):
-    try: return views.heading_fn(os.path.join(rd, 'clips', clip), json.load(open(os.path.join(rd, 'clips', clip, 'clip.json')))['source_files']['osv'])
+    try: return views.heading_fn(os.path.join(rd, 'clips', clip), config.source(json.load(open(os.path.join(rd, 'clips', clip, 'clip.json')))['source_files']['osv'], rd))
     except Exception: return lambda t: 0.0
 
 

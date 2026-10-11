@@ -21,7 +21,7 @@ from strata360.pipeline import guard
 from strata360.osv.calib import read_slots, Lens, quat_to_R, imu_offsets
 from strata360.osv.telemetry import read_frames, video_pts
 from strata360.render import photo as ph
-from strata360.render import camera as cam
+from strata360.render import camera as cam, gpu
 from strata360 import hw as hwmod
 
 LS = 3840  # lens frame size
@@ -181,8 +181,10 @@ class Renderer(Globe):
         """body <- upright-world direction matrix: d_body = M d_E (stored quaternion fields = w,x,y,z)."""
         return self.B.T @ quat_to_R(np.asarray(q)).T @ self.P.T
 
+    def ray_dirs(self, fwd_b, up_b, roll=0.0): return view_rays(self.theta, self.cphi, self.sphi, fwd_b, up_b, roll)       # the body-frame ray of every coarse-grid pixel
+
     def maps(self, fwd_b, up_b, roll=0.0):
-        d = view_rays(self.theta, self.cphi, self.sphi, fwd_b, up_b, roll); self._dirs = d                  # body-frame rays (the seam is read per ray)
+        d = self.ray_dirs(fwd_b, up_b, roll); self._dirs = d                  # body-frame rays (the seam is read per ray)
         out = []
         for L, sign in ((self.master, 1), (self.slave, -1)):
             uu, vv, th = L.project(d if self.warp is None else self.warp.apply(d, sign))            # a parallax warp moves each lens's sampling direction by half the disparity, in opposite ways
@@ -215,6 +217,8 @@ class Renderer(Globe):
 
     def _render_scene(self, L_master, L_slave, fwd_b, up_b, roll=0.0):
         """L_* are (3840,3840,3) uint16 code values. Blend in linear light with OpenOSV's lens weights (FOV feather x occlusion)."""
+        if gpu.available():
+            self._dirs = self.ray_dirs(fwd_b, up_b, roll); return gpu.scene(self, L_master, L_slave, self._dirs, keep=getattr(self, 'keep_on_gpu', False))          # all of it on the GPU (render/gpu.py)
         (um, vm, tm), (us, vs, ts) = self.maps(fwd_b, up_b, roll)
         W, H = self.W, self.H
         up = lambda a: cv2.resize(np.ascontiguousarray(a, dtype=np.float32), (W, H), interpolation=cv2.INTER_LINEAR)
@@ -270,17 +274,40 @@ def decode_args(osv, hw=True):
     return (['-flags', '+output_corrupt'] if damaged else (hwmod.hwaccel_args() if hw else [])), damaged
 
 
-def decoder(osv, stream, hw=True, ss=0.0):
+def decoder(osv, stream, hw=True, ss=0.0, native=False):
+    """ffmpeg process that writes the frames of one lens stream: rgb48le, or with `native` the codec's own 10-bit YUV (p010le), which render/gpu.py converts on the GPU (read it with `read_frame(p, native=True)`)."""
     args, _ = decode_args(osv, hw)
     cmd = ['ffmpeg', '-v', 'error'] + args + (['-ss', f'{ss:.4f}'] if ss > 0 else []) + \
-          ['-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough', '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
+          ['-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough', '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
     return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=LS * LS * BYTES * 2)
 
 
-def read_frame(p):
-    n = LS * LS * BYTES; buf = p.stdout.read(n)
+def read_frame(p, native=False):
+    n = gpu.p010_bytes(LS) if native else LS * LS * BYTES; buf = p.stdout.read(n)
     if len(buf) < n: return None
+    if native: return gpu.frame_from_p010(buf, LS)
     return np.frombuffer(buf, np.uint16).reshape(LS, LS, 3)
+
+
+def prefetch(read, depth=2):
+    """Iterate over `read()` results (called until it returns None) with the next ones fetched by a background thread: decoding (a wait on ffmpeg's pipes and the upload to the GPU) overlaps with the picture maths."""
+    import queue, threading
+    q = queue.Queue(depth); stop = threading.Event()
+
+    def work():
+        try:
+            while not stop.is_set():
+                item = read(); q.put(item)
+                if item is None: return
+        except BaseException as e: q.put(e)
+    threading.Thread(target=work, daemon=True).start()
+    try:
+        while True:
+            item = q.get()
+            if isinstance(item, BaseException): raise item
+            if item is None: return
+            yield item
+    finally: stop.set()
 
 
 def mux_audio(video, osv, out, start, dur, mode, whole_clip, meta=()):

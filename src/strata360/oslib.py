@@ -87,6 +87,30 @@ def windows_available_gb(): return _windows_memory().avail_phys / 1e9
 def windows_total_gb(): return _windows_memory().total_phys / 1e9
 
 
+def big_pipe(parent_reads, size=8 << 20):
+    """(parent_file, child_fd) for streaming raw video frames to or from a child process on Windows.
+
+    An anonymous pipe (subprocess.PIPE) has a 4 KB buffer there, which moves a 3840x3840 rgb48 frame at about 80 MB/s (1.2 s a frame, measured); a named pipe with a few MB of buffer (more gains nothing, and a dozen 256 MB ones exhausted the pool) does
+    the same frame in 0.03 s. `parent_reads` True: the child writes to the pipe (give `child_fd` as its stdout, read `parent_file`); False: the parent writes (child's stdin).
+    The caller closes `child_fd` (os.close) once the child has started."""
+    import ctypes, io, msvcrt, uuid
+    from ctypes import wintypes as wt
+    k = ctypes.WinDLL('kernel32', use_last_error=True)
+    k.CreateNamedPipeW.restype = wt.HANDLE; k.CreateNamedPipeW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.DWORD, wt.DWORD, wt.DWORD, wt.DWORD, ctypes.c_void_p]
+    k.CreateFileW.restype = wt.HANDLE; k.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, ctypes.c_void_p, wt.DWORD, wt.DWORD, wt.HANDLE]
+
+    class SecAttr(ctypes.Structure): _fields_ = [('n', wt.DWORD), ('desc', ctypes.c_void_p), ('inherit', wt.BOOL)]
+    bad = ctypes.c_void_p(-1).value; bs = chr(92); name = bs * 2 + '.' + bs + 'pipe' + bs + f'strata360-{os.getpid()}-{uuid.uuid4().hex}'
+    server = k.CreateNamedPipeW(name, 1 if parent_reads else 2, 0, 1, 0 if parent_reads else size, size if parent_reads else 0, 0, None)       # PIPE_ACCESS_INBOUND / OUTBOUND, byte mode, one instance
+    if server in (None, bad): raise ctypes.WinError(ctypes.get_last_error())
+    sa = SecAttr(ctypes.sizeof(SecAttr), None, True)
+    client = k.CreateFileW(name, 0x40000000 if parent_reads else 0x80000000, 0, ctypes.byref(sa), 3, 0, None)                              # GENERIC_WRITE / GENERIC_READ, OPEN_EXISTING, inheritable
+    if client in (None, bad): err = ctypes.get_last_error(); k.CloseHandle(server); raise ctypes.WinError(err)
+    sfd = msvcrt.open_osfhandle(server, os.O_RDONLY if parent_reads else os.O_WRONLY); cfd = msvcrt.open_osfhandle(client, os.O_WRONLY if parent_reads else os.O_RDONLY)
+    raw = io.FileIO(sfd, 'rb' if parent_reads else 'wb', closefd=True)
+    return (io.BufferedReader(raw, 1 << 20) if parent_reads else io.BufferedWriter(raw, 1 << 20)), cfd
+
+
 def venv_python(venv):
     """The interpreter of a virtual environment: bin/python on POSIX, Scripts\\python.exe on Windows."""
     return os.path.join(venv, 'Scripts', 'python.exe') if WIN else os.path.join(venv, 'bin', 'python')

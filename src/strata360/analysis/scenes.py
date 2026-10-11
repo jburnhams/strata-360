@@ -84,7 +84,7 @@ def analyse(osv, work_dir, every_s=5.0, models=None, px=512, previous=None, time
         adaptive = times is not None and V.proxy_available(proxy); sampling = 'adaptive' if adaptive else 'fixed'
         if V.proxy_available(proxy): V.write_stab_views_proxy(proxy, osv, tmp, every=every, yaws=(0, 180), px=px, fov=fov, **(dict(times=times) if adaptive else {}))
         else: V.write_stab_views(osv, tmp, every=every, yaws=(0, 180), px=px, fov=fov)
-        py = os.environ.get('STRATA_VISION_PYTHON') or os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..'); out = os.path.join(tmp, 'vlm.json')
+        from strata360.analysis import vlm as VLM; py = VLM.vision_python(); src = os.path.join(os.path.dirname(__file__), '..', '..'); out = os.path.join(tmp, 'vlm.json')
         scen = _vlm(py, src, tmp, os.path.join(tmp, 'scenery.json'), models, 'scenery'); old = reusable(previous, every_s, sampling, px, fov, scen['model'])                 # the scenery prompt is always run (it is the new part)
         want = [(i['frame'], i['view']) for i in scen['items']]; todo = [k for k in want if k not in old]; got = {}; secs = scen['seconds']
         if todo:                                                                                   # only the general answers that are missing (all of them on a first run; the rear ones an earlier run lost)

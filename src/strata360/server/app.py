@@ -398,14 +398,14 @@ def create_app(roots, token=None):
         mo_ = _j(d, 'motion.json'); out['heading'] = None if not mo_ else dict(t=mo_['series']['t'], deg=mo_['series']['heading_deg']); pv = os.path.join(d, 'proxy.mp4'); out['preview'] = os.path.exists(pv) and os.path.getsize(pv) > 0
         try:
             from strata360.analysis.views import focus_samples, person_samples
-            out['focus'] = focus_samples(d, c['source_files']['osv']); out['person'] = person_samples(d, c['source_files']['osv'])
+            out['focus'] = focus_samples(d, config.source(c['source_files']['osv'], d)); out['person'] = person_samples(d, config.source(c['source_files']['osv'], d))
         except Exception: out['focus'] = []; out['person'] = []
         try:                                                                              # the clearest view over time (the "Clarity" aim): from the view-quality maps of the exposure stage
             from strata360.analysis.exposure import load_quality
             from strata360.edit import attention as AT
             vq = load_quality(d); out['clarity'] = AT.clarity_samples(vq) if vq is not None and len(vq['t']) else []
         except Exception: out['clarity'] = []
-        out['scenic'] = scenic_samples(d, (c.get('source_files') or {}).get('osv'))                      # the best people-free direction over time (the "Scenic" aim), kept beside the quality grid it comes from
+        out['scenic'] = scenic_samples(d, config.source((c.get('source_files') or {}).get('osv'), d))                      # the best people-free direction over time (the "Scenic" aim), kept beside the quality grid it comes from
         out['unusable'] = None if not cd else cd.get('unusable', []); out['thresholds'] = None if not cd else cd.get('thresholds')
         ex = _j(d, 'exposure.json'); out['exposure'] = None if not ex else ex['summary']
         th = _j(d, 'thumb.json') or _j(d, 'thumb_quick.json'); out['thumb'] = th and {**th, 'overlay': TH.overlay_fresh(d)}; out['places'] = _j(d, 'places.json')

@@ -22,11 +22,17 @@ def main():
     from speechbrain.inference.speaker import EncoderClassifier
     segs = json.load(open(a.segments)); y = load_audio(a.osv); embs = []; stats = []
     if segs:
-        m = os.path.abspath(a.model); clf = EncoderClassifier.from_hparams(source=m, savedir=m, run_opts={'device': 'cpu'})
+        m = os.path.abspath(a.model)
+        if not os.path.exists(os.path.join(m, 'hyperparams.yaml')):                                      # fetched on first use (copies, not links: a Windows user may not create links)
+            from huggingface_hub import hf_hub_download
+            for f in ('hyperparams.yaml', 'embedding_model.ckpt', 'mean_var_norm_emb.ckpt', 'classifier.ckpt', 'label_encoder.ckpt'): hf_hub_download('speechbrain/spkrec-ecapa-voxceleb', f, local_dir=m)
+        from strata360 import hw
+        dev = hw.gpu_device(); from speechbrain.utils.fetching import LocalStrategy
+        clf = EncoderClassifier.from_hparams(source=m, savedir=m, run_opts={'device': dev}, local_strategy=LocalStrategy.COPY)         # copies, not symlinks (no link privilege on Windows)
     for s in segs:
         x = y[int(max(s['t0'], 0) * SR):int(s['t1'] * SR)]
         if len(x) < SR * 0.5: x = np.pad(x, (0, int(SR * 0.5) - len(x)))
-        with torch.no_grad(): e = clf.encode_batch(torch.from_numpy(x)[None]).squeeze().numpy()
+        with torch.no_grad(): e = clf.encode_batch(torch.from_numpy(x)[None].to(dev)).squeeze().cpu().numpy()
         embs.append(e.astype(np.float16)); n = SR // 20; fr = x[:len(x) // n * n].reshape(-1, n); lv = 20 * np.log10(np.sqrt((fr ** 2).mean(1)) + 1e-9) if len(fr) else np.array([-90.0])
         stats.append(dict(rms_db=round(float(20 * np.log10(np.sqrt((x ** 2).mean()) + 1e-9)), 1), peak_db=round(float(20 * np.log10(np.abs(x).max() + 1e-9)), 1), spread_db=round(float(np.percentile(lv, 95) - np.percentile(lv, 5)), 1)))
     np.save(a.out_npy, np.array(embs, np.float16).reshape(-1, 192)); json.dump(stats, open(a.out_json, 'w')); print(len(segs), 'segments')

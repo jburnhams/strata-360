@@ -20,7 +20,7 @@ Usage: python make_proxy.py CAM.OSV proxy.mp4 [--size 3840x1920] [--every 2] [--
 """
 import argparse, json, os, subprocess, sys, time
 import numpy as np, cv2
-from strata360.render import flat as r4
+from strata360.render import flat as r4, gpu
 from strata360 import hw
 from strata360.pipeline import guard
 from strata360.osv.telemetry import read_frames, video_pts
@@ -34,8 +34,10 @@ class EquirectRenderer(r4.Renderer):
         lon = (X / W - 0.5) * 2 * np.pi; lat = (0.5 - Y / H) * np.pi                       # Standard layout, centre column = +Y
         self.dE = np.stack([np.sin(lon) * np.cos(lat), np.cos(lon) * np.cos(lat), np.sin(lat)], -1).reshape(-1, 3)
 
+    def ray_dirs(self, M, _unused, roll=0.0): return np.einsum('nj,ij->ni', self.dE, M)
+
     def maps(self, M, _unused, roll=0.0):
-        d = np.einsum('nj,ij->ni', self.dE, M); self._dirs = d                          # d_body = M d_E; the carved seam is read per ray
+        d = self.ray_dirs(M, _unused, roll); self._dirs = d                          # d_body = M d_E; the carved seam is read per ray
         out = []
         for L, sign in ((self.master, 1), (self.slave, -1)):
             uu, vv, th = L.project(d if self.warp is None else self.warp.apply(d, sign))      # the parallax warp moves each lens's sampling direction by half the disparity, in opposite ways (as flat.Renderer.maps)
@@ -43,9 +45,10 @@ class EquirectRenderer(r4.Renderer):
         return out
 
 
-def decoder(osv, stream, every):
+def decoder(osv, stream, every, native=False):
+    """`native`: the codec's own 10-bit YUV (p010), converted on the GPU (render/gpu.py) instead of ffmpeg's rgb48 on the CPU."""
     cmd = ['ffmpeg', '-v', 'error', *r4.decode_args(osv)[0], '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
-           '-vf', f"select='not(mod(n\\,{every}))'", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
+           '-vf', f"select='not(mod(n\\,{every}))'", '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
     return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
 
 
@@ -74,26 +77,40 @@ def _make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt'
     """encoder 'h264' (the pipeline default): H.264 from VideoToolbox with the clip's audio, one file for analysis AND the browser player; 'vt' HEVC / 'x265' for archival proxies."""
     """Render the canonical analysis proxy and its JSON sidecar (next to `out`, .json). Returns the sidecar dict."""
     W, H = map(int, size.split('x')); t0 = time.time()
-    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True; boxes = clip_boxes(out, osv)
+    R = EquirectRenderer(osv, W, H); R.carve_seam = True; R.parallax = True; R.keep_on_gpu = gpu.native_decode() and W % 2 == 0 and H % 2 == 0; boxes = clip_boxes(out, osv)
     tel = read_frames(osv); pts = video_pts(osv, 0); n_src = len(pts)
     idx = list(range(0, n_src, every))
     if frames_limit: idx = idx[:frames_limit]
     nominal_fps = 50.0 / every
-    dm, ds = decoder(osv, 1, every), decoder(osv, 0, every)
+    nat = gpu.native_decode(); dm, ds = decoder(osv, 1, every, nat), decoder(osv, 0, every, nat)
     venc = (hw.h264_args(bitrate) if encoder == 'h264' else hw.hevc_args(bitrate, tag=False) if encoder == 'vt' else ['-c:v', 'libx265', '-preset', 'medium', '-x265-params', f'crf={crf}:log-level=error'])
     final = out; out = out + '.video.mp4' if encoder == 'h264' else out
-    enc = guard.popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', str(nominal_fps), '-i', '-',
-                            '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p'] + venc +
+    yuv = nat and W % 2 == 0 and H % 2 == 0                                                           # the RGB to YUV conversion on the GPU too (ffmpeg's takes a core): the encoder is given p010
+    enc = guard.popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', *(['-pix_fmt', 'p010le', '-color_range', 'tv', '-colorspace', 'bt709'] if yuv else ['-pix_fmt', 'rgb48le']), '-s', f'{W}x{H}', '-r', str(nominal_fps), '-i', '-',
+                            '-vf', 'format=yuv420p' if yuv else 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int,format=yuv420p'] + venc +
                            (['-movflags', '+faststart'] if encoder == 'h264' else ['-tag:v', 'hvc1', '-bsf:v', 'hevc_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1:video_full_range_flag=0']) +
                            ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', out], stdin=subprocess.PIPE)
-    frames = []
+    import queue, threading
+    sink = queue.Queue(3); werr = []
+
+    def writer():
+        while True:
+            im = sink.get()
+            if im is None: return
+            try: enc.stdin.write(gpu.rgb48_to_p010(im) if yuv else np.ascontiguousarray(im).tobytes())
+            except BaseException as e: werr.append(e); return
+    wt = threading.Thread(target=writer, daemon=True); wt.start()
+    frames = []; pairs = r4.prefetch(lambda: (lambda a, b: None if a is None or b is None else (a, b))(r4.read_frame(dm, nat), r4.read_frame(ds, nat)))          # the next pair is decoded while this one is rendered
     for j, k in enumerate(idx):
-        cm = r4.read_frame(dm); cs = r4.read_frame(ds)
-        if cm is None or cs is None: break
+        pair = next(pairs, None)
+        if pair is None: break
+        cm, cs = pair
         M = R.stab_matrix(tel['quat'][k]); R.update_seam(cm, cs, reset=(j == 0), people=seam_people(boxes, M, pts[k] - pts[0])); img = R.render(cm, cs, M, None)
-        enc.stdin.write(np.ascontiguousarray(img).tobytes())
+        sink.put(img)                                                                                  # converted and written by the writer thread, while the next picture is made
         frames.append(dict(proxy_frame=j, source_frame=int(k), t_s=round(float(pts[k] - pts[0]), 4)))
         if progress and j % 25 == 0: progress(j, len(idx))
+    sink.put(None); wt.join()
+    if werr: raise werr[0]
     enc.stdin.close(); enc.wait(); dm.kill(); ds.kill()
     if not frames_limit and len(frames) != len(idx): raise RuntimeError(f'the lens streams of {os.path.basename(osv)} gave {len(frames)} frames of the {len(idx)} expected: they would be paired out of step, so no proxy is made (a decoder dropped frames)')       # never a silent mismatch between the lenses
     if encoder == 'h264':                                                                            # add the clip's audio (AAC) and finish: one file for the detectors and the player

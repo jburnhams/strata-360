@@ -20,12 +20,37 @@ def run_text(cmd, timeout=10):
         p = _REAL_POPEN(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True); out, _ = p.communicate(timeout=timeout); return out or ''
     except Exception: return ''
 
-DEFAULTS = dict(max_workers=2, extra_worker_free_gb=7.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
 STAGE_MEM_GB = dict(proxy=2.5, quality=1.5, face_view=3.0, people=4.0, scenes=4.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
                     places=0.3, identity=0.5, candidates=0.5, audio_extract=0.5, audio_clean=2.0, audio_events=2.0, audio_background=1.2, transcript_check=0.5)
+STAGE_VRAM_GB = dict(proxy=3.0, transcribe=4.5, scenes=7.5, objects=3.0, people=2.5, face_view=2.0, speakers=1.0, audio_background=3.0, audio_events=1.0, audio_clean=3.0, exposure=0.0, quality=0.0)        # GPU memory a stage asks for on an NVIDIA GPU (measured: proxy 2.6, large-v3 3.5, Qwen3.5-9B Q4 with its projector 7)
 STAGE_MAX_CONCURRENT = dict(quality=1, face_view=1, transcript_check=1, audio_clean=1, audio_events=1, audio_background=1, proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)
+
+
+def vram_free_gb():
+    """Free memory of the NVIDIA GPU in GB (nvidia-smi, so no CUDA context is made here), or None without one."""
+    out = run_text(['nvidia-smi', '--query-gpu=memory.free', '--format=csv,noheader,nounits'], 5).strip().splitlines()
+    try: return float(out[0]) / 1024.0
+    except (IndexError, ValueError): return None
+
+
+def machine_defaults():
+    """The limits for this machine: 2 workers of 2 threads, tuned for a 16 GB Mac that must stay usable. A big NVIDIA PC (12 or more cores, 32 GB or more) runs more: up to 4 workers, each with its share of the cores (the models are on the GPU, whose memory
+    the stages ask for too: STAGE_VRAM_GB), and the heavy stages that are light enough may run in several copies (`concurrent_caps`)."""
+    d = dict(max_workers=2, extra_worker_free_gb=7.0, reserve_gb=2.0, busy_load_fraction=0.6, threads=2)
+    cpu = os.cpu_count() or 4
+    if sys.platform != 'darwin' and cpu >= 12 and vram_free_gb() is not None and mem_total_gb() >= 32: d.update(max_workers=min(4, cpu // 6), threads=max(2, min(8, cpu // 8)))
+    return d
+
+
+def concurrent_caps(cfg=None):
+    """STAGE_MAX_CONCURRENT scaled to the number of workers: the stages that use little GPU memory and mostly wait on decoding may run as many times as there are workers (proxy, exposure) or twice (speech recognition and alignment, speaker embeddings, the quality map)."""
+    caps = dict(STAGE_MAX_CONCURRENT); n = int(cfg_values(cfg)['max_workers'])
+    if n > 2:
+        for s in ('proxy', 'exposure'): caps[s] = n
+        for s in ('transcribe', 'align', 'speakers', 'quality'): caps[s] = 2
+    return caps
 
 
 def cfg_values(cfg):
@@ -92,13 +117,17 @@ def wait_for_headroom(stage, cfg=None, active=None, log=print, poll=20, max_wait
     """Block until the machine has room for one item of `stage`: enough available memory, not busy, and (for a heavy stage) no other worker running it. `active` is a callable returning the
     stages currently being processed by all workers. Returns True when it may go ahead, False if `max_wait` seconds passed."""
     if os.environ.get('STRATA_NO_RESOURCE_LIMITS'): return True                                    # tests and CI runners: nobody is waiting for the machine to be free
-    v = cfg_values(cfg); need = STAGE_MEM_GB.get(stage, 1.0) + float(v['reserve_gb']); cap = STAGE_MAX_CONCURRENT.get(stage); t0 = time.time(); said = None
+    v = cfg_values(cfg); need = STAGE_MEM_GB.get(stage, 1.0) + float(v['reserve_gb']); cap = concurrent_caps(cfg).get(stage); t0 = time.time(); said = None; vneed = STAGE_VRAM_GB.get(stage, 0.0)
     while True:
-        why = None; avail = mem_available_gb()
+        why = None; avail = mem_available_gb(); vfree = vram_free_gb() if vneed else None
         if avail < need: why = f'waiting for memory ({stage} needs about {need:.0f} GB, {avail:.0f} GB available)'
+        elif vfree is not None and vfree < vneed: why = f'waiting for GPU memory ({stage} needs about {vneed:.1f} GB, {vfree:.1f} GB free)'
         elif busy(cfg): why = 'waiting: the machine is busy'
         elif cap and active is not None and sum(1 for s in active() if s == stage) >= cap: why = f'waiting: another worker is already running {stage}'
         if why is None: return True
         if why != said: log(f'    {why}'); said = why
         if max_wait is not None and time.time() - t0 > max_wait: return False
         time.sleep(poll)
+
+
+DEFAULTS = machine_defaults()                                                                          # (after the functions it uses)

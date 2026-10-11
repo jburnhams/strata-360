@@ -131,7 +131,7 @@ def _speaker(segs, t0, t1):
 
 def clip_data(folder, clip, head=False):
     from strata360.analysis import views
-    d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = cj['source_files']['osv']
+    d = os.path.join(config.race_dir(folder), 'clips', clip); cj = json.load(open(os.path.join(d, 'clip.json'))); osv = config.source(cj['source_files']['osv'], d)
     sp = os.path.join(d, 'speakers.json')
     from strata360.analysis.exposure import load_quality
     out = dict(person=views.person_samples(d, osv), you=views.focus_samples(d, osv), heading=views.heading_fn(d, osv), speakers=json.load(open(sp))['segments'] if os.path.exists(sp) else [], quality=load_quality(d), views=CV.load(d, osv), stab=views.stab_fn(osv), proxy=_proxy_info(d) if os.environ.get('STRATA_YOU_KLT') == '1' else None, head=_head_provider(d, views.focus_samples(d, osv), head))          # the frame-by-frame tracker (analysis/subject_track.py) is opt-in: on 0021 it did not predict a held-out detection better than a straight line (the detections' box and face centres are themselves inexact)

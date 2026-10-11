@@ -32,7 +32,7 @@ def analyse(clip_dir, osv, log=print):
         if len(r.stdout) < W * H * 3: raise RuntimeError(f'face_view: could not read proxy frame {k} of {os.path.basename(clip_dir)}: {r.stderr.decode(errors="replace")[-200:]}')
         fr = np.frombuffer(r.stdout, np.uint8)[:W * H * 3].reshape(H, W, 3); x = samples[idx.index(k)]; mx, my = HT.crop_map(x['yaw'], x['pitch'], W, H)
         cv2.imwrite(os.path.join(tmp, f'c{where[k]:05d}.jpg'), cv2.remap(fr, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP), [cv2.IMWRITE_JPEG_QUALITY, 92]); crops[k] = where[k]
-    py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..'); out_json = os.path.join(tmp, 'det.json')
+    from strata360.analysis.vlm import vision_python; py = vision_python(); src = os.path.join(os.path.dirname(__file__), '..', '..'); out_json = os.path.join(tmp, 'det.json')
     subprocess.run([py, '-m', 'strata360.analysis.head_detect', tmp, out_json, '--pose'], check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)
     det = json.load(open(out_json))['frames']; out = []
     for x, k in zip(samples, idx):

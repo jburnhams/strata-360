@@ -10,6 +10,7 @@ dialogue is framed steadily and cut on pauses), and where the scene changes (set
 import json, os
 import numpy as np
 from scipy.ndimage import uniform_filter1d
+from strata360.pipeline import config
 
 SCHEMA_VERSION = 5
 MIN_LEN = 1.5
@@ -81,7 +82,7 @@ def timeline(d):
     scenery_ok = np.zeros(n); free_ok = np.zeros(n)                                                   # K3: is there somewhere good to look that shows no one (scenery), or at all (free)? from the quality grid; 0 without it
     try:
         from strata360.edit import clip_views as CV, scenery as SCN
-        cv = CV.load(str(d), (clip.get('source_files') or {}).get('osv'))
+        cv = CV.load(str(d), config.source((clip.get('source_files') or {}).get('osv'), d))
         if cv['grid'] is not None:
             grid_t = np.arange(0.5, n, 2.0); a = SCN.availability(cv['grid'], grid_t, cv['heading'], cv['prior'], cv['boxes']); f = SCN.availability(cv['grid'], grid_t, cv['heading'], cv['prior'], lambda t: [])
             scenery_ok = np.clip(at(grid_t, a, 0.0) / AVAIL_GOOD, 0.0, 1.0); free_ok = np.clip(at(grid_t, f, 0.0) / AVAIL_GOOD, 0.0, 1.0)
@@ -170,7 +171,7 @@ def build(d, thr=None):
     for a, b, k in _inside(_runs(me, gap=1), spans, 2.0): found.append((a, b, 'you', k))
     try:
         from strata360.analysis import views
-        ps = views.person_samples(str(d), (clip.get('source_files') or {}).get('osv')) if os.path.exists(os.path.join(d, 'identity.json')) else []
+        ps = views.person_samples(str(d), config.source((clip.get('source_files') or {}).get('osv'), d)) if os.path.exists(os.path.join(d, 'identity.json')) else []
     except Exception: ps = []
     if ps:
         pm = np.zeros(n, bool)

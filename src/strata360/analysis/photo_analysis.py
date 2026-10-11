@@ -118,7 +118,7 @@ def scenes_summary(log, scenery):
 # ---- the model runs (subprocesses in .venv-vision) ---------------------------------------------------------------------------------------------------------------------------------------------------------
 
 def _py_src():
-    here = os.path.dirname(__file__); return os.path.join(here, '..', '..', '..', '.venv-vision', 'bin', 'python'), os.path.join(here, '..', '..')
+    here = os.path.dirname(__file__); from strata360.analysis.vlm import vision_python; return vision_python(), os.path.join(here, '..', '..')
 
 
 def run_detect(images, tmp):
@@ -145,6 +145,7 @@ def run_vlm(images, tmp, models=None):
     """{index: (log answer, scenery answer)} for the BGR images, by the local vision model (analysis/scenes_vlm.py) run twice: the general description and the scenery rating."""
     import cv2
     py, src = _py_src(); out = {}
+    from strata360.analysis import vlm as VLM; py = VLM.vision_python()                                  # (the main environment when there is no .venv-vision: llama.cpp, analysis/vlm.py)
     for k, im in images.items():
         h, w = im.shape[:2]; s = VLM_PX / max(h, w)
         if s < 1: im = cv2.resize(im, (round(w * s), round(h * s)), interpolation=cv2.INTER_AREA)

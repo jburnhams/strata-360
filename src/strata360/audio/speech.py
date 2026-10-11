@@ -52,8 +52,9 @@ def translate_text(text, lang):
 
 def load_models(model='small', translate_model=None):
     from faster_whisper import WhisperModel
-    m = WhisperModel(model, device='cpu', compute_type='int8')
-    return m, (m if translate_model in (None, model) else WhisperModel(translate_model, device='cpu', compute_type='int8'))
+    from strata360 import hw
+    m = WhisperModel(model, device=hw.whisper_args()[0], compute_type=hw.whisper_args()[1])
+    return m, (m if translate_model in (None, model) else WhisperModel(translate_model, device=hw.whisper_args()[0], compute_type=hw.whisper_args()[1]))
 
 
 def speech_chunks(x16, max_len=18.0, merge_gap=0.6, pad=0.25):

@@ -14,7 +14,7 @@ import datetime as dt, hashlib, json, math, os, shutil, subprocess, sys, time
 import cv2
 import numpy as np
 from strata360.pipeline import config
-from strata360.render import camera as cam, flat, grade as GR, seam as SM, synthetic as SYN
+from strata360.render import camera as cam, flat, gpu as GPU, grade as GR, seam as SM, synthetic as SYN
 from strata360.render.film import pieces, render_piece, layout
 from strata360.audio.mix import build_audio
 from strata360.render.progress import Null
@@ -74,7 +74,13 @@ def final_dir(folder, key): return os.path.join(config.race_dir(folder), 'final'
 def final_key(plan, size, fps, bitrate, folder, upscale='off', min_zoom=None):
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav')
     h = hashlib.sha1(json.dumps([plan['segments'], size, fps, bitrate], sort_keys=True, default=str).encode()); h.update(str(os.path.getmtime(vo) if os.path.exists(vo) else 0).encode())
-    h.update(_overlay_sig(folder).encode()); h.update(b'grade1' if GR.on(folder) else b''); h.update(f'upscale:{UP.MODEL}:{UP.target_width(upscale, size[0])}:z{UP.MIN_ZOOM if min_zoom is None else min_zoom}:s{UP.MIN_SECONDS}'.encode() if UP.target_width(upscale, size[0]) else b''); h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
+    h.update(_overlay_sig(folder).encode()); h.update(_text_sig(folder).encode()); h.update(b'grade1' if GR.on(folder) else b''); h.update(f'upscale:{UP.MODEL}:{UP.target_width(upscale, size[0])}:z{UP.MIN_ZOOM if min_zoom is None else min_zoom}:s{UP.MIN_SECONDS}'.encode() if UP.target_width(upscale, size[0]) else b''); h.update(''.join(str(os.path.getmtime(g['synthetic'])) for g in plan['segments'] if g.get('synthetic') and os.path.exists(g['synthetic'])).encode()); return h.hexdigest()[:10]
+
+
+def _text_sig(folder):
+    """The part of the key for the text drawn on the pieces: the word-art cards (film_text.json) and whether the subtitles are on (empty when there are none, so earlier keys hold)."""
+    p = os.path.join(config.race_dir(folder), 'film_text.json'); sig = f'cards:{os.path.getmtime(p):.0f}' if os.path.exists(p) else ''
+    return sig + ('nosubs' if os.environ.get('STRATA_SUBTITLES') == '0' else 'subs')
 
 
 def _overlay_sig(folder):
@@ -101,7 +107,7 @@ class FinalSource:
     def _clip(self, clip):
         if clip not in self.info:
             from strata360.osv.telemetry import read_frames, video_pts
-            cj = json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json'))); osv = cj['source_files']['osv']
+            cj = json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json'))); osv = config.source(cj['source_files']['osv'], os.path.join(config.race_dir(self.folder), 'clips', clip))
             R = flat.Renderer(osv, self.W, self.H, 90.0, self.interp); self.info[clip] = dict(boxes=self._boxes(clip, osv), osv=osv, src_fps=float(cj['video']['nominal_fps']), n=int(cj['video']['source_frames']), R=R, Rs={(self.W, self.H): R}, T=read_frames(osv), pts=np.asarray(video_pts(osv, 0), float))
         return self.info[clip]
 
@@ -181,7 +187,7 @@ class FinalSource:
         V = self._eq; path = cam.CameraPath.from_dict(self.framing[sg['id']]); V.set_background(path.bg, **path.bg_opts); side = ci['side']; ez = np.array([0.0, 0.0, 1.0])
         t_from = sg['clip_start_s'] + a0 / fps; fr_n = len(side['frames']); Ms = None
         if path.ref != 'world':                                                          # heading-follow and body paths need the stabilisation of each frame (as the real renderer)
-            if ci['stab'] is None: ci['stab'] = PV.stab_matrices(json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json')))['source_files']['osv'])
+            if ci['stab'] is None: ci['stab'] = PV.stab_matrices(config.source(json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json')))['source_files']['osv'], os.path.join(config.race_dir(self.folder), 'clips', clip)))
             idx = np.clip(np.round(np.maximum(t_from + np.arange(m) / fps, 0.0) * fps).astype(int), 0, fr_n - 1); Ms = [ci['stab'](side['frames'][j]['source_frame']) for j in idx]
         P = path.evaluate(np.arange(a0, a1) / fps, Ms, fps)
         W0, H0 = side['size']; dw = min(self.decode_w, W0); dh = dw // 2; lead = max(-t_from, 0.0)                       # time before the clip starts: the first frame is held
@@ -216,11 +222,11 @@ class FinalSource:
         Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
         utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0            # the window's first frame on the race clock
         P = path.evaluate(times, Ms, self.fps); first = int(ks[0]); ss = max(float(pts[first]) - 0.002, 0.0)
-        dm, ds = flat.decoder(ci['osv'], 1, ss=ss), flat.decoder(ci['osv'], 0, ss=ss); k_dec = first - 1; last_seam = None; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
+        nat = GPU.native_decode(); dm, ds = flat.decoder(ci['osv'], 1, ss=ss, native=nat), flat.decoder(ci['osv'], 0, ss=ss, native=nat); k_dec = first - 1; last_seam = None; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
         try:
             for i in range(m):
                 while k_dec < ks[i]:
-                    with self.pg.timed('decode'): a, b = flat.read_frame(dm), flat.read_frame(ds)
+                    with self.pg.timed('decode'): a, b = flat.read_frame(dm, nat), flat.read_frame(ds, nat)
                     if a is None or b is None: break                                              # past the end of the clip: the last frame is held
                     cur_m, cur_s = a, b; k_dec += 1
                 if cur_m is None: raise RuntimeError(f"could not read {ci['osv']} at {t_abs[i]:.2f} s")
@@ -249,13 +255,19 @@ def encoder_args(bitrate):
     return ['-c:v', 'libx265', '-crf', '17', '-preset', 'medium', '-tag:v', 'hvc1', '-pix_fmt', 'yuv420p10le']
 
 
-def encode_piece(path, W, H, fps, bitrate, run, pg=None):
+def encode_piece(path, W, H, fps, bitrate, run, pg=None, post=None):
     """run(emit) renders the piece's frames into emit; they are encoded to `path` (kept only when complete). `pg`: a render/progress.py recorder that is told how long the encoder takes to accept the frames."""
-    cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', f'{W}x{H}', '-r', ffmpeg_rate(fps), '-i', '-', '-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int',
+    native = GPU.available() and W % 2 == 0 and H % 2 == 0 and os.environ.get('STRATA_GPU_DECODE') != '0'          # the RGB to YUV conversion on the GPU too (ffmpeg's takes a core per encoder): the pipe carries p010
+    src_args = ['-pix_fmt', 'p010le', '-color_range', 'tv', '-colorspace', 'bt709'] if native else ['-pix_fmt', 'rgb48le']
+    cmd = ['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', *src_args, '-s', f'{W}x{H}', '-r', ffmpeg_rate(fps), '-i', '-', *([] if native else ['-vf', 'scale=in_range=full:out_range=tv:out_color_matrix=bt709:flags=accurate_rnd+full_chroma_int']),
            *encoder_args(bitrate), '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', path + '.part.mov']
     enc = guard.popen(cmd, stdin=subprocess.PIPE)
+    count = [0]
+
     def put(img):
-        data = np.ascontiguousarray(img).tobytes()
+        if post is not None: img = post(img, count[0])                                                         # subtitles (and any other text) on the finished frame
+        count[0] += 1
+        data = GPU.rgb48_to_p010(img) if native else np.ascontiguousarray(img).tobytes()
         if pg is None: enc.stdin.write(data)
         else:
             with pg.timed('encode'): enc.stdin.write(data)
@@ -273,55 +285,166 @@ def render_final(*a, **k):
     with guard.heavy('final render', 4.0): return _render_final(*a, **k)
 
 
-def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='100M', limit_pieces=None, out=None, progress=None, upscale='off', pg=None, min_zoom=None):
-    """Render (or continue) the final film; returns the path of the film. `limit_pieces` renders only the first pieces and does not assemble (for trying things out). `upscale`: a mode of edit/upscale.py (off, 1080p, 1440p, full): enlarge the shots that hold too few pixels with the local model up to that width, and resample from there to the output size,
-    one factor for each whole shot. `progress(frames_done, frames_total)`: a callback; `pg`: the render/progress.py recorder (default: progress.json in the film's folder), which the page shows."""
+THREAD_VARS = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'NUMEXPR_NUM_THREADS')
+
+
+def vram_workers(width, height):
+    """How many render processes fit in the free GPU memory, or None without CUDA. Each holds the lens frames, the sampling maps and the encoder's copy of the picture: measured 2.6 GB at 1920x1080 and 5.2 GB at 3840x2160 (about 1.2 GB plus 0.5 GB a megapixel of output); six at 4K ran the card out of memory and the encoders died."""
+    from strata360.render import gpu
+    if not gpu.available(): return None
+    import torch
+    free = torch.cuda.mem_get_info()[0] / 1e9; return max(1, int(free // (1.2 + 0.5 * width * height / 1e6)))
+
+
+def render_workers(size=(3840, 2160)):
+    """How many processes render pieces at once. A piece is independent of the others, so they scale with the cores. `STRATA_RENDER_WORKERS` sets it; by default 1 on macOS (the machine stays usable for other work) and, elsewhere, one per five logical CPUs and six GB of memory, at most 6, and no more than the GPU's free memory holds for this output size."""
+    try: return max(int(os.environ['STRATA_RENDER_WORKERS']), 1)
+    except (KeyError, ValueError): pass
+    if sys.platform == 'darwin': return 1
+    from strata360.pipeline import resources as RS
+    n = max(1, min(6, (os.cpu_count() or 4) // 5, int(RS.mem_total_gb() // 6))); v = vram_workers(*size)
+    return n if v is None else min(n, v)
+
+
+def _claim(path):
+    """Take the piece for this process: True when the claim file was created (it holds our pid), or when the process that held it has died. Several workers share the pieces through these files."""
+    from strata360 import oslib
+    for _ in range(2):
+        try: fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY); os.write(fd, str(os.getpid()).encode()); os.close(fd); return True
+        except FileExistsError:
+            try: pid = int(open(path).read() or 0)
+            except (OSError, ValueError): return False
+            if oslib.pid_alive(pid): return False
+            try: os.remove(path)
+            except OSError: return False
+    return False
+
+
+def render_bookends(folder, d, size, fps, bitrate, pg):
+    """The opening and the ending as pieces of their own (edit/bookends.py): the chosen shot from the original footage with its camera move, the title over it, no race overlay. Returns {where: (movie, seconds)}; pieces already made are kept."""
+    from strata360.edit import bookends as BK
+    from strata360.render import titles as TT
+    W, H = size; out = {}
+    for b in BK.for_film(folder):
+        c = b['c']; spec = b['spec']; sig = hashlib.sha1(json.dumps([c, spec, size, fps, bitrate], sort_keys=True, default=str).encode()).hexdigest()[:8]; f = os.path.join(d, f"bookend-{b['where']}-{sig}.mov"); n = int(round(c['dur_s'] * fps))
+        if not os.path.exists(f + '.done'):
+            pg.detail(f"the {b['where']}: {c['id']}"); g = BK.segment_of(c); src = FinalSource(folder, [g], {g['id']: BK.framing_of(folder, c)}, W, H, fps, progress=pg); tt = TT.Title(spec, W, H, c['dur_s']) if spec else None
+            encode_piece(f, W, H, fps, bitrate, lambda emit: [emit(img) for img in src.frames(0, 0, n)], pg, post=(lambda im, i: tt.apply(im, i / fps)) if tt else None)
+        out[b['where']] = (f, n / fps)
+    return out
+
+
+def _prepare(folder, plan, framing, size, fps, upscale, min_zoom, pg):
+    """The part of a render every worker does: glides, exposure match, overlay, subtitle cues. Returns (plan, segs, pieces, source, captions)."""
     from strata360.edit import pans as PN
+    from strata360.overlay import for_project
+    W, H = size; plan0 = plan; plan = dict(plan, segments=PN.apply_pans(plan['segments'], framing, scorer=PN.looker(folder))[0]); segs = plan['segments']
+    ps = pieces(segs, fps)
+    src = FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H)), gains=GR.gains_for(folder, segs, framing), upscale=upscale, progress=pg, up_min_zoom=min_zoom)
+    from strata360.render.captions import Captions
+    from strata360.render import preview as PVW
+    return plan, segs, ps, src, Captions.for_project(folder, plan, W, H, fps, key=PVW.plan_key(folder, plan0))                                          # (the subtitle track: voice-over and speech, in film time)
+
+
+def _work(d, ps, segs, src, W, H, fps, bitrate, pg, on_done=None, limit_pieces=None, caps=None):
+    """Render the pieces nobody else has claimed or finished, in order; returns the number rendered here."""
+    mine = 0; base = {}; acc = 0
+    for p in ps: base[p['id']] = acc; acc += p['frames']                                                       # the film frame each piece starts at: the subtitles are drawn by film time
+    for n, p in enumerate(ps):
+        if limit_pieces is not None and n >= limit_pieces: break
+        f = os.path.join(d, p['id'] + '.mov')
+        if os.path.exists(f + '.done') or not _claim(f + '.claim'): continue
+        try:
+            t_piece = time.time(); pg.detail(f'piece {n + 1} of {len(ps)}')
+            encode_piece(f, W, H, fps, bitrate, lambda emit, p=p: render_piece(p, segs, src, emit), pg, post=(lambda im, i, b=base[p['id']]: caps.apply(im, b + i)) if caps is not None else None); mine += 1
+            pg.note(f"piece {n + 1} of {len(ps)} ({p['kind']}, {p['frames']} frames) in {time.time() - t_piece:.0f} s")
+        finally:
+            try: os.remove(f + '.claim')
+            except OSError: pass
+        on_done and on_done()
+    return mine
+
+
+def worker_main(argfile):
+    """A helper process of a parallel render: loads what the main render saved, renders pieces until none is left."""
+    import pickle
+    a = pickle.load(open(argfile, 'rb')); from strata360.render.progress import Null
+    from strata360 import oslib; oslib.lower_priority(19)
+    pg = Null(); plan, segs, ps, src, caps = _prepare(a['folder'], a['plan'], a['framing'], a['size'], a['fps'], a['upscale'], a['min_zoom'], pg)
+    _work(a['d'], ps, segs, src, a['size'][0], a['size'][1], a['fps'], a['bitrate'], pg, limit_pieces=a['limit_pieces'], caps=caps)
+
+
+def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='100M', limit_pieces=None, out=None, progress=None, upscale='off', pg=None, min_zoom=None, workers=None):
+    """Render (or continue) the final film; returns the path of the film. `limit_pieces` renders only the first pieces and does not assemble (for trying things out). `upscale`: a mode of edit/upscale.py (off, 1080p, 1440p, full): enlarge the shots that hold too few pixels with the local model up to that width, and resample from the model's size to the output's.
+    `progress(frames_done, frames_total)`: a callback; `pg`: the render/progress.py recorder (default: progress.json in the film's folder), which the page shows.
+    `workers`: how many processes render pieces at the same time (`render_workers()` by default): the others are started here, share the pieces through `.claim` files and are waited for."""
     from strata360.render.progress import Progress
     key = final_key(plan, list(size), fps, bitrate, folder, upscale, min_zoom)                                                                 # of the plan as saved (the server looks the film up by it); the glides follow from the plan
-    d = final_dir(folder, key); os.makedirs(d, exist_ok=True); pg = pg or Progress(os.path.join(d, 'progress.json')); W, H = size
+    d = final_dir(folder, key); os.makedirs(d, exist_ok=True); pg = pg or Progress(os.path.join(d, 'progress.json')); W, H = size; kids = []
     try:
         with pg.stage('prepare', 'glides, exposure match, overlay'):
-            plan = dict(plan, segments=PN.apply_pans(plan['segments'], framing, scorer=PN.looker(folder))[0])                       # a hard cut inside one clip becomes a glide where that is gentle (edit/pans.py)
-            segs = plan['segments']; ps = pieces(segs, fps); total = sum(p['frames'] for p in ps); t0 = time.time(); done_frames = 0
-            from strata360.overlay import for_project
-            src = FinalSource(folder, segs, framing, W, H, fps, overlay=for_project(folder, (W, H)), gains=GR.gains_for(folder, segs, framing), upscale=upscale, progress=pg, up_min_zoom=min_zoom)
+            plan0 = plan; plan, segs, ps, src, caps = _prepare(folder, plan, framing, size, fps, upscale, min_zoom, pg); total = sum(p['frames'] for p in ps); t0 = time.time()
             pg.note(f'{len(ps)} pieces, {total} frames at {W}x{H}, {fps:g} frames a second' + (f', enlarging the shots that need it ({UP.LABELS[UP.normalize(upscale)].lower()})' if UP.normalize(upscale) != 'off' else ''))
-        def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=done_frames, frames_total=total, pieces_done=sum(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
+        def finished(): return [p for p in ps if os.path.exists(os.path.join(d, p['id'] + '.mov.done'))]
+        def status(state, **kw): json.dump(dict(state=state, pid=os.getpid(), key=key, frames_done=sum(p['frames'] for p in finished()), frames_total=total, pieces_done=len(finished()), pieces_total=len(ps), started=t0, **kw), open(os.path.join(d, 'status.json.tmp'), 'w')); os.replace(os.path.join(d, 'status.json.tmp'), os.path.join(d, 'status.json'))
         status('rendering')
+        n_run = len(ps) if limit_pieces is None else min(limit_pieces, len(ps)); nw = min(workers or render_workers(size), max(n_run, 1))
+        def tick(): status('rendering'); progress and progress(sum(p['frames'] for p in finished()), total)
+        if nw > 1:
+            import pickle
+            from strata360 import oslib
+            share = max(1, (os.cpu_count() or 4) // (nw * 2))                                                                                    # each process gets its share of the cores for numpy / OpenCV (32 threads each, six times over, is slower than 5)
+            for k in THREAD_VARS: os.environ[k] = str(share)
+            cv2.setNumThreads(share)
+            af = os.path.join(d, 'worker.pickle'); pickle.dump(dict(folder=folder, plan=plan0, framing=framing, size=size, fps=fps, upscale=upscale, min_zoom=min_zoom, bitrate=bitrate, d=d, limit_pieces=limit_pieces), open(af, 'wb'))
+            for i in range(nw - 1):
+                env = dict(os.environ, PYTHONPATH=os.path.join(oslib.ROOT_DIR, 'src') + os.pathsep + os.environ.get('PYTHONPATH', ''), **{k: str(share) for k in THREAD_VARS})
+                kids.append(guard.popen([sys.executable, '-m', 'strata360.render.final', '--worker', af], env=env, stdout=open(os.path.join(d, f'worker{i + 1}.log'), 'w'), stderr=subprocess.STDOUT)); time.sleep(2)           # staggered: the first claims go to different pieces
+            pg.note(f'{nw} processes render pieces at the same time')
         with pg.stage('render', f'piece 0 of {len(ps)}'):
-            for n, p in enumerate(ps):
-                if limit_pieces is not None and n >= limit_pieces: break
-                f = os.path.join(d, p['id'] + '.mov')
-                if os.path.exists(f + '.done'): done_frames += p['frames']; pg.detail(f'piece {n + 1} of {len(ps)} (kept from before) · {done_frames}/{total} frames'); continue
-                t_piece = time.time(); pg.detail(f'piece {n + 1} of {len(ps)} · {done_frames}/{total} frames')
-                encode_piece(f, W, H, fps, bitrate, lambda emit, p=p: render_piece(p, segs, src, emit), pg); done_frames += p['frames']; status('rendering'); progress and progress(done_frames, total)
-                pg.note(f"piece {n + 1} of {len(ps)} ({p['kind']}, {p['frames']} frames) in {time.time() - t_piece:.0f} s")
+            while True:
+                _work(d, ps, segs, src, W, H, fps, bitrate, pg, on_done=tick, limit_pieces=limit_pieces, caps=caps); tick()
+                if all(os.path.exists(os.path.join(d, p['id'] + '.mov.done')) for p in ps[:n_run]): break
+                if not any(k.poll() is None for k in kids) and not any(os.path.exists(os.path.join(d, p['id'] + '.mov.claim')) for p in ps[:n_run]): raise RuntimeError(f'pieces are missing and no worker is left (see {d}/worker*.log)')
+                pg.detail(f'{len(finished())} of {len(ps)} pieces done, waiting for the other workers'); time.sleep(2)
+        for k in kids: k.wait()
         if limit_pieces is not None: status('partial'); pg.finish(); return d
+        with pg.stage('bookends'): bk = render_bookends(folder, d, size, fps, bitrate, pg)
+        lead = bk['intro'][1] if 'intro' in bk else 0.0; tail = bk['outro'][1] if 'outro' in bk else 0.0
+        from strata360.render import captions as CP; CP.write_srt([dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'film.srt'))                  # the subtitles as a file too, beside the film (after the opening)
         with pg.stage('timemap'):
             from strata360.render import timemap; timemap.write(plan, fps, d)                                                         # which footage is on screen at every frame (timemap.json and .csv beside the film)
         status('assembling')
-        with pg.stage('audio'): audio = os.path.join(d, 'audio.wav'); sound = build_audio(folder, plan, audio, total / fps, loudness=loudness_target(folder))          # the film's sound, to its loudness target
+        with pg.stage('audio'):
+            audio = os.path.join(d, 'audio.wav'); sound = build_audio(folder, plan, audio, total / fps, loudness=loudness_target(folder))          # the film's sound, to its loudness target
+            if lead or tail:                                                                                                                     # the opening and the ending are silent for now: the film's sound is moved after the opening
+                padded = os.path.join(d, 'audio_full.wav'); ms = int(round(lead * 1000)); r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', audio, '-af', f'adelay={ms}:all=1,apad=pad_dur={tail:.3f}', padded], capture_output=True, text=True)
+                if r.returncode: raise RuntimeError(r.stderr[-300:])
+                audio = padded
         with pg.stage('assemble'):
-            lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{os.path.join(d, p['id'] + '.mov')}'\n" for p in ps)); film = out or os.path.join(d, 'film.mp4')
+            lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{m}'\n" for m in [bk[w][0] for w in ('intro',) if w in bk] + [os.path.join(d, p['id'] + '.mov') for p in ps] + [bk[w][0] for w in ('outro',) if w in bk])); film = out or os.path.join(d, 'film.mp4')
             r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
             if r.returncode: status('error', error=r.stderr[-300:]); raise RuntimeError(r.stderr[-300:])
         status('done', finished=time.time(), film=film, sound=sound); pg.finish(); return film
     except BaseException as e:
         if pg.state == 'running': pg.fail(e)
         raise
+    finally:
+        for k in kids:
+            if k.poll() is None: k.kill()
 
 
 def main():
     import argparse
     from strata360.edit import framing as FR, project as PJ
-    ap = argparse.ArgumentParser(); ap.add_argument('folder'); ap.add_argument('--size', default='3840x2160'); ap.add_argument('--fps', type=float, default=0.0, help='frames a second; 0 (the default) is the footage\'s own rate'); ap.add_argument('--half-rate', action='store_true', help='half the rate: every other source frame (faster)'); ap.add_argument('--bitrate', default='100M')
-    ap.add_argument('--pieces', type=int, help='render only the first N pieces (a trial; nothing is assembled)'); ap.add_argument('--out'); ap.add_argument('--upscale-min-zoom', type=float, default=None, help=f'enlarge a shot only if more than {UP.MIN_SECONDS:g} s of it need at least this zoom (default {UP.MIN_ZOOM:g})'); ap.add_argument('--upscale', nargs='?', const='full', default='off', choices=list(UP.MODES), help='enlarge shots that hold too few pixels with the local model (slow): to the output size (full, the default when given), or to 1080p / 1440p and then resample'); a = ap.parse_args()
+    ap = argparse.ArgumentParser(); ap.add_argument('folder', nargs='?'); ap.add_argument('--size', default='3840x2160'); ap.add_argument('--fps', type=float, default=0.0, help='frames a second; 0 (the default) is the footage\'s own rate'); ap.add_argument('--half-rate', action='store_true', help='half the rate: every other source frame (faster)'); ap.add_argument('--bitrate', default='100M')
+    ap.add_argument('--workers', type=int, default=None, help='processes rendering pieces at once (default: STRATA_RENDER_WORKERS, else by cores and memory; 1 on a Mac)'); ap.add_argument('--worker', help=argparse.SUPPRESS); ap.add_argument('--pieces', type=int, help='render only the first N pieces (a trial; nothing is assembled)'); ap.add_argument('--out'); ap.add_argument('--upscale-min-zoom', type=float, default=None, help=f'enlarge a shot only if more than {UP.MIN_SECONDS:g} s of it need at least this zoom (default {UP.MIN_ZOOM:g})'); ap.add_argument('--upscale', nargs='?', const='full', default='off', choices=list(UP.MODES), help='enlarge shots that hold too few pixels with the local model (slow): to the output size (full, the default when given), or to 1080p / 1440p and then resample'); a = ap.parse_args()
+    if a.worker: worker_main(a.worker); return
     from strata360 import oslib; oslib.lower_priority(19)
     plan = PJ.load(a.folder).get('plan')
     if not plan: sys.exit('no plan yet')
     W, H = map(int, a.size.split('x')); fr = FR.resolve(a.folder, plan, head=True); fps = resolve_fps(a.folder, plan, a.fps, a.half_rate)
-    print(render_final(a.folder, plan, fr, (W, H), fps, a.bitrate, a.pieces, a.out, progress=lambda i, n: print(f'\r{i}/{n} frames', end='', flush=True), upscale=a.upscale, min_zoom=a.upscale_min_zoom))
+    print(render_final(a.folder, plan, fr, (W, H), fps, a.bitrate, a.pieces, a.out, progress=lambda i, n: print(f'\r{i}/{n} frames', end='', flush=True), upscale=a.upscale, min_zoom=a.upscale_min_zoom, workers=a.workers))
 
 
 if __name__ == '__main__': main()

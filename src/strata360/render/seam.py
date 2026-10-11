@@ -14,7 +14,7 @@ difference), narrow where they do not (two copies of a near object are never mix
 per ray."""
 import cv2
 import numpy as np
-from strata360.render import camera as cam, photo as ph
+from strata360.render import camera as cam, photo as ph, gpu
 
 COLS = 1024                 # seam columns (0.35 degrees each)
 BAND_COLS = 2048            # band columns (2 per seam column)
@@ -43,7 +43,7 @@ def _gauss_circular(x, sigma):
     return np.convolve(np.concatenate([x[-k:], x, x[:k]]), w, 'valid')
 
 
-def solve_dp(cost, max_step=MAX_STEP, step_penalty=STEP_PENALTY):
+def solve_dp_numpy(cost, max_step=MAX_STEP, step_penalty=STEP_PENALTY):
     """One row per column through `cost` (rows x cols) minimising the cells' cost plus step_penalty * |move| between neighbouring columns, a move of at most `max_step` rows, on a CLOSED ring (the last
     column connects to the first): the path is solved over two laps and the second lap is kept, so the seam has no start and no end. Returns the row of each column (int array)."""
     R, C = cost.shape; big = np.float32(FORBIDDEN * 10); c2 = np.concatenate([cost, cost], 1).astype(np.float32); c2 = np.where(np.isfinite(c2), c2, big)
@@ -59,6 +59,43 @@ def solve_dp(cost, max_step=MAX_STEP, step_penalty=STEP_PENALTY):
     r = int(np.argmin(acc)); path = np.zeros(2 * C, int); path[-1] = r
     for c in range(2 * C - 1, 0, -1): r = int(np.clip(r + back[r, c], 0, R - 1)); path[c - 1] = r
     return path[C:]
+
+
+try:
+    from numba import njit
+
+    @njit(cache=True)
+    def _dp_forward(c2, max_step, pens):
+        """The forward pass of solve_dp as compiled loops (same arithmetic and tie-breaking as the numpy version: float32, the first of equal moves from -max_step up wins)."""
+        R, C2 = c2.shape; acc = c2[:, 0].copy(); back = np.zeros((R, C2), np.int8); inf = np.float32(np.inf)
+        for c in range(1, C2):
+            new = np.empty(R, np.float32)
+            for r in range(R):
+                best = inf; arg = 0
+                for d in range(-max_step, max_step + 1):
+                    rr = r + d
+                    if rr < 0 or rr >= R: continue
+                    v = acc[rr] + pens[d + max_step]
+                    if v < best: best = v; arg = d
+                new[r] = best + c2[r, c]; back[r, c] = arg
+            acc = new
+        return acc, back
+
+    @njit(cache=True)
+    def _dp_trace(acc, back):
+        R, C2 = back.shape; path = np.zeros(C2, np.int64); r = np.argmin(acc); path[C2 - 1] = r
+        for c in range(C2 - 1, 0, -1):
+            r = min(max(r + back[r, c], 0), R - 1); path[c - 1] = r
+        return path
+except Exception: _dp_forward = None
+
+
+def solve_dp(cost, max_step=MAX_STEP, step_penalty=STEP_PENALTY):
+    """solve_dp_numpy, with the forward pass compiled by numba when it is installed (about 100 times faster; the seam is solved for every frame)."""
+    if _dp_forward is None: return solve_dp_numpy(cost, max_step, step_penalty)
+    R, C = cost.shape; big = np.float32(FORBIDDEN * 10); c2 = np.concatenate([cost, cost], 1).astype(np.float32); c2 = np.where(np.isfinite(c2), c2, big).astype(np.float32)
+    acc, back = _dp_forward(c2, int(max_step), np.array([np.float32(step_penalty * abs(d)) for d in range(-max_step, max_step + 1)], np.float32))
+    return _dp_trace(acc, back)[C:]
 
 
 def person_cost(people, lat_rows, cols=COLS):
@@ -114,6 +151,7 @@ class SeamCarver:
 
     def band(self, img_m, img_s, warp=None):
         """Luma and coverage of both lenses in the band: ((A, covA), (B, covB)), each (rows, BAND_COLS). With a parallax `warp` each lens is sampled where the warp moves it (what the renderer will show)."""
+        if gpu.available(): return gpu.band(self, img_m, img_s, warp)
         out = []; proj = self._proj if warp is None else [self.master.project(warp.apply(self.dirs, 1)), self.slave.project(warp.apply(self.dirs, -1))]
         for img, (u, v, th), om in ((img_m, proj[0], self.occl_m), (img_s, proj[1], self.occl_s)):
             u2 = u.astype(np.float32).reshape(BAND_ROWS, BAND_COLS); v2 = v.astype(np.float32).reshape(BAND_ROWS, BAND_COLS)

@@ -60,14 +60,19 @@ def reencoded(path, quality, scale):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('images'); ap.add_argument('out'); ap.add_argument('--model')
     ap.add_argument('--max-tokens', type=int); ap.add_argument('--prompt', choices=sorted(PROMPTS), default='log'); a = ap.parse_args(); max_tokens = a.max_tokens or (140 if a.prompt == 'scenery' else 260)
-    from mlx_vlm import load, generate
-    from mlx_vlm.prompt_utils import apply_chat_template
-    from mlx_vlm.utils import load_config
-    model_path = os.path.abspath(a.model or default_model()); model, proc = load(model_path); cfg = load_config(model_path); t0 = time.time(); out = []
-    try: prompt = apply_chat_template(proc, cfg, PROMPTS[a.prompt], num_images=1, enable_thinking=False)               # Qwen3.5 thinks first unless told not to
-    except TypeError: prompt = apply_chat_template(proc, cfg, PROMPTS[a.prompt], num_images=1)
-    extra = dict(repetition_penalty=1.05) if 'qwen3' in os.path.basename(model_path).lower() or 'qwen3.5' in model_path.lower() else {}
-    ask = lambda path: (lambda r: r.text if hasattr(r, 'text') else str(r))(generate(model, proc, prompt, image=[path], max_tokens=max_tokens, temperature=0.0, verbose=False, **extra))
+    from strata360.analysis import vlm
+    t0 = time.time(); out = []; srv = None
+    if vlm.use_llama():                                                                                      # no MLX (not a Mac): llama.cpp with the GGUF build of the same model (analysis/vlm.py)
+        srv = vlm.Server().__enter__(); name = vlm.label(srv.weights); ask = lambda path: srv.ask(PROMPTS[a.prompt], path, max_tokens)
+    else:
+        from mlx_vlm import load, generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+        from mlx_vlm.utils import load_config
+        model_path = os.path.abspath(a.model or default_model()); model, proc = load(model_path); cfg = load_config(model_path); name = model_label(model_path)
+        try: prompt = apply_chat_template(proc, cfg, PROMPTS[a.prompt], num_images=1, enable_thinking=False)               # Qwen3.5 thinks first unless told not to
+        except TypeError: prompt = apply_chat_template(proc, cfg, PROMPTS[a.prompt], num_images=1)
+        extra = dict(repetition_penalty=1.05) if 'qwen3' in os.path.basename(model_path).lower() or 'qwen3.5' in model_path.lower() else {}
+        ask = lambda path: (lambda r: r.text if hasattr(r, 'text') else str(r))(generate(model, proc, prompt, image=[path], max_tokens=max_tokens, temperature=0.0, verbose=False, **extra))
     for fn in sorted(glob.glob(os.path.join(a.images, 's*_v*.jpg'))):
         m = re.search(r's(\d+)_v(\d+)\.jpg', fn); k, v = int(m.group(1)), int(m.group(2))
         txt = ask(fn); ans = parse(txt)
@@ -75,7 +80,8 @@ def main():
             if ans: break
             tmp = reencoded(fn, quality, scale); txt = ask(tmp); ans = parse(txt); os.remove(tmp)
         out.append(dict(frame=k, view=v, answer=ans, raw=None if ans else txt[:300]))
-    json.dump(dict(schema=1, model=model_label(model_path), seconds=round(time.time() - t0, 1), items=out), open(a.out, 'w'))
+    if srv: srv.__exit__()
+    json.dump(dict(schema=1, model=name, seconds=round(time.time() - t0, 1), items=out), open(a.out, 'w'))
     print(f'{len(out)} images in {time.time() - t0:.1f} s')
 
 

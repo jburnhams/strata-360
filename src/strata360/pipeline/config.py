@@ -2,6 +2,7 @@
 
 Every stage declares which config keys it depends on (stages.py), so changing a setting re-runs only the stages that use it."""
 import copy, json, os
+from strata360 import hw
 
 DEFAULTS = {
     'name': None,
@@ -12,7 +13,7 @@ DEFAULTS = {
     # true only after checking against the GPX or a known event; until then start times are reported as provisional.
     'camera_clock': {'utc_offset_hours': 0.0, 'verified': False, 'note': ''},
     'languages': ['en'],                    # languages the speech identifier may choose from (e.g. ['en', 'fr', 'nl', 'de'] in Belgium)
-    'whisper_model': 'large-v3-turbo',
+    'whisper_model': hw.default_whisper_model(),         # large-v3 with a CUDA GPU, else large-v3-turbo (hw.default_whisper_model)
     'align_languages': ['en'],              # languages with a forced-alignment model (wordtimes.LANGUAGE_MODELS)
     'exposure_every_frames': 10,
     'people_every_frames': 50,
@@ -40,6 +41,17 @@ PROJECT_SUBFOLDER = 'strata360'      # results live in <footage folder>/strata36
 
 def is_project_path(name):
     return os.path.sep in str(name) or str(name).startswith('.') or os.path.isdir(os.path.join(str(name), PROJECT_SUBFOLDER))
+
+
+def source(path, near):
+    """Where a source file recorded in a clip.json really is on THIS machine. The path was stored where the footage was ingested (/Volumes/Expansion/... on the Mac that made the project); when it does not exist here, the file of that name beside the
+    project (in `near` or any folder above it, a clip folder for instance) is used, so a project can be opened from another computer or another mount. None stays None."""
+    if not path or os.path.exists(path): return path
+    d = os.path.abspath(str(near)); name = os.path.basename(str(path)); last = None
+    while d != last:
+        if os.path.isfile(os.path.join(d, name)): return os.path.join(d, name)
+        last, d = d, os.path.dirname(d)
+    return path
 
 
 def race_dir(name):

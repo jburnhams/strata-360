@@ -13,6 +13,11 @@ def default_model():
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('prompts'); ap.add_argument('answers'); ap.add_argument('--model'); ap.add_argument('--max-tokens', type=int, default=200); a = ap.parse_args()
+    from strata360.analysis import vlm
+    if vlm.use_llama():                                                                                      # no MLX: the local text model through llama.cpp (analysis/vlm.py)
+        t0 = time.time()
+        with vlm.Server(a.model, text=True) as srv: out = [srv.chat([dict(role='user', content=text)], a.max_tokens).strip() for text in json.load(open(a.prompts))]
+        json.dump(out, open(a.answers, 'w')); print(f'{len(out)} answers in {time.time() - t0:.1f} s'); return
     from mlx_vlm import load, generate
     from mlx_vlm.prompt_utils import apply_chat_template
     from mlx_vlm.utils import load_config

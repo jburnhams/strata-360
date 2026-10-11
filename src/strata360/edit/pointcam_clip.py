@@ -37,7 +37,7 @@ def clip_info(folder, clip):
     """(start epoch, duration s, osv path) of a clip, from its clip.json."""
     try: cj = json.load(open(os.path.join(config.race_dir(folder), 'clips', clip, 'clip.json')))
     except (OSError, ValueError): raise ValueError(f'no clip {clip}')
-    return _epoch(cj['time']['start_utc']), float(cj['video']['source_frames']) / float(cj['video']['nominal_fps']), (cj.get('source_files') or {}).get('osv')
+    return _epoch(cj['time']['start_utc']), float(cj['video']['source_frames']) / float(cj['video']['nominal_fps']), config.source((cj.get('source_files') or {}).get('osv'), config.race_dir(folder))
 
 
 def section_of(rd, key):

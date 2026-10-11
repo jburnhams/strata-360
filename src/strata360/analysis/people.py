@@ -39,7 +39,7 @@ def analyse(osv, work_dir, every=50, models=None):
         proxy = os.path.join(work_dir, 'proxy.mp4')
         if V.proxy_available(proxy): V.write_stab_views_proxy(proxy, osv, tmp, every=every)              # the shared early render: no decoding of the lens streams
         else: V.write_stab_views(osv, tmp, every=every)
-        py = os.path.join(os.path.dirname(__file__), '..', '..', '..', '.venv-vision', 'bin', 'python'); src = os.path.join(os.path.dirname(__file__), '..', '..')
+        from strata360.analysis.vlm import vision_python; py = vision_python(); src = os.path.join(os.path.dirname(__file__), '..', '..')
         jf, nf = os.path.join(tmp, 'det.json'), os.path.join(tmp, 'emb.npy')
         cmd = [py, '-m', 'strata360.analysis.people_detect', tmp, jf, nf] + (['--models', models] if models else [])
         subprocess.run(cmd, check=True, env={**os.environ, 'PYTHONPATH': src, 'PYTHONWARNINGS': 'ignore'}, stdout=subprocess.PIPE)

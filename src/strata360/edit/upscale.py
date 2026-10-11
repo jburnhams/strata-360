@@ -69,7 +69,7 @@ def load(name=None):
         except ImportError as e: raise RuntimeError(f'enlarging needs the torch and spandrel packages ({e.name} is missing): pip install -r requirements.txt') from e
         p = weights_path(name)
         if not os.path.exists(p): raise FileNotFoundError(f'{p} is missing: download {MODELS[name][2]}')
-        dev = 'mps' if torch.backends.mps.is_available() else 'cpu'
+        from strata360 import hw; dev = hw.gpu_device()                                         # the Apple GPU or CUDA when there is one (STRATA_GPU=0: the CPU)
         _model[name] = (ModelLoader().load_from_file(p).model.eval().to(dev), dev)
     return _model[name]
 

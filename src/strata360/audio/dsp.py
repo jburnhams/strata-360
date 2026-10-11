@@ -198,7 +198,10 @@ def dfn_denoise(x48, atten_lim_db=None):
     may attenuate (e.g. 12-20 dB), which keeps artefacts down at the price of leaving some noise. Needs the project venv."""
     global _DFN
     import torch
-    from df.enhance import enhance, init_df
+    try: from df.enhance import enhance, init_df
+    except ImportError:                                                  # DeepFilterNet needs a Rust build (not on Windows here): MossFormer2 stands in, with the same cap on how much it may take out
+        x = np.asarray(x48, np.float32); y = mossformer_denoise(x); n = min(len(x), len(y))
+        return (y[:n] + (10 ** (-atten_lim_db / 20.0) if atten_lim_db else 0.0) * (x[:n] - y[:n])).astype(np.float32)
     if _DFN is None: _DFN = init_df(log_level='ERROR')[:2]
     model, st = _DFN
     y = enhance(model, st, torch.from_numpy(np.asarray(x48, np.float32)[None]), atten_lim_db=atten_lim_db)
@@ -232,7 +235,8 @@ def mossformer_denoise(x48):
     """MossFormer2_SE_48K via ClearerVoice-Studio (2024-25 model). Runs in its own venv (.venv-cv, clearvoice pins numpy<2) as a subprocess."""
     import tempfile
     here = os.path.dirname(os.path.abspath(__file__))
-    py = os.environ.get('STRATA_CV_PYTHON') or os.path.join(here, '..', '..', '..', '.venv-cv', 'bin', 'python')   # repo root / .venv-cv
+    from strata360 import oslib
+    py = os.environ.get('STRATA_CV_PYTHON') or oslib.venv_python(os.path.join(here, '..', '..', '..', '.venv-cv'))   # repo root / .venv-cv
     with tempfile.TemporaryDirectory() as d:
         write_wav(f'{d}/in.wav', x48, SR)
         subprocess.run([py, os.path.join(here, 'mossformer_cli.py'), f'{d}/in.wav', f'{d}/out.wav'], check=True, capture_output=True)
