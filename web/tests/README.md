@@ -66,7 +66,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/Skeleton.tsx` | 100% | done |
 | `src/components/PlayIcons.tsx` | 100% | done |
 | `src/components/WindowPlayer.tsx` | 100% | done |
-| `src/components/ClipView.tsx` | 75% | partial (loading states, populated states, redo dialog, hide object; branches like audio missing some tests) |
+| `src/components/ClipView.tsx` | 94.44% | done (tested via `integration/ClipView.test.tsx`: missing thumb/transcript states, transcript modes, OSV summary, sound classes) |
 
 ### Helpers Added
 
