@@ -107,10 +107,15 @@ def _make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt'
         if pair is None: break
         cm, cs = pair
         M = R.stab_matrix(tel['quat'][k]); R.update_seam(cm, cs, reset=(j == 0), people=seam_people(boxes, M, pts[k] - pts[0])); img = R.render(cm, cs, M, None)
-        sink.put(img)                                                                                  # converted and written by the writer thread, while the next picture is made
+        while True:                                                                                    # converted and written by the writer thread, while the next picture is made
+            if werr: raise werr[0]                                                                     # the writer died (the encoder failed): stop, do not wait for a queue nobody empties
+            try: sink.put(img, timeout=2.0); break
+            except queue.Full: pass
         frames.append(dict(proxy_frame=j, source_frame=int(k), t_s=round(float(pts[k] - pts[0]), 4)))
         if progress and j % 25 == 0: progress(j, len(idx))
-    sink.put(None); wt.join()
+    try: sink.put(None, timeout=5.0)
+    except queue.Full: pass
+    wt.join(10.0)
     if werr: raise werr[0]
     enc.stdin.close(); enc.wait(); dm.kill(); ds.kill()
     if not frames_limit and len(frames) != len(idx): raise RuntimeError(f'the lens streams of {os.path.basename(osv)} gave {len(frames)} frames of the {len(idx)} expected: they would be paired out of step, so no proxy is made (a decoder dropped frames)')       # never a silent mismatch between the lenses

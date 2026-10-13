@@ -22,11 +22,20 @@ def hwaccel_args():
     return [] if want in ('', 'none') else ['-hwaccel', want]
 
 
+@functools.lru_cache(maxsize=None)
+def _encoder_works(name):
+    """Does a one-frame test encode with this encoder succeed? ffmpeg lists NVENC whenever the build has it, even on a PC with no NVIDIA GPU or driver, and then every encode fails at start."""
+    try:
+        r = subprocess.run(['ffmpeg', '-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=gray:s=256x256:r=1', '-frames:v', '1', '-c:v', name, '-f', 'null', '-'], capture_output=True, timeout=30)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError): return False
+
+
 def _hardware(codec):
-    """Name of the platform's hardware encoder for 'h264' or 'hevc', or None."""
+    """Name of the platform's hardware encoder for 'h264' or 'hevc', or None: it must be in this ffmpeg build AND actually encode here (`_encoder_works`)."""
     if os.environ.get('STRATA_ENCODER') == 'software': return None
     name = {'darwin': f'{codec}_videotoolbox', 'win32': f'{codec}_nvenc'}.get(sys.platform)
-    return name if name and has_encoder(name) else None
+    return name if name and has_encoder(name) and _encoder_works(name) else None
 
 
 def h264_args(bitrate):

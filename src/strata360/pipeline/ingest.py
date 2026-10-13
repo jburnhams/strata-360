@@ -36,8 +36,10 @@ def ingest_clip(clip, cfg):
     else:
         vs = [s for s in p['streams'] if s['codec_type'] == 'video' and s.get('codec_name') == 'hevc']
         if len(vs) != 2: notes.append(f'expected two HEVC lens streams, found {len(vs)}')
-    pts = video_sample_times(clip.osv); gaps, nominal = frame_gaps(pts)
-    if is_insv and n_front != len(pts): notes.append(f'the lens files differ in length ({len(pts)} rear, {n_front} front frames): the shorter decides')
+    pts = video_sample_times(clip.osv); n_rear = len(pts)
+    if is_insv: pts = pts[:min(n_rear, n_front)]
+    gaps, nominal = frame_gaps(pts)
+    if is_insv and n_front != n_rear: notes.append(f'the lens files differ in length ({n_rear} rear, {n_front} front frames): the shorter decides')
     nominal_fps = round(1.0 / nominal, 3)
     duration = float(pts[-1] - pts[0]) + nominal
     hdr = header(clip.osv)

@@ -9,6 +9,7 @@ ALL = ' h264_videotoolbox  hevc_videotoolbox  h264_nvenc  hevc_nvenc  libx264  l
 def fake_ffmpeg(monkeypatch):
     for k in ('STRATA_ENCODER', 'STRATA_HWACCEL'): monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(hw, '_ffmpeg_list', lambda kind: ALL)
+    monkeypatch.setattr(hw, '_encoder_works', lambda name: True)                      # the test encode is covered in test_hw_probe
 
 
 def codec(args): return args[args.index('-c:v') + 1]

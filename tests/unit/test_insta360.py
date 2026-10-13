@@ -69,3 +69,10 @@ def test_lens_files_and_input(tmp_path):
     assert I.lens_file(p, 0) == p and I.lens_file(p, 1).endswith('_10_001.insv')
     assert source.lens_input(p, 1)[-2:] == ['-map', '0:v:0'] and source.lens_input('a.osv', 1)[-1] == '0:v:1'
     assert source.full_frame_filter('a.osv') == [] and 'scale=3840:3840' in source.full_frame_filter(p)[0]
+
+
+def test_video_pts_agree_between_lenses(tmp_path, monkeypatch):
+    from strata360.osv import mp4, telemetry
+    p = str(tmp_path / 'VID_20240720_195607_00_001.insv')
+    monkeypatch.setattr(mp4, 'video_sample_times', lambda f: np.arange(479 if '_00_' in f else 478) / 29.97)
+    assert len(telemetry.video_pts(p, 0)) == 478 and len(telemetry.video_pts(p, 1)) == 478

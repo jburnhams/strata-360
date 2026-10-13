@@ -58,7 +58,8 @@ def video_pts(osv, stream=0):
     from strata360.osv import insta360
     if insta360.is_insv(osv):                                           # one file a lens
         from strata360.osv import mp4
-        return mp4.video_sample_times(insta360.lens_file(osv, stream))
+        n = min(len(mp4.video_sample_times(insta360.lens_file(osv, k))) for k in (0, 1))      # the lens files differ by a frame (the rear has one more): both lenses give the shorter count
+        return mp4.video_sample_times(insta360.lens_file(osv, stream))[:n]
     if stream == 0:
         try:
             from strata360.osv import mp4
