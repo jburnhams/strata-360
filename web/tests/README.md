@@ -58,7 +58,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/usePoll.ts` | 100% | done |
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
 | `src/components/ScriptPanel.tsx` | 96.55% | done (one missed branch) |
-| `src/components/VoiceoverPanel.tsx` | 61.76% | partial (media recorder edge cases) |
+| `src/components/VoiceoverPanel.tsx` | 100% | done |
 | `src/aim.ts` | 100% | done (tested via `unit/aim.test.ts`) |
 | every other file in `src/` | 0% | todo
 | `src/components/Timeline.tsx` | 77.55% | partial (interactions and edge cases)
