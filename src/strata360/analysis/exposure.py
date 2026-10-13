@@ -23,6 +23,7 @@ from strata360 import hw
 from strata360.pipeline import guard
 from strata360.osv.calib import read_slots, Lens, quat_to_R, imu_offsets
 from strata360.osv.telemetry import read_frames, read_exposure, video_pts
+from strata360.osv import source as lensrc
 from strata360.render import photo as ph
 
 LENS_PX = 960                # analysis resolution of each lens frame (a quarter of 3840)
@@ -35,7 +36,7 @@ QUALITY_EVERY = 5            # one quality map per this many exposure samples (5
 
 def decode_stream(osv, stream, every):
     """Yield (frame_index, uint16 RGB (LENS_PX, LENS_PX, 3)) for every `every`-th decoded frame of one lens stream."""
-    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
+    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), *lensrc.lens_input(osv, stream), '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))',scale={LENS_PX}:{LENS_PX}:flags=area", '-pix_fmt', 'rgb48le', '-f', 'rawvideo', '-']
     p = guard.popen(cmd, stdout=subprocess.PIPE, bufsize=LENS_PX * LENS_PX * 6 * 4)
     n = LENS_PX * LENS_PX * 6; k = 0
@@ -56,7 +57,7 @@ class Analyser:
         sl = read_slots(osv)
         self.master, self.slave = Lens(sl[2]), Lens(sl[1])       # stream 1 = master (front), stream 0 = slave (rear)
         self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
-        self.P, self.B = imu_offsets()
+        self.P, self.B = imu_offsets(osv)
         lon = ((np.arange(SPH_W) + 0.5) / SPH_W - 0.5) * 2 * np.pi; lat = (0.5 - (np.arange(SPH_H) + 0.5) / SPH_H) * np.pi
         LON, LAT = np.meshgrid(lon, lat)
         self.dE = np.stack([np.sin(LON) * np.cos(LAT), np.cos(LON) * np.cos(LAT), np.sin(LAT)], -1).reshape(-1, 3)

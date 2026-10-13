@@ -24,6 +24,7 @@ from strata360.render import flat as r4, gpu
 from strata360 import hw
 from strata360.pipeline import guard
 from strata360.osv.telemetry import read_frames, video_pts
+from strata360.osv import source as lensrc
 
 
 class EquirectRenderer(r4.Renderer):
@@ -47,8 +48,8 @@ class EquirectRenderer(r4.Renderer):
 
 def decoder(osv, stream, every, native=False):
     """`native`: the codec's own 10-bit YUV (p010), converted on the GPU (render/gpu.py) instead of ffmpeg's rgb48 on the CPU."""
-    cmd = ['ffmpeg', '-v', 'error', *r4.decode_args(osv)[0], '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
-           '-vf', f"select='not(mod(n\\,{every}))'", '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
+    cmd = ['ffmpeg', '-v', 'error', *r4.decode_args(osv)[0], *lensrc.lens_input(osv, stream), '-fps_mode', 'passthrough',
+           '-vf', ','.join([f"select='not(mod(n\\,{every}))'", *lensrc.full_frame_filter(osv, native)]), '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
     return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
 
 
@@ -81,7 +82,7 @@ def _make_proxy(osv, out, size='3840x1920', every=4, bitrate='80M', encoder='vt'
     tel = read_frames(osv); pts = video_pts(osv, 0); n_src = len(pts)
     idx = list(range(0, n_src, every))
     if frames_limit: idx = idx[:frames_limit]
-    nominal_fps = 50.0 / every
+    nominal_fps = float(1.0 / np.median(np.diff(pts))) / every if len(pts) > 1 else 50.0 / every      # the source's own rate (50 fps DJI, 29.97 Insta360)
     nat = gpu.native_decode(); dm, ds = decoder(osv, 1, every, nat), decoder(osv, 0, every, nat)
     venc = (hw.h264_args(bitrate) if encoder == 'h264' else hw.hevc_args(bitrate, tag=False) if encoder == 'vt' else ['-c:v', 'libx265', '-preset', 'medium', '-x265-params', f'crf={crf}:log-level=error'])
     final = out; out = out + '.video.mp4' if encoder == 'h264' else out
@@ -169,7 +170,7 @@ def make_preview_from_proxy(proxy_path, osv, out, size='2048x1024', bitrate='6M'
     """The browser preview derived from the clip's proxy: rescale to 2048x1024, H.264 (plays in every browser), the clip's audio as AAC. Takes seconds, not a second render."""
     t0 = time.time(); side = json.load(open(os.path.splitext(proxy_path)[0] + '.json')); W, H = size.split('x')
     subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', proxy_path, '-i', osv, '-map', '0:v', '-map', '1:a:0?', '-vf', f'scale={W}:{H}:flags=area,format=yuv420p', *hw.h264_args(bitrate), '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', '-c:a', 'aac', '-b:a', '96k', '-shortest', '-movflags', '+faststart', out], check=True)
-    fps = 50.0 / side['every_n_source_frames']
+    fps = side.get('nominal_fps') or 50.0 / side['every_n_source_frames']
     info = dict(schema_version=1, projection='equirectangular', layout='centre column = world +Y (heading datum), lon increases right', size=[int(W), int(H)], fps=fps, from_proxy=os.path.basename(proxy_path),
                 frame_times_s=[f['t_s'] for f in side['frames']], seconds=round(time.time() - t0, 1), note='upright and world-locked; the viewer adds the runner heading (motion.json) to follow their direction')
     json.dump(info, open(os.path.splitext(out)[0] + '.json', 'w')); return info

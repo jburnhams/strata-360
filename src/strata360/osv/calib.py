@@ -12,6 +12,8 @@ import struct, numpy as np
 from strata360.osv.pbdump import parse, packets, first_packet
 
 def read_slots(osv_path, djmd_stream=3):
+    from strata360.osv import insta360
+    if insta360.is_insv(osv_path): return insta360.slots(osv_path)
     pk = first_packet(osv_path, djmd_stream)
     sm = [v for f, w, v in parse(pk) if f == 2][0]
     f6 = [v for f, w, v in parse(sm) if f == 6][0]
@@ -39,8 +41,12 @@ import os as _os
 _DATA = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'data')
 
 
-def imu_offsets():
-    """(P, B): constant matrices tying the IMU quaternion to DJI's upright frame and to the lens body frame (Osmo 360; fitted in M0, see docs/progress.md)."""
+def imu_offsets(osv=None):
+    """(P, B): constant matrices tying the IMU quaternion to DJI's upright frame and to the lens body frame (Osmo 360; fitted in M0, see docs/progress.md). An Insta360 clip's quaternions are already
+    upright and in the body frame (osv/insta360.py), so its offsets are the identity: pass the clip's `osv` path to get them."""
+    if osv is not None:
+        from strata360.osv import insta360
+        if insta360.is_insv(osv): return np.eye(3), np.eye(3)
     return np.load(_os.path.join(_DATA, 'osmo360_imu_offsets.npy'))
 
 

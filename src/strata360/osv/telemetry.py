@@ -25,7 +25,9 @@ def _cached(osv, name, make):
 
 def read_frames(osv, djmd_stream=3):
     """Returns dict of arrays, one row per djmd packet (= per video frame):
-       ts_us (device microseconds), quat (N,4) fields 1..4 in stored order, acc (N,3). Cached on disk (see `_cached`)."""
+       ts_us (device microseconds), quat (N,4) fields 1..4 in stored order, acc (N,3). Cached on disk (see `_cached`). An Insta360 clip's rows come from its gyro and accelerometer (osv/insta360.py)."""
+    from strata360.osv import insta360
+    if insta360.is_insv(osv): return _cached(osv, 'frames-insta360', lambda: insta360.frames_from_imu(osv, video_pts(osv, 0)))
     return _cached(osv, f'frames{djmd_stream}', lambda: _read_frames(osv, djmd_stream))
 
 
@@ -53,6 +55,10 @@ def _read_frames(osv, djmd_stream=3):
 def video_pts(osv, stream=0):
     """Presentation times (seconds, sorted) of the video frames. The first video track comes from the MP4 index (a few milliseconds; identical to the packet scan, checked on two clips); anything else, or
     a file the index reader cannot handle, from an ffprobe packet scan (reads the whole file: about 80 s for a 3 GB clip)."""
+    from strata360.osv import insta360
+    if insta360.is_insv(osv):                                           # one file a lens
+        from strata360.osv import mp4
+        return mp4.video_sample_times(insta360.lens_file(osv, stream))
     if stream == 0:
         try:
             from strata360.osv import mp4
@@ -66,6 +72,8 @@ def video_pts(osv, stream=0):
 
 def read_exposure(osv):
     """Per-frame exposure (cached on disk, see `_cached`)."""
+    from strata360.osv import insta360
+    if insta360.is_insv(osv): return insta360.exposure_frames(osv, video_pts(osv, 0))
     flat = _cached(osv, 'exposure', lambda: {f'{n}__{k}': v for n, d in _read_exposure(osv).items() for k, v in d.items()})
     out = {}
     for key, v in flat.items(): n, k = key.split('__', 1); out.setdefault(n, {})[k] = v

@@ -20,6 +20,7 @@ import numpy as np, cv2
 from strata360.pipeline import guard
 from strata360.osv.calib import read_slots, Lens, quat_to_R, imu_offsets
 from strata360.osv.telemetry import read_frames, video_pts
+from strata360.osv import source as lensrc
 from strata360.render import photo as ph
 from strata360.render import camera as cam, gpu
 from strata360 import hw as hwmod
@@ -154,7 +155,7 @@ class Renderer(Globe):
         self.rtm = ph.THETA_MAX_DEG - ph.RENDER_INSET_DEG          # render-only blend inset (PhotoSeam.h), 94.99 deg
         self.gain_m = np.ones(3); self.gain_s = np.ones(3); self._lut = None
         self.osv = osv; self.init_globe(); self.seam = None; self.warp = None; self._carver = None; self.carve_seam = False; self.parallax = False                  # carve_seam: measure a seam from the lens frames before each render (update_seam)
-        P, B = imu_offsets()
+        P, B = imu_offsets(osv)
         self.P, self.B = P, B
         self.interp = {'cubic': cv2.INTER_CUBIC, 'linear': cv2.INTER_LINEAR, 'lanczos': cv2.INTER_LANCZOS4}[interp]
         # coarse pixel grid (output pixel centres), with the last row/col reaching the image edge
@@ -277,8 +278,9 @@ def decode_args(osv, hw=True):
 def decoder(osv, stream, hw=True, ss=0.0, native=False):
     """ffmpeg process that writes the frames of one lens stream: rgb48le, or with `native` the codec's own 10-bit YUV (p010le), which render/gpu.py converts on the GPU (read it with `read_frame(p, native=True)`)."""
     args, _ = decode_args(osv, hw)
+    vf = lensrc.full_frame_filter(osv, native)
     cmd = ['ffmpeg', '-v', 'error'] + args + (['-ss', f'{ss:.4f}'] if ss > 0 else []) + \
-          ['-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough', '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
+          [*lensrc.lens_input(osv, stream), '-fps_mode', 'passthrough', *(['-vf', ','.join(vf)] if vf else []), '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
     return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=LS * LS * BYTES * 2)
 
 

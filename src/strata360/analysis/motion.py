@@ -15,7 +15,7 @@ OUT_HZ = 5.0
 
 
 def analyse(osv):
-    T = read_frames(osv); P, B = imu_offsets()
+    T = read_frames(osv); P, B = imu_offsets(osv)
     t = (T['ts_us'] - T['ts_us'][0]) / 1e6; n = len(t)
     Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']])
     dt = np.maximum(np.diff(t), 1e-3)

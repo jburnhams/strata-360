@@ -9,6 +9,8 @@ COLOUR_MODES = {0: 'normal', 9: 'hlg', 19: 'dlogm'}      # StreamMeta.4 (README 
 
 def header(osv, djmd_stream=3):
     """Device, colour mode and calibration facts. Fields that cannot be decoded are None, never guessed."""
+    from strata360.osv import insta360
+    if insta360.is_insv(osv): return insta360.header(osv)
     pk = first_packet(osv, djmd_stream); top = {f: v for f, w, v in parse(pk) if w == 2}
     out = dict(device=None, firmware=None, serial=None, proto=None, colour_mode='unknown', colour_mode_raw=None, calibration_slots=0)
     if 1 in top:                                                        # header message: field 1 holds the device block

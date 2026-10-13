@@ -70,7 +70,7 @@ def stab_matrices(osv):
     """Per source frame: d_body = M d_world (the real renderer's Renderer.stab_matrix), for paths that follow the heading or sit on the body."""
     from strata360.osv.calib import quat_to_R, imu_offsets
     from strata360.osv.telemetry import read_frames
-    P, B = imu_offsets(); T = read_frames(osv)
+    P, B = imu_offsets(osv); T = read_frames(osv)
     return lambda k: B.T @ quat_to_R(np.asarray(T['quat'][min(k, len(T['quat']) - 1)])).T @ P.T
 
 
