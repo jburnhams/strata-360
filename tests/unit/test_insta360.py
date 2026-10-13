@@ -76,3 +76,11 @@ def test_video_pts_agree_between_lenses(tmp_path, monkeypatch):
     p = str(tmp_path / 'VID_20240720_195607_00_001.insv')
     monkeypatch.setattr(mp4, 'video_sample_times', lambda f: np.arange(479 if '_00_' in f else 478) / 29.97)
     assert len(telemetry.video_pts(p, 0)) == 478 and len(telemetry.video_pts(p, 1)) == 478
+
+
+def test_x3_front_lens_gets_the_measured_correction_and_others_do_not(tmp_path):
+    p = tmp_path / 'VID_20240720_195607_00_001.insv'; make_insv(p)
+    q = I.slots(str(p))[2]['q']
+    from strata360.osv.calib import quat_to_R
+    R = quat_to_R(q); assert not np.allclose(R, I._R_FRONT, atol=1e-6) and np.allclose(R, I._R_FRONT, atol=0.03)          # about 1.2 degrees off the nominal flip
+    assert np.allclose(I._front_rotation('Insta360 X4'), I._R_FRONT)

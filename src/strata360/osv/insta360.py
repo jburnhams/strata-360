@@ -131,11 +131,25 @@ _R_FRONT = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 _R_REAR = np.array([[-1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]])
 
 
+# Measured correction of the front lens against the nominal 180-degree flip, from 32 stitched frames of the X3 sample (feature matches in the lens overlap, then refined against the seam edge match with a held-out half:
+# edge disagreement at the seam fell by about a fifth, and 30 of 32 frames improved). A rotation vector in degrees (body frame) and a focal scale. Calibration is per camera, so this is applied to the X3 only.
+FRONT_ROTVEC_DEG = (0.609, 0.991, 0.121)
+FRONT_FOCAL_SCALE = 1.004
+
+
+def _front_rotation(model):
+    """The front lens's body-to-lens rotation, corrected for the X3's measured alignment (other models: nominal)."""
+    if not (model or '').startswith('Insta360 X3'): return _R_FRONT
+    from scipy.spatial.transform import Rotation as Rot
+    return _R_FRONT @ Rot.from_rotvec(np.radians(FRONT_ROTVEC_DEG)).as_matrix().T
+
+
 def slots(path):
     """{1: rear lens, 2: front lens} in calib.read_slots' shape: fx fy (1, 2), cx cy (3, 4), k1..k4 (5..8), k5 (15), extrinsic quaternion 'q' (body -> lens), and an empty selfie-stick occlusion polygon."""
-    lens = parse_calibration(extra(path)['calibration']); out = {}
-    for slot, L, R in ((1, lens[0], _R_REAR), (2, lens[1], _R_FRONT)):
+    x = extra(path); lens = parse_calibration(x['calibration']); out = {}; x3 = (x['model'] or '').startswith('Insta360 X3')
+    for slot, L, R in ((1, lens[0], _R_REAR), (2, lens[1], _front_rotation(x['model']))):
         f, k, cx, cy, _ = _fit_kb(L)
+        if slot == 2 and x3: f *= FRONT_FOCAL_SCALE
         out[slot] = {1: f, 2: f, 3: cx, 4: cy, 5: k[0], 6: k[1], 7: k[2], 8: k[3], 15: k[4], 10: LENS_PX, 11: LENS_PX, 'q': _quat_wxyz(R),
                      'poly_x': np.zeros(0), 'poly_y': np.zeros(0)}
     return out
