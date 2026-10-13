@@ -22,6 +22,99 @@ describe('ClipView', () => {
     expect(getByRole('region', { name: 'Loading Transcript' })).toBeInTheDocument()
   })
 
+  it('renders places when covered is true', async () => {
+    mockGet('/api/pointcams', makePointCams())
+    mockGet('/api/clip', makeClipDetail({
+      places: {
+        covered: true,
+        summary: { text: 'A nice road', places: [] },
+        points: [
+          { label: 'p1', lat: 10, lon: 20, address: { road: 'Start St' }, nearby: [{ name: 'Cafe', kind: 'amenity=cafe', distance_m: 10 }] },
+          { label: 'p2', lat: 10, lon: 21, address: { road: 'End St' }, nearby: [] }
+        ]
+      }
+    }))
+    const { findByText } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+    expect(await findByText('A nice road')).toBeInTheDocument()
+    expect(await findByText('Start St → End St')).toBeInTheDocument()
+    expect(await findByText('Cafe')).toBeInTheDocument()
+    expect(await findByText('10 m')).toBeInTheDocument()
+    expect(await findByText('open in OpenStreetMap')).toHaveAttribute('href', 'https://www.openstreetmap.org/?mlat=10&mlon=20#map=16/10/20')
+  })
+
+  it('renders places when covered is false', async () => {
+    mockGet('/api/pointcams', makePointCams())
+    mockGet('/api/clip', makeClipDetail({
+      places: { covered: false, note: 'Off road', points: [] }
+    }))
+    const { findByText } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+    expect(await findByText('Off road')).toBeInTheDocument()
+  })
+
+  it('renders different sound classes based on hints', async () => {
+    mockGet('/api/pointcams', makePointCams())
+    mockGet('/api/clip', makeClipDetail({
+      sounds: {
+        seconds: { wind: 1, music: 1, traffic: 1, unknown: 1 },
+        hints: { wind: ['avoid', 0], music: ['voice', 0], traffic: ['energy', 0] },
+        windows: [
+          { t0: 0, t1: 1, cats: { wind: 1 }, top: [] }, // avoid -> red
+          { t0: 1, t1: 2, cats: { music: 1 }, top: [] }, // voice -> green
+          { t0: 2, t1: 3, cats: { traffic: 1 }, top: [] }, // energy -> green
+          { t0: 3, t1: 4, cats: { unknown: 1 }, top: [] }, // top exists -> blue
+          { t0: 4, t1: 5, cats: {}, top: [] } // no top -> stone
+        ]
+      }
+    }))
+    const { findByTitle } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+    expect(await findByTitle('0:00–0:01: wind 1.00')).toHaveClass('bg-red-400')
+    expect(await findByTitle('0:01–0:02: music 1.00')).toHaveClass('bg-emerald-500')
+    expect(await findByTitle('0:02–0:03: traffic 1.00')).toHaveClass('bg-emerald-500')
+    expect(await findByTitle('0:03–0:04: unknown 1.00')).toHaveClass('bg-sky-400')
+    expect(await findByTitle('0:04: nothing but speech')).toHaveClass('bg-stone-300')
+  })
+
+  it('renders "other" when who is other in transcript', async () => {
+    mockGet('/api/pointcams', makePointCams())
+    mockGet('/api/clip', makeClipDetail({
+      transcript: [{ si: 1, t0: 0, t1: 1, text: 'hi', text_en: 'hi', lang: 'en', flagged: false, who: 'other', words: [] }]
+    }))
+    const { findByText } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+    expect(await findByText('other')).toBeInTheDocument()
+  })
+
+  it('allows changing the transcript language mode', async () => {
+    mockGet('/api/pointcams', makePointCams())
+    mockGet('/api/clip', makeClipDetail({
+      transcript: [{ si: 1, t0: 0, t1: 1, text: 'bonjour', text_en: 'hello', lang: 'fr', flagged: false, who: 'wearer', words: [] }]
+    }))
+    const { findByRole, findByText, queryByText } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+
+    // Default mode is 'translated'
+    expect(await findByText('hello')).toBeInTheDocument()
+    expect(queryByText('bonjour')).not.toBeInTheDocument()
+
+    const modeSelect = await findByRole('combobox', { name: '' }) // no label for the select
+    await userEvent.selectOptions(modeSelect, 'original')
+    expect(await findByText('bonjour')).toBeInTheDocument()
+    expect(queryByText('hello')).not.toBeInTheDocument()
+
+    await userEvent.selectOptions(modeSelect, 'both')
+    expect(await findByText('hello')).toBeInTheDocument()
+    expect(await findByText('bonjour')).toBeInTheDocument()
+  })
+
+  it('renders missing thumbnail and empty transcript states', async () => {
+    mockGet('/api/pointcams', makePointCams())
+    mockGet('/api/clip', makeClipDetail({
+      thumb: null,
+      transcript: []
+    }))
+    const { findByText } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+    expect(await findByText('no thumbnail yet')).toBeInTheDocument()
+    expect(await findByText('No speech recognised.')).toBeInTheDocument()
+  })
+
   it('shows an error if clip fetch fails', async () => {
     mockGet('/api/pointcams', makePointCams())
     mockError('/api/clip', 500, 'Failed to fetch clip')
