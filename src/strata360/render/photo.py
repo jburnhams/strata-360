@@ -59,6 +59,7 @@ def occlusion_map(poly_x, poly_y, size=3840, scale=0.5, feather=OCCL_FEATHER_PX,
     stored arc outward (occlusion_polygon); without them the lens is assumed centred with the rim at the frame edge."""
     n = int(size * scale); cx, cy = centre if centre is not None else (size / 2.0, size / 2.0)
     poly = occlusion_polygon(poly_x, poly_y, cx, cy, rim if rim is not None else size / 2.0 - 20.0)
+    if not len(poly): return np.ones((n, n), np.float32)                              # no occluder (an Insta360 lens): nothing is masked
     inside = np.zeros((n, n), np.uint8)
     if len(poly): cv2.fillPoly(inside, [(poly * scale).astype(np.int32).reshape(-1, 1, 2)], 255)
     dist = cv2.distanceTransform((inside == 0).astype(np.uint8), cv2.DIST_L2, 5) / scale   # px in lens coordinates, 0 inside

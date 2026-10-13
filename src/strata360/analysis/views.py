@@ -7,6 +7,7 @@ lens: 0 front, 60, 120, 180 = straight at the wearer (rear lens), 240, 300."""
 import json, math, os, subprocess, numpy as np, cv2
 from strata360.osv.calib import read_slots, Lens
 from strata360 import hw
+from strata360.osv import source as lensrc
 
 VIEW_YAWS = (0, 60, 120, 180, 240, 300)
 VIEW_PX = 1024
@@ -42,7 +43,7 @@ class Views:
 
 
 def decode(osv, stream, every):
-    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-fps_mode', 'passthrough',
+    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), *lensrc.lens_input(osv, stream), '-fps_mode', 'passthrough',
            '-vf', f"select='not(mod(n\\,{every}))',scale={LENS_PX}:{LENS_PX}:flags=area", '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-']
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=LENS_PX * LENS_PX * 3 * 2); n = LENS_PX * LENS_PX * 3; k = 0
     while True:
@@ -85,7 +86,7 @@ class StabViews:
         from strata360.osv.telemetry import read_frames
         from strata360.render.camera import heading_series
         sl = read_slots(osv); self.master, self.slave = Lens(sl[2]), Lens(sl[1]); self.yaws, self.px, self.fov, self.lens_px = yaws, px, fov, lens_px
-        P, B = imu_offsets(); T = read_frames(osv); fps = (len(T['ts_us']) - 1) / max((T['ts_us'][-1] - T['ts_us'][0]) / 1e6, 1e-6)
+        P, B = imu_offsets(osv); T = read_frames(osv); fps = (len(T['ts_us']) - 1) / max((T['ts_us'][-1] - T['ts_us'][0]) / 1e6, 1e-6)
         self.Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); self.heading = heading_series(self.Ms, tau_s=2.0, fps=fps)
 
     def render(self, k, frame_m, frame_s):
@@ -120,7 +121,7 @@ def _rect_rays(yaw_deg, heading_rad, w, h, hfov, pitch_deg=0.0):
 
 def grab_frame(osv, stream, t, size=LENS_PX):
     """One decoded frame (RGB uint8, size x size) of a lens stream at time t seconds."""
-    raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{max(t, 0):.3f}', '-i', osv, '-map', f'0:v:{stream}', '-frames:v', '1', '-vf', f'scale={size}:{size}:flags=area', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'],
+    raw = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{max(t, 0):.3f}', *lensrc.lens_input(osv, stream), '-frames:v', '1', '-vf', f'scale={size}:{size}:flags=area', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'],
                          stdout=subprocess.PIPE, check=True).stdout
     return np.frombuffer(raw, np.uint8).reshape(size, size, 3)
 
@@ -206,7 +207,7 @@ def heading_track(osv):
     from strata360.osv.calib import quat_to_R, imu_offsets
     from strata360.osv.telemetry import read_frames
     from strata360.render.camera import heading_series
-    P, B = imu_offsets(); T = read_frames(osv); fps = (len(T['ts_us']) - 1) / max((T['ts_us'][-1] - T['ts_us'][0]) / 1e6, 1e-6)
+    P, B = imu_offsets(osv); T = read_frames(osv); fps = (len(T['ts_us']) - 1) / max((T['ts_us'][-1] - T['ts_us'][0]) / 1e6, 1e-6)
     Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); return heading_series(Ms, tau_s=2.0, fps=fps), fps
 
 
@@ -293,7 +294,7 @@ def stab_fn(osv):
     try:
         from strata360.osv.calib import quat_to_R, imu_offsets
         from strata360.osv.telemetry import read_frames, video_pts
-        P, B = imu_offsets(); T = read_frames(osv); Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); pts = np.asarray(video_pts(osv, 0), float); pts = pts - pts[0]
+        P, B = imu_offsets(osv); T = read_frames(osv); Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); pts = np.asarray(video_pts(osv, 0), float); pts = pts - pts[0]
         def M(t): return Ms[int(np.clip(np.searchsorted(pts, float(t) - 1e-4), 0, min(len(Ms), len(pts)) - 1))]
     except Exception: M = None
     _STAB[osv] = M; return M

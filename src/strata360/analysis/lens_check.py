@@ -9,6 +9,7 @@ import numpy as np, cv2
 from scipy import ndimage
 
 from strata360 import hw
+from strata360.osv import source as lensrc
 from strata360.pipeline import guard
 
 SIZE, GRID = 480, 12
@@ -63,7 +64,7 @@ def blocked(doc, t):
 
 def frames(osv, stream, hz=1.0):
     """BGR 480 x 480 pictures of one lens stream at `hz` a second, one at a time."""
-    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), '-i', osv, '-map', f'0:v:{stream}', '-an', '-vf', f'fps={hz:g},scale={SIZE}:{SIZE}:flags=area', '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-']
+    cmd = ['ffmpeg', '-v', 'error', *hw.hwaccel_args(), *lensrc.lens_input(osv, stream), '-an', '-vf', f'fps={hz:g},scale={SIZE}:{SIZE}:flags=area', '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-']
     p = guard.popen(cmd, stdout=subprocess.PIPE, bufsize=SIZE * SIZE * 3 * 4); n = SIZE * SIZE * 3
     try:
         while True:

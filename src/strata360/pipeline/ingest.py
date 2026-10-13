@@ -6,6 +6,7 @@ import datetime as dt, hashlib, json, subprocess
 import numpy as np
 from strata360.osv.meta import header, frame_gaps
 from strata360.osv.mp4 import video_sample_times
+from strata360.osv import insta360
 
 SCHEMA_VERSION = 1
 
@@ -26,12 +27,19 @@ def utc_hash(clip_id, start_utc, end_utc):
 
 def ingest_clip(clip, cfg):
     """Build the clip.json body. Nothing here is guessed: what cannot be determined is recorded as None with a note."""
-    p = _probe(clip.osv); fmt = p['format']; tags = fmt.get('tags', {})
-    vs = [s for s in p['streams'] if s['codec_type'] == 'video' and s.get('codec_name') == 'hevc']
-    au = [s for s in p['streams'] if s['codec_type'] == 'audio']
-    notes = []
-    if len(vs) != 2: notes.append(f'expected two HEVC lens streams, found {len(vs)}')
-    pts = video_sample_times(clip.osv); gaps, nominal = frame_gaps(pts)
+    p = _probe(clip.osv); fmt = p['format']; tags = fmt.get('tags', {}); is_insv = insta360.is_insv(clip.osv)
+    au = [s for s in p['streams'] if s['codec_type'] == 'audio']; notes = []
+    if is_insv:                                                                                        # two files, one lens each (the rear is the primary file, which also has the audio)
+        front = _probe(insta360.lens_file(clip.osv, 1)); vs = [s for q in (p, front) for s in q['streams'] if s['codec_type'] == 'video'][:2]
+        if len(vs) != 2: notes.append(f'expected one video stream in each lens file, found {len(vs)}')
+        n_front = len(video_sample_times(insta360.lens_file(clip.osv, 1)))
+    else:
+        vs = [s for s in p['streams'] if s['codec_type'] == 'video' and s.get('codec_name') == 'hevc']
+        if len(vs) != 2: notes.append(f'expected two HEVC lens streams, found {len(vs)}')
+    pts = video_sample_times(clip.osv); n_rear = len(pts)
+    if is_insv: pts = pts[:min(n_rear, n_front)]
+    gaps, nominal = frame_gaps(pts)
+    if is_insv and n_front != n_rear: notes.append(f'the lens files differ in length ({n_rear} rear, {n_front} front frames): the shorter decides')
     nominal_fps = round(1.0 / nominal, 3)
     duration = float(pts[-1] - pts[0]) + nominal
     hdr = header(clip.osv)
@@ -41,19 +49,21 @@ def ingest_clip(clip, cfg):
     clock = cfg['camera_clock']; offset = dt.timedelta(hours=float(clock.get('utc_offset_hours', 0.0)), seconds=float(clock.get('offset_seconds', 0.0)))     # camera clock minus UTC
     if clock.get('drift_s_per_day') and creation is not None:                                        # a clock that gains/loses steadily: offset grows linearly from a reference camera time
         ref = _parse_iso(clock.get('drift_ref_camera_time')) or creation; offset += dt.timedelta(seconds=float(clock['drift_s_per_day']) * (creation - ref).total_seconds() / 86400.0)
-    if creation is not None: start, source = creation - offset, 'container_creation_time'
+    if is_insv and fname is not None:                                                                  # Insta360: the file name is the recording start (agrees with the file's modification time less its length); creation_time runs 9 to 10 s early
+        start, source = fname - offset, 'filename'; notes.append('Insta360: start time from the file name (container creation_time is about 10 s early)')
+    elif creation is not None: start, source = creation - offset, 'container_creation_time'
     elif fname is not None: start, source = fname - offset, 'filename'; notes.append('container has no creation_time; used the file name')
     else: start, source = None, 'none'; notes.append('no time source found')
-    disagreement = abs((creation - fname).total_seconds()) if (creation and fname) else None
+    disagreement = abs((creation - fname).total_seconds()) if (creation and fname and not is_insv) else None
     status = 'definitive' if (start is not None and clock.get('verified') and (disagreement is None or disagreement <= 3.0)) else 'provisional'
     if disagreement is not None and disagreement > 3.0: notes.append(f'container time and file name disagree by {disagreement:.0f} s')
     if not clock.get('verified'): notes.append('camera clock not verified against the GPX or a known event (race.json camera_clock.verified)')
     end = start + dt.timedelta(seconds=duration) if start else None
     ts = lambda d: None if d is None else d.isoformat().replace('+00:00', 'Z')
     return dict(
-        schema_version=SCHEMA_VERSION, clip_id=clip.id, fingerprint=clip.fingerprint, source_files=dict(osv=clip.osv, lrf=clip.lrf), size_bytes=clip.size,
+        schema_version=SCHEMA_VERSION, clip_id=clip.id, fingerprint=clip.fingerprint, source_files=dict(osv=clip.osv, lrf=clip.lrf, **(dict(front=insta360.lens_file(clip.osv, 1)) if is_insv else {})), size_bytes=clip.size,
         camera=dict(model=hdr['device'] or tags.get('encoder'), serial=hdr['serial'], firmware=hdr['firmware'], proto=hdr['proto']),
-        video=dict(streams=len(vs), width=int(vs[0]['width']) if vs else None, height=int(vs[0]['height']) if vs else None, codec='hevc', pix_fmt=vs[0].get('pix_fmt') if vs else None,
+        video=dict(streams=len(vs), width=int(vs[0]['width']) if vs else None, height=int(vs[0]['height']) if vs else None, codec=(vs[0].get('codec_name') or 'hevc') if vs else 'hevc', pix_fmt=vs[0].get('pix_fmt') if vs else None,
                    nominal_fps=nominal_fps, source_frames=int(len(pts)), dropped_frames=int(sum(g[2] for g in gaps)), gaps=[dict(after_frame=g[0], t_s=g[1], missing=g[2]) for g in gaps]),
         audio=dict(present=bool(au), channels=int(au[0]['channels']) if au else None, sample_rate=int(au[0]['sample_rate']) if au else None, codec=au[0]['codec_name'] if au else None),
         colour_mode=hdr['colour_mode'], colour_mode_raw=hdr['colour_mode_raw'], calibration_slots=hdr['calibration_slots'], gps_in_metadata=False,
