@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import { axe } from 'vitest-axe'
 import AskPage, { inline } from '../../src/components/AskPage'
-import type { AgentAnswer, AgentStatus } from '../../src/api'
+import type { AgentAnswer, AgentPending, AgentStatus } from '../../src/api'
 import { mockError, mockGet, mockNetworkError, mockPending, mockPost, recordRequests } from '../utils/api'
 import { screen, setup, within } from '../utils/render'
 
 const status = (o: Partial<AgentStatus> = {}): AgentStatus => ({ configured: true, model: 'nvidia/nemotron-3-super-120b-a12b', vision_model: 'meta/llama-3.2-11b-vision-instruct', read_only: true, available: true, ...o })
 const answer = (o: Partial<AgentAnswer> = {}): AgentAnswer => ({ answer: 'There are 3 clips.', steps: [], images: [], model: 'm', vision: false, seconds: 1, ...o })
+const pend = (o: Partial<AgentPending> = {}): AgentPending => ({ id: 'p1', action: 'final.render', summary: 'start the final film render (hours of work, large files)', why: 'a long, heavy render', args: {}, ...o })
 const props = { folder: '/f', clipIds: ['CAM_1', 'CAM_2'], onOpenClip: vi.fn() }
 const ask = async (user: ReturnType<typeof setup>['user'], q: string) => { await user.type(await screen.findByLabelText('Your question'), q); await user.click(screen.getByRole('button', { name: 'Ask' })) }
 
@@ -109,6 +110,45 @@ describe('AskPage', () => {
     const { user, rerender } = setup(<AskPage {...props} />); await ask(user, 'old question')
     rerender(<AskPage {...props} folder="/other" />); expect(screen.queryByText('old question')).not.toBeInTheDocument()
     release(); await vi.waitFor(() => expect(screen.queryByText('Looking…')).not.toBeInTheDocument()); expect(screen.queryByText('Old answer.')).not.toBeInTheDocument()
+  })
+
+  it('sends edits only when "Allow edits" is ticked, and says so in the header', async () => {
+    mockGet('/api/agent', status()); const seen = recordRequests('/api/agent/chat'); mockPost('/api/agent/chat', answer())
+    const { user } = setup(<AskPage {...props} />)
+    const box = await screen.findByRole('checkbox', { name: /Allow edits/ }); expect(box).not.toBeChecked(); expect(screen.getByText(/read only/)).toBeInTheDocument()
+    await ask(user, 'a'); await screen.findByText('There are 3 clips.'); await user.click(box); expect(screen.getByText(/edits allowed/)).toBeInTheDocument(); await ask(user, 'b'); await vi.waitFor(() => expect(seen).toHaveLength(2))
+    expect(seen.map(s => (s.body as { write: boolean }).write)).toEqual([false, true])
+  })
+
+  it('shows what waits for approval when the page opens, and an answer can add to it', async () => {
+    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); mockPost('/api/agent/chat', answer({ pending: [pend(), pend({ id: 'p2', summary: 'forget 2 analysis results' })] }))
+    const { user } = setup(<AskPage {...props} />)
+    const list = await screen.findByRole('list', { name: 'Waiting for your approval' }); expect(within(list).getAllByRole('listitem')).toHaveLength(1); expect(within(list).getByText(/a long, heavy render/)).toBeInTheDocument()
+    await ask(user, 'render it'); await vi.waitFor(() => expect(within(screen.getByRole('list', { name: 'Waiting for your approval' })).getAllByRole('listitem')).toHaveLength(2))
+  })
+
+  it('approving runs it through the server and reports what was done', async () => {
+    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); const seen = recordRequests('/api/agent/approve'); mockPost('/api/agent/approve', { ok: true, did: 'start the final film render', job: true, backup: null })
+    const { user } = setup(<AskPage {...props} />); await user.click(await screen.findByRole('button', { name: 'Approve' }))
+    expect(await screen.findByText(/Approved and done: start the final film render\. It runs in the background\./)).toBeInTheDocument(); expect(seen[0].body).toEqual({ folder: '/f', id: 'p1' })
+    expect(screen.queryByRole('list', { name: 'Waiting for your approval' })).not.toBeInTheDocument()
+  })
+
+  it('denying tells the server and drops the card', async () => {
+    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); const seen = recordRequests('/api/agent/deny'); mockPost('/api/agent/deny', { denied: true })
+    const { user } = setup(<AskPage {...props} />); await user.click(await screen.findByRole('button', { name: 'Deny' }))
+    expect(await screen.findByText(/Denied: start the final film render/)).toBeInTheDocument(); expect(seen[0].body).toEqual({ folder: '/f', id: 'p1' }); expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
+  it('shows an approval that failed, and drops the stale card (it is gone on the server)', async () => {
+    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); mockError('/api/agent/approve', 404, 'that approval is gone (expired or already answered)', 'post')
+    const { user } = setup(<AskPage {...props} />); await user.click(await screen.findByRole('button', { name: 'Approve' }))
+    expect(await screen.findByText(/that approval is gone/)).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
+  it('has no accessibility violations with an approval waiting', async () => {
+    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); const { container } = setup(<AskPage {...props} />)
+    await screen.findByRole('button', { name: 'Approve' }); expect(await axe(container)).toHaveNoViolations()
   })
 
   it('has no accessibility violations and a labelled conversation log', async () => {

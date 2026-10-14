@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, type AgentImage, type AgentStatus, type AgentStep, type AgentTurn } from '../api'
+import { api, type AgentImage, type AgentPending, type AgentStatus, type AgentStep, type AgentTurn } from '../api'
 import { PanelSkeleton } from './Skeleton'
 
 // Ask questions about the project in plain words: a hosted model answers by looking things up with read-only tools (the clips, the transcript, the edit plan, the script ...). It cannot change anything.
@@ -36,10 +36,10 @@ function Steps({ steps }: { steps: AgentStep[] }) {
 
 export default function AskPage({ folder, clipIds, onOpenClip }: { folder: string; clipIds: string[]; onOpenClip: (clip: string) => void }) {
   const [status, setStatus] = useState<AgentStatus | null | undefined>(undefined)       // undefined: asking, null: the server could not say
-  const [msgs, setMsgs] = useState<Msg[]>([]); const [text, setText] = useState(''); const [busy, setBusy] = useState(false); const [vision, setVision] = useState(false)
+  const [msgs, setMsgs] = useState<Msg[]>([]); const [text, setText] = useState(''); const [busy, setBusy] = useState(false); const [vision, setVision] = useState(false); const [write, setWrite] = useState(false); const [pending, setPending] = useState<AgentPending[]>([]); const [deciding, setDeciding] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null); const gen = useRef(0)
   useEffect(() => { let live = true; api.agent().then(s => live && setStatus(s)).catch(() => live && setStatus(null)); return () => { live = false } }, [])
-  useEffect(() => { gen.current++; setMsgs([]); setBusy(false) }, [folder])                                  // another project: a new conversation
+  useEffect(() => { gen.current++; setMsgs([]); setBusy(false); setPending([]); let live = true; api.agentPending(folder).then(r => live && setPending(r.pending)).catch(() => {}); return () => { live = false } }, [folder])      // another project: a new conversation; what still waits for approval there is shown
   useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [msgs, busy])
   if (status === undefined) return <PanelSkeleton title="Ask about the project" rows={4} />
 
@@ -48,18 +48,26 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
     const history: Msg[] = [...msgs.filter(m => !m.error), { role: 'user', content: q }]; const mine = gen.current
     setMsgs([...msgs, { role: 'user', content: q }]); setText(''); setBusy(true)
     try {
-      const r = await api.ask(folder, history.map(({ role, content }) => ({ role, content })), vision)
-      if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: r.answer, steps: r.steps, images: r.images }])
+      const r = await api.ask(folder, history.map(({ role, content }) => ({ role, content })), vision, write)
+      if (mine === gen.current) { setMsgs(m => [...m, { role: 'assistant', content: r.answer, steps: r.steps, images: r.images }]); if (r.pending) setPending(r.pending) }
     } catch (e) {
       if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: e instanceof Error ? e.message : 'The assistant did not answer.', error: true }])
     } finally { if (mine === gen.current) setBusy(false) }
+  }
+  const decide = async (p: AgentPending, approve: boolean) => {
+    setDeciding(p.id); const mine = gen.current
+    try {
+      const r = approve ? await api.agentApprove(folder, p.id) : null; if (!approve) await api.agentDeny(folder, p.id)
+      if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: approve ? `Approved and done: ${r?.did ?? p.summary}.${r?.job ? ' It runs in the background.' : ''}` : `Denied: ${p.summary}.` }])
+    } catch (e) { if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: e instanceof Error ? e.message : 'That did not work.', error: true }]) }
+    finally { if (mine === gen.current) { setPending(ps => ps.filter(x => x.id !== p.id)); setDeciding(null) } }
   }
   const ready = status?.configured && status.available
 
   return (
     <section className="flex min-h-[60vh] flex-col rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-lg font-semibold">Ask about the project</h2>
-        <span className="text-xs text-stone-500">read only · {status?.model ?? 'no model'}</span></div>
+        <span className="text-xs text-stone-500">{write ? 'edits allowed' : 'read only'} · {status?.model ?? 'no model'}</span></div>
       {!ready && <p role="status" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
         {status === null ? 'The server did not say whether the assistant is set up.' : !status.available ? 'The assistant needs the mcp package on the server: pip install mcp.' : 'The assistant needs an NVIDIA_API_KEY: put NVIDIA_API_KEY=… in secrets.env next to the project and restart the server.'}</p>}
       <div role="log" aria-live="polite" aria-label="Conversation" className="min-h-0 flex-1 space-y-3 overflow-auto">
@@ -76,6 +84,13 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
         {busy && <p className="text-sm text-stone-500" role="status">Looking…</p>}
         <div ref={end} />
       </div>
+      {pending.length > 0 && <ul aria-label="Waiting for your approval" className="mt-3 space-y-2">
+        {pending.map(p => <li key={p.id} className="rounded-lg border-2 border-amber-500 bg-amber-50 p-3 text-sm dark:bg-amber-950">
+          <div><b>Needs your approval:</b> {p.summary}</div><div className="text-xs text-stone-600 dark:text-stone-400">Why: {p.why}.</div>
+          <div className="mt-2 flex gap-2"><button disabled={deciding !== null} onClick={() => void decide(p, true)} className="rounded-lg bg-emerald-700 px-3 py-1 text-white disabled:opacity-40">Approve</button>
+            <button disabled={deciding !== null} onClick={() => void decide(p, false)} className="rounded-lg border border-stone-400 px-3 py-1 disabled:opacity-40">Deny</button></div>
+        </li>)}
+      </ul>}
       <form className="mt-3 flex gap-2" onSubmit={e => { e.preventDefault(); void send(text) }}>
         <textarea aria-label="Your question" value={text} rows={2} disabled={!ready} onChange={e => setText(e.target.value)} placeholder={ready ? 'Ask a question…' : 'Not set up'}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(text) } }}
@@ -83,6 +98,7 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
         <button type="submit" disabled={!ready || busy || !text.trim()} className="self-end rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">Ask</button>
       </form>
       <label className="mt-2 flex items-center gap-2 text-xs text-stone-600 dark:text-stone-400" title="Off: the model never sees a picture, it is only shown to you. On: each picture is sent to a vision model that describes it in words."><input type="checkbox" checked={vision} disabled={!ready} onChange={e => setVision(e.target.checked)} /> Let the model see the pictures it fetches (sent to {status?.vision_model ?? 'a vision model'})</label>
+      <label className="mt-1 flex items-center gap-2 text-xs text-stone-600 dark:text-stone-400" title="Off: the assistant can only look. On: it can change the plan, transcript, notes and script like you can; every change is backed up and journalled, and costly or heavy actions wait for your approval here."><input type="checkbox" checked={write} disabled={!ready} onChange={e => setWrite(e.target.checked)} /> Allow edits (backed up and journalled; costly or heavy actions still wait for your approval)</label>
       <p className="mt-2 text-xs text-stone-500">Your question and what the tools find (clip ids, transcript phrases, plan and script text) go to the model service. Pictures only do when the box above is ticked.</p>
     </section>
   )

@@ -192,7 +192,9 @@ export interface AgentStatus { configured: boolean; model: string; vision_model:
 export interface AgentTurn { role: 'user' | 'assistant'; content: string }
 export interface AgentStep { tool: string; args: Record<string, unknown>; seconds: number; chars: number; error: string | null }
 export interface AgentImage { url: string; caption: string }
-export interface AgentAnswer { answer: string; steps: AgentStep[]; images: AgentImage[]; model: string; vision: boolean; seconds: number }
+export interface AgentPending { id: string; action: string; summary: string; why: string; args: Record<string, unknown> }
+export interface AgentAnswer { answer: string; steps: AgentStep[]; images: AgentImage[]; pending?: AgentPending[]; model: string; vision: boolean; write?: boolean; seconds: number }
+export interface AgentDone { ok: boolean; did: string; job: boolean | null; backup: string | null }
 export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string>; vo_must?: { folder: string; folder_ordered: boolean; clips: Record<string, string> } }
 export interface VoPin { id: string; text: string; mode: 'clip' | 'ordered' | 'anywhere'; clip?: string }
 export interface ScriptPins { include?: string[]; exclude?: string[]; vo?: VoPin[]; vo_never?: string[] }
@@ -370,7 +372,10 @@ export const api = {
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   agent: () => call<AgentStatus>('/api/agent'),
-  ask: (folder: string, messages: AgentTurn[], vision = false) => call<AgentAnswer>('/api/agent/chat', { folder, messages, vision }),
+  ask: (folder: string, messages: AgentTurn[], vision = false, write = false) => call<AgentAnswer>('/api/agent/chat', { folder, messages, vision, write }),
+  agentPending: (folder: string) => call<{ pending: AgentPending[] }>('/api/agent/pending?' + q({ folder })),
+  agentApprove: (folder: string, id: string) => call<AgentDone>('/api/agent/approve', { folder, id }),
+  agentDeny: (folder: string, id: string) => call<{ denied: boolean }>('/api/agent/deny', { folder, id }),
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),
   saveVo: (folder: string, text: string, clip?: string, ordered?: boolean) => call<Notes>('/api/notes', { folder, kind: 'vo', text, clip, ordered }),
   saveScriptPins: (folder: string, pins: ScriptPins) => call<ScriptPins>('/api/script2/pins', { folder, ...pins }),

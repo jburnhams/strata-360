@@ -6,6 +6,7 @@ import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClip
 // Per-test variations belong in the test, via `mockGet`/`mockPost`/`mockError` from ./api.
 export const handlers = [
   http.get('/api/last', () => HttpResponse.json({ folder: null })),
+  http.get('/api/agent/pending', () => HttpResponse.json({ pending: [] })),
   http.get('/api/browse', () => HttpResponse.json(makeBrowse())),
   http.get('/api/notes', () => HttpResponse.json(makeNotes())),
   http.post('/api/notes', async ({ request }) => HttpResponse.json(makeNotes({ folder: ((await request.json()) as { text: string }).text }))),

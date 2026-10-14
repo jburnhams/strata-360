@@ -1960,8 +1960,33 @@ def create_app(roots, token=None):
         if not AG.valid_model(model): raise HTTPException(400, 'not a model name')
         vm = body.get('vision_model') or AG.VISION_MODEL
         if not AG.valid_model(vm): raise HTTPException(400, 'not a model name')
-        try: return AG.run(MT.AsgiBackend(api, token), f, body.get('messages') or [], key, model, vision=body.get('vision') is True, vision_model=vm)
+        write = body.get('write') is True                                                  # editing is the user's switch, per question: the Ask page's "Allow edits" box
+        try: return AG.run((MT.WriteAsgiBackend if write else MT.AsgiBackend)(api, token), f, body.get('messages') or [], key, model, vision=body.get('vision') is True, vision_model=vm, write=write)
         except AG.AgentError as e: raise HTTPException(503 if e.retryable else 400, str(e))
+
+    @api.get('/api/agent/pending', dependencies=[Depends(auth)])
+    def get_agent_pending(folder: str):                                                   # the actions the assistant asked for that need YOUR approval (cost, data sent out, work thrown away, hours of rendering)
+        from strata360.server import agent_edit as AE
+        return dict(pending=AE.pending_for(folder_of(folder)))
+
+    @api.post('/api/agent/approve', dependencies=[Depends(auth)])
+    def post_agent_approve(body: dict):                                                   # {folder, id}: you approve one pending action: it runs now. Only a person pressing the button gets here; the model's tools cannot
+        import asyncio
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        f = folder_of(body.get('folder'))
+        try: return asyncio.run(AE.approve(MT.WriteAsgiBackend(api, token).post, f, str(body.get('id'))))
+        except MT.ToolError as e: raise HTTPException(404 if 'gone' in str(e) else 400, str(e))
+
+    @api.post('/api/agent/deny', dependencies=[Depends(auth)])
+    def post_agent_deny(body: dict):                                                      # {folder, id}: you refuse a pending action
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        try: return AE.deny(folder_of(body.get('folder')), str(body.get('id')))
+        except MT.ToolError as e: raise HTTPException(404, str(e))
+
+    @api.get('/api/agent/journal', dependencies=[Depends(auth)])
+    def get_agent_journal(folder: str, limit: int = 50):                                  # what the assistant changed (or was refused): newest last; `backup_before` names the backup to restore the earlier state from
+        from strata360.server import agent_edit as AE
+        return dict(entries=AE.read_journal(folder_of(folder), max(1, min(limit, 500))))
 
     mount_mcp(api, token)                                                               # /mcp: the read-only tools for a local agent (server/mcp_tools.py)
     return api

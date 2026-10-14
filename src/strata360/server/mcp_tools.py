@@ -50,6 +50,17 @@ class AsgiBackend:
     async def get_bytes(self, path, **params): return await _get(self._client(), path, params, raw=True)
 
 
+class WriteAsgiBackend(AsgiBackend):
+    """The in-process backend that may also POST (write mode of the assistant: the edit tier, server/agent_edit.py). A separate class so the read-only one cannot."""
+    async def post(self, path, body):
+        async with self._client() as c: r = await c.post(path, json=body)
+        if r.status_code >= 400:
+            try: why = r.json().get('detail', r.text)
+            except ValueError: why = r.text
+            raise ToolError(f'{path}: {r.status_code} {why}')
+        return r.json()
+
+
 class HttpBackend:
     """GETs a running server over HTTP (the stdio shim)."""
     def __init__(self, url, token=None): self.url, self.token = url.rstrip('/'), token
@@ -96,8 +107,8 @@ def seg_row(g, line=None):
     return r
 
 
-def build_server(backend, default_folder=None):
-    """The MCPServer (mcp 2.x `MCPServer`) with every tool bound to `backend`."""
+def build_server(backend, default_folder=None, write=False):
+    """The MCPServer (mcp 2.x `MCPServer`) with every tool bound to `backend`. With `write` (the backend must have `post`) the `edit` tool is added too: the edit tier of server/agent_edit.py."""
     from mcp.server.mcpserver import MCPServer, Image
     from mcp.types import ToolAnnotations
     ro = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -228,6 +239,15 @@ def build_server(backend, default_folder=None):
         if not name or not re.match(r'^[\w.-]+$', name): raise ToolError('of="still" needs the name of a still (see film(view="stills"))')
         return Image(data=await backend.get_bytes('/api/film/still/thumb', folder=f, name=name, w=960), format='jpeg')
 
+    if write:
+        from strata360.server import agent_edit as AE
+        usage = AE.usage()
+
+        async def edit(action: str, args: dict | None = None, folder: str | None = None) -> dict:
+            return await AE.execute(backend.post, await folder_of(folder), action, args or {})
+        edit.__doc__ = ('Change the project, with the same effect as the user doing it in the app. `action` is one of the names below, `args` its arguments (a ? marks an optional one). Changes are backed up and journalled. Actions marked [needs approval] do not run: they wait for the USER to approve them in the Ask panel, '
+                        'and you must tell the user so. [background job] actions start work and return at once. ACTIONS: ' + usage)
+        srv.add_tool(edit, annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))
     return srv
 
 

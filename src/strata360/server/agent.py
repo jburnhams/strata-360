@@ -18,6 +18,10 @@ SYSTEM = """You are the assistant of a film editing project: a 360 camera film o
 Answer from the tools' results, never from guesses: when you need a fact (a clip, a time, what was said, what the plan does) call a tool. Start broad (`project`), then narrow (`clip` with only the sections you need, `transcript` with a query, `plan` rows); every answer says what more can be asked for. Name clips by their id and give times in seconds into the clip. Be brief and concrete. If something is missing (a stage not run, no transcript), say so and say which stage would make it. When the user asks to see something (a frame, a still, a moment, a clip's thumbnail), call `picture`: the picture is shown to the user below your answer, but you cannot see it yourself, so describe only what the tools' text tells you. The project folder is already set for the tools: do not ask for it."""
 
 
+WRITE_SYSTEM = """
+EDITING IS ON: you may also change the project with the `edit` tool, with the same effect as the user doing it in the app. Look first (the read tools), change what was asked and nothing more, then say plainly what you changed. Every change is backed up and journalled. Some actions say [needs approval]: they do NOT run when you call them, the user must press Approve in the panel: tell them what is waiting and why, and never say it was done. Background jobs start work and return at once: say it was started, not finished. If an edit fails, say so with the reason."""
+
+
 class AgentError(Exception):
     retryable = False
 
@@ -91,8 +95,8 @@ def result_text(res):
     return text if len(text) <= RESULT_CHARS else text[:RESULT_CHARS] + f'\n... ({len(text) - RESULT_CHARS} more characters left out: ask for less or a part)'
 
 
-async def _loop(srv, folder, history, key, model, chat, max_steps, see=None):
-    tools = openai_tools(await srv.list_tools()); msgs = [dict(role='system', content=SYSTEM + f'\nProject folder (already given to every tool): {folder}')] + clean_history(history); steps = []; images = []; question = clean_history(history)[-1]['content']
+async def _loop(srv, folder, history, key, model, chat, max_steps, see=None, write=False):
+    tools = openai_tools(await srv.list_tools()); msgs = [dict(role='system', content=SYSTEM + (WRITE_SYSTEM if write else '') + f'\nProject folder (already given to every tool): {folder}')] + clean_history(history); steps = []; images = []; question = clean_history(history)[-1]['content']
     for _ in range(max_steps):
         reply = await asyncio.to_thread(chat, msgs, tools, model, key); calls = reply.get('tool_calls') or []
         if not calls: return (reply.get('content') or '').strip() or 'I have no answer for that.', steps, images
@@ -113,12 +117,13 @@ async def _loop(srv, folder, history, key, model, chat, max_steps, see=None):
     reply = await asyncio.to_thread(chat, msgs, [], model, key); return (reply.get('content') or '').strip() or 'I could not finish the research in the steps allowed.', steps, images
 
 
-def run(backend, folder, history, key, model=DEFAULT_MODEL, chat=None, max_steps=MAX_STEPS, vision=False, vision_model=VISION_MODEL, see=None):
+def run(backend, folder, history, key, model=DEFAULT_MODEL, chat=None, max_steps=MAX_STEPS, vision=False, vision_model=VISION_MODEL, see=None, write=False):
     """Answer the last question of `history` ([{role, content}]) about the project in `folder`: the model calls the read-only tools through `backend` until it can answer. `vision`: the pictures the tools make are also described by `vision_model` (`see(jpeg, question)` replaces that call, for tests). Returns dict(answer, steps, images, model, vision, seconds)."""
     from strata360.server import mcp_tools as MT
     if vision and see is None: see = lambda jpeg, question: describe_nvidia(jpeg, question, vision_model, key)
-    t0 = time.time(); answer, steps, images = asyncio.run(_loop(MT.build_server(backend, folder), folder, history, key, model, chat or chat_nvidia, max_steps, see if vision else None))
-    return dict(answer=answer, steps=steps, images=images, model=model, vision=bool(vision), seconds=round(time.time() - t0, 1))
+    from strata360.server import agent_edit as AE
+    t0 = time.time(); answer, steps, images = asyncio.run(_loop(MT.build_server(backend, folder, write=write), folder, history, key, model, chat or chat_nvidia, max_steps, see if vision else None, write))
+    return dict(answer=answer, steps=steps, images=images, pending=AE.pending_for(folder) if write else [], model=model, vision=bool(vision), write=bool(write), seconds=round(time.time() - t0, 1))
 
 
 def valid_model(m): return bool(m) and bool(re.match(r'^[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.:-]*$', m))
