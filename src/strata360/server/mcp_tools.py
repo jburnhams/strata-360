@@ -1,4 +1,4 @@
-"""MCP tools for the strata360 server: what an agent may look at in a project. READ ONLY: the backend has a `get` and nothing else, so no tool can change a project, start a job or delete anything (writing tools, if they ever come, are a separate registry behind a flag).
+"""MCP tools for the strata360 server: what an agent may look at in a project, and, in write mode, change. The eight look-tools only GET (a read-only backend has no `post` at all). The ninth, `edit`, exists only when the server is built with `write`: it goes through server/agent_edit.py (argument checks, approval for costly actions, backups, journal, undo).
 
 The tools are NOT a map of the HTTP API. They are a few task-shaped tools whose answers are digests, built to cost an agent little context:
   project     where the project stands (one digest over progress, coverage, plan, script, music, track, stills), or its stage table, log or the allowed roots
@@ -9,11 +9,12 @@ The tools are NOT a map of the HTTP API. They are a few task-shaped tools whose 
   script      the voice-over script as a summary or a page of its items
   film        the rendered outputs and the facts around them: stills, final render, music, GPS track
   picture     one picture: a frame of the footage at a time, a clip's thumbnail, or a rendered film still
+  edit        (write mode) change the project: plan overrides, transcript, notes, script ... ; costly actions wait for the user's approval
 One tool call may fetch several endpoints (concurrently) and cut them down; each answer says what else can be asked for (`more`). Everything goes through the server's own API (`/api/...`), so the folder allow-list (roots), the token and the shapes the web app sees apply unchanged. Answers are trimmed (`shrink`): lists are cut with a count of what was left out, long text is cut, per-word timing is dropped.
 
   build_server(backend, default_folder)   -> MCPServer with the tools above
-  AsgiBackend(app, token)                  in-process, for the server's own /mcp (no network hop)
-  HttpBackend(url, token)                  over HTTP, for `strata360 mcp` (stdio) talking to a running server
+  AsgiBackend(app, token)                  in-process, read only, for the server's own /mcp (no network hop); WriteAsgiBackend adds post and edit
+  HttpBackend(url, token)                  over HTTP, read only, for `strata360 mcp` (stdio) talking to a running server; WriteHttpBackend sends edits to the server (POST /api/agent/edit)
 
 Folder: every tool takes an optional `folder`; without it the project last opened in the server (`/api/last`) is used."""
 import asyncio, re
@@ -54,11 +55,12 @@ class WriteAsgiBackend(AsgiBackend):
     """The in-process backend that may also POST (write mode of the assistant: the edit tier, server/agent_edit.py). A separate class so the read-only one cannot."""
     async def post(self, path, body):
         async with self._client() as c: r = await c.post(path, json=body)
-        if r.status_code >= 400:
-            try: why = r.json().get('detail', r.text)
-            except ValueError: why = r.text
-            raise ToolError(f'{path}: {r.status_code} {why}')
-        return r.json()
+        return _json_or_raise(r, path)
+
+    async def edit(self, folder, action, args):
+        """One edit action, run here in the server process (its approvals and journal)."""
+        from strata360.server import agent_edit as AE
+        return await AE.execute(self.post, folder, action, args)
 
 
 class HttpBackend:
@@ -69,6 +71,21 @@ class HttpBackend:
         return httpx.AsyncClient(base_url=self.url, headers={'Authorization': f'Bearer {self.token}'} if self.token else {}, timeout=60)
     async def get(self, path, **params): return await _get(self._client(), path, params)
     async def get_bytes(self, path, **params): return await _get(self._client(), path, params, raw=True)
+
+
+def _json_or_raise(r, path):
+    if r.status_code >= 400:
+        try: why = r.json().get('detail', r.text)
+        except ValueError: why = r.text
+        raise ToolError(f'{path}: {r.status_code} {why}')
+    return r.json()
+
+
+class WriteHttpBackend(HttpBackend):
+    """The stdio shim's backend in write mode: an edit is sent to the running server (POST /api/agent/edit), which runs it, so approvals wait where the user sees them (the Ask page) and the backup and the journal are the server's."""
+    async def edit(self, folder, action, args):
+        async with self._client() as c: r = await c.post('/api/agent/edit', json=dict(folder=folder, action=action, args=args))
+        return _json_or_raise(r, '/api/agent/edit')
 
 
 async def _get(client, path, params, raw=False):
@@ -108,7 +125,7 @@ def seg_row(g, line=None):
 
 
 def build_server(backend, default_folder=None, write=False):
-    """The MCPServer (mcp 2.x `MCPServer`) with every tool bound to `backend`. With `write` (the backend must have `post`) the `edit` tool is added too: the edit tier of server/agent_edit.py."""
+    """The MCPServer (mcp 2.x `MCPServer`) with every tool bound to `backend`. With `write` (the backend must have `edit`) the `edit` tool is added too: the edit tier of server/agent_edit.py."""
     from mcp.server.mcpserver import MCPServer, Image
     from mcp.types import ToolAnnotations
     ro = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -244,7 +261,7 @@ def build_server(backend, default_folder=None, write=False):
         usage = AE.usage()
 
         async def edit(action: str, args: dict | None = None, folder: str | None = None) -> dict:
-            return await AE.execute(backend.post, await folder_of(folder), action, args or {})
+            return await backend.edit(await folder_of(folder), action, args or {})
         edit.__doc__ = ('Change the project, with the same effect as the user doing it in the app. `action` is one of the names below, `args` its arguments (a ? marks an optional one). Changes are backed up and journalled. Actions marked [needs approval] do not run: they wait for the USER to approve them in the Ask panel, '
                         'and you must tell the user so. [background job] actions start work and return at once. ACTIONS: ' + usage)
         srv.add_tool(edit, annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False))

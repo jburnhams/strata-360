@@ -20,6 +20,13 @@ class Post:
         return {'ok': True}
 
 
+class WB:
+    """A write backend for the tool: its edit runs the real edit tier over the given post."""
+    def __init__(self, post): self.post = post
+    async def get(self, *a, **k): return {}
+    async def edit(self, folder, action, args): return await AE.execute(self.post, folder, action, args)
+
+
 @pytest.fixture(autouse=True)
 def clean(monkeypatch):
     AE.PENDING.clear(); AE._last_write.clear(); yield; AE.PENDING.clear(); AE._last_write.clear()
@@ -132,7 +139,7 @@ class TestApproval:
         with pytest.raises(MT.ToolError, match='too many'): self.go(Post(), 'analysis.redo', dict(items=[dict(clip='z', stage='x')]))
 
     def test_the_edit_tool_cannot_run_a_gated_action_by_any_argument(self):
-        post = Post(); srv = MT.build_server(type('B', (), {'post': post, 'get': None})(), '/p', write=True)
+        post = Post(); srv = MT.build_server(WB(post), '/p', write=True)
         r = run(srv.call_tool('edit', dict(action='final.render', args=dict(size='3840x2160')))); assert post.calls == [] and 'needs_approval' in r.content[0].text
         with pytest.raises(MT.ToolError): run(srv.call_tool('edit', dict(action='final.render', args=dict(approved=True))))
 
@@ -141,10 +148,10 @@ class TestTool:
     def test_the_edit_tool_exists_only_in_write_mode(self):
         class B:
             async def get(self, *a, **k): return {}
-        assert 'edit' not in MT.tool_names(MT.build_server(B(), '/p')) and 'edit' in MT.tool_names(MT.build_server(type('W', (B,), {'post': Post()})(), '/p', write=True))
+        assert 'edit' not in MT.tool_names(MT.build_server(B(), '/p')) and 'edit' in MT.tool_names(MT.build_server(WB(Post()), '/p', write=True))
 
     def test_the_description_lists_the_actions_and_the_rule_about_approval(self):
-        srv = MT.build_server(type('W', (), {'post': Post(), 'get': None})(), '/p', write=True); t = next(t for t in run(srv.list_tools()) if t.name == 'edit')
+        srv = MT.build_server(WB(Post()), '/p', write=True); t = next(t for t in run(srv.list_tools()) if t.name == 'edit')
         assert 'plan.lock(wid, locked?)' in t.description and 'needs approval' in t.description and 'USER' in t.description and len(t.description) < 2500 and t.annotations.read_only_hint is False
 
     def test_the_read_only_backend_cannot_post(self): assert not hasattr(MT.AsgiBackend(None), 'post') and hasattr(MT.WriteAsgiBackend(None), 'post')
@@ -209,7 +216,7 @@ class TestRoutes:
     def test_the_new_routes_need_the_token_and_the_roots(self, make_client, project, tmp_path):
         c = make_client(token='s3cret'); h = {'Authorization': 'Bearer s3cret'}
         assert c.get('/api/agent/pending', params=dict(folder=project.folder)).status_code == 401 and c.post('/api/agent/approve', json=dict(folder=project.folder, id='x')).status_code == 401
-        assert c.get('/api/agent/pending', params=dict(folder=str(tmp_path.parent)), headers=h).status_code == 403 and c.get('/api/agent/journal', params=dict(folder=project.folder), headers=h).json() == dict(entries=[])
+        assert c.get('/api/agent/pending', params=dict(folder=str(tmp_path.parent)), headers=h).status_code == 403 and c.get('/api/agent/journal', params=dict(folder=project.folder), headers=h).json()['entries'] == []
 
     def test_the_model_cannot_reach_the_approve_route_through_a_tool(self):
         assert 'approve' not in AE.usage() and not any(r.startswith('/api/agent') for r, *_ in AE.ACTIONS.values())

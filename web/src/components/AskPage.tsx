@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, type AgentImage, type AgentPending, type AgentStatus, type AgentStep, type AgentTurn } from '../api'
+import { api, type AgentImage, type AgentPending, type AgentStatus, type AgentStep, type AgentTurn, type AgentUndoState } from '../api'
 import { PanelSkeleton } from './Skeleton'
 
 // Ask questions about the project in plain words: a hosted model answers by looking things up with read-only tools (the clips, the transcript, the edit plan, the script ...). It cannot change anything.
@@ -39,7 +39,15 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
   const [msgs, setMsgs] = useState<Msg[]>([]); const [text, setText] = useState(''); const [busy, setBusy] = useState(false); const [vision, setVision] = useState(false); const [write, setWrite] = useState(false); const [pending, setPending] = useState<AgentPending[]>([]); const [deciding, setDeciding] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null); const gen = useRef(0)
   useEffect(() => { let live = true; api.agent().then(s => live && setStatus(s)).catch(() => live && setStatus(null)); return () => { live = false } }, [])
-  useEffect(() => { gen.current++; setMsgs([]); setBusy(false); setPending([]); let live = true; api.agentPending(folder).then(r => live && setPending(r.pending)).catch(() => {}); return () => { live = false } }, [folder])      // another project: a new conversation; what still waits for approval there is shown
+  const [undo, setUndo] = useState<AgentUndoState | null>(null); const [undoing, setUndoing] = useState(false)
+  const refresh = (live: () => boolean = () => true) => {                                                         // what waits for approval (an outside agent may have asked) and what an undo would do
+    api.agentPending(folder).then(r => live() && setPending(r.pending)).catch(() => {}); api.agentJournal(folder).then(r => live() && setUndo(r.undo)).catch(() => {})
+  }
+  useEffect(() => {                                                                                                // another project: a new conversation; what waits there is shown, and kept fresh while the page is open
+    gen.current++; setMsgs([]); setBusy(false); setPending([]); setUndo(null); let on = true; const live = () => on
+    refresh(live); const t = window.setInterval(() => refresh(live), 5000); return () => { on = false; window.clearInterval(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder])
   useEffect(() => { end.current?.scrollIntoView?.({ block: 'end' }) }, [msgs, busy])
   if (status === undefined) return <PanelSkeleton title="Ask about the project" rows={4} />
 
@@ -49,7 +57,7 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
     setMsgs([...msgs, { role: 'user', content: q }]); setText(''); setBusy(true)
     try {
       const r = await api.ask(folder, history.map(({ role, content }) => ({ role, content })), vision, write)
-      if (mine === gen.current) { setMsgs(m => [...m, { role: 'assistant', content: r.answer, steps: r.steps, images: r.images }]); if (r.pending) setPending(r.pending) }
+      if (mine === gen.current) { setMsgs(m => [...m, { role: 'assistant', content: r.answer, steps: r.steps, images: r.images }]); if (r.pending) setPending(r.pending); refresh(() => mine === gen.current) }
     } catch (e) {
       if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: e instanceof Error ? e.message : 'The assistant did not answer.', error: true }])
     } finally { if (mine === gen.current) setBusy(false) }
@@ -60,7 +68,15 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
       const r = approve ? await api.agentApprove(folder, p.id) : null; if (!approve) await api.agentDeny(folder, p.id)
       if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: approve ? `Approved and done: ${r?.did ?? p.summary}.${r?.job ? ' It runs in the background.' : ''}` : `Denied: ${p.summary}.` }])
     } catch (e) { if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: e instanceof Error ? e.message : 'That did not work.', error: true }]) }
-    finally { if (mine === gen.current) { setPending(ps => ps.filter(x => x.id !== p.id)); setDeciding(null) } }
+    finally { if (mine === gen.current) { setPending(ps => ps.filter(x => x.id !== p.id)); setDeciding(null); refresh(() => mine === gen.current) } }
+  }
+  const doUndo = async () => {
+    setUndoing(true); const mine = gen.current
+    try {
+      const r = await api.agentUndo(folder)
+      if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: `Undone: the project is back to before the assistant's last ${r.undone} change${r.undone === 1 ? '' : 's'} (${r.files} files restored). The state just before the undo is saved as ${r.checkpoint ?? 'the latest backup'}.` }])
+    } catch (e) { if (mine === gen.current) setMsgs(m => [...m, { role: 'assistant', content: e instanceof Error ? e.message : 'The undo did not work.', error: true }]) }
+    finally { if (mine === gen.current) { setUndoing(false); refresh(() => mine === gen.current) } }
   }
   const ready = status?.configured && status.available
 
@@ -84,6 +100,9 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
         {busy && <p className="text-sm text-stone-500" role="status">Looking…</p>}
         <div ref={end} />
       </div>
+      {undo?.available && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-stone-100 p-2 text-sm dark:bg-stone-800">
+        <span>The assistant made {undo.changes} change{undo.changes === 1 ? '' : 's'}{undo.since ? ` since ${new Date(undo.since * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}.</span>
+        <button disabled={undoing} onClick={() => void doUndo()} title="Put the project back to how it was before the assistant's last changes. The current state is backed up first, and anything you changed since is undone too." className="rounded-lg border border-stone-400 px-3 py-1 disabled:opacity-40">Undo them</button></div>}
       {pending.length > 0 && <ul aria-label="Waiting for your approval" className="mt-3 space-y-2">
         {pending.map(p => <li key={p.id} className="rounded-lg border-2 border-amber-500 bg-amber-50 p-3 text-sm dark:bg-amber-950">
           <div><b>Needs your approval:</b> {p.summary}</div><div className="text-xs text-stone-600 dark:text-stone-400">Why: {p.why}.</div>

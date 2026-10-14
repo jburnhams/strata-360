@@ -2,9 +2,10 @@
 
 One nested tool, `edit(action, args)`, is offered only in write mode. Each action is one (or a few) of the server's own POST routes, with its arguments checked here first. The safeguards:
 
-  Backups     before the first change of a session (and again whenever the last agent change is over SESSION_S old) a backup of the project metadata is forced, so the state before the agent touched anything can be restored; after every change one is made unless
-              one is under BACKUP_S old (pipeline/backup.py: every backup of the last 3 hours is kept).
-  Journal     every change is appended to <project>/strata360/agent_log.jsonl: time, action, arguments, result or error, the backup that preceded it.
+  Backups     before the first change of a session (and again whenever the last agent change is over SESSION_S old) a backup of the project metadata is forced, so the state before the agent touched anything can be restored; changes then BATCH: another
+              backup is made after a change only when the last one is over BACKUP_S (5 minutes) old (pipeline/backup.py: every backup of the last 3 hours is kept).
+  Journal     every change is appended to <project>/strata360/agent_log.jsonl: time, action, arguments, result or error, the backup that preceded it; the first change of a session records the `restore_point` that undo goes back to.
+  Undo        `undo(folder)` puts the project metadata back to the restore point of the latest session of agent changes (after saving the current state as a backup, so the undo can itself be undone). One click, one session at a time.
   Approval    some actions (`GATED`) never run on the model's say-so: they create a pending approval that only the user can grant (the Approve button of the Ask page, `POST /api/agent/approve`), because they cost money, send data out, throw work away
               or take hours. The model is told "needs the user's approval" and cannot grant it. Pending approvals expire after PENDING_S.
   Not offered at all: deleting anything, uploading files (music, tracks, photos, recordings), the camera clock, the wearer's face profile, API keys.
@@ -12,7 +13,7 @@ One nested tool, `edit(action, args)`, is offered only in write mode. Each actio
   execute(post, folder, action, args, approved=False)  ->  dict(ok, result) | dict(needs_approval, id, summary) ; raises ToolError on a bad request"""
 import json, os, threading, time, uuid
 
-BACKUP_S = 60.0                  # after a change, a backup unless one is this young
+BACKUP_S = 300.0                 # changes batch: after a change a backup is made only when the last one is older than this (5 minutes)
 SESSION_S = 20 * 60              # a pause this long between agent changes starts a new session (a forced backup of the state before the next change)
 PENDING_S = 30 * 60              # how long an approval can wait
 MAX_PENDING = 20
@@ -120,6 +121,38 @@ def _backup(folder, force):
     except Exception: return None                         # a backup problem must not stop an edit the user asked for; the journal says there was none
 
 
+def _latest(folder):
+    from strata360.pipeline import backup as B
+    bk = B.list_backups(folder); return bk[-1][0] if bk else None
+
+
+def undo_state(folder):
+    """What an undo would do: dict(available, restore_point, since, changes, sessions). Sessions are counted from the journal: each session's first change records its `restore_point`, and an undo takes the latest one away."""
+    stack = []
+    for e in read_journal(folder, 5000):
+        if e.get('action') == 'agent.undo' and e.get('status') == 'undone':
+            if stack: stack.pop()
+        elif e.get('session_start') and e.get('status') in ('done', 'failed') and e.get('restore_point'): stack.append(dict(restore_point=e['restore_point'], since=e['t'], changes=0))
+        if stack and e.get('status') == 'done' and e.get('action') != 'agent.undo': stack[-1]['changes'] += 1
+    top = stack[-1] if stack else None
+    return dict(available=bool(top and top['changes']), restore_point=top and top['restore_point'], since=top and top['since'], changes=top['changes'] if top else 0, sessions=len(stack))
+
+
+def undo(folder):
+    """Put the project metadata back to the state before the latest session of agent changes. The current state is backed up first. Returns dict(restored, checkpoint, files, undone)."""
+    from strata360.pipeline import backup as B
+    st = undo_state(folder)
+    if not st['available']: raise ToolError('there is no assistant change to undo')
+    if not os.path.exists(os.path.join(B.backup_dir(folder), st['restore_point'])): raise ToolError(f"the backup {st['restore_point']} is gone (backups are thinned over time): it cannot be restored")
+    from strata360.pipeline import config
+    jp = os.path.join(config.race_dir(folder), LOG); keep = open(jp, 'rb').read() if os.path.exists(jp) else b''                  # the journal is inside the backed-up folder: an undo must not rewind the record of itself
+    cp = B.backup(folder, force=True, interval=0.0); n = B.restore_over(folder, st['restore_point'])
+    with open(jp, 'wb') as f: f.write(keep)
+    journal(folder, dict(t=time.time(), source='user', action='agent.undo', status='undone', restored=st['restore_point'], checkpoint=os.path.basename(cp) if cp else None, files=n, undid=st['changes']))
+    with _lock: _last_write.pop(folder, None)                                                                          # the next change starts a new session
+    return dict(restored=st['restore_point'], checkpoint=os.path.basename(cp) if cp else None, files=n, undone=st['changes'])
+
+
 def expire(now=None):
     now = time.time() if now is None else now
     for k in [k for k, v in PENDING.items() if now - v['created'] > PENDING_S]: PENDING.pop(k, None)
@@ -142,11 +175,12 @@ async def execute(post, folder, action, args, approved=False, source='agent'):
         return dict(needs_approval=pid, summary=text, why=why, note='the user must approve this in the Ask panel; you cannot approve it. Tell them what it does and why it needs approval.')
     with _lock: first = time.time() - _last_write.get(folder, 0) > SESSION_S; _last_write[folder] = time.time()
     before = _backup(folder, force=first); entry = dict(t=time.time(), source=source, action=action, args=args, summary=text, backup_before=before, approved=bool(approved))
+    if first: entry.update(session_start=True, restore_point=before or _latest(folder))                                  # nothing changed since the newest backup: that backup IS the state before
     try: res = await post(route, dict(body_of(action, args), folder=folder))
     except Exception as e:
         entry.update(status='failed', error=str(e)[:300]); journal(folder, entry); raise ToolError(f'{action} failed: {e}')
     after = _backup(folder, force=False); entry.update(status='done', backup_after=after); journal(folder, entry)
-    return dict(ok=True, did=text, job=bool(job) or None, result=_trim(res), backup=before or after)
+    return dict(ok=True, did=text, job=bool(job) or None, result=_trim(res), backup=before or after, undoable=True)
 
 
 def _trim(res):

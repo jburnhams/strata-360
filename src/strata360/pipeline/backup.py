@@ -81,7 +81,10 @@ def list_backups(folder):
 
 def _write(folder, now, files):
     d = backup_dir(folder); os.makedirs(d, exist_ok=True)
-    name = 'meta-' + dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime(_STAMP) + '.tar.gz'; final = os.path.join(d, name); tmp = final + f'.{os.getpid()}.tmp'
+    name = 'meta-' + dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime(_STAMP) + '.tar.gz'
+    while os.path.exists(os.path.join(d, name)):                                          # names have one-second resolution: a second backup in the same second (an undo checkpoint) must never replace the first
+        now += 1; name = 'meta-' + dt.datetime.fromtimestamp(now, dt.timezone.utc).strftime(_STAMP) + '.tar.gz'
+    final = os.path.join(d, name); tmp = final + f'.{os.getpid()}.tmp'
     with tarfile.open(tmp, 'w:gz') as tf:
         for rel, p in files:
             try: tf.add(p, arcname=rel, recursive=False)
@@ -135,6 +138,11 @@ def restore(folder, name, dest):
             with tf.extractfile(m) as r, open(target, 'wb') as w: w.write(r.read())
             os.utime(target, (m.mtime, m.mtime)); n += 1
     return n
+
+
+def restore_over(folder, name):
+    """Unpack one backup over the project's own files (what undo does): the files in the backup come back as they were; files made since stay. Back up the current state first. Returns the number of files."""
+    return restore(folder, name, config.race_dir(folder))
 
 
 class Ticker:

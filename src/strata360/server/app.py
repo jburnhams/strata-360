@@ -160,9 +160,10 @@ def progress(folder):
 
 
 def mount_mcp(api, token):
-    """Serve the read-only MCP tools at /mcp (streamable HTTP, the server's token required) from the same process, so an agent sees what the web app sees. Skipped when the `mcp` package is not installed, or with STRATA360_MCP=0."""
+    """Serve the MCP tools at /mcp (streamable HTTP, the server's token required) from the same process, so an agent sees what the web app sees. Skipped when the `mcp` package is not installed, or with STRATA360_MCP=0."""
     if os.environ.get('STRATA360_MCP') == '0': return
-    try: from strata360.server import mcp_tools as MT; srv = MT.build_server(MT.AsgiBackend(api, token))
+    write = os.environ.get('STRATA360_MCP_WRITE') != '0'                                  # the edit tool is on by default (the /api routes it calls are as open as it is); STRATA360_MCP_WRITE=0 makes /mcp read-only
+    try: from strata360.server import mcp_tools as MT; srv = MT.build_server((MT.WriteAsgiBackend if write else MT.AsgiBackend)(api, token), write=write)
     except ImportError: return
     import contextlib
     api.mount('/mcp', MT.guarded(srv.streamable_http_app(streamable_http_path='/'), token)); inner = api.router.lifespan_context
@@ -1984,9 +1985,23 @@ def create_app(roots, token=None):
         except MT.ToolError as e: raise HTTPException(404, str(e))
 
     @api.get('/api/agent/journal', dependencies=[Depends(auth)])
-    def get_agent_journal(folder: str, limit: int = 50):                                  # what the assistant changed (or was refused): newest last; `backup_before` names the backup to restore the earlier state from
+    def get_agent_journal(folder: str, limit: int = 50):                                  # what the assistant changed (or was refused): newest last; `backup_before` names the backup to restore the earlier state from; `undo`: what one click of undo would do
         from strata360.server import agent_edit as AE
-        return dict(entries=AE.read_journal(folder_of(folder), max(1, min(limit, 500))))
+        f = folder_of(folder); return dict(entries=AE.read_journal(f, max(1, min(limit, 500))), undo=AE.undo_state(f))
+
+    @api.post('/api/agent/edit', dependencies=[Depends(auth)])
+    def post_agent_edit(body: dict):                                                      # {folder, action, args}: one edit action of the assistant's edit tier (server/agent_edit.py), for an outside agent (the MCP stdio shim) so its approvals and journal live here. There is no way to pass an approval
+        import asyncio
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        f = folder_of(body.get('folder'))
+        try: return asyncio.run(AE.execute(MT.WriteAsgiBackend(api, token).post, f, str(body.get('action')), body.get('args') if isinstance(body.get('args'), dict) else {}))
+        except MT.ToolError as e: raise HTTPException(400, str(e))
+
+    @api.post('/api/agent/undo', dependencies=[Depends(auth)])
+    def post_agent_undo(body: dict):                                                      # {folder}: put the project back to before the assistant's latest session of changes (the current state is backed up first)
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        try: return AE.undo(folder_of(body.get('folder')))
+        except MT.ToolError as e: raise HTTPException(409, str(e))
 
     mount_mcp(api, token)                                                               # /mcp: the read-only tools for a local agent (server/mcp_tools.py)
     return api

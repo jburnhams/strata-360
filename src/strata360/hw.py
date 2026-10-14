@@ -119,13 +119,13 @@ def gpu_pause(worked_s, sleep=None):
 def gpu_throttled(fn, device=None):
     """`fn` (a model's forward or predict) that waits for its GPU work to finish and then pauses for the duty cycle: the GPU is used in slices, never flat out."""
     def run(*a, **k):
-        t0 = time.time(); out = fn(*a, **k); dev = device or gpu_device()
+        t0 = time.perf_counter(); out = fn(*a, **k); dev = device or gpu_device()                      # a duration: the monotonic high-resolution clock (time.time() ticks every 15 ms on Windows, so a short call measured 0 s and was never paused)
         try:
             import torch
             if dev == 'mps': torch.mps.synchronize()
             elif dev == 'cuda': torch.cuda.synchronize()
         except Exception: pass
-        if dev != 'cpu': gpu_pause(time.time() - t0)
+        if dev != 'cpu': gpu_pause(time.perf_counter() - t0)
         return out
     return run
 

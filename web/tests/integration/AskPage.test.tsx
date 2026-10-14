@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { axe } from 'vitest-axe'
 import AskPage, { inline } from '../../src/components/AskPage'
-import type { AgentAnswer, AgentPending, AgentStatus } from '../../src/api'
+import type { AgentAnswer, AgentPending, AgentStatus, AgentUndoState } from '../../src/api'
 import { mockError, mockGet, mockNetworkError, mockPending, mockPost, recordRequests } from '../utils/api'
-import { screen, setup, within } from '../utils/render'
+import { act, screen, setup, within } from '../utils/render'
 
 const status = (o: Partial<AgentStatus> = {}): AgentStatus => ({ configured: true, model: 'nvidia/nemotron-3-super-120b-a12b', vision_model: 'meta/llama-3.2-11b-vision-instruct', read_only: true, available: true, ...o })
 const answer = (o: Partial<AgentAnswer> = {}): AgentAnswer => ({ answer: 'There are 3 clips.', steps: [], images: [], model: 'm', vision: false, seconds: 1, ...o })
 const pend = (o: Partial<AgentPending> = {}): AgentPending => ({ id: 'p1', action: 'final.render', summary: 'start the final film render (hours of work, large files)', why: 'a long, heavy render', args: {}, ...o })
+const undoState = (o: Partial<AgentUndoState> = {}): AgentUndoState => ({ available: true, restore_point: 'meta-1.tar.gz', since: 1_800_000_000, changes: 1, sessions: 1, ...o })
 const props = { folder: '/f', clipIds: ['CAM_1', 'CAM_2'], onOpenClip: vi.fn() }
 const ask = async (user: ReturnType<typeof setup>['user'], q: string) => { await user.type(await screen.findByLabelText('Your question'), q); await user.click(screen.getByRole('button', { name: 'Ask' })) }
 
@@ -121,29 +122,53 @@ describe('AskPage', () => {
   })
 
   it('shows what waits for approval when the page opens, and an answer can add to it', async () => {
-    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); mockPost('/api/agent/chat', answer({ pending: [pend(), pend({ id: 'p2', summary: 'forget 2 analysis results' })] }))
+    mockGet('/api/agent', status()); let queue = [pend()]; mockGet('/api/agent/pending', () => ({ pending: queue })); mockPost('/api/agent/chat', () => { queue = [pend(), pend({ id: 'p2', summary: 'forget 2 analysis results' })]; return answer({ pending: queue }) })
     const { user } = setup(<AskPage {...props} />)
     const list = await screen.findByRole('list', { name: 'Waiting for your approval' }); expect(within(list).getAllByRole('listitem')).toHaveLength(1); expect(within(list).getByText(/a long, heavy render/)).toBeInTheDocument()
     await ask(user, 'render it'); await vi.waitFor(() => expect(within(screen.getByRole('list', { name: 'Waiting for your approval' })).getAllByRole('listitem')).toHaveLength(2))
   })
 
   it('approving runs it through the server and reports what was done', async () => {
-    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); const seen = recordRequests('/api/agent/approve'); mockPost('/api/agent/approve', { ok: true, did: 'start the final film render', job: true, backup: null })
+    mockGet('/api/agent', status()); let queue = [pend()]; mockGet('/api/agent/pending', () => ({ pending: queue })); const seen = recordRequests('/api/agent/approve'); mockPost('/api/agent/approve', () => { queue = []; return { ok: true, did: 'start the final film render', job: true, backup: null } })
     const { user } = setup(<AskPage {...props} />); await user.click(await screen.findByRole('button', { name: 'Approve' }))
     expect(await screen.findByText(/Approved and done: start the final film render\. It runs in the background\./)).toBeInTheDocument(); expect(seen[0].body).toEqual({ folder: '/f', id: 'p1' })
     expect(screen.queryByRole('list', { name: 'Waiting for your approval' })).not.toBeInTheDocument()
   })
 
   it('denying tells the server and drops the card', async () => {
-    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); const seen = recordRequests('/api/agent/deny'); mockPost('/api/agent/deny', { denied: true })
+    mockGet('/api/agent', status()); let queue = [pend()]; mockGet('/api/agent/pending', () => ({ pending: queue })); const seen = recordRequests('/api/agent/deny'); mockPost('/api/agent/deny', () => { queue = []; return { denied: true } })
     const { user } = setup(<AskPage {...props} />); await user.click(await screen.findByRole('button', { name: 'Deny' }))
     expect(await screen.findByText(/Denied: start the final film render/)).toBeInTheDocument(); expect(seen[0].body).toEqual({ folder: '/f', id: 'p1' }); expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
   })
 
   it('shows an approval that failed, and drops the stale card (it is gone on the server)', async () => {
-    mockGet('/api/agent', status()); mockGet('/api/agent/pending', { pending: [pend()] }); mockError('/api/agent/approve', 404, 'that approval is gone (expired or already answered)', 'post')
+    mockGet('/api/agent', status()); let calls = 0; mockGet('/api/agent/pending', () => ({ pending: calls++ === 0 ? [pend()] : [] })); mockError('/api/agent/approve', 404, 'that approval is gone (expired or already answered)', 'post')
     const { user } = setup(<AskPage {...props} />); await user.click(await screen.findByRole('button', { name: 'Approve' }))
     expect(await screen.findByText(/that approval is gone/)).toBeInTheDocument(); expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+  })
+
+  it('offers one-click undo when the assistant has changed things, and says where the replaced state went', async () => {
+    mockGet('/api/agent', status()); mockGet('/api/agent/journal', { entries: [], undo: undoState({ changes: 3 }) }); const seen = recordRequests('/api/agent/undo')
+    mockPost('/api/agent/undo', { restored: 'meta-1.tar.gz', checkpoint: 'meta-2.tar.gz', files: 5, undone: 3 })
+    const { user } = setup(<AskPage {...props} />)
+    expect(await screen.findByText(/The assistant made 3 changes/)).toBeInTheDocument()
+    mockGet('/api/agent/journal', { entries: [], undo: undoState({ available: false, changes: 0 }) }); await user.click(screen.getByRole('button', { name: 'Undo them' }))
+    expect(await screen.findByText(/Undone: the project is back to before the assistant's last 3 changes \(5 files restored\)\. The state just before the undo is saved as meta-2\.tar\.gz/)).toBeInTheDocument()
+    expect(seen[0].body).toEqual({ folder: '/f' }); await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Undo them' })).not.toBeInTheDocument())
+  })
+
+  it('shows no undo when there is nothing to undo, and an undo that fails says why', async () => {
+    mockGet('/api/agent', status()); setup(<AskPage {...props} />); await screen.findByLabelText('Your question'); expect(screen.queryByRole('button', { name: 'Undo them' })).not.toBeInTheDocument()
+    mockGet('/api/agent/journal', { entries: [], undo: undoState() }); mockError('/api/agent/undo', 409, 'the backup meta-1.tar.gz is gone', 'post')
+    const { user } = setup(<AskPage {...props} />); await user.click(await screen.findByRole('button', { name: 'Undo them' })); expect(await screen.findByText(/the backup meta-1\.tar\.gz is gone/)).toBeInTheDocument()
+  })
+
+  it('picks up an approval an outside agent asked for while the page is open', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); try {
+      mockGet('/api/agent', status()); setup(<AskPage {...props} />); await screen.findByLabelText('Your question'); expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+      mockGet('/api/agent/pending', { pending: [pend({ summary: 'asked by Claude Code' })] }); await act(() => vi.advanceTimersByTimeAsync(5200))
+      expect(await screen.findByText(/asked by Claude Code/)).toBeInTheDocument()
+    } finally { vi.useRealTimers() }
   })
 
   it('has no accessibility violations with an approval waiting', async () => {
