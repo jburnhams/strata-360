@@ -64,7 +64,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/VoiceoverPanel.tsx` | 100% | done |
 | `src/aim.ts` | 100% | done (tested via `unit/aim.test.ts`) |
 | every other file in `src/` | 0% | todo
-| `src/components/Timeline.tsx` | 77.55% | partial (interactions and edge cases)
+| `src/components/Timeline.tsx` | 94.23% | done (interactions and edge cases tested)
 | `src/components/Moments.tsx` | 100% | done |
 | `src/components/Skeleton.tsx` | 100% | done |
 | `src/components/PlayIcons.tsx` | 100% | done |
