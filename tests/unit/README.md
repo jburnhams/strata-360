@@ -26,6 +26,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `edit/music_fit.py`, `audio/music_gen/__init__.py` | 98%, 86% | done: the fit and checks on synthetic clicks with the real beat tracker and a fake stretch; the generator with a fake backend and fake file I/O; the build end to end with a fake generator (`test_music_build.py`). `audio/music_gen/acestep_runner.py` and `acestep()`'s subprocess run only against the real model (by hand, progress.md) |
 | `edit/stems.py`, the beat tracker, key and bar features in `edit/music.py` | 67% | partial: the cache and separator contract, the tracker and bar features done; `demucs_separator` and the ffmpeg read/write need models and ffmpeg (an integration run on the PC), the rest of `music.py` is the integration owner's |
 | `edit/chrono.py`, `transcript_edits.py`, `analysis/follow.py`, `render/parallax.py` | >= 94% | done |
+| `analysis/transcript_review.py` and its two endpoints in `server/app.py` | ~100% | done (`test_transcript_review.py`: pace, priority, reviewed marks, the worst-first queue, endpoints) |
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
 | `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |
 | `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network. `overlay/flyover.py`: camera, style and frames with `mbgl-render` faked (`test_overlay_flyover.py`) |
