@@ -328,7 +328,9 @@ def list_drafts(folder):
 
 def save_draft(folder, doc):
     """Writes script2/draft-<time>.json and removes all but the last KEEP drafts. Returns the file name."""
-    d = _dir(folder); os.makedirs(d, exist_ok=True); name = 'draft-' + dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.json'                        # microseconds: names sort in the order they were written
+    d = _dir(folder); os.makedirs(d, exist_ok=True); now = dt.datetime.now(); last = list_drafts(folder)[-1:]
+    name = 'draft-' + now.strftime('%Y%m%d-%H%M%S-%f') + '.json'                                                                                             # microseconds: names sort in the order they were written
+    while last and name <= last[0]: now += dt.timedelta(microseconds=1); name = 'draft-' + now.strftime('%Y%m%d-%H%M%S-%f') + '.json'                      # (a coarse clock, as on Windows, can give two saves one time: the newer must still sort last)
     p = os.path.join(d, name); json.dump(doc, open(p + '.tmp', 'w'), indent=1); os.replace(p + '.tmp', p)
     for old in list_drafts(folder)[:-KEEP]: os.remove(os.path.join(d, old))
     return name

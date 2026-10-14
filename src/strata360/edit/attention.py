@@ -33,7 +33,8 @@ def score_map(vq, t0, t1):
             bad_master = lens < 0.5; mostly = share > 0.65 if bad_master else share < 0.35; s = np.where(mostly, s * BAD_LENS_FACTOR, s)
         sc.append(s)
     lens_share = np.nanmedian(vq['lens_detail_share_master'][sel]) if np.isfinite(vq['lens_detail_share_master'][sel]).any() else float('nan')
-    return np.nanmean(np.stack(sc), axis=0), float(lens_share)
+    st = np.stack(sc); seen = np.isfinite(st).sum(0)                                                             # the mean over the maps that cover a cell; NaN (without numpy's warning) where none does
+    return np.divide(np.where(np.isfinite(st), st, 0).sum(0), seen, out=np.full(seen.shape, np.nan, st.dtype), where=seen > 0), float(lens_share)
 
 
 def best_yaw_offset(vq, t0, t1, heading_deg):

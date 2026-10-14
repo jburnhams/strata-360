@@ -25,3 +25,16 @@ if (typeof globalThis.localStorage?.getItem !== 'function') {
   }
   Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true, writable: true })
 }
+
+// leaflet-node (loaded by the files that draw a map) reads an image's `src` as a file path, so every `/api/...` picture (map tiles, thumbnails) logged "Could not find image". The app's own URL stays in the attribute (tests read it); what is loaded is a 1 px picture.
+// (Done once the test file has imported what it needs, so a file that never loads leaflet-node is not touched by it.)
+const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+beforeAll(() => {
+  const proto = globalThis.HTMLImageElement?.prototype, d = proto && Object.getOwnPropertyDescriptor(proto, 'src')
+  if (!proto || !d?.set || (d.set as { pixel?: boolean }).pixel) return
+  const set = function (this: HTMLImageElement, value: string) {
+    if (typeof value === 'string' && value.startsWith('/')) { d.set!.call(this, PIXEL); this.setAttribute('src', value) } else d.set!.call(this, value)
+  }
+  ;(set as { pixel?: boolean }).pixel = true
+  Object.defineProperty(proto, 'src', { ...d, set })
+})

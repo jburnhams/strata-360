@@ -1,9 +1,12 @@
 import { expect, it } from 'vitest'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { axe } from 'vitest-axe'
-import { mockGet, mockPending, recordRequests, mockError, mockPost } from '../utils/api'
+import { mockGet, mockPending, recordRequests, mockError, mockPost, type Seen } from '../utils/api'
 import { setup } from '../utils/render'
 import { makeMeta } from '../utils/factories'
 import FilmDetails from '../../src/components/FilmDetails'
+
+const lastPost = (reqs: Seen[]) => reqs.filter(r => r.method === 'POST').at(-1)?.body                    // what the last save sent
 
 it('renders a skeleton while loading', async () => {
   mockPending('/api/meta')
@@ -30,8 +33,7 @@ it('saves changes to title', async () => {
   await user.type(title, 'New Title')
   await user.click(document.body) // blur
 
-  const { waitFor } = await import('@testing-library/react')
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST' && (r.body as any)?.title === 'New Title')).toBeTruthy(), { timeout: 1000 })
+  await waitFor(() => expect(lastPost(reqs)).toMatchObject({ title: 'New Title' }), { timeout: 1000 })
 })
 
 it.todo('saves changes to date (flaky due to input[type="date"] and React synthetic onChange in jsdom)')
@@ -43,25 +45,24 @@ it('saves changes to race results', async () => {
   await findByDisplayValue('Test Title') // wait for load
   const reqs = recordRequests('/api/meta')
 
-  const { waitFor, fireEvent } = await import('@testing-library/react')
   const starters = await findByLabelText('Starters')
   fireEvent.change(starters, { target: { value: '100' } })
   fireEvent.blur(starters)
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST' && (r.body as any)?.results?.starters === 100)).toBeTruthy(), { timeout: 1000 })
+  await waitFor(() => expect(lastPost(reqs)).toMatchObject({ results: { starters: 100 } }), { timeout: 1000 })
 
   const finishers = await findByLabelText('Finishers')
   fireEvent.change(finishers, { target: { value: '90' } })
   fireEvent.blur(finishers)
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST' && (r.body as any)?.results?.finishers === 90)).toBeTruthy(), { timeout: 1000 })
+  await waitFor(() => expect(lastPost(reqs)).toMatchObject({ results: { finishers: 90 } }), { timeout: 1000 })
 
   const you = await findByLabelText('You')
   await user.selectOptions(you, 'yes')
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST' && (r.body as any)?.results?.finished === true)).toBeTruthy(), { timeout: 1000 })
+  await waitFor(() => expect(lastPost(reqs)).toMatchObject({ results: { finished: true } }), { timeout: 1000 })
 
   const position = await findByLabelText('Your position')
   fireEvent.change(position, { target: { value: '5' } })
   fireEvent.blur(position)
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST' && (r.body as any)?.results?.position === 5)).toBeTruthy(), { timeout: 1000 })
+  await waitFor(() => expect(lastPost(reqs)).toMatchObject({ results: { position: 5 } }), { timeout: 1000 })
 })
 
 it('clears race results on empty input', async () => {
@@ -71,12 +72,11 @@ it('clears race results on empty input', async () => {
   await findByDisplayValue('Test Title') // wait for load
   const reqs = recordRequests('/api/meta')
 
-  const { waitFor, fireEvent } = await import('@testing-library/react')
   const starters = await findByLabelText('Starters')
 
   fireEvent.change(starters, { target: { value: '' } })
   fireEvent.blur(starters)
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST' && (r.body as any)?.results?.starters === null)).toBeTruthy(), { timeout: 1000 })
+  await waitFor(() => expect(lastPost(reqs)).toMatchObject({ results: { starters: null } }), { timeout: 1000 })
 })
 
 it('shows an error if save fails', async () => {
@@ -96,13 +96,12 @@ it('uses earliest capture when button is clicked', async () => {
   mockGet('/api/meta', () => makeMeta({ date: '2023-01-05', effective: { title: null, date: '2023-01-05' }, defaults: { title: null, date: '2023-01-01', earliest_capture_utc: null } }))
   const { user, findByText } = setup(<FilmDetails folder="/f" />)
 
-  const { waitFor, screen } = await import('@testing-library/react')
   await waitFor(async () => expect(await screen.findByText('use earliest capture')).toBeInTheDocument(), { timeout: 1000 }) // Wait for loaded state
 
   const btn = await findByText('use earliest capture')
   const reqs = recordRequests('/api/meta')
   await user.click(btn)
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST' && (r.body as any)?.date === '')).toBeTruthy())
+  await waitFor(() => expect(lastPost(reqs)).toMatchObject({ date: '' }))
 })
 
 it('has no accessibility violations', async () => {

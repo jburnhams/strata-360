@@ -85,6 +85,16 @@ def test_used_lines_are_what_the_clip_items_cover():
     assert SD.used_line_ids(GOOD, PACK) == {'0001.00', '0001.01', '0003.00'}
 
 
+def test_two_drafts_saved_in_one_clock_tick_keep_their_order(project, monkeypatch):
+    import datetime
+    class Frozen(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None): return cls(2026, 2, 21, 12, 0, 0, 5)
+    monkeypatch.setattr(SD, 'dt', type('dt', (), dict(datetime=Frozen, timedelta=datetime.timedelta)))
+    names = [SD.save_draft(project.folder, dict(n=i)) for i in range(3)]
+    assert len(set(names)) == 3 and names == sorted(names) and SD.load_draft(project.folder)['n'] == 2
+
+
 def test_drafts_are_kept_three_at_a_time_and_pins_are_saved(project):
     f = project.folder; assert SD.load_draft(f) is None and SD.list_drafts(f) == [] and SD.load_pins(f) == {}
     names = [SD.save_draft(f, dict(n=i)) for i in range(5)]; assert len(set(names)) == 5 and SD.list_drafts(f) == sorted(names)[-3:] and SD.load_draft(f)['n'] == 4 and SD.load_draft(f, names[-2])['n'] == 3

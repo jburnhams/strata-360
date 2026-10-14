@@ -5,15 +5,12 @@ import { setup } from '../utils/render'
 import { mockGet } from '../utils/api'
 import { makeClipDetail } from '../utils/factories'
 
-vi.mock('../../src/components/ClipPlayer', () => ({
-  default: () => <div data-testid="clip-player">ClipPlayer Mock</div>
-}))
 
 describe('WindowPlayer', () => {
-  it('renders a loading skeleton initially, then renders ClipPlayer when data loads', async () => {
+  it('renders a loading skeleton initially, then renders the player when data loads', async () => {
     mockGet('/api/clip', makeClipDetail({ id: 'c1' }))
     const onClose = vi.fn()
-    const { getByText, findByTestId, container } = setup(<WindowPlayer folder="f" clip="c1" start={10} end={20} title="My Window" onClose={onClose} />)
+    const { getByText, findByRole, container } = setup(<WindowPlayer folder="f" clip="c1" start={10} end={20} title="My Window" onClose={onClose} />)
 
     expect(getByText('My Window')).toBeInTheDocument()
 
@@ -21,7 +18,7 @@ describe('WindowPlayer', () => {
     expect(container.querySelector('.animate-pulse')).toBeInTheDocument()
 
     // after fetching, it displays the player
-    const player = await findByTestId('clip-player')
+    const player = await findByRole('slider', { name: 'Seek' })           // the clip's own player
     expect(player).toBeInTheDocument()
     expect(container.querySelector('.animate-pulse')).not.toBeInTheDocument()
   })

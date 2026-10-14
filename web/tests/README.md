@@ -7,7 +7,7 @@ vitest 4, Testing Library, user-event, msw (backend mocks), vitest-axe, fast-che
 - `unit/`: node environment, no DOM. Pure functions and `api.ts`. Setup: `utils/setup-node.ts`.
 - `integration/`: jsdom. Components and hooks, rendered with Testing Library. Setup: `utils/setup.ts`.
 - One test file per source file, same name (`components/NoteBox.tsx` -> `integration/NoteBox.test.tsx`).
-- Worked examples to copy: `integration/FolderBrowser.test.tsx` (request/response states, navigation, a11y), `integration/NoteBox.test.tsx` (debounced saves with fake timers, request assertions), `integration/App.test.tsx` (mocking a child component), `unit/api.test.ts` (the client's contract).
+- Worked examples to copy: `integration/FolderBrowser.test.tsx` (request/response states, navigation, a11y), `integration/NoteBox.test.tsx` (debounced saves with fake timers, request assertions), `integration/App.test.tsx` (the whole app against msw), `unit/api.test.ts` (the client's contract).
 
 ## The shared helpers (`utils/`): use these, extend them, don't bypass them
 
@@ -29,7 +29,7 @@ Move anything two tests share into `utils/`. Refactor older tests onto the helpe
 - Test what a user or caller sees: query by role/label/text; assert on outgoing requests with `recordRequests`. No class-name queries, no snapshots.
 - One concept per `it`, named as a sentence. Cover happy path, loading, empty, server error (4xx/5xx), dropped connection, edge values, interaction.
 - No arbitrary sleeps: `findBy*`, `vi.waitFor`, and fake timers (`vi.useFakeTimers({ shouldAdvanceTime: true })` with user-event) for debounces and polling.
-- Mock a child component with `vi.mock` when the test is about the parent only (see `App.test.tsx`).
+- Render the real children and let msw answer their requests: `App`, `Workspace`, `Timeline`, `ClipView` and `WindowPlayer` are tested that way (assert on what the user sees, such as the `Film details` heading or the player's `Seek` slider). Add the endpoint's default handler to `utils/handlers.ts` when a child needs one. The only module stubbed is `hls.js` (`FilmPreview.test.tsx`): jsdom has no MediaSource. Reach for `vi.mock` only for something the environment cannot run, never to skip a request.
 - msw v3: the option is `onUnhandledFrame`, not `onUnhandledRequest`. Handlers use relative `/api/...` paths; `setup-node.ts` makes that work in node.
 - A bug found while testing: write `it.todo('...')` or `it.fails`, comment it as a finding, and don't change app behaviour in a test PR.
 
@@ -53,7 +53,8 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/MusicStudio.tsx` | ~95% | done (`MusicStudio.test.tsx`: analyse, settings, preview drawing, phrase clicks, moments, build states, built player, a11y) |
 | `src/components/ProjectProgress.tsx` | 100% | done |
 | `src/components/RedoDialog.tsx` | 100% | done |
-| `src/components/Phrase.tsx` | 100% | done (trivial branch misses) |
+| `src/components/Phrase.tsx` | 100% | done (`Phrase.test.tsx`: word colours, language chip and flip in each mode, every word-correction action and its request) |
+| `src/components/FilmPreview.tsx`, `src/components/FrameStep.tsx` | 100% | done (`hls.js` is the one stubbed module: jsdom has no MediaSource; the stream wiring, fatal errors, native playback, frame-length learning) |
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/usePoll.ts` | 100% | done |
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
