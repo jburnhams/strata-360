@@ -161,6 +161,12 @@ def quality(ctx):
     QG.save(ctx.path(QG.FILE), QG.analyse(ctx.path('proxy.mp4')))
 
 
+@stage('palette', 1, outputs=('palette.json',), deps=('proxy', 'ingest'), note='a colour scheme for the clip\'s animated and overlaid text: the colours really in the footage (Lab clusters of the horizon band), a base hue, its complementary accent and a split-complement, tinted light and dark neutrals and an outline, each moved in lightness until it reads against the footage (contrast 4.5); the title designer is given it (a few seconds)')
+def palette(ctx):
+    from strata360.analysis import palette as PAL
+    v = ctx.clip_json['video']; ctx.write(PAL.FILE, ctx.stamped(PAL.analyse(ctx.path('proxy.mp4'), v['source_frames'] / v['nominal_fps'])))
+
+
 @stage('cameras', 1, keys=('camera_seed',), outputs=('cameras.json',), deps=('quality', 'motion', 'identity'), soft_deps=('scenes', 'people'),
        note='the clip\'s virtual cameras, best first: heading, you, person, scenery (nobody in view) and about one free camera per 15 s, each with a start, an end, a score and its aim; seeded variety (setting camera_seed; no video decoding)')
 def cameras(ctx):
