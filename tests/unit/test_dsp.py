@@ -205,7 +205,7 @@ def test_clean_for_playback(monkeypatch):
     monkeypatch.setattr(dsp, 'ffmpeg_filter', fake_ff)
     monkeypatch.setattr(dsp, 'dfn_denoise', lambda x, atten: x)
     monkeypatch.setattr(dsp, '_smooth_gain', lambda tgt, r, a, rel: np.ones_like(tgt))
-    monkeypatch.setattr(dsp, 'block_loudness', lambda x, block, hop, sr: (np.linspace(0, 1.0, 10), np.full(10, -20.0), np.full(10, -20.0)))
+    monkeypatch.setattr(dsp, 'block_loudness', lambda x, block, hop, sr: (np.linspace(0, 1.0, 10), np.full(10, -20.0), np.full(10, 0.01)))        # (-20 LUFS blocks of mean-square energy 0.01)
     monkeypatch.setattr(dsp, '_peak_limit', lambda x, lim: x)
 
     # Clean for playback uses integrated_lufs and block_loudness.

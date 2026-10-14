@@ -104,6 +104,12 @@ def _series(motion, key):
     return np.asarray(s.get('t', []), float), np.asarray(s.get(key, []), float)
 
 
+def _steadiness(tm, shake, t0, t1):
+    """0 (very shaky) to 1 (still) over the window t0 to t1 of the per-second shake series; 0.5 when the series has no reading in the window (a window past its end is not a shaky one)."""
+    w = shake[(tm >= t0) & (tm <= t1)]; w = w[np.isfinite(w)]
+    return float(np.clip(1.0 - w.mean() / 45.0, 0.0, 1.0)) if len(w) else 0.5
+
+
 def candidates(folder, per=6, gap=12.0):
     """{'intro': [...], 'outro': [...]}: candidate dicts (id, kind, where, clip, clip_start_s, dur_s, technique, score, why, features), best first, at most `per` of each kind. Openings come from the first fifth of the race's clips, endings from the last fifth
     (and the globe shots from anywhere in the first or last half), so a crowd is the start line's or the finish's."""
@@ -111,7 +117,7 @@ def candidates(folder, per=6, gap=12.0):
     clips = _race_clips(folder); n = len(clips); rd = os.path.join(config.race_dir(folder), 'clips'); found = {(w, k): [] for w in ('intro', 'outro') for k in KINDS}
     for i, (c, _) in enumerate(clips):
         d = os.path.join(rd, c); pos = i / max(n - 1, 1); fv = _load(d, 'face_view.json'); mo = _load(d, 'motion.json'); sc = _load(d, 'scenes.json'); dur = float((mo or {}).get('duration_s') or 0.0)
-        tm, shake = _series(mo, 'shake_dps'); steady = lambda t0, t1: float(np.clip(1.0 - np.nanmean(shake[(tm >= t0) & (tm <= t1)]) / 45.0, 0.0, 1.0)) if len(tm) else 0.5
+        tm, shake = _series(mo, 'shake_dps'); steady = lambda t0, t1: _steadiness(tm, shake, t0, t1)
         items = [it for it in (sc or {}).get('items', []) if it.get('ok')]
         scenery = lambda t0, t1: float(np.mean([it['scenery'] for it in items if t0 - 3 <= it['t_s'] <= t1 + 3 and isinstance(it.get('scenery'), (int, float))] or [4.0])) / 10.0
         if fv and fv.get('samples'):

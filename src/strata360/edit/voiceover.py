@@ -376,7 +376,8 @@ def _mix(folder, out, total, dest):
         if o['tempo'] != 1.0: f.append(f"atempo={o['tempo']}")
         if o['fit'] == 'over': f.append(f"atrim=0:{o['played_s']}"); f.append(f"afade=t=out:st={max(0.0, o['played_s'] - 0.08):.3f}:d=0.08")
         f.append(f"adelay={int(round(o['film_start_s'] * 1000))}:all=1"); chains.append(f"[{i}:a]" + ','.join(f) + f'[a{i}]')
-    mix = ''.join(f'[a{i}]' for i in range(len(out))) + f'amix=inputs={len(out)}:normalize=0:duration=longest,apad=whole_dur={total:.3f},atrim=0:{total:.3f},alimiter=limit=0.95[m]'
+    inputs += ['-f', 'lavfi', '-t', f'{total:.3f}', '-i', f'anullsrc=r={SR}:cl=mono']                         # a silent input as long as the film: the mix is then that long whatever order ffmpeg ends its inputs in (apad after amix sometimes left the track as short as the last line)
+    mix = ''.join(f'[a{i}]' for i in range(len(out))) + f'[{len(out)}:a]amix=inputs={len(out) + 1}:normalize=0:duration=longest,apad=whole_dur={total:.3f},atrim=0:{total:.3f},alimiter=limit=0.95[m]'
     _run(['ffmpeg', '-y', '-v', 'error', *inputs, '-filter_complex', ';'.join(chains + [mix]), '-map', '[m]', '-ar', str(SR), '-ac', '1', dest + '.part.wav']); os.replace(dest + '.part.wav', dest)
 
 
