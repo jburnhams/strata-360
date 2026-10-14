@@ -159,6 +159,20 @@ def progress(folder):
     p = project_progress(folder); from strata360.pipeline import resources; p['job_running'] = bool(p.get('workers')); p['max_workers'] = resources.DEFAULTS['max_workers']; return p
 
 
+def mount_mcp(api, token):
+    """Serve the read-only MCP tools at /mcp (streamable HTTP, the server's token required) from the same process, so an agent sees what the web app sees. Skipped when the `mcp` package is not installed, or with STRATA360_MCP=0."""
+    if os.environ.get('STRATA360_MCP') == '0': return
+    try: from strata360.server import mcp_tools as MT; srv = MT.build_server(MT.AsgiBackend(api, token))
+    except ImportError: return
+    import contextlib
+    api.mount('/mcp', MT.guarded(srv.streamable_http_app(streamable_http_path='/'), token)); inner = api.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with inner(app), srv.session_manager.run(): yield
+    api.router.lifespan_context = lifespan
+
+
 def create_app(roots, token=None):
     """The FastAPI application. `roots` are the only folders it may look inside; `token` (optional) is required on every request (cookie, `?token=` on first visit, or Bearer)."""
     from fastapi import Depends, FastAPI, HTTPException, Request
@@ -1919,6 +1933,22 @@ def create_app(roots, token=None):
         f = folder_of(body.get('folder')); items = [(str(i['clip']), str(i['stage'])) for i in body.get('items', [])]
         return dict(cleared=runner.clear_items(f, items))
 
+    @api.get('/api/agent', dependencies=[Depends(auth)])
+    def get_agent():                                                                      # whether the project assistant can be used (a key is set: never the key itself) and with which model
+        import importlib.util
+        from strata360.server import agent as AG
+        return dict(configured=bool(AG.key_for_nvidia()), model=os.environ.get('STRATA360_AGENT_MODEL') or AG.DEFAULT_MODEL, read_only=True, available=importlib.util.find_spec('mcp') is not None)
+
+    @api.post('/api/agent/chat', dependencies=[Depends(auth)])
+    def post_agent_chat(body: dict):                                                      # {folder, messages: [{role, content}], model?}: the assistant answers the last question from the read-only tools; what the tools return goes to the model service
+        from strata360.server import agent as AG, mcp_tools as MT
+        f = folder_of(body.get('folder')); key = AG.key_for_nvidia(); model = body.get('model') or os.environ.get('STRATA360_AGENT_MODEL') or AG.DEFAULT_MODEL
+        if not key: raise HTTPException(409, 'no NVIDIA_API_KEY: put NVIDIA_API_KEY=... in secrets.env')
+        if not AG.valid_model(model): raise HTTPException(400, 'not a model name')
+        try: return AG.run(MT.AsgiBackend(api, token), f, body.get('messages') or [], key, model)
+        except AG.AgentError as e: raise HTTPException(503 if e.retryable else 400, str(e))
+
+    mount_mcp(api, token)                                                               # /mcp: the read-only tools for a local agent (server/mcp_tools.py)
     return api
 
 

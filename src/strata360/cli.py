@@ -712,6 +712,13 @@ def cmd_stop_all(a):
     killed = guard.panic(); print(f'killed {len(killed)} processes' + (f': {killed[:20]}' if killed else '')); print(f'memory pressure level {guard.pressure_level()}, swap {guard.swap_used_gb():.1f} GB, load {os.getloadavg()[0]:.1f}')
 
 
+def cmd_mcp(a):
+    """The read-only MCP tools over stdio, for an agent that starts a program (Claude Code, Claude Desktop): they ask a running `strata360 serve` (its URL and token), so the agent and the web app see the same project."""
+    try: from strata360.server import mcp_tools as MT
+    except ImportError: sys.exit('the mcp package is not installed: pip install mcp')
+    MT.build_server(MT.HttpBackend(a.url, a.token or os.environ.get('STRATA360_SERVER_TOKEN')), a.folder).run('stdio')
+
+
 def main():
     ap = argparse.ArgumentParser(prog='strata360', description='Automatic editing pipeline for 360 race footage'); sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init', help='create a race from a folder of camera files'); p.add_argument('name'); p.add_argument('--library', required=True)
@@ -726,6 +733,7 @@ def main():
     p = sub.add_parser('doctor', help='check the environment'); p.set_defaults(fn=cmd_doctor)
     p = sub.add_parser('backup', help='back up the project metadata now (also done every 30 min while changed), list the backups, or unpack one'); p.add_argument('name'); p.add_argument('--list', action='store_true')
     p.add_argument('--restore', metavar='ARCHIVE', help='unpack this backup (name from --list)'); p.add_argument('--to', help='folder to unpack into (default: backups/restored-<name>)'); p.set_defaults(fn=cmd_backup)
+    p = sub.add_parser('mcp', help='read-only MCP tools (stdio) for a local agent: clips, transcript, edit plan, script, film stills of a running `strata360 serve`'); p.add_argument('--url', default='http://127.0.0.1:8360', help='the running server'); p.add_argument('--token', help='its token (or STRATA360_SERVER_TOKEN)'); p.add_argument('--folder', help='the project the tools use by default (else the one last opened in the server)'); p.set_defaults(fn=cmd_mcp)
     p = sub.add_parser('stop-all', help='emergency stop: kill every ffmpeg, ffprobe, pytest and strata360 process of this user (not the web server)'); p.set_defaults(fn=cmd_stop_all)
     p = sub.add_parser('fetch-models', help='download the models the default stages need'); p.add_argument('race', nargs='?'); p.set_defaults(fn=cmd_fetch_models)
     p = sub.add_parser('who', help='cluster the faces, show them, and save which one is you'); p.add_argument('name'); p.add_argument('--me', help='cluster number(s) that are you, comma separated: 101 or 101,103'); p.add_argument('--label', default='me'); p.add_argument('--auto', action='store_true', help='save the suggested wearer as the profile if the suggestion is confident'); p.set_defaults(fn=cmd_who)

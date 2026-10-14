@@ -23,6 +23,7 @@ appdirs==1.4.4
 packaging==23.2
 fastapi
 uvicorn
+mcp>=2,<3               # the read-only agent tools (server/mcp_tools.py): /mcp on the server and `strata360 mcp`; optional: without it the server just has no /mcp
 kokoro-onnx>=0.6        # the voice-over voice (Kokoro-82M, open model); model files: ./strata360 voiceover . --fetch
 librosa                 # TIGER-DnR (audio_background stage): model code fetched at a pinned commit by audio/background.py
 torch_complex
