@@ -55,6 +55,7 @@ class Lens:
         self.fx, self.fy, self.cx, self.cy = slot[1], slot[2], slot[3], slot[4]
         self.k = np.array([slot[5], slot[6], slot[7], slot[8], slot[15]])
         self.R = quat_to_R(slot['q'])
+        self.size = int(slot.get(10) or 3840)                              # the calibration's lens size in pixels (callers use the video's real size, osv/source.py `lens_size`)
     def project(self, d_body, scale=1.0):
         """body-frame unit dirs (N,3) -> pixel (u,v) in the lens image at `scale`, plus theta (rad)."""
         d = np.einsum('nj,ij->ni', np.asarray(d_body, dtype=np.float64), self.R)   # einsum: avoids a broken Accelerate matmul seen on this Mac

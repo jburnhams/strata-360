@@ -26,7 +26,7 @@ from strata360.osv.telemetry import read_frames, read_exposure, video_pts
 from strata360.osv import source as lensrc
 from strata360.render import photo as ph
 
-LENS_PX = 960                # analysis resolution of each lens frame (a quarter of 3840)
+LENS_PX = 960                # analysis resolution of each lens frame (the frame is decoded straight to this size; lens coordinates are in the lens's own pixels, `Lens.size`)
 SPH_W, SPH_H = 720, 360      # analysis sphere (0.5 deg per pixel)
 GRID_W, GRID_H = 24, 12      # world-frame brightness grid (15 deg cells)
 SCHEMA_VERSION = 1
@@ -55,8 +55,8 @@ def luma_lin(rgb):            # BT.709 luma of linear RGB
 class Analyser:
     def __init__(self, osv):
         sl = read_slots(osv)
-        self.master, self.slave = Lens(sl[2]), Lens(sl[1])       # stream 1 = master (front), stream 0 = slave (rear)
-        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
+        self.master, self.slave = Lens(sl[2]), Lens(sl[1]); self.ls = lensrc.lens_size(osv)       # stream 1 = master (front), stream 0 = slave (rear); ls = the lens pictures' own size
+        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], size=self.ls, centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], size=self.ls, centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
         self.P, self.B = imu_offsets(osv)
         lon = ((np.arange(SPH_W) + 0.5) / SPH_W - 0.5) * 2 * np.pi; lat = (0.5 - (np.arange(SPH_H) + 0.5) / SPH_H) * np.pi
         LON, LAT = np.meshgrid(lon, lat)
@@ -68,7 +68,7 @@ class Analyser:
         """Upright (world-locked) linear-light sphere (SPH_H, SPH_W, 3) and its coverage from the two lens frames."""
         M = self.B.T @ quat_to_R(np.asarray(quat)).T @ self.P.T
         d = np.einsum('nj,ij->ni', self.dE, M)                                  # body-frame rays
-        sc = LENS_PX / 3840.0
+        sc = LENS_PX / float(self.ls)
         lin, w = [], []
         for code, L, om in ((code_m, self.master, self.occl_m), (code_s, self.slave, self.occl_s)):
             u, v, th = L.project(d)
@@ -85,7 +85,7 @@ class Analyser:
 
     def lens_mean(self, code, L, om):
         """Mean linear RGB of one lens over its own useful area (theta < 90 deg, outside the occlusion polygon)."""
-        n = LENS_PX; ys, xs = np.mgrid[0:n, 0:n]; sc = 3840.0 / n
+        n = LENS_PX; ys, xs = np.mgrid[0:n, 0:n]; sc = self.ls / float(n)
         r = np.hypot((xs + 0.5) * sc - L.cx, (ys + 0.5) * sc - L.cy)
         th = np.linspace(0, np.pi, 4000); thd = th * (1 + sum(L.k[i] * th ** (2 * (i + 1)) for i in range(5))); rr = L.fx * thd
         valid = (r < np.interp(np.radians(90.0), th, rr))

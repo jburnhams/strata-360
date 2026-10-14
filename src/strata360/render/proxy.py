@@ -50,7 +50,7 @@ def decoder(osv, stream, every, native=False):
     """`native`: the codec's own 10-bit YUV (p010), converted on the GPU (render/gpu.py) instead of ffmpeg's rgb48 on the CPU."""
     cmd = ['ffmpeg', '-v', 'error', *r4.decode_args(osv)[0], *lensrc.lens_input(osv, stream), '-fps_mode', 'passthrough',
            '-vf', ','.join([f"select='not(mod(n\\,{every}))'", *lensrc.full_frame_filter(osv, native)]), '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
-    return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=r4.LS * r4.LS * r4.BYTES * 2)
+    ls = lensrc.lens_size(osv); p = guard.popen(cmd, stdout=subprocess.PIPE, bufsize=ls * ls * r4.BYTES * 2); p.lens_size = ls; return p
 
 
 def clip_boxes(out, osv):

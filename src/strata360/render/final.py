@@ -117,7 +117,10 @@ class FinalSource:
         if not self.up_w: return 1
         if sg.get('synthetic'): self.why[sg['id']] = 'generated clip'; return 1
         if sg['id'] not in self._factors:
-            from strata360.analysis.views import NATIVE_PPD
+            from strata360.analysis.views import NATIVE_PPD as _PPD
+            try: ls = self._clip(sg['clip'])['R'].ls                                                       # lens pixels per degree: fewer on a smaller lens picture
+            except (OSError, KeyError): ls = 3840                                                          # no clip record to read (the footage is judged by name only): a DJI-sized lens
+            NATIVE_PPD = _PPD * ls / 3840.0
             why = UP.skip_reason(os.path.join(config.race_dir(self.folder), 'clips', sg['clip'])); path = cam.CameraPath.from_dict(self.framing[sg['id']]); fov = float(np.min(path.fov)); f = 1 if why else UP.factor_for(NATIVE_PPD, self.up_w, fov)
             if f > 1:                                                                                  # only a shot with more than up_min_s seconds at or over the zoom threshold is enlarged (the whole shot then)
                 over = UP.seconds_over(path.t, path.fov, sg.get('dur_s'), self.W, NATIVE_PPD, self.up_min_zoom)

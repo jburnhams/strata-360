@@ -5,6 +5,13 @@ import os
 import numpy as np
 import pytest
 from strata360.analysis import objects as O, regions as R, vocab as VOC
+from strata360.osv import source as lens_source
+
+
+@pytest.fixture(autouse=True)
+def lens_3840(monkeypatch):
+    monkeypatch.setattr(lens_source, 'lens_size', lambda osv: 3840)            # the clips here are names, not files: a DJI-sized lens
+
 
 TILE = O.TILES.index((15, 0.0))               # a tile looking ahead and a little up
 MID = [472, 472, 552, 552]                     # a box in the middle of a tile picture

@@ -34,6 +34,7 @@ NAMED_CONF, LOW_CONF = 0.25, 0.10         # the detector's confidence to keep a 
 PF_CONF = 0.30                            # ... and a prompt-free box
 MIN_SIDE_PX, MAX_AREA = 8, 0.25           # a box shorter than this on its short side, or filling more than this share of a tile, is not an object
 CROP_MARGIN, CROP_FOV = 1.8, (10.0, 60.0)
+from strata360.osv import source as _source
 TINY_DEG = V.CROP_WANT_PX / 3 / V.NATIVE_PPD       # below this even the lens frame gives the box fewer than a third of the pixels the labelling model wants
 DARK_SUN, DARK_EXPOSURE, BLACK_FRAME = -12.0, 0.2, 0.02
 WEARER_NEAR_S = 1.5
@@ -256,7 +257,7 @@ def analyse(osv, work_dir, times, words, *, stats, vocab, categories=(), sun=Non
                     for w, cf in areas_of(named).items(): a = areas.setdefault(w, dict(boxes=0, max_conf=0.0)); a['boxes'] += 1; a['max_conf'] = max(a['max_conf'], round(cf, 3))
                 for c in merge_moment(cands, people, wearer_dirs(focus, t)):
                     if c['wearer']: counts['wearer'] += 1; dropped.append(dict(t=t, kind=c['kind'], yoloe=c['yoloe'], conf=round(c['conf'], 2), lon=round(c['lon'], 1), lat=round(c['lat'], 1), deg=round(c['deg'], 1))); continue
-                    if c['deg'] < TINY_DEG: counts['tiny'] += 1; continue
+                    if c['deg'] < TINY_DEG * 3840.0 / _source.lens_size(osv): counts['tiny'] += 1; continue
                     if c['kind'] == 'other' and c['lat'] < GROUND_LAT and c['deg'] < GROUND_DEG: counts['ground'] += 1; continue
                     o, new = mem.see(c, t)
                     if not new: continue

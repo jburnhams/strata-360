@@ -37,7 +37,7 @@ class FakeLens:
 
 
 class FakeStab:
-    Ms = np.array([np.eye(3)]); master = FakeLens(); slave = FakeLens()
+    Ms = np.array([np.eye(3)]); master = FakeLens(); slave = FakeLens(); ls = 3840
 
 
 @pytest.fixture

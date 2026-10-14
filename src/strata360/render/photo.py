@@ -10,7 +10,7 @@ import numpy as np, cv2
 
 THETA_MAX_DEG = 97.59            # half of the usable 195.18 deg lens FOV (BlendParams::lensFovDeg)
 ANALYSIS_FEATHER_DEG = 4.0       # BlendParams::featherDeg
-OCCL_FEATHER_PX = 24.0           # BlendParams::occlusionFeatherPx (in 3840 px lens coordinates)
+OCCL_FEATHER_PX = 24.0           # BlendParams::occlusionFeatherPx, for a 3840 px lens picture (occlusion_map scales it to the lens's own size)
 RENDER_INSET_DEG = 2.6           # kDefaultSeamInsetDeg: the render blend ends inside the calibrated FOV
 RENDER_FEATHER_DEG = 3.0         # kSeamInsetFeatherDeg
 TRUST_ALPHA = 0.99               # kTrustedAlpha
@@ -54,9 +54,10 @@ def occlusion_polygon(poly_x, poly_y, cx, cy, rim_px):
     return np.array(arc + back)
 
 
-def occlusion_map(poly_x, poly_y, size=3840, scale=0.5, feather=OCCL_FEATHER_PX, centre=None, rim=None):
+def occlusion_map(poly_x, poly_y, size=3840, scale=0.5, feather=None, centre=None, rim=None):
     """Signed occlusion factor map at `scale` of the lens frame: 0 inside the stick region, ramping to 1 at `feather` px outside. `centre` (cx, cy) and `rim` (radius of the usable image circle) close the
     stored arc outward (occlusion_polygon); without them the lens is assumed centred with the rim at the frame edge."""
+    feather = OCCL_FEATHER_PX * size / 3840.0 if feather is None else feather
     n = int(size * scale); cx, cy = centre if centre is not None else (size / 2.0, size / 2.0)
     poly = occlusion_polygon(poly_x, poly_y, cx, cy, rim if rim is not None else size / 2.0 - 20.0)
     if not len(poly): return np.ones((n, n), np.float32)                              # no occluder (an Insta360 lens): nothing is masked
@@ -93,7 +94,7 @@ def _remap16(img, u, v, shape):
 def estimate_gain(img_master, img_slave, lens_master, lens_slave, occl_master, occl_slave):
     """OpenOSV estimateGain: per-channel exposure match in linear light from trusted co-visible pixels around the seam.
     Returns (gain_master, gain_slave, n_trusted), a symmetric split of the mean ratio, each clamped to [0.5, 2] via sqrt.
-    img_* are (3840,3840,3) uint16 code values."""
+    img_* are (S,S,3) uint16 code values, S the lens picture's size."""
     rows = int(round(BAND_HALF_DEG * (BAND_W / 2) / 180.0)) * 2
     T = np.radians(90.0 + np.linspace(-BAND_HALF_DEG, BAND_HALF_DEG, rows))
     P = np.linspace(-np.pi, np.pi, BAND_W, endpoint=False)
