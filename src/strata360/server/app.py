@@ -370,6 +370,19 @@ def create_app(roots, token=None):
             if os.path.exists(os.path.join(d, n)): return FileResponse(os.path.join(d, n), media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
         raise HTTPException(404, 'no thumbnail yet')
 
+    @api.get('/api/clip/frame')
+    def get_clip_frame(request: Request, folder: str, clip: str, t: float, yaw: float = 0.0, pitch: float = 0.0, fov: float = 100.0, w: int = 960):         # a still of the footage: the flat upright view (yaw 0 = ahead, 180 = behind) at `t` seconds into the clip, cut from its proxy
+        auth(request); f = folder_of(folder); d = _cd(f, clip); c = _j(d, 'clip.json'); proxy = os.path.join(d, 'proxy.mp4')
+        if not c: raise HTTPException(404, 'no such clip')
+        from strata360.analysis import views as V
+        dur = c['video']['source_frames'] / c['video']['nominal_fps']
+        if not (0.0 <= t <= dur): raise HTTPException(400, f'the clip is {dur:.1f} s long: ask for a time inside it')
+        if not V.proxy_available(proxy): raise HTTPException(404, 'no proxy video yet: the proxy stage makes the one this picture is cut from')
+        w = int(min(max(w, 160), 1920)); fov = float(min(max(fov, 40.0), 120.0)); pitch = float(min(max(pitch, -80.0), 80.0))
+        try: jpg = V.render_thumb_proxy(proxy, config.source((c.get('source_files') or {}).get('osv'), d), float(t), yaw=float(yaw), pitch=pitch, hfov=fov, w=w, h=int(round(w * 9 / 16)))
+        except Exception as e: raise HTTPException(500, f'could not cut the picture: {e}')
+        return Response(jpg, media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
+
     @api.get('/api/preview')
     def get_preview(request: Request, folder: str, clip: str):                           # the preview video (Range requests are handled, so seeking works); <video> cannot send headers, so the cookie/query token authenticates
         auth(request); f = folder_of(folder); p = os.path.join(_cd(f, clip), 'proxy.mp4')
@@ -1937,7 +1950,7 @@ def create_app(roots, token=None):
     def get_agent():                                                                      # whether the project assistant can be used (a key is set: never the key itself) and with which model
         import importlib.util
         from strata360.server import agent as AG
-        return dict(configured=bool(AG.key_for_nvidia()), model=os.environ.get('STRATA360_AGENT_MODEL') or AG.DEFAULT_MODEL, read_only=True, available=importlib.util.find_spec('mcp') is not None)
+        return dict(configured=bool(AG.key_for_nvidia()), model=os.environ.get('STRATA360_AGENT_MODEL') or AG.DEFAULT_MODEL, read_only=True, vision_model=AG.VISION_MODEL, available=importlib.util.find_spec('mcp') is not None)
 
     @api.post('/api/agent/chat', dependencies=[Depends(auth)])
     def post_agent_chat(body: dict):                                                      # {folder, messages: [{role, content}], model?}: the assistant answers the last question from the read-only tools; what the tools return goes to the model service
@@ -1945,7 +1958,9 @@ def create_app(roots, token=None):
         f = folder_of(body.get('folder')); key = AG.key_for_nvidia(); model = body.get('model') or os.environ.get('STRATA360_AGENT_MODEL') or AG.DEFAULT_MODEL
         if not key: raise HTTPException(409, 'no NVIDIA_API_KEY: put NVIDIA_API_KEY=... in secrets.env')
         if not AG.valid_model(model): raise HTTPException(400, 'not a model name')
-        try: return AG.run(MT.AsgiBackend(api, token), f, body.get('messages') or [], key, model)
+        vm = body.get('vision_model') or AG.VISION_MODEL
+        if not AG.valid_model(vm): raise HTTPException(400, 'not a model name')
+        try: return AG.run(MT.AsgiBackend(api, token), f, body.get('messages') or [], key, model, vision=body.get('vision') is True, vision_model=vm)
         except AG.AgentError as e: raise HTTPException(503 if e.retryable else 400, str(e))
 
     mount_mcp(api, token)                                                               # /mcp: the read-only tools for a local agent (server/mcp_tools.py)

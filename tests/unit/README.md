@@ -31,6 +31,9 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |
 | `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network. `overlay/flyover.py`: camera, style and frames with `mbgl-render` faked (`test_overlay_flyover.py`) |
 | `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
+| `analysis/palette.py` | ~95% | done (`test_palette.py`: Lab/LCh round trip, hue choice, harmony swatches, per-pixel contrast choice, grey fallback; the frame reader needs ffmpeg and is not run) |
+| `server/mcp_tools.py` | ~95% | done (`test_mcp_tools.py`: each composite tool's digest and limits on canned routes, the tool set read only and small, in-process against the real app, the /mcp mount and its token; the HTTP backend is not run) |
+| `server/agent.py` | ~95% | done (`test_agent.py`: the tool loop with a scripted model, pictures, the optional vision description, HTTP errors, the clip-frame route and the chat routes; no network) |
 | `gps/sun.py` (the `sun` stage), `analysis/scenes.apply_sun` / `patch_sun` | n/a | done: the label boundaries, a clip's start/middle/end sun, clips outside the track, reading the stored field, the clip card taking it, dusk from the sun in the scene labels |
 | `analysis/vocab.py`, `vocab.json`, `vocab_stats_seed.json` | n/a | done: the shipped wordlists are checked for consistency; word union and cap, label simplifying, stop/scenery/feature, the stats book (record, merge, round trip, weak words, suggestions), category matching and word review with a fake model, project-local additions and removals |
 | `analysis/sampling.py` | n/a | done: the moments chosen by distance moved, scene change and sharpness, the fallbacks, reading the inputs from a clip folder and the track |

@@ -115,6 +115,15 @@ describe('Workspace', () => {
     expect(screen.queryByText('Review the transcript')).not.toBeInTheDocument()
   })
 
+  it('opens the project assistant from the sidebar and gives it the clip ids to link', async () => {
+    mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_20260101120000_0001_D' })] })
+    mockGet('/api/agent', { configured: true, model: 'm', vision_model: 'v', read_only: true, available: true })
+    const { user } = setup(<Workspace folder="/data/myfolder" onChange={vi.fn()} />)
+    await user.click(await screen.findByRole('button', { name: 'Ask about the project' }))
+    expect(await screen.findByRole('heading', { name: 'Ask about the project' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Film details' })).not.toBeInTheDocument()
+  })
+
   it('calls onChange when "open another / new project" is clicked', async () => {
     const onChange = vi.fn()
     const { user } = setup(<Workspace folder="/data/myfolder" onChange={onChange} />)
