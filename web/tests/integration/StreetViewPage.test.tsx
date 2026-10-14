@@ -290,7 +290,7 @@ describe('clicking the map for the nearest street view', () => {
   it('puts the nearest street view under the map and shows a picture larger when it is clicked', async () => {
     server.use(http.get('/api/streetview/near', () => HttpResponse.json({ cached: true, result: makeNearResult(), job: null })))
     const { user } = await click(); const panel = await screen.findByLabelText('Nearest street view to the clicked point'); const map = screen.getByRole('application')
-    expect(map.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(map.compareDocumentPosition(panel)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)                              // the panel comes after the map in the page, and is not inside it
     await user.click(await screen.findByRole('button', { name: 'Show Mapillary m9 larger' })); const big = screen.getByRole('dialog', { name: 'Larger picture' }); expect(within(big).getByRole('img').getAttribute('src')).toContain('id=m9&w=1024')
     await user.keyboard('{Escape}'); expect(screen.queryByRole('dialog')).toBeNull()
   })

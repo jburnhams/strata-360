@@ -5,13 +5,7 @@ import { setup } from '../utils/render'
 import { mockGet, mockPost, mockError, recordRequests } from '../utils/api'
 import { makeClipDetail, makePointCams } from '../utils/factories'
 
-vi.mock('../../src/components/ClipPlayer', () => ({
-  default: () => <div data-testid="clip-player">ClipPlayer</div>
-}))
 
-vi.mock('../../src/components/TrackMap', () => ({
-  default: () => <div data-testid="track-map">TrackMap</div>
-}))
 
 describe('ClipView', () => {
   it('shows loading skeletons initially', () => {
@@ -88,13 +82,13 @@ describe('ClipView', () => {
     mockGet('/api/clip', makeClipDetail({
       transcript: [{ si: 1, t0: 0, t1: 1, text: 'bonjour', text_en: 'hello', lang: 'fr', flagged: false, who: 'wearer', words: [] }]
     }))
-    const { findByRole, findByText, queryByText } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+    const { findAllByRole, findByText, queryByText } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
 
     // Default mode is 'translated'
     expect(await findByText('hello')).toBeInTheDocument()
     expect(queryByText('bonjour')).not.toBeInTheDocument()
 
-    const modeSelect = await findByRole('combobox', { name: '' }) // no label for the select
+    const modeSelect = (await findAllByRole('combobox')).find(s => s.querySelector('option[value="original"]'))!      // (the transcript's mode select has no label; the player has selects of its own)
     await userEvent.selectOptions(modeSelect, 'original')
     expect(await findByText('bonjour')).toBeInTheDocument()
     expect(queryByText('hello')).not.toBeInTheDocument()
@@ -135,9 +129,9 @@ describe('ClipView', () => {
       sounds: { seconds: { voice: 1 }, hints: { voice: ['voice', 0] }, windows: [{ t0: 0, t1: 5, cats: { voice: 0.8 }, top: [] }] }
     }))
 
-    const { findByText, getByText, findByTestId } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
+    const { findByText, getByText, findByRole } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
 
-    expect(await findByTestId('clip-player')).toBeInTheDocument()
+    expect(await findByRole('slider', { name: 'Seek' })).toBeInTheDocument()                          // the real player
     expect(getByText('2026-02-22 19:00:00')).toBeInTheDocument()
     expect(getByText('0:10')).toBeInTheDocument()
     expect(getByText('Track A')).toBeInTheDocument()

@@ -6,9 +6,6 @@ import { makeClipInfo, makeEditResponse, makeEditState, makePlanSegment } from '
 import { mockGet, mockPost, mockError, mockPending, recordRequests } from '../utils/api'
 import { stubMedia } from '../utils/media'
 
-vi.mock('../../src/components/FilmPreview', () => ({ default: () => <div data-testid="film-preview" /> }))
-vi.mock('../../src/components/FinalRender', () => ({ default: () => <div data-testid="final-render" /> }))
-vi.mock('../../src/components/WindowPlayer', () => ({ default: () => <div data-testid="window-player" /> }))
 
 describe('Timeline', () => {
   afterEach(() => { vi.clearAllMocks() })
@@ -118,13 +115,14 @@ describe('Timeline', () => {
     })
     mockGet('/api/edit', editResp)
 
-    const { findByTitle, findByText, getByTestId, user } = setup(<Timeline folder="/data" clips={[makeClipInfo()]} onOpenClip={vi.fn()} />)
+    const { findByTitle, findByText, findByRole, queryByRole, user } = setup(<Timeline folder="/data" clips={[makeClipInfo()]} onOpenClip={vi.fn()} />)
     await findByText('Plan')
 
     const playBtn = await findByTitle('play this window')
     await user.click(playBtn)
 
-    expect(getByTestId('window-player')).toBeInTheDocument()
+    await user.click(await findByRole('button', { name: 'close' }))                                    // the window's player opens over the plan, and closes again
+    expect(queryByRole('button', { name: 'close' })).not.toBeInTheDocument()
   })
 
   it('handles overrides (changing transition)', async () => {

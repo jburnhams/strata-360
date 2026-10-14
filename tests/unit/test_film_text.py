@@ -1,4 +1,5 @@
 """Text cards through the film (edit/film_text.py): the checks on what the model offers, the score and the planner's pick, and drawing the cards."""
+import os
 import numpy as np
 from strata360.edit import film_text as F
 from strata360.render import captions as C
@@ -51,3 +52,142 @@ def test_a_card_is_drawn_only_while_it_is_on():
     cards = C.Cards([dict(t=10.0, dur_s=2.6, spec=spec)], 320, 180, 25.0); img = np.full((180, 320, 3), 40, np.uint8)
     assert cards.apply(img, 100) is img and cards.apply(img, 500) is img
     on = cards.apply(img, int(11.0 * 25)); assert (on != img).any() and on.max() > 200 and cards.apply(img, int(11.0 * 25), bgr=True).shape == img.shape
+
+
+# ---- reading the models' answers, the files the planner is given, and the pieces that need the preview
+
+def test_the_models_answer_is_found_inside_chatter_and_trailing_commas_are_forgiven():
+    assert F.parse('Sure! {"a": 1, "b": [1, 2,],} Hope that helps') == {'a': 1, 'b': [1, 2]}
+    assert F.parse('no object here') is None and F.parse('{"a": ') is None
+
+
+def test_options_are_read_from_a_cards_key_and_from_a_bare_list():
+    assert F.parse_options('{"cards": [{"t": 9}]}') == [{'t': 9}]
+    assert F.parse_options('Here you go: [{"t": 1}, {"t": 2}]') == [{'t': 1}, {'t': 2}]
+    assert F.parse_options('nothing useful') == []
+
+
+def test_what_was_heard_is_what_overlaps_the_card():
+    cues = [dict(t0=0.0, t1=4.0, kind='speech', text='early'), dict(t0=10.0, t1=14.0, kind='vo', text='middle'), dict(t0=20.0, t1=22.0, kind='speech', text='late')]
+    assert F.heard_at(cues, 12.0, 16.0) == 'vo: middle' and F.heard_at(cues, 3.0, 11.0) == 'speech: early | vo: middle'
+    assert F.heard_at(cues, 5.0, 9.0) == 'nothing said' and F.heard_at(cues, 4.0, 10.0) == 'nothing said'          # touching is not overlapping
+    assert len(F.heard_at([dict(t0=0.0, t1=9.0, kind='speech', text='word ' * 200)], 0.0, 9.0)) == 300
+
+
+def test_the_latest_preview_is_the_newest_film_folder_with_a_playlist(project):
+    import os
+    root = project.path('preview'); assert F.latest_preview(project.folder) is None
+    for name, with_playlist, mtime in (('film-old', True, 1_000), ('film-new', True, 2_000), ('film-broken', False, 3_000), ('other-new', True, 4_000)):
+        d = os.path.join(root, name); os.makedirs(d)
+        if with_playlist: open(os.path.join(d, 'index.m3u8'), 'w').write('#EXTM3U'); os.utime(d, (mtime, mtime))
+    assert os.path.basename(F.latest_preview(project.folder)) == 'film-new'
+
+
+def test_the_frames_of_the_preview_are_read_from_ffmpeg(fake_run):
+    fake_run.returns['ffmpeg'] = bytes(960 * 540 * 3)
+    frames = F.frames_of_film('/key', 10.0, 4.0, n=3)
+    assert len(frames) == 3 and frames[0].shape == (540, 960, 3) and frames[0].dtype == np.uint8
+    assert [c[c.index('-ss') + 1] for c in fake_run.calls] == ['10.20', '12.00', '13.80'] and all(c[c.index('-i') + 1].endswith('index.m3u8') for c in fake_run.calls)
+
+
+def test_a_preview_that_cannot_be_read_is_an_error(fake_run):
+    import pytest
+    fake_run.returns['ffmpeg'] = b'short'
+    with pytest.raises(RuntimeError, match='could not read the preview'): F.frames_of_film('/key', 0.0, 1.0)
+
+
+class _Model:
+    def __init__(self, text): self.text, self.asked = text, []
+    def chat(self, messages, max_tokens, temperature): self.asked.append(messages[0]['content']); return self.text
+    def ask(self, prompt, images, max_tokens): self.asked.append((prompt, list(images))); return self.text
+
+
+def test_the_text_model_is_given_the_facts_and_quotes_and_its_answer_is_checked():
+    model = _Model('{"options": [{"type": "progress", "t": 20.0, "title": "DAY 2", "meta": "KM 75", "worth": 8, "why": "a milestone"}, {"type": "progress", "t": 20.0, "title": "KM 999"}]}')
+    opts, drop = F.propose(FACTS, QUOTES, 250.0, model, n=5)
+    prompt = model.asked[0]
+    assert 'day 2 20:08 km 75.2' in prompt and 'q1 t=50.0s speech: the last one lost my mind' in prompt and 'up to 5 options' in prompt and '250 seconds' in prompt
+    assert [o['lines'][0]['text'] for o in opts] == ['DAY 2'] and opts[0]['worth_why'] == 'a milestone' and len(drop) == 1
+
+
+def test_a_film_without_facts_or_quotes_says_so_to_the_model():
+    model = _Model('{"options": []}'); assert F.propose([], [], 100.0, model) == ([], []) and model.asked[0].count('(none)') == 2
+
+
+def test_a_card_with_no_time_or_a_bad_worth_is_handled():
+    ok, drop = F.validate([dict(type='progress', title='DAY 2'), dict(type='progress', t='soon', title='DAY 2'), dict(type='progress', t=20.0, title='DAY 2', worth='lots'), dict(type='progress', t=20.0, title='DAY 2', worth=99), dict(type='progress', t=20.0)], FACTS, QUOTES, 250.0)
+    assert drop[:2] == ['no time', 'no time'] and len(drop) == 3 and [o['worth'] for o in ok] == [5.0, 10.0]
+
+
+def test_a_progress_card_far_from_any_fact_is_refused():
+    ok, drop = F.validate([dict(type='progress', t=60.0, title='DAY 2')], FACTS, QUOTES, 250.0); assert ok == [] and 'no facts near' in drop[0]
+    ok, drop = F.validate([dict(type='progress', t=20.0, title='DAY 2')], [], QUOTES, 250.0); assert ok == [] and 'no facts near' in drop[0]
+
+
+def test_a_quote_card_lasts_longer_for_more_words_but_not_without_limit():
+    q = dict(id='q', t=30.0, kind='vo', text=' '.join(f'w{i}' for i in range(40)))
+    short, _ = F.validate([dict(type='quote', t=30.0, id='q', title='w1 w2 w3')], [], [q], 250.0); long, _ = F.validate([dict(type='quote', t=30.0, id='q', title=' '.join(f'w{i}' for i in range(12)))], [], [q], 250.0)
+    too_many, drop = F.validate([dict(type='quote', t=30.0, id='q', title=' '.join(f'w{i}' for i in range(13)))], [], [q], 250.0)
+    assert short[0]['dur_s'] == 2.6 and long[0]['dur_s'] == 5.7 and too_many == [] and 'not a run' in drop[0]
+
+
+class _Shots:
+    """frames_of_film stand-in: three blank frames."""
+    def __call__(self, key_dir, t0, dur, n=5): return [np.zeros((540, 960, 3), np.uint8) for _ in range(n)]
+
+
+def test_the_vision_model_rates_the_shot_under_a_card(tmp_path, monkeypatch):
+    monkeypatch.setattr(F, 'frames_of_film', _Shots())
+    model = _Model('{"excitement": 8, "obscure_risk": 99, "calm": "top", "verdict": "avoid", "why": "a fall"}')
+    cues = [dict(t0=9.0, t1=12.0, kind='speech', text='oh no')]; opt = dict(t=10.0, dur_s=3.0, lines=[dict(role='title', text='HALFWAY'), dict(role='meta', text='KM 183')])
+    got = F.judge_shot(opt, '/key', cues, model, str(tmp_path))
+    assert got == dict(excitement=8.0, obscure_risk=10.0, calm='top', verdict='avoid', why='a fall')                    # (a rating above 10 is held at 10)
+    prompt, images = model.asked[0]; assert 'HALFWAY / KM 183' in prompt and 'speech: oh no' in prompt and len(images) == 3 and all(os.path.exists(p) for p in images)
+
+
+def test_an_unreadable_answer_about_the_shot_means_an_ordinary_one(tmp_path, monkeypatch):
+    monkeypatch.setattr(F, 'frames_of_film', _Shots())
+    for text in ('I cannot tell', '{"excitement": "high", "verdict": "perfect"}'):
+        got = F.judge_shot(dict(t=10.0, dur_s=3.0, lines=[dict(role='title', text='x')]), '/key', [], _Model(text), str(tmp_path))
+        assert got['excitement'] == 5.0 and got['obscure_risk'] == 5.0 and got['verdict'] == 'ok' and got['calm'] == 'none'
+
+
+def _stored(project, plan_key='K', picked=()):
+    opts = [dict(id=f'o{i}', type='quote', t=20.0 + 40 * i, dur_s=2.6, lines=[dict(role='title', text=f'line {i}')], worth=6.0, score=6.5, shot=dict(verdict='good', excitement=3.0, obscure_risk=2.0, calm='top', why='x'), blocking=dict(score=1.5, what='the hand') if i == 0 else None) for i in range(3)]
+    project.write_json('film_text_options.json', dict(plan_key=plan_key, options=opts))
+    project.write_json('film_text.json', dict(cards=[dict(t=opts[i]['t'], lines=opts[i]['lines']) for i in picked]))
+
+
+def test_the_planner_is_given_the_options_and_which_were_picked(project, monkeypatch):
+    from strata360.render import preview as PVW
+    monkeypatch.setattr(PVW, 'plan_key', lambda folder, plan: 'K'); _stored(project, picked=(1,))
+    got = F.for_plan(project.folder, {})
+    assert [o['id'] for o in got['text_options']] == ['o0', 'o1', 'o2'] and got['text_cards'] == ['o1']
+    assert got['text_options'][0]['blocking'] == dict(score=1.5, what='the hand') and got['text_options'][1]['blocking'] is None and got['text_options'][0]['shot']['calm'] == 'top'
+
+
+def test_options_made_for_another_plan_are_flagged_and_missing_files_give_nothing(project, monkeypatch):
+    from strata360.render import preview as PVW
+    assert F.for_plan(project.folder, {}) == {}
+    monkeypatch.setattr(PVW, 'plan_key', lambda folder, plan: 'NEW'); _stored(project, plan_key='OLD'); assert F.for_plan(project.folder, {}) == dict(text_options_stale=True)
+
+
+def test_no_film_text_file_yet_means_nothing_is_picked(project, monkeypatch):
+    import os
+    from strata360.render import preview as PVW
+    monkeypatch.setattr(PVW, 'plan_key', lambda folder, plan: 'K'); _stored(project); os.remove(project.path('film_text.json'))
+    got = F.for_plan(project.folder, {}); assert len(got['text_options']) == 3 and got['text_cards'] == []
+
+
+def test_attaching_puts_the_options_in_the_saved_plan_and_drops_the_old_ones(project, monkeypatch):
+    from strata360.edit import project as PJ
+    from strata360.render import preview as PVW
+    monkeypatch.setattr(PVW, 'plan_key', lambda folder, plan: 'K'); _stored(project, picked=(2,))
+    PJ.save(project.folder, dict(plan=dict(segments=[], text_options_stale=True, text_cards=['old']), settings={}, overrides={}))
+    F.attach(project.folder); plan = PJ.load(project.folder)['plan']
+    assert plan['text_cards'] == ['o2'] and len(plan['text_options']) == 3 and 'text_options_stale' not in plan
+
+
+def test_attaching_without_a_plan_changes_nothing(project):
+    from strata360.edit import project as PJ
+    F.attach(project.folder); assert PJ.load(project.folder)['plan'] is None

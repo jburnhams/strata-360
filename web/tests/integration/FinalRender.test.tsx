@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { axe } from 'vitest-axe'
 import { mockGet, mockPending, recordRequests, mockPost } from '../utils/api'
 import { setup } from '../utils/render'
@@ -33,9 +33,8 @@ it('can trigger a render with changed settings', async () => {
 
   await user.click(await findByRole('button', { name: 'Render final film' }))
 
-  const { waitFor } = await import('@testing-library/react')
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST')).toBeTruthy())
-  expect(reqs[0].body).toMatchObject({ folder: '/f', size: '3840x2160', fps: 50, half_rate: true })
+  await vi.waitFor(() => expect(reqs).toHaveLength(1))
+  expect(reqs[0].method).toBe('POST'); expect(reqs[0].body).toMatchObject({ folder: '/f', size: '3840x2160', fps: 50, half_rate: true })
 })
 
 it('shows progress and stop button while rendering', async () => {
@@ -49,8 +48,8 @@ it('shows progress and stop button while rendering', async () => {
 
   await user.click(await findByRole('button', { name: /stop/i }))
 
-  const { waitFor } = await import('@testing-library/react')
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST')).toBeTruthy())
+  await vi.waitFor(() => expect(reqs).toHaveLength(1))
+  expect(reqs[0]).toMatchObject({ method: 'POST', body: { folder: '/f' } })
 })
 
 it('has no accessibility violations', async () => {
@@ -65,8 +64,7 @@ it('sends the enlarge mode with the start request', async () => {
   const { user, findByRole, findByLabelText } = setup(<FinalRender folder="/f" />)
   const reqs = recordRequests('/api/final/start'); mockPost('/api/final/start', { started: true })
   await user.selectOptions(await findByLabelText(/Enlarge/), '1080p'); await user.click(await findByRole('button', { name: 'Render final film' }))
-  const { waitFor } = await import('@testing-library/react')
-  await waitFor(() => expect(reqs.find(r => r.method === 'POST')?.body).toMatchObject({ upscale: '1080p' }))
+  await vi.waitFor(() => expect(reqs.find(r => r.method === 'POST')?.body).toMatchObject({ upscale: '1080p' }))
 })
 
 it('shows the steps and timings of a running render', async () => {

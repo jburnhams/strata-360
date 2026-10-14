@@ -4,9 +4,6 @@ import { mockError, mockGet, mockPending, recordRequests } from '../utils/api'
 import { makeBrowse } from '../utils/factories'
 import { screen, setup } from '../utils/render'
 
-// Workspace is a whole screen of its own requests; App only decides which folder to hand it.
-vi.mock('../../src/components/Workspace', () => ({ default: ({ folder }: { folder: string }) => <div data-testid="workspace">{folder}</div> }))
-
 describe('App', () => {
   it('shows nothing until it knows whether there is a last project', () => {
     mockPending('/api/last')
@@ -33,7 +30,7 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: 'Create project here' }))
     await screen.findByRole('heading', { name: 'Strata 360' })
     await vi.waitFor(() => expect(seen).toMatchObject([{ method: 'POST', body: { folder: '/data/trip' } }]))
-    expect(screen.getByTestId('workspace')).toHaveTextContent('/data/trip')
+    expect(await screen.findByText('/data/trip')).toBeInTheDocument(); expect(await screen.findByRole('heading', { name: 'Film details' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Create project here' })).not.toBeInTheDocument()
   })
 
@@ -41,7 +38,23 @@ describe('App', () => {
     mockGet('/api/last', { folder: '/data/last' })
     const seen = recordRequests('/api/open')
     setup(<App />)
-    expect(await screen.findByTestId('workspace')).toHaveTextContent('/data/last')
+    expect(await screen.findByText('/data/last')).toBeInTheDocument()
     await vi.waitFor(() => expect(seen).toHaveLength(1))
+  })
+
+  it('offers another project from the workspace and goes back to the same one on cancel', async () => {
+    mockGet('/api/last', { folder: '/data/last' })
+    const { user } = setup(<App />)
+    await user.click(await screen.findByRole('button', { name: 'open another / new project' }))
+    expect(await screen.findByRole('button', { name: 'Create project here' })).toBeInTheDocument()
+    expect(screen.queryByText('/data/last')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'cancel' }))
+    expect(await screen.findByText('/data/last')).toBeInTheDocument()
+  })
+
+  it('still opens the project when the server cannot be told about it', async () => {
+    mockGet('/api/last', { folder: '/data/last' }); mockError('/api/open', 500, 'disk full', 'post')
+    setup(<App />)
+    expect(await screen.findByText('/data/last')).toBeInTheDocument()
   })
 })

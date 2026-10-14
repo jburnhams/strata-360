@@ -84,3 +84,154 @@ def test_rough_blocks_take_the_length_from_a_target_then_the_music_then_the_foot
     m = P.rough_blocks(f); assert m['target_source'] == 'music' and abs(m['plan']['target_s'] - 96.0) < 1 and m['music']['offset_s'] == 4.0                       # the track from its first downbeat
     assert P.rough_blocks(f, auto=True)['target_source'] == 'automatic' and P.rough_blocks(f, target_s=40)['target_source'] == 'target'                          # --auto ignores the track; a target beats it
     assert P.load(f)['plan'] is None                                                                                                                         # the saved plan is untouched
+
+
+# ---- reading the project from disk, the music switch, and the overrides' guards
+
+def _rd(f, *p): return os.path.join(f, 'strata360', *p)
+
+
+def test_a_project_json_that_cannot_be_read_counts_as_empty():
+    f = make_project(); os.makedirs(_rd(f), exist_ok=True); open(_rd(f, 'project.json'), 'w').write('{broken')
+    e = P.load(f); assert e['plan'] is None and e['settings'] == P.DEFAULT_SETTINGS and e['overrides'] == P.EMPTY_OVERRIDES
+    P.save(f, dict(settings={}, overrides={}, plan=None)); assert json.load(open(_rd(f, 'project.json'))) == dict(edit=dict(settings={}, overrides={}, plan=None))
+
+
+def test_saved_settings_and_overrides_are_laid_over_the_defaults():
+    f = make_project(); P.save(f, dict(settings=dict(length_s=45.0), overrides=dict(bans_techs=['x'])))
+    e = P.load(f); assert e['settings']['length_s'] == 45.0 and e['settings']['bpm'] == 120.0 and e['overrides']['bans_techs'] == ['x'] and e['overrides']['locked'] == []
+    e['overrides']['locked'].append(1); assert P.EMPTY_OVERRIDES['locked'] == []                                    # (the defaults are never shared)
+
+
+def test_clips_are_read_with_their_extra_analysis_and_those_without_candidates_are_named():
+    f = make_project((30, 12)); ids = sorted(os.listdir(_rd(f, 'clips')))
+    d = _rd(f, 'clips', ids[0]); json.dump(dict(segments=[dict(t0=1, t1=2)]), open(os.path.join(d, 'alignment.json'), 'w'))
+    json.dump(dict(cameras=[dict(kind='front', start_s=0, end_s=5, score=0.9, extra='dropped')]), open(os.path.join(d, 'cameras.json'), 'w'))
+    json.dump(dict(samples=[dict(t=0, score=0.8), dict(t=1, score=0.6)], clear=0.7), open(os.path.join(d, 'face_view.json'), 'w'))
+    os.remove(_rd(f, 'clips', ids[1], 'candidates.json')); os.makedirs(_rd(f, 'clips', 'junk')); open(_rd(f, 'clips', 'junk', 'clip.json'), 'w').write('nope')
+    clips, missing = P.load_clips(f)
+    assert [c['id'] for c in clips] == [ids[0]] and missing == [ids[1]]
+    c = clips[0]; assert c['alignment'] == [dict(t0=1, t1=2)] and c['cameras'] == [dict(kind='front', start_s=0, end_s=5, score=0.9)] and c['face_view'] == [(0, 0.8), (1, 0.6)] and c['face_clear'] == 0.7
+
+
+def test_a_clip_whose_extra_files_are_broken_is_still_planned():
+    f = make_project((30,)); cid = os.listdir(_rd(f, 'clips'))[0]
+    for name, body in (('alignment.json', '{bad'), ('cameras.json', '{"cameras": [{"kind": "x"}]}'), ('face_view.json', '{"samples": [{"t": 1}]}')): open(_rd(f, 'clips', cid, name), 'w').write(body)
+    c = P.load_clips(f)[0][0]; assert 'alignment' not in c and 'cameras' not in c and 'face_view' not in c
+
+
+def test_there_is_no_music_record_without_a_file():
+    f = make_project(); assert P.music_record(f, {}) is None and P.music_info(f, {}) is None and P.music_record(f, dict(music='music/none.mp3')) is None
+
+
+def test_an_unreadable_track_is_no_music(monkeypatch):
+    from strata360.edit import music as MU
+    f = make_project(); os.makedirs(_rd(f, 'music')); open(_rd(f, 'music', 't.mp3'), 'wb').write(b'x')
+    def boom(rd, rel): raise RuntimeError('no decoder')
+    monkeypatch.setattr(MU, 'info', boom); assert P.music_record(f, dict(music='music/t.mp3')) is None
+    monkeypatch.setattr(MU, 'info', lambda rd, rel: dict(analysis=dict(bpm=100.0), name=rel)); assert P.music_info(f, dict(music='music/t.mp3')) == dict(bpm=100.0)
+
+
+def test_music_modes_decide_whether_the_track_sets_the_length():
+    assert P.built_mode(dict(music_mode='built')) and not P.built_mode(dict(music_mode='fixed')) and not P.built_mode({})
+    assert P.fixed_length_free(dict(music_mode='built', music='music/t.mp3')) and P.fixed_length_free(dict(music_mode='built', music=None))
+    assert not P.fixed_length_free(dict(music_mode='built', music=P.BUILT)) and not P.fixed_length_free(dict(music_mode='fixed', music='music/t.mp3'))
+    assert P.original_track('f', dict(music=P.BUILT, music_original='music/t.mp3')) == 'music/t.mp3' and P.original_track('f', dict(music='music/t.mp3')) == 'music/t.mp3' and P.original_track('f', {}) is None
+
+
+def test_using_the_built_track_keeps_the_upload_and_going_back_restores_it(monkeypatch):
+    f = make_project(); monkeypatch.setattr(P, 'propose', lambda folder, **kw: P.load(folder))
+    try: P.use_built(f); assert False
+    except RuntimeError as e: assert 'no built track' in str(e)
+    os.makedirs(_rd(f, 'music')); open(_rd(f, P.BUILT), 'wb').write(b'x'); P.set_music(f, 'music/up.mp3')
+    s = P.use_built(f)['settings']; assert s['music'] == P.BUILT and s['music_original'] == 'music/up.mp3'
+    s = P.use_built(f)['settings']; assert s['music_original'] == 'music/up.mp3'                                       # (using it twice does not lose the upload)
+    s = P.use_original(f)['settings']; assert s['music'] == 'music/up.mp3' and s['music_original'] is None
+    assert P.set_music(f, None)['settings']['music'] is None
+
+
+def test_a_clip_weight_is_held_between_a_fifth_and_five_times_and_one_removes_it(monkeypatch):
+    f = make_project(); monkeypatch.setattr(P, 'propose', lambda folder, **kw: P.load(folder))
+    assert P.set_clip_weight(f, 'C01', 50)['overrides']['clip_weight'] == {'C01': 5.0} and P.set_clip_weight(f, 'C01', 0.01)['overrides']['clip_weight'] == {'C01': 0.2}
+    assert P.set_clip_weight(f, 'C01', 1.0)['overrides']['clip_weight'] == {} and P.set_clip_weight(f, 'C02', 3)['overrides']['clip_weight'] == {'C02': 3.0}
+    assert P.set_clip_weight(f, 'C02', None)['overrides']['clip_weight'] == {}
+
+
+def test_banning_twice_keeps_one_entry_and_lifting_removes_it(monkeypatch):
+    f = make_project(); monkeypatch.setattr(P, 'propose', lambda folder, **kw: P.load(folder))
+    P.ban(f, 'moment', 'c1'); assert P.ban(f, 'moment', 'c1')['overrides']['bans_cands'] == ['c1'] and P.ban(f, 'technique', 'orbit')['overrides']['bans_techs'] == ['orbit']
+    o = P.ban(f, 'moment', 'c1', on=False)['overrides']; assert o['bans_cands'] == [] and o['bans_techs'] == ['orbit']
+
+
+def test_an_override_on_a_window_that_does_not_exist_is_an_error(monkeypatch):
+    f = make_project(); monkeypatch.setattr(P, 'propose', lambda folder, **kw: P.load(folder))
+    for call in (lambda: P.set_technique(f, 'nope@0.00', 'orbit'), lambda: P.set_lock(f, 'nope@0.00', True), lambda: P.set_transition(f, 'nope@0.00', 'cut')):
+        try: call(); assert False
+        except KeyError as e: assert 'no such segment nope@0.00' in str(e)
+    assert P.set_technique(f, 'nope@0.00', None)['overrides']['tech_force'] == {}                                         # (clearing needs no window)
+
+
+def test_a_transition_must_be_a_known_one_and_none_goes_back_to_the_rule(monkeypatch):
+    from strata360.edit import transitions as TR
+    f = make_project(); monkeypatch.setattr(P, 'propose', lambda folder, **kw: P.load(folder))
+    edit = P.load(f); edit['plan'] = dict(segments=[dict(id='w@0.00')]); P.save(f, edit)
+    try: P.set_transition(f, 'w@0.00', 'teleport'); assert False
+    except ValueError as e: assert 'one of' in str(e)
+    assert P.set_transition(f, 'w@0.00', TR.TYPES[0])['overrides']['transitions'] == {'w@0.00': TR.TYPES[0]}
+    assert P.set_transition(f, 'w@0.00', None)['overrides']['transitions'] == {}
+
+
+def test_generated_clips_are_put_in_their_places_among_the_segments():
+    from strata360.edit import synthetic as SY
+    f = make_project(); seg = lambda i, b: dict(id=f's{i}', index=i, start_beat=b, clip='C')
+    assert P.insert_synthetic(f, [seg(0, 0)], [], 0.5) == [seg(0, 0)]
+    SY.save(f, dict(clips=[dict(id='G01', seconds=4.0, t0='2026-02-21T12:00:00.000Z', t1='2026-02-21T12:00:04.000Z')]))
+    out = P.insert_synthetic(f, [seg(0, 0), seg(1, 16)], [dict(clip='G01', beats=8, start_beat=8, role='gap', item=3)], 0.5)
+    assert [g['start_beat'] for g in out] == [0, 8, 16] and [g['index'] for g in out] == [0, 1, 2]
+    g = out[1]; assert g['clip'] == 'G01' and g['dur_s'] == 4.0 and g['film_start_s'] == 4.0 and g['kind'] == 'synthetic' and g['role'] == 'gap' and g['item'] == 3
+    assert g['synthetic'] == os.path.normpath(_rd(f, 'synthetic', 'G01.mp4')) and g['synthetic_seconds'] == 4.0
+
+
+def test_gap_clips_that_already_match_the_plan_are_left_alone():
+    from strata360.edit import synthetic as SY
+    f = make_project(); SY.save(f, dict(clips=[dict(id='G01', seconds=4.0)]))
+    assert P.sync_gap_clips(f, [dict(clip='G01', seconds=4.02)]) == [] and P.sync_gap_clips(f, []) == []
+
+
+def test_without_music_the_beats_cannot_be_synced():
+    f = make_project(); ser = [dict(id='a')]
+    assert P.beat_list(f, dict(music=None), None) is None and P.beat_list(f, dict(music='m'), None) is None and P.beat_list(f, dict(music=None), dict(built=False)) is None
+    assert P.beat_sync(f, {}, None, ser, [], [], {}, []) == (ser, None) and P.beat_sync(f, {}, dict(x=1), [], [], [], {}, []) == ([], None)
+
+
+def test_beats_that_cannot_be_found_leave_the_cuts_on_the_average_tempo(monkeypatch):
+    f = make_project(); ser = [dict(id='a')]; warnings = []
+    monkeypatch.setattr(P, 'beat_list', lambda *a: (_ for _ in ()).throw(RuntimeError('no tracker')))
+    assert P.beat_sync(f, dict(music='m'), dict(x=1), ser, [], [], {}, warnings) == (ser, None) and 'no tracker' in warnings[0]
+    monkeypatch.setattr(P, 'beat_list', lambda *a: None); assert P.beat_sync(f, dict(music='m'), dict(x=1), ser, [], [], {}, []) == (ser, None)
+
+
+def test_a_built_tracks_beats_come_from_its_bar_lines(monkeypatch):
+    from strata360.edit import beat_sync as BS, music as MU
+    f = make_project(); monkeypatch.setattr(MU, 'built_score', lambda rd, rel: dict(downbeats=[0.0, 2.0])); monkeypatch.setattr(BS, 'from_downbeats', lambda d, n: [0.0, 0.5, 1.0])
+    assert P.beat_list(f, dict(music='m'), dict(built=True, bar_beats=4)) == dict(beats=[0.0, 0.5, 1.0], downbeats=[0.0, 2.0])
+    monkeypatch.setattr(MU, 'built_score', lambda rd, rel: None); assert P.beat_list(f, dict(music='m'), dict(built=True, bar_beats=4)) is None
+
+
+def test_a_script_plan_needs_a_draft_and_candidates():
+    f = make_project()
+    try: P.plan_from_script(f); assert False
+    except O.Infeasible as e: assert 'no script draft' in str(e)
+    from strata360.edit import script_draft as SD
+    SD.save_draft(f, dict(items=[]))
+    for name in os.listdir(_rd(f, 'clips')): os.remove(_rd(f, 'clips', name, 'candidates.json'))
+    try: P.plan_from_script(f); assert False
+    except O.Infeasible as e: assert 'no candidates yet' in str(e)
+
+
+def test_gap_items_need_a_gap_in_the_draft_and_a_track():
+    f = make_project()
+    assert P.apply_gap_items(f, dict(items=[dict(type='clip', clip='0001')])) == [] and P.apply_gap_items(f, {}) == []
+    os.makedirs(_rd(f), exist_ok=True); json.dump({}, open(_rd(f, 'race.json'), 'w'))
+    try: P.apply_gap_items(f, dict(items=[dict(type='gap', clip='G01', seconds=5)])); assert False
+    except O.Infeasible as e: assert 'no race track' in str(e)

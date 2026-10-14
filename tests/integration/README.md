@@ -37,7 +37,7 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 | `edit/voiceover.py`, `edit/vo_fit.py` | n/a | `test_voiceover.py` | `respeak`/`fit_project` with the fake speech engine |
 | `edit/music.py` | n/a | `test_music.py` | |
 | `edit/optimise.py` | n/a | `test_edit.py` | slow pure computation (see Known issues) |
-| `cli.py` | 59% | `test_cli_commands.py` | basic commands (doctor, status, etc) covered |
+| `cli.py` | 35% (this file alone, before the other suites) | `test_cli_commands.py` | catalog, init errors, progress (json and text), open, coverage, backup (make, list, restore), credits, plan-blocks, gaps without a track, doctor. The model and render commands are manual checks |
 | `render/film.py` | 81% | `test_render.py` | composing film pieces |
 | `render/final.py` | 92% | `test_render.py` | final CLI rendering |
 | `render/flat.py` | 70% | `test_render.py` | flat CLI rendering, seam |
@@ -51,3 +51,4 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 - `test_edit.py` (the optimiser on synthetic candidates, ~100 s) needs no ffmpeg: it is slow pure computation. Candidate to move to `tests/unit/` with smaller inputs (a job for the unit run), or to mark `slow`.
 - A `RuntimeWarning: overflow encountered in divide` from `render/photo.py:64` appears when the synthetic clip goes through exposure (a division by a zero scale on the synthetic lens). Possible product bug; not hidden here.
 - Old files here still assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); convert them to `monkeypatch` when you touch them.
+- `edit/voiceover.py::_mix` padded the voice-over track with `apad` after `amix`; with the same command ffmpeg sometimes gave a track as short as the last line (8 s of a 20 s film, about half the runs on Windows). It now mixes in a silent input as long as the film. `test_voiceover.py::TestFitting` is the regression test (run it repeatedly: it was flaky, not failing every time).
