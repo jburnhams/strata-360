@@ -18,7 +18,7 @@ import numpy as np
 from strata360.osv.pbdump import parse
 
 MAGIC = b'8db42d694ccc418790edff439fe026bf'
-REC_EXTRA, REC_GYRO, REC_EXPOSURE = 0x101, 0x300, 0x400
+REC_EXTRA, REC_GYRO, REC_EXPOSURE, REC_AAA = 0x101, 0x300, 0x400, 0x900
 GYRO_DPS_PER_LSB = 2000.0 / 32768.0
 IMU_TO_BODY = np.array([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
 VIDEO_LATENCY_S = 0.2336            # the camera clock at the first video frame, after the first exposure record (7 frames; 0.223 to 0.234 s on three clips, by matching image motion to the gyro)
@@ -188,6 +188,17 @@ def read_exposure_records(path):
     return d[:, :8].copy().view('<u8').ravel().astype(np.float64) / 1e6, d[:, 8:].copy().view('<f8').ravel()
 
 
+def read_aaa(path):
+    """(camera-clock seconds, ISO) of the auto-exposure table (record 0x900: 48-byte entries about every 4 frames; u32 ms timestamp, f32 target EV, f32 exposure ms, u32 stats, u32 packed luma stats whose top 13 bits give the
+    ISO as `100 * (bits >> 19) >> 6`; layout from Gyroflow's telemetry-parser, checked here: ISO about 3100 at dusk with the shutter at its limit, 110 to 350 by day). The first entry is a header and is skipped."""
+    rec = read_trailer(path)
+    if REC_AAA not in rec: raise ValueError('no auto-exposure record')
+    a = np.frombuffer(rec[REC_AAA], np.uint8); a = a[:len(a) // 48 * 48].reshape(-1, 48).astype(np.int64); a = a[a.any(1)][1:]
+    ts = (a[:, 0] | a[:, 1] << 8 | a[:, 2] << 16 | a[:, 3] << 24) / 1000.0
+    ls = a[:, 16] | a[:, 17] << 8 | a[:, 18] << 16 | a[:, 19] << 24
+    return ts, ((100 * ((ls & 0xFFF80000) >> 19)) >> 6).astype(np.float64)
+
+
 def device_start(path):
     """Camera clock (seconds) at the first video frame."""
     ets, _ = read_exposure_records(path); return float((ets[1] if len(ets) > 1 else ets[0]) + VIDEO_LATENCY_S)
@@ -231,10 +242,15 @@ def frames_from_imu(path, pts):
 
 
 def exposure_frames(path, pts):
-    """Per-frame exposure like the DJI reader's: ISO (not recorded: constant 100), shutter denominator, colour temperature (not recorded: 0), one entry a frame (both lenses share it)."""
+    """Per-frame exposure like the DJI reader's: ISO from the auto-exposure table (100 where there is none), shutter denominator, colour temperature (not recorded: 0), one entry a frame (both lenses share it)."""
     ets, ex = read_exposure_records(path); pts = np.asarray(pts, float); T = device_start(path) + (pts - pts[0])
     k = np.clip(np.searchsorted(ets, T), 0, len(ets) - 1); e = ex[k]
-    d = dict(iso=np.full(len(pts), 100.0), shutter_den=np.maximum(np.round(1.0 / np.maximum(e, 1e-6)), 1).astype(np.int64), ct=np.zeros(len(pts), np.int64))
+    iso = np.full(len(pts), 100.0)
+    try:
+        ts, v = read_aaa(path)
+        if len(ts): iso = v[np.clip(np.searchsorted(ts, T, side='right') - 1, 0, len(ts) - 1)]              # the last entry at or before each frame
+    except ValueError: pass
+    d = dict(iso=iso, shutter_den=np.maximum(np.round(1.0 / np.maximum(e, 1e-6)), 1).astype(np.int64), ct=np.zeros(len(pts), np.int64))
     return {'djmd3': d, 'djmd4': {k_: v.copy() for k_, v in d.items()}}
 
 

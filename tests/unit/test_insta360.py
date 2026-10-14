@@ -24,7 +24,8 @@ def make_insv(path, n_imu=2000):
     imu = b''.join(struct.pack('<Q6H', 1_000_000 + i * 1000, 32768, 32768 - 1000, 32768, 32768, 32768, 32768) for i in range(n_imu))
     exp = b''.join(struct.pack('<Qd', 4_000_000 + i * 33333, 0.01) for i in range(5))
     body = b''
-    for rid, d in ((0xa00, b'x' * 5), (0x101, extra), (0x300, imu), (0x400, exp)): body += d + struct.pack('<HI', rid, len(d))      # data, then (id, length): read backwards
+    aaa = b''.join(struct.pack('<IffII7I', 1000 * i, 0.0, 10.0, 0, (((1600 >> 0) << 19) if i else 0), *([0] * 7)) for i in range(6))                   # iso = 100 * 1600 >> 6 = 2500
+    for rid, d in ((0xa00, b'x' * 5), (0x101, extra), (0x300, imu), (0x400, exp), (0x900, aaa)): body += d + struct.pack('<HI', rid, len(d))      # data, then (id, length): read backwards
     with open(path, 'wb') as f:
         f.write(b'\0' * 100 + body + b'\0' * 32 + struct.pack('<II', len(body) + 72, 3) + I.MAGIC)
 
@@ -95,3 +96,9 @@ def test_lens_pixels_follow_the_video_size(tmp_path, monkeypatch):
     for size in (2880, 2400):
         monkeypatch.setattr(I, 'lens_size', lambda path, size=size: size)
         for slot in I.slots(str(p)).values(): assert abs(slot[3] - size / 2) < 25 and slot[10] == size
+
+
+def test_iso_comes_from_the_auto_exposure_table(tmp_path):
+    p = tmp_path / 'VID_20240720_195607_00_001.insv'; make_insv(p)
+    ts, iso = I.read_aaa(str(p)); assert len(ts) == 5 and np.all(iso == 2500)
+    e = I.exposure_frames(str(p), np.arange(4) / 29.97)['djmd3']; assert np.all(e['iso'] == 2500) and e['shutter_den'][0] == 100
