@@ -10,7 +10,7 @@ export default function RedoDialog({ folder, stage, clip, onClose }: { folder: s
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [cascade, setCascade] = useState(true)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { api.state(folder).then(x => { setM(x); if (stage) setSel(new Set(Object.keys(x.clips).filter(c => !clip || c === clip).flatMap(c => x.dependents[stage].map(s => `${c}|${s}`)))) }) }, [folder, stage, clip])
+  useEffect(() => { let live = true; api.state(folder).then(x => { if (!live) return; setM(x); if (stage) setSel(new Set(Object.keys(x.clips).filter(c => !clip || c === clip).flatMap(c => x.dependents[stage].map(s => `${c}|${s}`)))) }).catch(() => {}); return () => { live = false } }, [folder, stage, clip])
   const rows = useMemo(() => (m ? Object.keys(m.clips).filter(c => !clip || c === clip) : []), [m, clip])
   if (!m) return null
   const key = (c: string, s: string) => `${c}|${s}`

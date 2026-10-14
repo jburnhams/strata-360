@@ -6,7 +6,7 @@ import { PanelSkeleton } from './Skeleton'
 export default function FilmDetails({ folder }: { folder: string }) {
   const [m, setM] = useState<Meta>()
   const [err, setErr] = useState<string>()
-  useEffect(() => { api.meta(folder).then(setM) }, [folder])
+  useEffect(() => { let live = true; api.meta(folder).then(x => live && setM(x)).catch(() => {}); return () => { live = false } }, [folder])      // a failed request leaves the skeleton: it must not be an unhandled rejection
   if (!m) return <PanelSkeleton title="Film details" rows={4} />
   const save = async (patch: Parameters<typeof api.saveMeta>[1]) => {
     try { setM(await api.saveMeta(folder, patch)); setErr(undefined) } catch (e) { setErr((e as Error).message) }

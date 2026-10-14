@@ -159,6 +159,21 @@ def progress(folder):
     p = project_progress(folder); from strata360.pipeline import resources; p['job_running'] = bool(p.get('workers')); p['max_workers'] = resources.DEFAULTS['max_workers']; return p
 
 
+def mount_mcp(api, token):
+    """Serve the MCP tools at /mcp (streamable HTTP, the server's token required) from the same process, so an agent sees what the web app sees. Skipped when the `mcp` package is not installed, or with STRATA360_MCP=0."""
+    if os.environ.get('STRATA360_MCP') == '0': return
+    write = os.environ.get('STRATA360_MCP_WRITE') != '0'                                  # the edit tool is on by default (the /api routes it calls are as open as it is); STRATA360_MCP_WRITE=0 makes /mcp read-only
+    try: from strata360.server import mcp_tools as MT; srv = MT.build_server((MT.WriteAsgiBackend if write else MT.AsgiBackend)(api, token), write=write)
+    except ImportError: return
+    import contextlib
+    api.mount('/mcp', MT.guarded(srv.streamable_http_app(streamable_http_path='/'), token)); inner = api.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with inner(app), srv.session_manager.run(): yield
+    api.router.lifespan_context = lifespan
+
+
 def create_app(roots, token=None):
     """The FastAPI application. `roots` are the only folders it may look inside; `token` (optional) is required on every request (cookie, `?token=` on first visit, or Bearer)."""
     from fastapi import Depends, FastAPI, HTTPException, Request
@@ -355,6 +370,19 @@ def create_app(roots, token=None):
         for n in ('thumb.jpg', 'thumb_quick.jpg'):
             if os.path.exists(os.path.join(d, n)): return FileResponse(os.path.join(d, n), media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
         raise HTTPException(404, 'no thumbnail yet')
+
+    @api.get('/api/clip/frame')
+    def get_clip_frame(request: Request, folder: str, clip: str, t: float, yaw: float = 0.0, pitch: float = 0.0, fov: float = 100.0, w: int = 960):         # a still of the footage: the flat upright view (yaw 0 = ahead, 180 = behind) at `t` seconds into the clip, cut from its proxy
+        auth(request); f = folder_of(folder); d = _cd(f, clip); c = _j(d, 'clip.json'); proxy = os.path.join(d, 'proxy.mp4')
+        if not c: raise HTTPException(404, 'no such clip')
+        from strata360.analysis import views as V
+        dur = c['video']['source_frames'] / c['video']['nominal_fps']
+        if not (0.0 <= t <= dur): raise HTTPException(400, f'the clip is {dur:.1f} s long: ask for a time inside it')
+        if not V.proxy_available(proxy): raise HTTPException(404, 'no proxy video yet: the proxy stage makes the one this picture is cut from')
+        w = int(min(max(w, 160), 1920)); fov = float(min(max(fov, 40.0), 120.0)); pitch = float(min(max(pitch, -80.0), 80.0))
+        try: jpg = V.render_thumb_proxy(proxy, config.source((c.get('source_files') or {}).get('osv'), d), float(t), yaw=float(yaw), pitch=pitch, hfov=fov, w=w, h=int(round(w * 9 / 16)))
+        except Exception as e: raise HTTPException(500, f'could not cut the picture: {e}')
+        return Response(jpg, media_type='image/jpeg', headers={'Cache-Control': 'no-cache'})
 
     @api.get('/api/preview')
     def get_preview(request: Request, folder: str, clip: str):                           # the preview video (Range requests are handled, so seeking works); <video> cannot send headers, so the cookie/query token authenticates
@@ -1919,6 +1947,63 @@ def create_app(roots, token=None):
         f = folder_of(body.get('folder')); items = [(str(i['clip']), str(i['stage'])) for i in body.get('items', [])]
         return dict(cleared=runner.clear_items(f, items))
 
+    @api.get('/api/agent', dependencies=[Depends(auth)])
+    def get_agent():                                                                      # whether the project assistant can be used (a key is set: never the key itself) and with which model
+        import importlib.util
+        from strata360.server import agent as AG
+        return dict(configured=bool(AG.key_for_nvidia()), model=os.environ.get('STRATA360_AGENT_MODEL') or AG.DEFAULT_MODEL, read_only=True, vision_model=AG.VISION_MODEL, available=importlib.util.find_spec('mcp') is not None)
+
+    @api.post('/api/agent/chat', dependencies=[Depends(auth)])
+    def post_agent_chat(body: dict):                                                      # {folder, messages: [{role, content}], model?}: the assistant answers the last question from the read-only tools; what the tools return goes to the model service
+        from strata360.server import agent as AG, mcp_tools as MT
+        f = folder_of(body.get('folder')); key = AG.key_for_nvidia(); model = body.get('model') or os.environ.get('STRATA360_AGENT_MODEL') or AG.DEFAULT_MODEL
+        if not key: raise HTTPException(409, 'no NVIDIA_API_KEY: put NVIDIA_API_KEY=... in secrets.env')
+        if not AG.valid_model(model): raise HTTPException(400, 'not a model name')
+        vm = body.get('vision_model') or AG.VISION_MODEL
+        if not AG.valid_model(vm): raise HTTPException(400, 'not a model name')
+        write = body.get('write') is True                                                  # editing is the user's switch, per question: the Ask page's "Allow edits" box
+        try: return AG.run((MT.WriteAsgiBackend if write else MT.AsgiBackend)(api, token), f, body.get('messages') or [], key, model, vision=body.get('vision') is True, vision_model=vm, write=write)
+        except AG.AgentError as e: raise HTTPException(503 if e.retryable else 400, str(e))
+
+    @api.get('/api/agent/pending', dependencies=[Depends(auth)])
+    def get_agent_pending(folder: str):                                                   # the actions the assistant asked for that need YOUR approval (cost, data sent out, work thrown away, hours of rendering)
+        from strata360.server import agent_edit as AE
+        return dict(pending=AE.pending_for(folder_of(folder)))
+
+    @api.post('/api/agent/approve', dependencies=[Depends(auth)])
+    def post_agent_approve(body: dict):                                                   # {folder, id}: you approve one pending action: it runs now. Only a person pressing the button gets here; the model's tools cannot
+        import asyncio
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        f = folder_of(body.get('folder'))
+        try: return asyncio.run(AE.approve(MT.WriteAsgiBackend(api, token).post, f, str(body.get('id'))))
+        except MT.ToolError as e: raise HTTPException(404 if 'gone' in str(e) else 400, str(e))
+
+    @api.post('/api/agent/deny', dependencies=[Depends(auth)])
+    def post_agent_deny(body: dict):                                                      # {folder, id}: you refuse a pending action
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        try: return AE.deny(folder_of(body.get('folder')), str(body.get('id')))
+        except MT.ToolError as e: raise HTTPException(404, str(e))
+
+    @api.get('/api/agent/journal', dependencies=[Depends(auth)])
+    def get_agent_journal(folder: str, limit: int = 50):                                  # what the assistant changed (or was refused): newest last; `backup_before` names the backup to restore the earlier state from; `undo`: what one click of undo would do
+        from strata360.server import agent_edit as AE
+        f = folder_of(folder); return dict(entries=AE.read_journal(f, max(1, min(limit, 500))), undo=AE.undo_state(f))
+
+    @api.post('/api/agent/edit', dependencies=[Depends(auth)])
+    def post_agent_edit(body: dict):                                                      # {folder, action, args}: one edit action of the assistant's edit tier (server/agent_edit.py), for an outside agent (the MCP stdio shim) so its approvals and journal live here. There is no way to pass an approval
+        import asyncio
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        f = folder_of(body.get('folder'))
+        try: return asyncio.run(AE.execute(MT.WriteAsgiBackend(api, token).post, f, str(body.get('action')), body.get('args') if isinstance(body.get('args'), dict) else {}))
+        except MT.ToolError as e: raise HTTPException(400, str(e))
+
+    @api.post('/api/agent/undo', dependencies=[Depends(auth)])
+    def post_agent_undo(body: dict):                                                      # {folder}: put the project back to before the assistant's latest session of changes (the current state is backed up first)
+        from strata360.server import agent_edit as AE, mcp_tools as MT
+        try: return AE.undo(folder_of(body.get('folder')))
+        except MT.ToolError as e: raise HTTPException(409, str(e))
+
+    mount_mcp(api, token)                                                               # /mcp: the read-only tools for a local agent (server/mcp_tools.py)
     return api
 
 

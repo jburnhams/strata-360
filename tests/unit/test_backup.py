@@ -73,3 +73,20 @@ def test_replacing_music_keeps_every_earlier_track(tmp_path, monkeypatch):
     rd = str(tmp_path)
     for i in range(3): M.store(rd, b'a%d' % i, '.mp3', 'n')
     names = sorted(os.listdir(os.path.join(rd, 'music'))); assert 'track.mp3' in names and len([n for n in names if n.endswith('.replaced')]) == 2
+
+
+def test_two_backups_in_the_same_second_never_replace_each_other(proj):
+    rd = config.race_dir(proj); t = 1_800_000_000.0
+    first = B.backup(proj, now=t, force=True)
+    open(os.path.join(rd, 'race.json'), 'w').write('{"changed": true}')
+    second = B.backup(proj, now=t, force=True)
+    assert first and second and first != second and os.path.exists(first) and os.path.exists(second)
+    assert B.stamp_of(os.path.basename(second)) == B.stamp_of(os.path.basename(first)) + 1                       # the later one takes the next free second
+    assert tarfile.open(first).extractfile('race.json').read() == b'{}' and tarfile.open(second).extractfile('race.json').read() == b'{"changed": true}'
+
+
+def test_restore_over_puts_files_back_and_leaves_newer_ones(proj):
+    rd = config.race_dir(proj); t = 1_800_000_000.0; p = B.backup(proj, now=t, force=True)
+    open(os.path.join(rd, 'race.json'), 'w').write('{"changed": true}'); open(os.path.join(rd, 'later.json'), 'w').write('1')
+    assert B.restore_over(proj, os.path.basename(p)) == 3 - 1                                                      # clip.json and race.json are in the backup
+    assert open(os.path.join(rd, 'race.json')).read() == '{}' and os.path.exists(os.path.join(rd, 'later.json'))

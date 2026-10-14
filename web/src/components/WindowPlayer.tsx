@@ -5,7 +5,7 @@ import ClipPlayer from './ClipPlayer'
 // One window of one clip in a modal: the clip's own player, limited to the window and started at once.
 export default function WindowPlayer({ folder, clip, start, end, title, onClose }: { folder: string; clip: string; start: number; end: number; title: string; onClose: () => void }) {
   const [c, setC] = useState<ClipDetail>()
-  useEffect(() => { api.clip(folder, clip).then(setC) }, [folder, clip])
+  useEffect(() => { let live = true; api.clip(folder, clip).then(x => live && setC(x)).catch(() => {}); return () => { live = false } }, [folder, clip])
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
       <div className="w-full max-w-3xl rounded-xl bg-white p-3 shadow-xl dark:bg-stone-900" onClick={e => e.stopPropagation()}>

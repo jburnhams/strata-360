@@ -250,6 +250,8 @@ def hud_boxes(folder, plan, t, W=960, H=540):
 
 def design_cards(folder, cards, server, key_dir, log=print, plan=None):
     from strata360.edit import title_design as TD
+    from strata360.analysis import palette as PAL
+    from strata360.pipeline import runner
     from strata360.render import captions as CP, titles as TT
     cues = CP.build_cues(folder, plan) if plan else []; cap = CP.Captions(cues, 960, 540, 25.0)                      # the subtitles are put on the frames the model sees: the cards are designed LAST, round everything else
     for ci, c in enumerate(cards):
@@ -259,7 +261,9 @@ def design_cards(folder, cards, server, key_dir, log=print, plan=None):
             if o.get('spec') and o['t'] < c['t'] + c['dur_s'] and c['t'] < o['t'] + o['dur_s']: avoid += [b for _, b in TT.piece_boxes(TT.Title(o['spec'], 960, 540, o['dur_s']))]
         purpose = {'quote': "a quote from what was said, shown as a short on-screen note", 'progress': 'a progress update about the race (a short on-screen note)'}[c['type']]
         calm = c.get('shot', {}).get('calm', 'none'); hint = f" The shot's calmest part for lettering is the {calm}." if calm in ('top', 'bottom', 'left', 'right', 'centre') else ''
-        spec, report = TD.design(frames, c['lines'], purpose, c['dur_s'], server, scene='The film already has the race overlay along the left and right edges and the top row, and subtitles along the bottom: keep the words inside the middle of the frame (x from 0.2 to 0.8, y from 0.1 to 0.78). The word art is short and quick: it must read at a glance.' + hint, tmp_dir=os.path.dirname(key_dir), rounds=1, log=log, bottom_clear=0.18, keep_in=SAFE_ZONE, avoid=avoid)
+        g = next((g for g in plan['segments'] if g['film_start_s'] <= c['t'] < g['film_start_s'] + g['dur_s'] and g.get('clip')), None) if plan else None
+        pal = PAL.load(runner.clip_dir(folder, g['clip'])) if g else None                                                 # the colour scheme of the clip the card sits on
+        spec, report = TD.design(frames, c['lines'], purpose, c['dur_s'], server, palette=pal, scene='The film already has the race overlay along the left and right edges and the top row, and subtitles along the bottom: keep the words inside the middle of the frame (x from 0.2 to 0.8, y from 0.1 to 0.78). The word art is short and quick: it must read at a glance.' + hint, tmp_dir=os.path.dirname(key_dir), rounds=1, log=log, bottom_clear=0.18, keep_in=SAFE_ZONE, avoid=avoid)
         c['spec'] = spec; c['changes'] = report['changes']; c['blocking'] = report.get('blocking');  log(f"  designed {c['type']} at {c['t']} s: {' / '.join(l['text'] for l in c['lines'])}")
     return cards
 

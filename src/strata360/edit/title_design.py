@@ -132,7 +132,7 @@ def fit_timing(spec, duration, clear=None):
 def _fill_colour(el): return TT.hex_rgb(el['fill']['c1']), TT.hex_rgb(el['fill']['c2'])
 
 
-def enforce(spec, lines, frames, times, boxes, duration, W=960, H=540, clear=None, bottom_clear=0.0, keep_in=None, avoid=(), persons=None):
+def enforce(spec, lines, frames, times, boxes, duration, W=960, H=540, clear=None, bottom_clear=0.0, keep_in=None, avoid=(), persons=None, palette=None):
     """Check a spec against the frames (uint8 RGB at `times`, with the faces `boxes` found in each) and correct it. Returns (spec, notes): what was changed and why."""
     spec = fit_timing(normalize(spec, lines), duration, clear); notes = []; notes_orig = {}; els = spec['elements']; vis = [i for i, t in enumerate(times) if spec['timing']['start_s'] <= t <= spec['timing']['end_s']] or list(range(len(times)))
     if not els: return spec, notes
@@ -183,6 +183,13 @@ def enforce(spec, lines, frames, times, boxes, duration, W=960, H=540, clear=Non
         bg = [];
         for i in vis:
             f = frames[i].astype(np.float32) / 255.0; Hh, Ww = f.shape[:2]; bg.append(f[int(b[1] * Hh):max(int(b[3] * Hh), int(b[1] * Hh) + 1), int(b[0] * Ww):max(int(b[2] * Ww), int(b[0] * Ww) + 1)].reshape(-1, 3))
+        if palette:                                                                                                       # the colours come from the clip's palette: the one with the most contrast against the area this word is on
+            from strata360.analysis import palette as PAL
+            sw = palette['scheme']['swatches']; px = np.concatenate(bg); used = [o['fill']['c1'] for o in els[:ei]]; prefer = ('base', 'accent', 'support') if ei == 0 else ('accent', 'support', 'base')
+            c1, ct, sel = PAL.choose_coloured(sw, px, prefer, exclude=used[-1:] if len(els) > 1 else ())
+            if c1:
+                was = el['fill']['c1']; el['fill'] = dict(el['fill'], type='solid', c1=c1, c2=c1); el['stroke'] = dict(w=max(el['stroke']['w'], 0.007), color=PAL.choose([s_ for s_ in sw if s_['role'] == 'neutral'], px, against=c1)[0]); el['shadow'] = dict(el['shadow'], opacity=max(el['shadow']['opacity'], 0.7), blur=max(el['shadow']['blur'], 0.016), dy=max(el['shadow']['dy'], 0.007))
+                notes.append(f"'{el['text']}': {c1} ({sel['role']} {sel['tone']}) from the palette, contrast {ct:.1f} against the area it is on (the model had {was})")
         bgc = np.concatenate(bg).mean(0); worst = min(TT.contrast(c, tuple(bgc)) for c in _fill_colour(el))
         if worst < 3.0:
             dark = TT.luminance(_fill_colour(el)[0]) > 0.4; el['stroke'] = dict(w=max(el['stroke']['w'], 0.006), color='#101010' if dark else '#f5f5f5'); el['shadow']['opacity'] = max(el['shadow']['opacity'], 0.55); notes.append(f"'{el['text']}' had contrast {worst:.1f} against the picture: an outline of the opposite tone added")
@@ -247,9 +254,11 @@ def parse(text):
     return None
 
 
-def design(frames, lines, kind, duration, server, scene='', models='models', tmp_dir=None, rounds=2, log=print, clear=None, bottom_clear=0.0, keep_in=None, avoid=()):
-    """frames: uint8 RGB pictures of the shot at the fractions `SAMPLES` of `duration`. Returns (spec, report): the final spec and what happened (the model's own answer, what the code changed, the critique)."""
+def design(frames, lines, kind, duration, server, scene='', models='models', tmp_dir=None, rounds=2, log=print, clear=None, bottom_clear=0.0, keep_in=None, avoid=(), palette=None):
+    """frames: uint8 RGB pictures of the shot at the fractions `SAMPLES` of `duration`. `palette`: the clip's palette document (analysis/palette.py), told to the model as the colours to use. Returns (spec, report): the final spec and what happened (the model's own answer, what the code changed, the critique)."""
     import cv2
+    from strata360.analysis import palette as PAL
+    if palette: scene = (scene + ' ' + PAL.for_prompt(palette)).strip()
     tmp_dir = tmp_dir or os.path.join(os.path.dirname(__file__), '..', '..', '..', 'models'); os.makedirs(tmp_dir, exist_ok=True); times = [round(f * duration, 2) for f in SAMPLES]; stats = frame_stats(frames); boxes = face_boxes(frames, models); persons = person_boxes(frames, models)
     info = [dict(t=times[i], light=stats[i]['light'], detail=stats[i]['detail'], faces=[[round(v, 2) for v in b] for b in boxes[i]], colours=stats[i]['colours']) for i in range(len(frames))]; paths = []
     for k in (0, 2, 4):
@@ -259,11 +268,11 @@ def design(frames, lines, kind, duration, server, scene='', models='models', tmp
                            pin=', '.join(TT.PRESETS_IN), pout=', '.join(TT.PRESETS_OUT), eases=', '.join(TT.EASES))
     raw = server.ask(prompt, paths, 1800, temperature=0.8); ans = parse(raw) or {}; report = dict(model_answer=ans, rounds=[])
     if not ans or not ans.get('elements'): log('the model gave no usable composition: the plain stacked title is used')
-    spec, notes = enforce(ans, lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons); report['changes'] = notes
+    spec, notes = enforce(ans, lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons, palette=palette); report['changes'] = notes
     for r in range(rounds):
         mid = int(round(0.6 * (len(frames) - 1))); title = TT.Title(spec, frames[mid].shape[1], frames[mid].shape[0], duration); t_show = float(np.clip(times[mid], spec['timing']['start_s'] + 2.0, spec['timing']['end_s'] - 0.7))
         shown = title.apply(frames[mid], t_show); p = os.path.join(tmp_dir, '_title_check.jpg'); cv2.imwrite(p, cv2.resize(shown, (960, 540), interpolation=cv2.INTER_AREA)[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90])
         crit = parse(server.ask(CRITIQUE.format(words=json.dumps(words)), [p], 1800)) or {}; report['rounds'].append(crit)
         if crit.get('ok', True) or not crit.get('elements'): break
-        spec, notes2 = enforce(dict(ans, elements=crit['elements']), lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons); report['changes'] += notes2
+        spec, notes2 = enforce(dict(ans, elements=crit['elements']), lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons, palette=palette); report['changes'] += notes2
     spec['why'] = ans.get('why', ''); report['blocking'] = blocking(spec, times, boxes, persons, list(avoid), duration, frames[0].shape[1], frames[0].shape[0]); return spec, report

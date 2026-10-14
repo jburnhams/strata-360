@@ -188,6 +188,14 @@ export interface ClipDetail {
   transcript: Line[]; scenes: { summary: any; items: any[] } | null; identity: Record<string, number> | null; candidates: Candidate[] | null; person?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean; person?: number }[] | null; clarity?: { t: number; yaw: number; pitch: number; score?: number }[] | null; scenic?: { t: number; yaw: number; pitch: number }[] | null; focus?: { t: number; yaw: number; pitch: number; who: 'you' | 'other'; speaking: boolean }[] | null; preview?: boolean; heading?: { t: number[]; deg: number[] } | null; unusable?: Unusable[] | null; thresholds?: { usable_score: number; min_len_s: number; max_stretch_s: number } | null
   objects?: ObjectsInfo | null; places?: Places | null; exposure: Record<string, any> | null; thumb: { kind: string; t_s: number; why: string; overlay?: boolean } | null; track?: Record<string, any>; track_text?: string
 }
+export interface AgentStatus { configured: boolean; model: string; vision_model: string; read_only: boolean; available: boolean }
+export interface AgentTurn { role: 'user' | 'assistant'; content: string }
+export interface AgentStep { tool: string; args: Record<string, unknown>; seconds: number; chars: number; error: string | null }
+export interface AgentImage { url: string; caption: string }
+export interface AgentPending { id: string; action: string; summary: string; why: string; args: Record<string, unknown> }
+export interface AgentAnswer { answer: string; steps: AgentStep[]; images: AgentImage[]; pending?: AgentPending[]; model: string; vision: boolean; write?: boolean; seconds: number }
+export interface AgentUndoState { available: boolean; restore_point: string | null; since: number | null; changes: number; sessions: number }
+export interface AgentDone { ok: boolean; did: string; job: boolean | null; backup: string | null }
 export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string>; vo_must?: { folder: string; folder_ordered: boolean; clips: Record<string, string> } }
 export interface VoPin { id: string; text: string; mode: 'clip' | 'ordered' | 'anywhere'; clip?: string }
 export interface ScriptPins { include?: string[]; exclude?: string[]; vo?: VoPin[]; vo_never?: string[] }
@@ -364,6 +372,13 @@ export const api = {
   override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState }>('/api/edit/override', { folder, ...body }),
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
+  agent: () => call<AgentStatus>('/api/agent'),
+  ask: (folder: string, messages: AgentTurn[], vision = false, write = false) => call<AgentAnswer>('/api/agent/chat', { folder, messages, vision, write }),
+  agentPending: (folder: string) => call<{ pending: AgentPending[] }>('/api/agent/pending?' + q({ folder })),
+  agentJournal: (folder: string) => call<{ entries: unknown[]; undo: AgentUndoState }>('/api/agent/journal?' + q({ folder, limit: '1' })),
+  agentUndo: (folder: string) => call<{ restored: string; checkpoint: string | null; files: number; undone: number }>('/api/agent/undo', { folder }),
+  agentApprove: (folder: string, id: string) => call<AgentDone>('/api/agent/approve', { folder, id }),
+  agentDeny: (folder: string, id: string) => call<{ denied: boolean }>('/api/agent/deny', { folder, id }),
   saveNote: (folder: string, text: string, clip?: string) => call<Notes>('/api/notes', { folder, text, clip }),
   saveVo: (folder: string, text: string, clip?: string, ordered?: boolean) => call<Notes>('/api/notes', { folder, kind: 'vo', text, clip, ordered }),
   saveScriptPins: (folder: string, pins: ScriptPins) => call<ScriptPins>('/api/script2/pins', { folder, ...pins }),
