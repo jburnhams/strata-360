@@ -164,7 +164,9 @@ def mount_mcp(api, token):
     if os.environ.get('STRATA360_MCP') == '0': return
     write = os.environ.get('STRATA360_MCP_WRITE') != '0'                                  # the edit tool is on by default (the /api routes it calls are as open as it is); STRATA360_MCP_WRITE=0 makes /mcp read-only
     try: from strata360.server import mcp_tools as MT; srv = MT.build_server((MT.WriteAsgiBackend if write else MT.AsgiBackend)(api, token), write=write)
-    except ImportError: return
+    except Exception as e:                                                                 # not installed, or broken here: the server still starts, without /mcp
+        if not isinstance(e, ImportError): print(f'/mcp is off: the mcp package could not be loaded ({e})', file=sys.stderr)
+        return
     import contextlib
     api.mount('/mcp', MT.guarded(srv.streamable_http_app(streamable_http_path='/'), token)); inner = api.router.lifespan_context
 

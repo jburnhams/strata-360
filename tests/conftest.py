@@ -2,6 +2,12 @@
 import os, shutil, socket, pytest
 from strata360.pipeline import guard
 
+# The mcp SDK evaluates `subprocess.Popen[bytes]` the first time its Windows modules load: load it now, before any test replaces Popen with a double (fake_popen),
+# or the server (which mounts /mcp when the SDK is there) fails to start in whichever test happens to import it first.
+for _m in ('mcp.server.mcpserver', 'mcp.client.stdio'):
+    try: __import__(_m)
+    except Exception: pass
+
 
 def pytest_collection_modifyitems(items):
     for item in items:

@@ -15,6 +15,7 @@ DECISIONS = {
     'audio': ['loudness and wind labels'],
     'motion': ['steadiness, usable footage', 'thumbnails'],
     'proxy': ['preview player', 'scene, people and thumbnail analysis'],
+    'palette': ['title colours'],
     'thumb': ['clip list pictures'],
     'places': ['place names in the script'],
     'transcribe': ['dialogue windows', 'script facts'],

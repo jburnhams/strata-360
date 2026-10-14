@@ -28,7 +28,7 @@ DEFAULTS = {
     'places': {'radius_m': 1000},                 # OpenStreetMap lookups (README 18.4j); endpoints can be replaced by a self-hosted Nominatim / Overpass
     'overlay': {'enabled': True},           # the race overlay on the final film and the thumbnails (overlay/layout.py: elements, layout, map styles, zoom, scale, fonts); map key THUNDERFOREST_API_KEY in secrets.env
     'proxy': {'size': '3840x1920', 'every_frames': 2, 'bitrate': '16M', 'encoder': 'h264'},
-    'stages': ['ingest', 'audio_extract', 'audio_clean', 'audio_events', 'motion', 'proxy', 'thumb', 'places', 'sun', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best', 'thumb_overlay'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
+    'stages': ['ingest', 'audio_extract', 'audio_clean', 'audio_events', 'motion', 'proxy', 'palette', 'thumb', 'places', 'sun', 'audio', 'transcribe', 'align', 'exposure', 'people', 'identity', 'scenes', 'speakers', 'candidates', 'thumb_best', 'thumb_overlay'],   # default set for `run` / `open`; `proxy` is opt-in (slow, large)
 }
 
 
@@ -85,7 +85,7 @@ def track_path(name, cfg=None):
     return g if g and os.path.exists(g) else None
 
 
-ADDED_STAGES = [('audio_extract', 'ingest'), ('audio_clean', 'audio_extract'), ('audio_events', 'audio_clean'), ('thumb_overlay', 'thumb_best'), ('sun', 'places')]
+ADDED_STAGES = [('audio_extract', 'ingest'), ('audio_clean', 'audio_extract'), ('audio_events', 'audio_clean'), ('thumb_overlay', 'thumb_best'), ('sun', 'places'), ('palette', 'proxy')]
 
 
 def load(name):

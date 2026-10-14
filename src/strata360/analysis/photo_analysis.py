@@ -23,7 +23,7 @@ SCHEMA = 1
 VERSIONS = dict(exposure=1, quality=1, places=1, people=1, objects=1, identity=1, face_view=1, scenes=1, thumb_overlay=5)
 ORDER = tuple(VERSIONS)
 MODEL_STAGES = ('people', 'objects', 'scenes')                      # need `.venv-vision` and the models
-NOT_APPLICABLE = ('ingest', 'audio_extract', 'audio_clean', 'audio_background', 'audio_events', 'audio', 'transcribe', 'align', 'transcript_check', 'speakers', 'motion', 'proxy', 'thumb', 'thumb_best', 'candidates')
+NOT_APPLICABLE = ('ingest', 'audio_extract', 'audio_clean', 'audio_background', 'audio_events', 'audio', 'transcribe', 'align', 'transcript_check', 'speakers', 'motion', 'proxy', 'palette', 'thumb', 'thumb_best', 'candidates')
 ME_MIN_DET = 0.5
 WORK_PX = 1600                                            # photos are looked at this wide (longest side) by the measurements and the detectors
 VLM_PX = 1024
