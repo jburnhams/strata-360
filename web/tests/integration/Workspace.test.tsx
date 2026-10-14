@@ -105,6 +105,16 @@ describe('Workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Film details' })).not.toBeInTheDocument()
   })
 
+  it('opens the transcript review page from the sidebar and an unsure phrase there opens its clip', async () => {
+    mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_20260101120000_0001_D' })] })
+    const { user } = setup(<Workspace folder="/data/myfolder" onChange={vi.fn()} />)
+    await user.click(await screen.findByRole('button', { name: 'Review transcript' }))
+    expect(await screen.findByText('Review the transcript')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Film details' })).not.toBeInTheDocument()
+    await user.click(await screen.findByTitle('open the clip at this moment'))
+    expect(screen.queryByText('Review the transcript')).not.toBeInTheDocument()
+  })
+
   it('calls onChange when "open another / new project" is clicked', async () => {
     const onChange = vi.fn()
     const { user } = setup(<Workspace folder="/data/myfolder" onChange={onChange} />)

@@ -117,6 +117,11 @@ export interface WordEdit { orig: string; src: 'user' | 'gemini'; why?: string |
 export type WordMark = 'must' | 'never'
 export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit; m?: WordMark }
 export interface Seg { si: number; part?: number; play0?: number; play1?: number; words: WordT[]; clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
+export interface ReviewItem {
+  clip: string; si: number; t0: number; t1: number; play0: number; play1: number; lang: string; text: string; words: WordT[]; reviewed: boolean
+  wps: number | null; logprob: number | null; no_speech: number | null; low_words: number; n_words: number; flags: string[]; priority: number; play_rate: number
+}
+export interface ReviewQueue { items: ReviewItem[]; todo: number; total: number; fast_wps: number; normal_wps: number }
 export interface ScriptLine { says?: string[]; seg: number; film_start_s: number; seconds: number; clip: string; text: string; words: number; est_speak_s: number; budget_words: number }
 export interface ScriptDoc { file: string; title: string | null; provider?: string; model?: string; target_s: number; wpm: number; style?: string; lines: ScriptLine[]; total_words: number; total_speak_s: number; remaining_problems: { seg: number; problem: string }[]; seconds_llm?: number }
 export interface ScriptState { key_configured: boolean; providers: Record<string, { models: string[]; default: string; configured: boolean }>; models: string[]; llm: { provider: string; model: string }; running: boolean; last_exit: number | null; log: string; latest: ScriptDoc | null; scripts: number }
@@ -304,6 +309,8 @@ export const api = {
   roughMixUrl: (folder: string, v = '') => '/api/script2/mix/audio?' + q({ folder, v }),
   generateScript2: (folder: string, o: { revise?: boolean; target_s?: number; auto?: boolean } = {}) => call<{ started: boolean; reason?: string }>('/api/script2/generate', { folder, ...o }),
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
+  transcriptReview: (folder: string) => call<ReviewQueue>('/api/transcript/review?' + q({ folder })),
+  markReviewed: (folder: string, clip: string, seg: number, state = true) => call<{ ok: boolean }>('/api/transcript/reviewed', { folder, clip, seg, state }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
   hideObject: (b: { folder: string; clip?: string; id?: number; label?: string; hide: boolean }) => call<{ ok: boolean }>('/api/clip/object/hide', b),

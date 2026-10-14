@@ -12,7 +12,7 @@ from strata360.edit.script_pack import norm_label
 
 from strata360 import oslib
 from strata360.pipeline import backup as Backup, config, clips as clipmod
-from strata360.analysis import thumbs as TH, transcript_edits as TE, transcript_fix as TF, transcript_marks as TM
+from strata360.analysis import thumbs as TH, transcript_edits as TE, transcript_fix as TF, transcript_marks as TM, transcript_review as TR
 
 STATIC = os.path.join(os.path.dirname(__file__), 'static')
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
@@ -329,6 +329,19 @@ def create_app(roots, token=None):
                 if not s.get('text', '').strip(): continue
                 out.extend(phrase_parts(s, si, lab.get((round(s['t0'], 2), round(s['t1'], 2))), clip=c['clip_id'], flagged=bool(s.get('flags') or s.get('suspect'))))
         return dict(segments=out)
+
+    @api.get('/api/transcript/review', dependencies=[Depends(auth)])
+    def get_transcript_review(folder: str):                                              # every phrase with words, worst first (low confidence, fast speech, the recogniser's flags): the review queue; reviewed ones come last
+        f = folder_of(folder); rd = config.race_dir(f); ds = [d for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))) if _j(d, 'clip.json')]
+        items = TR.queue(ds, effective, lambda d: _j(d, 'clip.json')['clip_id'])
+        return dict(items=items, todo=sum(1 for x in items if not x['reviewed']), total=len(items), fast_wps=TR.FAST_WPS, normal_wps=TR.NORMAL_WPS)
+
+    @api.post('/api/transcript/reviewed', dependencies=[Depends(auth)])
+    def post_transcript_reviewed(body: dict):                                            # {folder, clip, seg, state?}: you have looked at this phrase (state false puts it back in the queue)
+        f = folder_of(body.get('folder')); d = _cd(f, body.get('clip'))
+        try: si = int(body['seg']); t0 = _j(d, 'transcript.json')['segments'][si]['t0']
+        except (KeyError, TypeError, ValueError, IndexError): raise HTTPException(404, 'no such phrase')
+        TR.set_reviewed(d, si, t0, body.get('state', True) is not False); return dict(ok=True)
 
     @api.get('/api/meta', dependencies=[Depends(auth)])
     def get_meta_tz(folder: str):

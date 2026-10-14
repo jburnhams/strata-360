@@ -1,4 +1,4 @@
-import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, RoughMix, Lyrics, LyricPhrase, DetectedObject, Region, ObjectsInfo } from '../../src/api'
+import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, RoughMix, Lyrics, LyricPhrase, DetectedObject, Region, ObjectsInfo, ReviewItem, ReviewQueue } from '../../src/api'
 
 // Typed builders for API payloads: sensible defaults, override what the test cares about (`makeBrowse({ can_create: false })`).
 // Add one per interface in src/api.ts as tests need it. Keep the defaults boring and valid.
@@ -7,6 +7,11 @@ export const makeBrowseEntry = (o: Partial<BrowseEntry> = {}): BrowseEntry => ({
 export const makeWordT = (o: Partial<WordT> = {}): WordT => ({ w: 'hello', t0: 0, t1: 1, ...o })
 
 export const makeSeg = (o: Partial<Seg> = {}): Seg => ({ si: 0, clip: 'CAM_123', t0: 0, t1: 1, lang: 'en', text: 'hello', text_en: null, flagged: false, who: 'wearer', words: [makeWordT()], ...o })
+
+export const makeReviewItem = (o: Partial<ReviewItem> = {}): ReviewItem => ({ clip: 'CAM_20260101120000_0001_D', si: 0, t0: 3.2, t1: 8.9, play0: 2.9, play1: 9.3, lang: 'en', text: 'we are fine', reviewed: false, wps: 5.1, logprob: -0.7, no_speech: 0.01, low_words: 1, n_words: 3,
+  flags: [], priority: 1.9, play_rate: 0.69, words: [{ i: 0, w: 'we', t0: 3.2, t1: 3.5, p: 0.9 }, { i: 1, w: 'wear', t0: 3.6, t1: 3.9, p: 0.3 }, { i: 2, w: 'fine', t0: 4.0, t1: 4.4, p: 0.8 }], ...o })
+
+export const makeReviewQueue = (o: Partial<ReviewQueue> = {}): ReviewQueue => ({ items: [makeReviewItem()], todo: 1, total: 1, fast_wps: 4.5, normal_wps: 3.5, ...o })
 
 export const makeClipInfo = (o: Partial<ClipInfo> = {}): ClipInfo => ({ id: 'CAM_123', start_utc: '2023-01-01T12:00:00Z', duration_s: 10, has_note: false, thumb: 'best', steady: 1, candidates: 2, ...o })
 
