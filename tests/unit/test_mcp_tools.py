@@ -233,3 +233,11 @@ class TestMount:
     def test_the_mount_can_be_switched_off(self, make_client, monkeypatch):
         monkeypatch.setenv('STRATA360_MCP', '0')
         with make_client() as c: assert c.post('/mcp/', json=self.INIT, headers=self.HEAD).status_code in (404, 405)
+
+
+def test_a_broken_mcp_package_does_not_stop_the_server_it_just_has_no_mcp(make_client, monkeypatch, capsys):
+    def broken(*a, **k): raise TypeError("type 'X' is not subscriptable")
+    monkeypatch.setattr(MT, 'build_server', broken)
+    with make_client() as c:
+        assert c.get('/api/roots').status_code == 200 and c.post('/mcp/', json={}).status_code in (404, 405)
+    assert '/mcp is off' in capsys.readouterr().err

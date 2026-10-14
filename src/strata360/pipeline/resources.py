@@ -22,7 +22,7 @@ def run_text(cmd, timeout=10):
 
 
 # Approximate peak memory of each stage (GB) and how many may run at once (heavy stages: one).
-STAGE_MEM_GB = dict(proxy=2.5, quality=1.5, face_view=3.0, people=4.0, scenes=4.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, thumb_best=1.5, motion=0.5, ingest=0.5,
+STAGE_MEM_GB = dict(proxy=2.5, quality=1.5, face_view=3.0, people=4.0, scenes=4.0, speakers=3.0, transcribe=4.0, align=2.0, exposure=2.0, audio=1.5, preview=1.0, thumb=1.5, palette=1.0, thumb_best=1.5, motion=0.5, ingest=0.5,
                     places=0.3, identity=0.5, candidates=0.5, audio_extract=0.5, audio_clean=2.0, audio_events=2.0, audio_background=1.2, transcript_check=0.5)
 STAGE_VRAM_GB = dict(proxy=3.0, transcribe=4.5, scenes=7.5, objects=3.0, people=2.5, face_view=2.0, speakers=1.0, audio_background=3.0, audio_events=1.0, audio_clean=3.0, exposure=0.0, quality=0.0)        # GPU memory a stage asks for on an NVIDIA GPU (measured: proxy 2.6, large-v3 3.5, Qwen3.5-9B Q4 with its projector 7)
 STAGE_MAX_CONCURRENT = dict(quality=1, face_view=1, transcript_check=1, audio_clean=1, audio_events=1, audio_background=1, proxy=1, people=1, scenes=1, speakers=1, transcribe=1, align=1, exposure=1, preview=1)

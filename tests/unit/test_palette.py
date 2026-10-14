@@ -95,3 +95,36 @@ def test_load_and_prompt(tmp_path):
     (tmp_path / P.FILE).write_text(json.dumps(doc)); got = P.load(str(tmp_path))
     text = P.for_prompt(got)
     assert doc['scheme']['base'] in text and doc['scheme']['accent'] in text and 'complement' in text
+
+
+class TestStage:
+    def test_it_is_a_default_stage_right_after_the_proxy_it_reads(self):
+        from strata360.pipeline import config, stages
+        st = config.DEFAULTS['stages']; assert st[st.index('proxy') + 1] == 'palette'
+        s = stages.STAGES['palette']; assert 'proxy' in s.deps and s.outputs == ('palette.json',) and stages.ORDER.index('palette') > stages.ORDER.index('proxy')
+
+    def test_a_project_made_before_the_stage_existed_gets_it_after_its_proxy(self, make_project):
+        from strata360.pipeline import config
+        p = make_project(config={'stages': ['ingest', 'transcribe', 'proxy', 'thumb']}); st = config.load(p.folder)['stages']
+        assert st.index('palette') == st.index('proxy') + 1 and st.index('thumb') == st.index('palette') + 1 and st.count('palette') == 1
+
+    def test_a_project_that_does_not_make_a_proxy_does_not_get_it(self, make_project):
+        from strata360.pipeline import config
+        p = make_project(config={'stages': ['ingest', 'transcribe', 'thumb']}); assert 'palette' not in config.load(p.folder)['stages']
+
+    def test_it_is_known_to_coverage_resources_and_photos(self):
+        from strata360.analysis import photo_analysis as PA
+        from strata360.pipeline import coverage, resources
+        assert coverage.DECISIONS['palette'] == ['title colours']
+        assert 'palette' in PA.NOT_APPLICABLE and 'palette' not in PA.ORDER and resources.STAGE_MEM_GB['palette'] > 0
+
+    def test_the_stage_writes_palette_json_from_the_proxy_and_the_clips_length(self, monkeypatch, tmp_path):
+        from strata360.pipeline import stages
+        seen = {}; monkeypatch.setattr(P, 'analyse', lambda proxy, dur, n=P.SAMPLES: seen.update(proxy=proxy, dur=dur) or dict(samples=n, scheme={}))
+        class Ctx:
+            def path(self, n): return str(tmp_path / n)
+            clip_json = dict(video=dict(source_frames=900, nominal_fps=30.0))
+            def stamped(self, o): return dict(o, stamped=True)
+            def write(self, n, o): seen['written'] = (n, o)
+        stages.palette(Ctx())
+        assert seen['proxy'] == str(tmp_path / 'proxy.mp4') and seen['dur'] == 30.0 and seen['written'] == ('palette.json', dict(samples=P.SAMPLES, scheme={}, stamped=True))
