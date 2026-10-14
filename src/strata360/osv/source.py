@@ -3,6 +3,7 @@
 The pipeline calls a clip's primary file its `osv` (the name is from the first supported camera). For a DJI .OSV both lens streams are in that one file (stream 1 = front, stream 0 = rear). For an Insta360 .insv pair
 (osv/insta360.py) each lens is its own file and its own single stream. `lens_input` gives the ffmpeg input and map options for one lens either way, so a decoder is written once.
 """
+import functools
 from strata360.osv import insta360
 
 
@@ -20,9 +21,16 @@ def lens_path(osv, stream):
     return insta360.lens_file(osv, stream) if insta360.is_insv(osv) else osv
 
 
+@functools.lru_cache(maxsize=64)
+def lens_size(osv):
+    """Pixels along one side of a lens picture: the lens video's own width (3840 for a DJI Osmo 360, 2880 for an Insta360 X3). Every renderer and analyser works at this size (no resizing to fit)."""
+    import json, subprocess
+    out = subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width', '-of', 'json', lens_path(osv, 0)])
+    return int(json.loads(out)['streams'][0]['width'])
+
+
 def full_frame_filter(osv, native=False):
-    """ffmpeg filters (a list, maybe empty) that bring a lens picture to the renderers' lens size, 3840 x 3840, in the range the readers expect: BT.709 limited range for `native` (p010, converted on the GPU), else whatever the
-    rgb48 conversion makes of it. DJI lenses already are 3840 x 3840 (10-bit HEVC, limited range); an Insta360 lens is 2880 x 2880, 8-bit, full range."""
-    if not insta360.is_insv(osv): return []
-    s = 'scale=3840:3840:flags=bicubic'
-    return [s + ':in_range=full:out_range=limited:in_color_matrix=bt709:out_color_matrix=bt709' if native else s]
+    """ffmpeg filters (a list, maybe empty) that bring a lens picture, at its own size, into the range the readers expect: BT.709 limited range for `native` (p010, converted on the GPU), else whatever the rgb48 conversion
+    makes of it. DJI lenses are 10-bit HEVC, limited range already; an Insta360 lens is 8-bit, full range, so the native path converts it."""
+    if not insta360.is_insv(osv) or not native: return []
+    return ['scale=in_range=full:out_range=limited:in_color_matrix=bt709:out_color_matrix=bt709']

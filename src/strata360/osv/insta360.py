@@ -8,7 +8,7 @@ Trailer (found in the X3 sample, see docs/progress): the file ends with the 32-b
 gyroscope is 2000 deg/s over 32768); 0x400 per-frame exposure time (u64 microseconds, f64 seconds), whose timestamps are the camera clock the IMU shares.
 
 What this module gives the rest of the pipeline (same shapes as the DJI readers in calib.py / telemetry.py / meta.py):
-  slots(path)        the two lenses as Kannala-Brandt slots in the 3840-px lens coordinates the renderers use (the calibration is a unified-camera (Mei) model: it is converted by a fit, `_fit_kb`)
+  slots(path)        the two lenses as Kannala-Brandt slots in the lens video's own pixels (the calibration is a unified-camera (Mei) model: it is converted by a fit, `_fit_kb`)
   read_frames(path)  per-frame camera clock, upright orientation quaternion and acceleration, from the gyro and accelerometer (`fuse`)
   read_exposure(path), header(path)
 Body frame as DJI's: +Y the front lens, -Y the rear lens, +Z up along the stick, +X right. IMU frame -> body: x_b = z_i, y_b = y_i, z_b = -x_i (the camera is mounted square on its axes: measured by matching image rotation to gyro rotation).
@@ -18,11 +18,10 @@ import numpy as np
 from strata360.osv.pbdump import parse
 
 MAGIC = b'8db42d694ccc418790edff439fe026bf'
-REC_EXTRA, REC_GYRO, REC_EXPOSURE = 0x101, 0x300, 0x400
+REC_EXTRA, REC_GYRO, REC_EXPOSURE, REC_AAA = 0x101, 0x300, 0x400, 0x900
 GYRO_DPS_PER_LSB = 2000.0 / 32768.0
 IMU_TO_BODY = np.array([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]])
 VIDEO_LATENCY_S = 0.2336            # the camera clock at the first video frame, after the first exposure record (7 frames; 0.223 to 0.234 s on three clips, by matching image motion to the gyro)
-LENS_PX = 3840.0                    # the lens coordinates every renderer works in (the video is scaled to this when decoded: source.full_frame_filter)
 CANVAS = 5952.0                     # the calibration is for a side-by-side canvas of two 5952-px lens images; the 2880-px video is that halved and cropped by 48 px each side (found by stitching: relative lens rotation 179.8 deg)
 _NAME = re.compile(r'^(?P<kind>VID|PRO|IMG)_(?P<date>\d{8})_(?P<time>\d{6})_(?P<lens>\d{2})_(?P<n>\d{3})\.insv$', re.I)
 
@@ -111,14 +110,28 @@ def _mei_radius(L, theta):
     return L['fx'] * x * (1 + k1 * r2 + k2 * r2 ** 2 + k3 * r2 ** 3)
 
 
-def _fit_kb(L, theta_max_deg=110.0):
-    """Kannala-Brandt terms (k1..k5 of calib.Lens) that reproduce the Mei lens's radius curve, in 3840-px lens coordinates: (fx, [k1..k5], cx, cy, worst error in px)."""
-    s = 2.0 / 3.0                                                  # canvas px -> 3840-px lens coordinates: halve (video is 2880) and scale 3840/2880 = 4/3
+def canvas_to_video(size):
+    """(scale, offset) taking a calibration (canvas) pixel to a pixel of the lens video of `size` px: video = canvas * scale - offset. The 2880-px video is the canvas halved and cropped by 48 px each side (measured); any other size is
+    assumed to be the whole canvas scaled (not checked)."""
+    return (0.5, (CANVAS * 0.5 - size) / 2.0) if size <= CANVAS / 2.0 else (size / CANVAS, 0.0)
+
+
+@functools.lru_cache(maxsize=32)
+def lens_size(path):
+    """Width in pixels of the (square) lens video of a primary .insv: 2880 on the X3."""
+    import json, subprocess
+    out = subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width', '-of', 'json', path])
+    return int(json.loads(out)['streams'][0]['width'])
+
+
+def _fit_kb(L, size=2880, theta_max_deg=110.0):
+    """Kannala-Brandt terms (k1..k5 of calib.Lens) that reproduce the Mei lens's radius curve, in pixels of a lens video of `size` px: (fx, [k1..k5], cx, cy, worst error in px)."""
+    s, off = canvas_to_video(size)
     th = np.radians(np.linspace(0.0, theta_max_deg, 400)); r = _mei_radius(L, th) * s
     f = float(_mei_radius(L, np.array([1e-4]))[0] / 1e-4 * s)       # central slope, px per radian
     A = np.stack([th ** (2 * (i + 1) + 1) for i in range(5)], -1); y = r / f - th
     k, *_ = np.linalg.lstsq(A, y, rcond=None); err = float(np.abs(f * (th + A @ k) - r).max())
-    return f, k, L['cx'] * s - 64.0, L['cy'] * s - 64.0, err
+    return f, k, L['cx'] * s - off, L['cy'] * s - off, err
 
 
 def _quat_wxyz(R):
@@ -131,12 +144,26 @@ _R_FRONT = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 _R_REAR = np.array([[-1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0]])
 
 
+# Measured correction of the front lens against the nominal 180-degree flip, from 32 stitched frames of the X3 sample (feature matches in the lens overlap, then refined against the seam edge match with a held-out half:
+# edge disagreement at the seam fell by about a fifth, and 30 of 32 frames improved). A rotation vector in degrees (body frame) and a focal scale. Calibration is per camera, so this is applied to the X3 only.
+FRONT_ROTVEC_DEG = (0.609, 0.991, 0.121)
+FRONT_FOCAL_SCALE = 1.004
+
+
+def _front_rotation(model):
+    """The front lens's body-to-lens rotation, corrected for the X3's measured alignment (other models: nominal)."""
+    if not (model or '').startswith('Insta360 X3'): return _R_FRONT
+    from scipy.spatial.transform import Rotation as Rot
+    return _R_FRONT @ Rot.from_rotvec(np.radians(FRONT_ROTVEC_DEG)).as_matrix().T
+
+
 def slots(path):
     """{1: rear lens, 2: front lens} in calib.read_slots' shape: fx fy (1, 2), cx cy (3, 4), k1..k4 (5..8), k5 (15), extrinsic quaternion 'q' (body -> lens), and an empty selfie-stick occlusion polygon."""
-    lens = parse_calibration(extra(path)['calibration']); out = {}
-    for slot, L, R in ((1, lens[0], _R_REAR), (2, lens[1], _R_FRONT)):
-        f, k, cx, cy, _ = _fit_kb(L)
-        out[slot] = {1: f, 2: f, 3: cx, 4: cy, 5: k[0], 6: k[1], 7: k[2], 8: k[3], 15: k[4], 10: LENS_PX, 11: LENS_PX, 'q': _quat_wxyz(R),
+    x = extra(path); lens = parse_calibration(x['calibration']); out = {}; x3 = (x['model'] or '').startswith('Insta360 X3'); size = lens_size(path)
+    for slot, L, R in ((1, lens[0], _R_REAR), (2, lens[1], _front_rotation(x['model']))):
+        f, k, cx, cy, _ = _fit_kb(L, size)
+        if slot == 2 and x3: f *= FRONT_FOCAL_SCALE
+        out[slot] = {1: f, 2: f, 3: cx, 4: cy, 5: k[0], 6: k[1], 7: k[2], 8: k[3], 15: k[4], 10: size, 11: size, 'q': _quat_wxyz(R),
                      'poly_x': np.zeros(0), 'poly_y': np.zeros(0)}
     return out
 
@@ -159,6 +186,17 @@ def read_exposure_records(path):
     if REC_EXPOSURE not in rec: raise ValueError('no exposure record')
     d = np.frombuffer(rec[REC_EXPOSURE], np.uint8); d = d[:len(d) // 16 * 16].reshape(-1, 16)
     return d[:, :8].copy().view('<u8').ravel().astype(np.float64) / 1e6, d[:, 8:].copy().view('<f8').ravel()
+
+
+def read_aaa(path):
+    """(camera-clock seconds, ISO) of the auto-exposure table (record 0x900: 48-byte entries about every 4 frames; u32 ms timestamp, f32 target EV, f32 exposure ms, u32 stats, u32 packed luma stats whose top 13 bits give the
+    ISO as `100 * (bits >> 19) >> 6`; layout from Gyroflow's telemetry-parser, checked here: ISO about 3100 at dusk with the shutter at its limit, 110 to 350 by day). The first entry is a header and is skipped."""
+    rec = read_trailer(path)
+    if REC_AAA not in rec: raise ValueError('no auto-exposure record')
+    a = np.frombuffer(rec[REC_AAA], np.uint8); a = a[:len(a) // 48 * 48].reshape(-1, 48).astype(np.int64); a = a[a.any(1)][1:]
+    ts = (a[:, 0] | a[:, 1] << 8 | a[:, 2] << 16 | a[:, 3] << 24) / 1000.0
+    ls = a[:, 16] | a[:, 17] << 8 | a[:, 18] << 16 | a[:, 19] << 24
+    return ts, ((100 * ((ls & 0xFFF80000) >> 19)) >> 6).astype(np.float64)
 
 
 def device_start(path):
@@ -204,10 +242,15 @@ def frames_from_imu(path, pts):
 
 
 def exposure_frames(path, pts):
-    """Per-frame exposure like the DJI reader's: ISO (not recorded: constant 100), shutter denominator, colour temperature (not recorded: 0), one entry a frame (both lenses share it)."""
+    """Per-frame exposure like the DJI reader's: ISO from the auto-exposure table (100 where there is none), shutter denominator, colour temperature (not recorded: 0), one entry a frame (both lenses share it)."""
     ets, ex = read_exposure_records(path); pts = np.asarray(pts, float); T = device_start(path) + (pts - pts[0])
     k = np.clip(np.searchsorted(ets, T), 0, len(ets) - 1); e = ex[k]
-    d = dict(iso=np.full(len(pts), 100.0), shutter_den=np.maximum(np.round(1.0 / np.maximum(e, 1e-6)), 1).astype(np.int64), ct=np.zeros(len(pts), np.int64))
+    iso = np.full(len(pts), 100.0)
+    try:
+        ts, v = read_aaa(path)
+        if len(ts): iso = v[np.clip(np.searchsorted(ts, T, side='right') - 1, 0, len(ts) - 1)]              # the last entry at or before each frame
+    except ValueError: pass
+    d = dict(iso=iso, shutter_den=np.maximum(np.round(1.0 / np.maximum(e, 1e-6)), 1).astype(np.int64), ct=np.zeros(len(pts), np.int64))
     return {'djmd3': d, 'djmd4': {k_: v.copy() for k_, v in d.items()}}
 
 

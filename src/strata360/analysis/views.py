@@ -27,7 +27,7 @@ def view_rays(yaw_deg, px=VIEW_PX, fov=VIEW_FOV, pitch_deg=0.0):
 class Views:
     def __init__(self, osv, yaws=VIEW_YAWS, px=VIEW_PX, fov=VIEW_FOV):
         sl = read_slots(osv); self.master, self.slave = Lens(sl[2]), Lens(sl[1]); self.yaws, self.px, self.fov = yaws, px, fov
-        sc = LENS_PX / 3840.0; self.maps = []
+        sc = LENS_PX / float(lensrc.lens_size(osv)); self.maps = []
         for y in yaws:
             d = view_rays(y, px, fov); um, vm, _ = self.master.project(d, sc); us, vs, _ = self.slave.project(d, sc)
             w = np.clip(0.5 + d[:, 1] / np.sin(np.radians(6.0)), 0, 1).reshape(px, px, 1).astype(np.float32)      # master in front of y=0, slave behind, 6 degree blend
@@ -85,12 +85,12 @@ class StabViews:
         from strata360.osv.calib import quat_to_R, imu_offsets
         from strata360.osv.telemetry import read_frames
         from strata360.render.camera import heading_series
-        sl = read_slots(osv); self.master, self.slave = Lens(sl[2]), Lens(sl[1]); self.yaws, self.px, self.fov, self.lens_px = yaws, px, fov, lens_px
+        sl = read_slots(osv); self.master, self.slave = Lens(sl[2]), Lens(sl[1]); self.yaws, self.px, self.fov, self.lens_px = yaws, px, fov, lens_px; self.ls = lensrc.lens_size(osv)
         P, B = imu_offsets(osv); T = read_frames(osv); fps = (len(T['ts_us']) - 1) / max((T['ts_us'][-1] - T['ts_us'][0]) / 1e6, 1e-6)
         self.Ms = np.array([B.T @ quat_to_R(q).T @ P.T for q in T['quat']]); self.heading = heading_series(self.Ms, tau_s=2.0, fps=fps)
 
     def render(self, k, frame_m, frame_s):
-        M = self.Ms[min(k, len(self.Ms) - 1)]; h = self.heading[min(k, len(self.heading) - 1)]; sc = self.lens_px / 3840.0; out = []
+        M = self.Ms[min(k, len(self.Ms) - 1)]; h = self.heading[min(k, len(self.heading) - 1)]; sc = self.lens_px / float(self.ls); out = []
         for y in self.yaws:
             dE = stab_view_rays(y, h, self.px, self.fov); d = np.einsum('nj,ij->ni', dE, M)                         # d_body = M d_E
             um, vm, _ = self.master.project(d, sc); us, vs, _ = self.slave.project(d, sc)
@@ -131,7 +131,7 @@ def render_thumb(osv, t, yaw=0.0, pitch=0.0, hfov=95.0, w=960, h=540, stab=None,
     from strata360.osv.mp4 import video_sample_times
     stab = stab or StabViews(osv, yaws=(0,)); pts = video_sample_times(osv); k = int(np.clip(np.searchsorted(pts, pts[0] + t), 0, len(pts) - 1))
     fm, fs = grab_frame(osv, 1, pts[k]), grab_frame(osv, 0, pts[k]); M = stab.Ms[min(k, len(stab.Ms) - 1)]; hd = stab.heading[min(k, len(stab.heading) - 1)]
-    dE = _rect_rays(yaw, hd, w, h, hfov, pitch); d = np.einsum('nj,ij->ni', dE, M); sc = LENS_PX / 3840.0
+    dE = _rect_rays(yaw, hd, w, h, hfov, pitch); d = np.einsum('nj,ij->ni', dE, M); sc = LENS_PX / float(stab.ls)
     um, vm, _ = stab.master.project(d, sc); us, vs, _ = stab.slave.project(d, sc); f = lambda a: a.astype(np.float32).reshape(h, w)
     wt = np.clip(0.5 + d[:, 1] / np.sin(np.radians(6.0)), 0, 1).reshape(h, w, 1).astype(np.float32)
     a = cv2.remap(fm, f(um), f(vm), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT); b = cv2.remap(fs, f(us), f(vs), cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
@@ -145,9 +145,13 @@ def render_thumb(osv, t, yaw=0.0, pitch=0.0, hfov=95.0, w=960, h=540, stab=None,
 
 CROP_PX = 448
 CROP_WANT_PX = 96            # an object this many pixels long in the picture given to the labelling model can be identified
-LENS_FULL = 3840             # the lens video's own size
-NATIVE_PPD = 20.0            # lens pixels per degree at the middle of a lens (3840 px over about 190 degrees)
+NATIVE_PPD = 20.0            # lens pixels per degree at the middle of a lens of 3840 px (about 190 degrees); `native_ppd(osv)` scales it to the lens's own size
 SEAM = math.sin(math.radians(6.0))
+
+
+def native_ppd(osv):
+    """Lens pixels per degree at the middle of this clip's lenses: NATIVE_PPD for a 3840 px lens, less for a smaller one."""
+    return NATIVE_PPD * lensrc.lens_size(osv) / 3840.0
 
 
 def crop_plan(box, view_px=VIEW_PX, fov=VIEW_FOV, want_px=CROP_WANT_PX, native_ppd=NATIVE_PPD):
@@ -183,14 +187,14 @@ class CropRenderer:
 
     def _frame(self, stream, k):
         if k != self._k: self._k, self._frames = k, {}
-        if stream not in self._frames: self._frames[stream] = grab_frame(self.osv, stream, self.pts[k], size=LENS_FULL)
+        if stream not in self._frames: self._frames[stream] = grab_frame(self.osv, stream, self.pts[k], size=self.stab.ls)
         return self._frames[stream]
 
     def crop(self, t, lon, lat, fov, px=CROP_PX):
         k = int(np.clip(np.searchsorted(self.pts, self.pts[0] + t), 0, len(self.pts) - 1)); M = self.stab.Ms[min(k, len(self.stab.Ms) - 1)]
         db = np.einsum('nj,ij->ni', crop_rays(lon, lat, fov, px).reshape(-1, 3), M); f = lambda a: a.astype(np.float32).reshape(px, px)       # d_body = M d_E
         def cut(lens, stream):
-            u, v, _ = lens.project(db, LENS_FULL / 3840.0); return cv2.remap(self._frame(stream, k), f(u), f(v), cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT)
+            u, v, _ = lens.project(db, 1.0); return cv2.remap(self._frame(stream, k), f(u), f(v), cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT)
         c = lens_choice(db[:, 1])
         if c == 'master': return cut(self.stab.master, 1)
         if c == 'slave': return cut(self.stab.slave, 0)

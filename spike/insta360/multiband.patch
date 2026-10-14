@@ -1,0 +1,72 @@
+diff --git a/src/strata360/render/flat.py b/src/strata360/render/flat.py
+index 51c4104..8e41146 100644
+--- a/src/strata360/render/flat.py
++++ b/src/strata360/render/flat.py
+@@ -154,6 +154,7 @@ class Renderer(Globe):
+         self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
+         self.rtm = ph.THETA_MAX_DEG - ph.RENDER_INSET_DEG          # render-only blend inset (PhotoSeam.h), 94.99 deg
+         self.gain_m = np.ones(3); self.gain_s = np.ones(3); self._lut = None
++        self.multiband = os.environ.get('STRATA_MULTIBAND') in ('1', 'match'); self.mb_match = os.environ.get('STRATA_MULTIBAND') == 'match'; self.px_per_deg = W / max(hfov, 1.0)         # opt-in two-band seam blend (photo.multiband_blend), CPU renderer only
+         self.osv = osv; self.init_globe(); self.seam = None; self.warp = None; self._carver = None; self.carve_seam = False; self.parallax = False                  # carve_seam: measure a seam from the lens frames before each render (update_seam)
+         P, B = imu_offsets(osv)
+         self.P, self.B = P, B
+@@ -257,6 +258,10 @@ class Renderer(Globe):
+             gs = 1.0 if lutm is not None else self.gain_s
+             lin = w * (gm * ph.EOTF_LUT[af]) + (1 - w) * (gs * ph.EOTF_LUT[bf])
+             out.reshape(-1, 3)[idx] = ph.linear_to_code16(lin)
++        if self.multiband and idx.size:
++            wm2 = ph.lens_weight(tm, oc_m, self.rtm, ph.MULTIBAND_WIDE_DEG); ws2 = ph.lens_weight(ts, oc_s, self.rtm, ph.MULTIBAND_WIDE_DEG); sw = wm2 + ws2          # wide weights: inside the region both lenses see
++            wide = up(np.where(sw > 1e-4, wm2 / np.maximum(sw, 1e-9), wn))
++            out = ph.multiband_blend(out, a, b, wnf, wide, covf, ph.MULTIBAND_SPLIT_DEG * self.px_per_deg, self.mb_match)
+         return out
+ 
+ 
+diff --git a/src/strata360/render/photo.py b/src/strata360/render/photo.py
+index de5b336..2a8df47 100644
+--- a/src/strata360/render/photo.py
++++ b/src/strata360/render/photo.py
+@@ -114,3 +114,32 @@ def estimate_gain(img_master, img_slave, lens_master, lens_slave, occl_master, o
+     ratio = np.where((m0 > 1e-6) & (m1 > 1e-6), m1 / np.maximum(m0, 1e-12), 1.0)   # slave / master
+     g_m = np.clip(np.sqrt(ratio), 0.5, 2.0)
+     return g_m, 1.0 / g_m, n
++
++
++MULTIBAND_SPLIT_DEG = 1.5        # detail finer than this is joined at the (narrow) seam; broader brightness (glare, exposure) is joined over MULTIBAND_WIDE_DEG
++MULTIBAND_WIDE_DEG = 12.0
++
++
++def multiband_blend(out, a, b, wn, wn_wide, cov, split_px, match=False):
++    """Two-band blend of two lens pictures in linear light: the low band (a Gaussian of `split_px`) is mixed by the wide weights `wn_wide`, the detail (the rest) by the seam weights `wn`, so a haze or exposure step that
++    exists in one lens only becomes a soft gradient while edges stay as sharp as the narrow seam makes them. `out` is the ordinary result (kept wherever the lenses do not both matter), a and b the lens pictures (uint16 code
++    values), wn / wn_wide the master's share (0..1) and cov the covered mask. With `match` the second lens's low band is first scaled, per colour channel, by the smooth ratio of the two lenses' low bands around the seam (it tapers to 1 away from it), which evens out exposure and colour differences between the lenses as well as glare. Returns the new picture; only the part around the seam is recomputed."""
++    roi = (((wn_wide > 0.001) & (wn_wide < 0.999)) | ((wn > 0.0005) & (wn < 0.9995))) & cov
++    if not roi.any(): return out
++    ys, xs = np.where(roi); pad = int(3 * split_px) + 2
++    y0, y1 = max(ys.min() - pad, 0), min(ys.max() + pad + 1, out.shape[0]); x0, x1 = max(xs.min() - pad, 0), min(xs.max() + pad + 1, out.shape[1])
++    A = EOTF_LUT[a[y0:y1, x0:x1]]; B = EOTF_LUT[b[y0:y1, x0:x1]]; h, w = A.shape[:2]
++    d = max(1, int(split_px / 3.0))
++    def low(X, sig=split_px):
++        dd = max(1, int(sig / 3.0))
++        if dd == 1: return cv2.GaussianBlur(X, (0, 0), sig)
++        s = cv2.GaussianBlur(cv2.resize(X, (max(w // dd, 1), max(h // dd, 1)), interpolation=cv2.INTER_AREA), (0, 0), sig / dd)
++        return cv2.resize(s, (w, h), interpolation=cv2.INTER_LINEAR)
++    la, lb = low(A), low(B); n = wn[y0:y1, x0:x1, None]; nw = wn_wide[y0:y1, x0:x1, None]
++    if match:
++        g = 4.0 * nw * (1.0 - nw); ratio = (la + 1e-4) / (lb + 1e-4); sg = 4.0 * split_px
++        num = low(ratio * g, sg); den = low(g, sg).reshape(h, w, 1); rc = np.where(den > 0.05, num / np.maximum(den, 1e-3), 1.0).clip(0.5, 2.0)
++        B = B * (1.0 + (rc - 1.0) * g); lb = low(B)
++    res = nw * la + (1 - nw) * lb + n * (A - la) + (1 - n) * (B - lb)
++    new = out.copy(); sub = linear_to_code16(np.clip(res, 0.0, 1.0)); m = cov[y0:y1, x0:x1, None]
++    new[y0:y1, x0:x1] = np.where(m, sub, out[y0:y1, x0:x1]); return new
+diff --git a/src/strata360/render/proxy.py b/src/strata360/render/proxy.py
+index 18927d7..a9ed9c9 100644
+--- a/src/strata360/render/proxy.py
++++ b/src/strata360/render/proxy.py
+@@ -34,6 +34,7 @@ class EquirectRenderer(r4.Renderer):
+         xs = np.linspace(0, W, self.gw); ys = np.linspace(0, H, self.gh); X, Y = np.meshgrid(xs, ys)
+         lon = (X / W - 0.5) * 2 * np.pi; lat = (0.5 - Y / H) * np.pi                       # Standard layout, centre column = +Y
+         self.dE = np.stack([np.sin(lon) * np.cos(lat), np.cos(lon) * np.cos(lat), np.sin(lat)], -1).reshape(-1, 3)
++        self.px_per_deg = W / 360.0
+ 
+     def ray_dirs(self, M, _unused, roll=0.0): return np.einsum('nj,ij->ni', self.dE, M)
+ 

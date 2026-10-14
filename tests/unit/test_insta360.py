@@ -24,7 +24,8 @@ def make_insv(path, n_imu=2000):
     imu = b''.join(struct.pack('<Q6H', 1_000_000 + i * 1000, 32768, 32768 - 1000, 32768, 32768, 32768, 32768) for i in range(n_imu))
     exp = b''.join(struct.pack('<Qd', 4_000_000 + i * 33333, 0.01) for i in range(5))
     body = b''
-    for rid, d in ((0xa00, b'x' * 5), (0x101, extra), (0x300, imu), (0x400, exp)): body += d + struct.pack('<HI', rid, len(d))      # data, then (id, length): read backwards
+    aaa = b''.join(struct.pack('<IffII7I', 1000 * i, 0.0, 10.0, 0, (((1600 >> 0) << 19) if i else 0), *([0] * 7)) for i in range(6))                   # iso = 100 * 1600 >> 6 = 2500
+    for rid, d in ((0xa00, b'x' * 5), (0x101, extra), (0x300, imu), (0x400, exp), (0x900, aaa)): body += d + struct.pack('<HI', rid, len(d))      # data, then (id, length): read backwards
     with open(path, 'wb') as f:
         f.write(b'\0' * 100 + body + b'\0' * 32 + struct.pack('<II', len(body) + 72, 3) + I.MAGIC)
 
@@ -41,11 +42,12 @@ def test_imu_and_exposure_decode(tmp_path):
     ets, ex = I.read_exposure_records(str(p)); assert len(ets) == 5 and abs(ex[0] - 0.01) < 1e-12
 
 
-def test_calibration_converts_to_kb_slots(tmp_path):
+def test_calibration_converts_to_kb_slots(tmp_path, monkeypatch):
+    monkeypatch.setattr(I, 'lens_size', lambda path: 2880)
     p = tmp_path / 'VID_20240720_195607_00_001.insv'; make_insv(p)
     s = I.slots(str(p)); assert set(s) == {1, 2}
     for slot in s.values():
-        assert abs(slot[3] - 1920) < 30 and abs(slot[4] - 1920) < 30 and slot[1] > 900 and len(slot['poly_x']) == 0
+        assert abs(slot[3] - 1440) < 25 and abs(slot[4] - 1440) < 25 and 600 < slot[1] < 1000 and len(slot['poly_x']) == 0
     L = I.parse_calibration(CAL); f, k, cx, cy, err = I._fit_kb(L[0]); assert err < 1.0
 
 
@@ -68,7 +70,8 @@ def test_lens_files_and_input(tmp_path):
     p = str(tmp_path / 'VID_20240720_195607_00_001.insv')
     assert I.lens_file(p, 0) == p and I.lens_file(p, 1).endswith('_10_001.insv')
     assert source.lens_input(p, 1)[-2:] == ['-map', '0:v:0'] and source.lens_input('a.osv', 1)[-1] == '0:v:1'
-    assert source.full_frame_filter('a.osv') == [] and 'scale=3840:3840' in source.full_frame_filter(p)[0]
+    assert source.full_frame_filter('a.osv', True) == [] and source.full_frame_filter(p) == []                  # nothing is resized
+    assert 'in_range=full' in source.full_frame_filter(p, True)[0] and '3840' not in source.full_frame_filter(p, True)[0]
 
 
 def test_video_pts_agree_between_lenses(tmp_path, monkeypatch):
@@ -76,3 +79,26 @@ def test_video_pts_agree_between_lenses(tmp_path, monkeypatch):
     p = str(tmp_path / 'VID_20240720_195607_00_001.insv')
     monkeypatch.setattr(mp4, 'video_sample_times', lambda f: np.arange(479 if '_00_' in f else 478) / 29.97)
     assert len(telemetry.video_pts(p, 0)) == 478 and len(telemetry.video_pts(p, 1)) == 478
+
+
+def test_x3_front_lens_gets_the_measured_correction_and_others_do_not(tmp_path, monkeypatch):
+    monkeypatch.setattr(I, 'lens_size', lambda path: 2880)
+    p = tmp_path / 'VID_20240720_195607_00_001.insv'; make_insv(p)
+    q = I.slots(str(p))[2]['q']
+    from strata360.osv.calib import quat_to_R
+    R = quat_to_R(q); assert not np.allclose(R, I._R_FRONT, atol=1e-6) and np.allclose(R, I._R_FRONT, atol=0.03)          # about 1.2 degrees off the nominal flip
+    assert np.allclose(I._front_rotation('Insta360 X4'), I._R_FRONT)
+
+
+def test_lens_pixels_follow_the_video_size(tmp_path, monkeypatch):
+    """Calibration coordinates are in the lens video's own pixels: the centre sits at half the size, whatever the size."""
+    p = tmp_path / 'VID_20240720_195607_00_001.insv'; make_insv(p)
+    for size in (2880, 2400):
+        monkeypatch.setattr(I, 'lens_size', lambda path, size=size: size)
+        for slot in I.slots(str(p)).values(): assert abs(slot[3] - size / 2) < 25 and slot[10] == size
+
+
+def test_iso_comes_from_the_auto_exposure_table(tmp_path):
+    p = tmp_path / 'VID_20240720_195607_00_001.insv'; make_insv(p)
+    ts, iso = I.read_aaa(str(p)); assert len(ts) == 5 and np.all(iso == 2500)
+    e = I.exposure_frames(str(p), np.arange(4) / 29.97)['djmd3']; assert np.all(e['iso'] == 2500) and e['shutter_den'][0] == 100

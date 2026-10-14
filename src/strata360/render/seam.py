@@ -162,7 +162,7 @@ class SeamCarver:
         return out
 
     def carve(self, img_m, img_s, prior=None, warp=None, people=None):
-        """Carve the seam from two decoded lens frames (uint16 RGB code values, 3840 x 3840). `prior` (a Seam from the neighbouring frame) adds the hold and the clamp; `people` ([(lat, lon, height)], see `person_cost`) steers the seam round them (none: as before, which the proxies rely on)."""
+        """Carve the seam from two decoded lens frames (uint16 RGB code values, the lens video's own size). `prior` (a Seam from the neighbouring frame) adds the hold and the clamp; `people` ([(lat, lon, height)], see `person_cost`) steers the seam round them (none: as before, which the proxies rely on)."""
         (A, cA), (B, cB) = self.band(img_m, img_s, warp); h = lambda x: x.reshape(BAND_ROWS, COLS, 2).mean(2)             # to seam columns
         a, b, ca, cb = h(A), h(B), h(cA), h(cB); R = BAND_ROWS; S = R + 1; w = max(int(round(COST_WINDOW_DEG / self.row_deg)), 1)
         D = np.abs(a - b); cs = np.concatenate([np.zeros((1, COLS), np.float32), np.cumsum(D, 0)]); s_idx = np.arange(S)

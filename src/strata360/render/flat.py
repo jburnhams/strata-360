@@ -25,7 +25,7 @@ from strata360.render import photo as ph
 from strata360.render import camera as cam, gpu
 from strata360 import hw as hwmod
 
-LS = 3840  # lens frame size
+LS = 3840  # the DJI lens frame size, kept as the default: a source's own size is `lensrc.lens_size(osv)` and every decoder / reader below uses that
 BYTES = 6  # rgb48le: 16-bit code values (10-bit source, range-expanded)
 
 
@@ -150,8 +150,8 @@ class Renderer(Globe):
     def __init__(self, osv, W=3840, H=2160, hfov=90.0, interp='cubic', grid=8):
         self.W, self.H, self.grid = W, H, grid
         sl = read_slots(osv)
-        self.master, self.slave = Lens(sl[2]), Lens(sl[1])  # stream 1 = master (front), stream 0 = slave (rear)
-        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
+        self.master, self.slave = Lens(sl[2]), Lens(sl[1]); self.ls = lensrc.lens_size(osv)                                 # the lens pictures' own size (the video's)  # stream 1 = master (front), stream 0 = slave (rear)
+        self.occl_m = ph.occlusion_map(sl[2]['poly_x'], sl[2]['poly_y'], size=self.ls, centre=(self.master.cx, self.master.cy), rim=self.master.rim_radius(ph.THETA_MAX_DEG)); self.occl_s = ph.occlusion_map(sl[1]['poly_x'], sl[1]['poly_y'], size=self.ls, centre=(self.slave.cx, self.slave.cy), rim=self.slave.rim_radius(ph.THETA_MAX_DEG))
         self.rtm = ph.THETA_MAX_DEG - ph.RENDER_INSET_DEG          # render-only blend inset (PhotoSeam.h), 94.99 deg
         self.gain_m = np.ones(3); self.gain_s = np.ones(3); self._lut = None
         self.osv = osv; self.init_globe(); self.seam = None; self.warp = None; self._carver = None; self.carve_seam = False; self.parallax = False                  # carve_seam: measure a seam from the lens frames before each render (update_seam)
@@ -217,7 +217,7 @@ class Renderer(Globe):
         return self._bgR._render_scene(src[0], src[1], fwd_b, up_b, roll)
 
     def _render_scene(self, L_master, L_slave, fwd_b, up_b, roll=0.0):
-        """L_* are (3840,3840,3) uint16 code values. Blend in linear light with OpenOSV's lens weights (FOV feather x occlusion)."""
+        """L_* are (S,S,3) uint16 code values (S = self.ls, the lens video's own size). Blend in linear light with OpenOSV's lens weights (FOV feather x occlusion)."""
         if gpu.available():
             self._dirs = self.ray_dirs(fwd_b, up_b, roll); return gpu.scene(self, L_master, L_slave, self._dirs, keep=getattr(self, 'keep_on_gpu', False))          # all of it on the GPU (render/gpu.py)
         (um, vm, tm), (us, vs, ts) = self.maps(fwd_b, up_b, roll)
@@ -281,14 +281,14 @@ def decoder(osv, stream, hw=True, ss=0.0, native=False):
     vf = lensrc.full_frame_filter(osv, native)
     cmd = ['ffmpeg', '-v', 'error'] + args + (['-ss', f'{ss:.4f}'] if ss > 0 else []) + \
           [*lensrc.lens_input(osv, stream), '-fps_mode', 'passthrough', *(['-vf', ','.join(vf)] if vf else []), '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
-    return guard.popen(cmd, stdout=subprocess.PIPE, bufsize=LS * LS * BYTES * 2)
+    ls = lensrc.lens_size(osv); p = guard.popen(cmd, stdout=subprocess.PIPE, bufsize=ls * ls * BYTES * 2); p.lens_size = ls; return p
 
 
 def read_frame(p, native=False):
-    n = gpu.p010_bytes(LS) if native else LS * LS * BYTES; buf = p.stdout.read(n)
+    ls = getattr(p, 'lens_size', LS); n = gpu.p010_bytes(ls) if native else ls * ls * BYTES; buf = p.stdout.read(n)
     if len(buf) < n: return None
-    if native: return gpu.frame_from_p010(buf, LS)
-    return np.frombuffer(buf, np.uint16).reshape(LS, LS, 3)
+    if native: return gpu.frame_from_p010(buf, ls)
+    return np.frombuffer(buf, np.uint16).reshape(ls, ls, 3)
 
 
 def prefetch(read, depth=2):
