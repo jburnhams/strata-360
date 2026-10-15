@@ -82,6 +82,23 @@ describe('Timeline', () => {
     ask.mockReturnValue(true); await user.click(await findByRole('button', { name: 'Re-plan' })); expect(seen).toHaveLength(1); ask.mockRestore()
   })
 
+  it('asks for another version of the plan', async () => {
+    const editResp = makeEditResponse({
+      edit: {
+        settings: { length_s: 90, bpm: 120, bar_beats: 4, seed: 1, wpm: 150, style: 'default' },
+        overrides: { locked: [], tech_force: {}, bans_cands: [], bans_techs: [], clip_weight: {} },
+        plan: { generated_at: 'utc', film: { length_s: 30, beats: 60, bpm: 120 }, segments: [makePlanSegment()], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 5 }, warnings: [] }
+      }
+    })
+    mockGet('/api/edit', editResp)
+    mockPost('/api/edit/propose', { edit: editResp.edit })
+    const seenPropose = recordRequests('/api/edit/propose')
+    const { findByRole, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+    await user.click(await findByRole('button', { name: 'Another version' }))
+    expect(seenPropose).toHaveLength(1)
+    expect(seenPropose[0].body).toEqual({ folder: '/data', seed: 2, keep: false, replace: true })
+  })
+
   it('handles overrides (locking a segment)', async () => {
     const planSeg = makePlanSegment({ id: 'w1', locked: false })
     const editResp = makeEditResponse({
@@ -103,6 +120,37 @@ describe('Timeline', () => {
 
     expect(seenOverride).toHaveLength(1)
     expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'lock', wid: 'w1', locked: true })
+  })
+
+  it('handles overrides (changing technique and clearing it)', async () => {
+    const planSeg = makePlanSegment({ id: 'w1', locked: false, technique: 'static', options: [{ tech: 'static', score: 1 }, { tech: 'pan', score: 0.5 }] })
+    const editResp = makeEditResponse({
+      edit: {
+        settings: { length_s: 90, bpm: 120, bar_beats: 4, seed: 1, wpm: 150, style: 'default' },
+        overrides: { locked: [], tech_force: {}, bans_cands: [], bans_techs: [], clip_weight: {} },
+        plan: { generated_at: 'utc', film: { length_s: 5, beats: 10, bpm: 120 }, segments: [planSeg], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 5 }, warnings: [] }
+      }
+    })
+    mockGet('/api/edit', editResp)
+    mockPost('/api/edit/override', { edit: editResp.edit })
+
+    let seenOverride = recordRequests('/api/edit/override')
+    const { findByRole, findByText, user, unmount } = setup(<Timeline folder="/data" clips={[makeClipInfo()]} onOpenClip={vi.fn()} />)
+    await findByText('Plan')
+    const select = await findByRole('combobox', { name: 'chosen by the planner' })
+    await user.selectOptions(select, 'pan')
+    expect(seenOverride).toHaveLength(1)
+    expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'technique', wid: 'w1', technique: 'pan' })
+    unmount()
+
+    const editRespForced = makeEditResponse({ edit: { ...editResp.edit, overrides: { ...editResp.edit.overrides, tech_force: { w1: 'pan' } } as never } })
+    mockGet('/api/edit', editRespForced)
+    mockPost('/api/edit/override', { edit: editRespForced.edit })
+    seenOverride = recordRequests('/api/edit/override')
+    const forced = setup(<Timeline folder="/data" clips={[makeClipInfo()]} onOpenClip={vi.fn()} />)
+    await forced.findByText('Plan')
+    await forced.user.click(await forced.findByRole('button', { name: 'auto' }))
+    expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'technique', wid: 'w1', technique: null })
   })
 
   it('handles window playback', async () => {
@@ -146,6 +194,25 @@ describe('Timeline', () => {
 
     expect(seenOverride).toHaveLength(1)
     expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'transition', wid: 'w1', transition: 'dissolve' })
+  })
+
+  it('handles overrides (clearing transition)', async () => {
+    const planSeg = makePlanSegment({ id: 'w1', index: 1, locked: false, transition: { type: 'dissolve', beats: 1, dur_s: 0.5, why: 'auto' } })
+    const editResp = makeEditResponse({
+      edit: {
+        settings: { length_s: 90, bpm: 120, bar_beats: 4, seed: 1, wpm: 150, style: 'default' },
+        overrides: { locked: [], tech_force: {}, bans_cands: [], bans_techs: [], clip_weight: {}, transitions: { w1: 'dissolve' } },
+        plan: { generated_at: 'utc', film: { length_s: 5, beats: 10, bpm: 120 }, segments: [planSeg], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 5 }, warnings: [] }
+      }
+    })
+    mockGet('/api/edit', editResp)
+    mockPost('/api/edit/override', { edit: editResp.edit })
+    const seenOverride = recordRequests('/api/edit/override')
+
+    const { findByRole, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo()]} onOpenClip={vi.fn()} />)
+    await findByText('Plan')
+    await user.click(await findByRole('button', { name: 'auto' }))
+    expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'transition', wid: 'w1', transition: null })
   })
 
   it('handles clear my changes button', async () => {
@@ -211,6 +278,48 @@ describe('Timeline', () => {
     expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'weight', clip: 'CAM_1', factor: 1.5 })
   })
 
+  it('handles changing clip weight (less)', async () => {
+    const editResp = makeEditResponse({
+      edit: {
+        settings: { length_s: 90, bpm: 120, bar_beats: 4, seed: 1, wpm: 150, style: 'default' },
+        overrides: { locked: [], tech_force: {}, bans_cands: [], bans_techs: [], clip_weight: {} },
+        plan: { generated_at: 'utc', film: { length_s: 5, beats: 10, bpm: 120 }, segments: [makePlanSegment({ clip: 'CAM_1' })], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 5 }, warnings: [] }
+      }
+    })
+    mockGet('/api/edit', editResp)
+    mockPost('/api/edit/override', { edit: editResp.edit })
+
+    const seenOverride = recordRequests('/api/edit/override')
+
+    const { findByTitle, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
+    await findByText('Plan')
+    const btn = await findByTitle('less of this clip')
+    await user.click(btn)
+
+    expect(seenOverride).toHaveLength(1)
+    expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'weight', clip: 'CAM_1', factor: 1 / 1.5 })
+  })
+
+  it('handles skip moment', async () => {
+    const editResp = makeEditResponse({
+      edit: {
+        settings: { length_s: 90, bpm: 120, bar_beats: 4, seed: 1, wpm: 150, style: 'default' },
+        overrides: { locked: [], tech_force: {}, bans_cands: [], bans_techs: [], clip_weight: {} },
+        plan: { generated_at: 'utc', film: { length_s: 5, beats: 10, bpm: 120 }, segments: [makePlanSegment({ clip: 'CAM_1', clip_start_s: 0, dur_s: 5 })], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 5 }, warnings: [] }
+      }
+    })
+    mockGet('/api/edit', editResp)
+    mockPost('/api/edit/override', { edit: editResp.edit })
+
+    const seenOverride = recordRequests('/api/edit/override')
+
+    const { findByTitle, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
+    await findByText('Plan')
+    await user.click(await findByTitle('never use this footage (whichever way of seeing it)'))
+
+    expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'ban', kind: 'moment', key: 'win:CAM_1@0@5', on: true })
+  })
+
   it('labels the windows of a plan made from the script: you, narration, b-roll', async () => {
     const seg = (id: string, role: 'clip' | 'vo' | 'broll', i: number) => makePlanSegment({ id, clip: 'CAM_1', role, item: i, index: i, film_start_s: i * 5, options: [{ tech: 'static', score: 1 }] })
     mockGet('/api/edit', makeEditResponse({ edit: {
@@ -219,5 +328,20 @@ describe('Timeline', () => {
     const { findByText, getByText } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
     expect(await findByText(/from the script draft/)).toBeInTheDocument()
     expect(getByText('you')).toBeInTheDocument(); expect(getByText('narration')).toBeInTheDocument(); expect(getByText('b-roll')).toBeInTheDocument()
+  })
+
+  it('calls onOpenClip when a clip name is clicked', async () => {
+    const onOpenClip = vi.fn()
+    const editResp = makeEditResponse({
+      edit: {
+        settings: { length_s: 90, bpm: 120, bar_beats: 4, seed: 1, wpm: 150, style: 'default' },
+        overrides: { locked: [], tech_force: {}, bans_cands: [], bans_techs: [], clip_weight: {} },
+        plan: { generated_at: 'utc', film: { length_s: 5, beats: 10, bpm: 120 }, segments: [makePlanSegment({ clip: 'CAM_1' })], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 5 }, warnings: [] }
+      }
+    })
+    mockGet('/api/edit', editResp)
+    const { findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={onOpenClip} />)
+    await user.click(await findByText('1'))
+    expect(onOpenClip).toHaveBeenCalledWith('CAM_1')
   })
 })
