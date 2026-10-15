@@ -277,7 +277,7 @@ def title_candidate(folder, cid, lines=None, out_dir=None, server=None, log=prin
     import cv2
     from strata360.pipeline import config
     from strata360.edit import title_design as TD, framing as FR, techniques as TQ
-    from strata360.analysis import vlm, palette as PAL
+    from strata360.analysis import vlm, palette_cluster as PC
     out_dir = out_dir or os.path.join(config.race_dir(folder), 'bookends'); doc = json.load(open(os.path.join(out_dir, 'bookends.json'))); c = next((x for w in doc['candidates'] for x in doc['candidates'][w] if x['id'] == cid), None)
     if c is None: raise SystemExit(f'no candidate {cid}: see {out_dir}/bookends.json')
     cap = cv2.VideoCapture(os.path.join(out_dir, c['video'])); n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)); frames = []
@@ -290,7 +290,7 @@ def title_candidate(folder, cid, lines=None, out_dir=None, server=None, log=prin
     if hold is not None: a_ = hold - c['clip_start_s']; clear = (round(a_, 2), round(a_ + (SEQ_FACE if c['kind'] == 'sequence' else FACE_S), 2))      # the stretch about your face: no words on it
     if own:
         moe = os.path.join(vlm.ROOT, 'models', 'qwen36-35b-a3b'); server = vlm.Server(vlm.llm_files()[0], glob_first(moe, 'mmproj*.gguf') or vlm.model_files()[1]).__enter__()
-    try: spec, report = TD.design(frames, lines, {'sequence': 'opening (a globe that opens, a pan round the crowd, a close view of the runner\'s face)', 'globe_face': 'opening (a globe that zooms onto the runner\'s face)', 'crowd': 'opening (a crowd)'}.get(c['kind'], 'opening') if c['where'] == 'intro' else 'ending', c['dur_s'], server, scene=scene, tmp_dir=out_dir, log=log, clear=clear, palette=PAL.load(os.path.join(config.race_dir(folder), 'clips', c['clip'])))
+    try: spec, report = TD.design(frames, lines, {'sequence': 'opening (a globe that opens, a pan round the crowd, a close view of the runner\'s face)', 'globe_face': 'opening (a globe that zooms onto the runner\'s face)', 'crowd': 'opening (a crowd)'}.get(c['kind'], 'opening') if c['where'] == 'intro' else 'ending', c['dur_s'], server, scene=scene, tmp_dir=out_dir, log=log, clear=clear, palette=PC.for_clip(folder, c['clip']))
     finally:
         if own: server.__exit__()
     json.dump(dict(spec=spec, report=report), open(os.path.join(out_dir, cid + '.title.json'), 'w'), indent=1)

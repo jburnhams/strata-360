@@ -720,6 +720,19 @@ def cmd_mcp(a):
     MT.build_server((MT.HttpBackend if a.read_only else MT.WriteHttpBackend)(a.url, token), a.folder, write=not a.read_only).run('stdio')
 
 
+def cmd_palette_schemes(a):
+    """A few colour schemes for the whole film instead of one per clip (analysis/palette_cluster.py): the best compromise between how well each clip is served and how many schemes there are."""
+    from strata360.analysis import palette_cluster as PC
+    docs = PC.load_docs(a.name)
+    if not docs: sys.exit('no clip has a palette yet: run the palette stage (`strata360 run FOLDER --stages proxy,palette`)')
+    if a.sweep:
+        print(f'{len(docs)} clip palettes; what a scheme costs (in the loss of the clips it takes) against how many schemes there are:')
+        for c, k, l in PC.sweep(docs): print(f'  cost {c:5.2f}  {k:2d} schemes  mean loss per clip {l:.3f}')
+        return
+    r = PC.run(a.name, a.cost); print(f"{r['k']} schemes for {len(docs)} clips at cost {a.cost} (mean loss per clip {r['loss_mean']}); written to {PC.FILE}")
+    for i, s in enumerate(r['schemes']): print(f"  {i}  {s['label']:14s} {len(s['members']):3d} clips  base {s['scheme']['base']}  accent {s['scheme']['accent']}  mean loss {s['mean_loss']}")
+
+
 def main():
     ap = argparse.ArgumentParser(prog='strata360', description='Automatic editing pipeline for 360 race footage'); sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init', help='create a race from a folder of camera files'); p.add_argument('name'); p.add_argument('--library', required=True)
@@ -735,6 +748,7 @@ def main():
     p = sub.add_parser('backup', help='back up the project metadata now (also done every 30 min while changed), list the backups, or unpack one'); p.add_argument('name'); p.add_argument('--list', action='store_true')
     p.add_argument('--restore', metavar='ARCHIVE', help='unpack this backup (name from --list)'); p.add_argument('--to', help='folder to unpack into (default: backups/restored-<name>)'); p.set_defaults(fn=cmd_backup)
     p = sub.add_parser('mcp', help='MCP tools (stdio) for a local agent: look at clips, transcript, edit plan, script and stills of a running `strata360 serve`, and edit them (backed up, journalled; costly actions wait for your approval in the app)'); p.add_argument('--url', default='http://127.0.0.1:8360', help='the running server'); p.add_argument('--token', help='its token (or STRATA360_SERVER_TOKEN)'); p.add_argument('--folder', help='the project the tools use by default (else the one last opened in the server)'); p.add_argument('--read-only', action='store_true', help='leave out the edit tool'); p.set_defaults(fn=cmd_mcp)
+    p = sub.add_parser('palette-schemes', help='a few colour schemes for the whole film instead of one per clip: clusters the palettes of the clips (needs the palette stage), writes palette_schemes.json, which the titles then use'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--cost', type=float, default=2.0, help='what one more scheme costs in lost accuracy (higher: fewer schemes; --sweep shows the range)'); p.add_argument('--sweep', action='store_true', help='show how many schemes each cost gives, and write nothing'); p.set_defaults(fn=cmd_palette_schemes)
     p = sub.add_parser('stop-all', help='emergency stop: kill every ffmpeg, ffprobe, pytest and strata360 process of this user (not the web server)'); p.set_defaults(fn=cmd_stop_all)
     p = sub.add_parser('fetch-models', help='download the models the default stages need'); p.add_argument('race', nargs='?'); p.set_defaults(fn=cmd_fetch_models)
     p = sub.add_parser('who', help='cluster the faces, show them, and save which one is you'); p.add_argument('name'); p.add_argument('--me', help='cluster number(s) that are you, comma separated: 101 or 101,103'); p.add_argument('--label', default='me'); p.add_argument('--auto', action='store_true', help='save the suggested wearer as the profile if the suggestion is confident'); p.set_defaults(fn=cmd_who)
