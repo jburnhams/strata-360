@@ -115,6 +115,12 @@ describe('Workspace', () => {
     expect(screen.queryByText('Review the transcript')).not.toBeInTheDocument()
   })
 
+  it('shows the look and feel panel on the overview', async () => {
+    mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_20260101120000_0001_D' })] })
+    setup(<Workspace folder="/data/myfolder" onChange={vi.fn()} />)
+    expect(await screen.findByRole('heading', { name: 'Look and feel' })).toBeInTheDocument(); expect(await screen.findByRole('heading', { name: 'Typography' })).toBeInTheDocument()
+  })
+
   it('opens the project assistant from the sidebar and gives it the clip ids to link', async () => {
     mockGet('/api/clips', { clips: [makeClipInfo({ id: 'CAM_20260101120000_0001_D' })] })
     mockGet('/api/agent', { configured: true, model: 'm', vision_model: 'v', read_only: true, available: true })

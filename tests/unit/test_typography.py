@@ -170,8 +170,9 @@ class TestProjectFile:
         open(proj.path('notes.json'), 'w').write(json.dumps(dict(folder='wedding family love', clips={}, updated={}))); assert TY.for_project(proj.folder)['fonts'] == s['fonts']      # new notes do not change a scheme that exists
 
     def test_new_style_words_or_a_refresh_choose_again(self, proj):
-        a = TY.for_project(proj.folder); b = TY.for_project(proj.folder, style='elegant refined quiet'); assert b['style'] == 'elegant refined quiet' and b['fonts']['display'] != a['fonts']['display']
-        proj.write_json('notes.json', dict(folder='baby family wedding love', clips={}, updated={})); assert TY.for_project(proj.folder, refresh=True)['vibes'].get('warm', 0) > 0.5
+        a = TY.for_project(proj.folder); b = TY.for_project(proj.folder, style='elegant refined quiet'); assert b['style'] == ['elegant', 'refined', 'quiet'] and b['fonts']['display'] != a['fonts']['display']
+        proj.write_json('notes.json', dict(folder='baby family wedding love', clips={}, updated={})); assert TY.for_project(proj.folder, refresh=True)['style'] == ['elegant', 'refined', 'quiet']       # a refresh keeps the user's own vibes
+        TY.update(proj.folder, style=[]); assert TY.for_project(proj.folder, refresh=True)['vibes'].get('warm', 0) > 0.5
 
     def test_the_projects_palettes_and_notes_and_scene_labels_are_its_signals(self, proj):
         proj.write_json('notes.json', dict(folder='A trail in the mountains', clips={'CLIP_A': 'forest at dawn'}, updated={}))

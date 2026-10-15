@@ -10,7 +10,7 @@ import datetime as dt, json, math, os, re, time
 from strata360.edit import script_pack as SP, script_pins as PN, script_ground as GR
 from strata360.edit.script_pack import norm_label
 
-PROMPT_VERSION = 15
+PROMPT_VERSION = 16
 PAD_S = 0.18                  # a clip item is played from the start of its first line to the end of its last line, plus this
 VO_PAUSE_S = 0.25             # breathing room after a narration item
 ANCHOR_SLACK_S = 8.0          # an anchor further than this from where the items put it is sent back (the editor stretches b-roll for small differences)
@@ -53,12 +53,17 @@ RULES
 11. FIXED PARTS. Anything the user has fixed (MUST INCLUDE, DO NOT USE, narration to use word for word, phrases never to say) is not up for discussion. Plan the film around the fixed parts: they leave a known amount of time for everything else.
 12. NOTES AND PINNED NARRATION PER CLIP, GAP OR PHOTO. The runner's notes for a clip, gap or photo, and the narration they marked MUST INCLUDE for it, belong to roughly that moment of the film, not to the exact seconds of that item. Use them where they fit best around it. When the item is too short for them, let the narration run on into the item just before or after it (never further away), and do not stretch the item just to fit the words.
 13. THE LENGTH. Hit the target length (the checks need it), but tell the user honestly whether it suits the material and the music: set "length_note" to "fits" when the target is about right, "too_long" when the target forces padding or repeats or dull parts, "too_short" when the material or the music clearly needs more room, with "ideal_s" your estimate of the best length in seconds and a one or two sentence "why" (what would be lost or padded, which sections of the music).
+14. THE LOOK AND FEEL. The film's titles, lettering and colours are chosen from a few words (vibes) that say how the film should look and feel. Give "vibes": three to five words, chosen ONLY from this list: __VIBES__. Choose from the story you tell, the place and the mood of the footage (an ultra through the Alps at night: rugged, outdoors, cinematic; a family weekend: warm, personal, friendly), not from the fact that it is a race. The user may change your choice.
 '''
+
+from strata360.render.typography import VIBES
+SYSTEM = SYSTEM.replace('__VIBES__', ', '.join(VIBES))
 
 SCHEMA = '''Return ONE JSON object and nothing else:
 {
   "title": "short film title",
   "story": "two or three sentences: the arc you chose and why",
+  "vibes": ["three to five words chosen ONLY from the list in rule 14 that describe the look and feel this film's titles and lettering should have"],
   "length_note": {"verdict": "fits | too_long | too_short", "ideal_s": 230, "why": "one or two sentences: does the target length (and the music) suit the material? what would you cut or add?"},
   "items": [
     {"type": "vo",    "clip": "0004", "text": "narration the runner speaks over the picture of that clip", "words": 23, "basis": ["a short quote or paraphrase of what the narration rests on (the notes, the track line, the runner's words)", "or a transcript line id such as 0008.03"], "t": 12.5},
@@ -103,7 +108,7 @@ def build_messages(pack, target_s, wpm, pins=None, draft=None):
     user = (f"TARGET FILM LENGTH: {target_s:.0f} seconds (accept {(1 - TOLERANCE) * target_s:.0f} to {(1 + TOLERANCE) * target_s:.0f}).\n"
             f"WORDS-PER-MINUTE for the voice-over: {wpm:.0f} (so {wpm / 60:.2f} words per second; 30 words take {30 * 60 / wpm:.1f} s).\n\n{text}\n\n")
     if cons: user += cons + '\n\n'
-    if draft: user += 'CURRENT DRAFT (revise it as rule 9 says):\n' + json.dumps({k: draft.get(k) for k in ('title', 'story', 'items', 'skipped')}, indent=1) + '\n\n'
+    if draft: user += 'CURRENT DRAFT (revise it as rule 9 says):\n' + json.dumps({k: draft.get(k) for k in ('title', 'story', 'vibes', 'items', 'skipped')}, indent=1) + '\n\n'
     return [dict(role='system', content=SYSTEM), dict(role='user', content=user + SCHEMA)], text
 
 
@@ -122,6 +127,15 @@ def length_note(script):
     try: ideal = round(float(n['ideal_s']), 0) if n.get('ideal_s') is not None else None
     except (TypeError, ValueError): ideal = None
     return dict(verdict=n['verdict'], ideal_s=ideal, why=str(n.get('why') or '').strip()[:600])
+
+
+def clean_vibes(v):
+    """The vibes the writer chose, kept to the vocabulary (render/typography.VIBES), lower case, no repeats, at most five. Anything else is dropped."""
+    out = []
+    for w in v if isinstance(v, list) else []:
+        w = str(w).strip().lower()
+        if w in VIBES and w not in out: out.append(w)
+    return out[:5]
 
 
 def parse(text):
@@ -311,7 +325,7 @@ def write(pack, target_s, wpm, pins=None, draft=None, chat=None, retries=2, mode
     if not script and best is not None: script, rep, probs = best[:3]; log('the last attempt could not be read: keeping the closest earlier one')
     warns = GR.check(script, pack, ptxt) if script else []
     resolve(script, pack, wpm); warns = warns + (director_notes(script, pack) if script else [])
-    return dict(version=1, prompt_version=PROMPT_VERSION, created=dt.datetime.now().isoformat(timespec='seconds'), model=model, provider=provider, target_s=round(target_s, 1), wpm=wpm, title=script.get('title'), story=script.get('story'), length_note=length_note(script),
+    return dict(version=1, prompt_version=PROMPT_VERSION, created=dt.datetime.now().isoformat(timespec='seconds'), model=model, provider=provider, target_s=round(target_s, 1), wpm=wpm, title=script.get('title'), story=script.get('story'), vibes=clean_vibes(script.get('vibes')), length_note=length_note(script),
                 items=script.get('items') or [], skipped=script.get('skipped') or [], report=rep, problems=probs, warnings=warns, pins=pins or {}, revised=bool(draft), runs=runs)
 
 

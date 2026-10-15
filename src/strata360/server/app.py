@@ -2005,6 +2005,35 @@ def create_app(roots, token=None):
         try: return AE.undo(folder_of(body.get('folder')))
         except MT.ToolError as e: raise HTTPException(409, str(e))
 
+    @api.get('/api/typography', dependencies=[Depends(auth)])
+    def get_typography(folder: str):                                                      # the project's typography scheme (chosen now when there is none), the library of fonts with their vibes and roles, the vibes the script writer chose, and the colour schemes
+        from strata360.render import typography as TY
+        f = folder_of(folder); sch = TY.for_project(f)
+        return dict(scheme=sch, library=[dict(id=k, family=v['family'], category=v['category'], desc=v['desc'], vibes=v['vibes'], roles=v['roles'], caps=v['caps'], min_em=v['min_em']) for k, v in TY.FONT_TABLE.items()],
+                    vibes=list(TY.VIBES), roles=list(TY.ROLES), script_vibes=TY.script_vibes(f))
+
+    @api.post('/api/typography', dependencies=[Depends(auth)])
+    def post_typography(body: dict):                                                      # {folder, style?: [vibes] (empty: the script writer's choice), fonts?: {role: font id | null (the choice)}, refresh?: true}: your vibes and fonts; the scheme is chosen again around them
+        from strata360.render import typography as TY
+        f = folder_of(body.get('folder'))
+        try: return dict(scheme=TY.update(f, style=body.get('style'), fonts=body.get('fonts') if isinstance(body.get('fonts'), dict) else None))
+        except ValueError as e: raise HTTPException(400, str(e))
+
+    @api.get('/api/typography/sample')
+    def get_typography_sample(request: Request, font: str, text: str = 'DAY 2', px: int = 96, color: str = '#ffffff'):     # a picture of some words in one font (transparent background), for the app's font cards; <img> cannot send headers, so the cookie/query token authenticates
+        auth(request)
+        from strata360.render import typography as TY
+        if font not in TY.FONT_TABLE: raise HTTPException(404, 'no such font')
+        if not re.match(r'^#[0-9a-fA-F]{6}$', color): raise HTTPException(400, 'a colour like #rrggbb')
+        return Response(TY.sample_png(font, text[:48], int(min(max(px, 16), 200)), color), media_type='image/png', headers={'Cache-Control': 'max-age=3600'})
+
+    @api.get('/api/palette-schemes', dependencies=[Depends(auth)])
+    def get_palette_schemes(folder: str):                                                 # the project's colour schemes (analysis/palette_cluster.py): each with its colours and how many clips use it, or {present: false}
+        from strata360.analysis import palette_cluster as PC
+        doc = PC.load(folder_of(folder))
+        if not doc: return dict(present=False)
+        return dict(present=True, cost=doc['cost'], loss_mean=doc['loss_mean'], clips=len(doc['assignment']), schemes=[dict(label=x['label'], clips=len(x['members']), mean_loss=x['mean_loss'], tone=x['mood']['tone'], **{k: x['scheme'][k] for k in ('base', 'accent', 'support', 'light', 'dark', 'outline')}) for x in doc['schemes']])
+
     mount_mcp(api, token)                                                               # /mcp: the read-only tools for a local agent (server/mcp_tools.py)
     return api
 

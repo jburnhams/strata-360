@@ -140,17 +140,81 @@ def apply_to_element(el, scheme, kind='progress'):
     el['font'] = scheme['fonts'][role]; return old
 
 
-def for_project(folder, style='', refresh=False):
-    """The project's scheme: typography.json when it exists (and no new `style` words or `refresh`), else chosen now from the project's palettes, title, notes and scene labels, and written. Returns the scheme (a dict with `fonts`)."""
+INFERRED_SHARE = 0.4               # what the project says about itself counts this much beside the script writer's or the user's choice
+SCRIPT_WEIGHT, USER_WEIGHT = 1.0, 2.0
+
+
+def clean_words(words):
+    """`words` (a list, or a comma/space separated string) as a list of vocabulary vibes, lower case, no repeats."""
+    if isinstance(words, str): words = re.split(r'[,;\s]+', words)
+    out = []
+    for w in words or []:
+        w = str(w).strip().lower()
+        if w in VIBES and w not in out: out.append(w)
+    return out
+
+
+def combine(inferred, script=(), user=()):
+    """{vibe: weight 0..1} from the three sources, in order of authority: what the project says about itself (a tie-break), the vibes the script writer chose, and the user's own choice. The user's choice, when there is one, replaces the writer's."""
+    v = {k: INFERRED_SHARE * x for k, x in inferred.items()}
+    for w in (list(user) if user else list(script)): v[w] = v.get(w, 0.0) + (USER_WEIGHT if user else SCRIPT_WEIGHT)
+    top = max(v.values()) if v else 1.0
+    return {k: round(x / top, 3) for k, x in sorted(v.items(), key=lambda kv: -kv[1]) if x > 0}
+
+
+def script_vibes(folder):
+    """The vibes the newest script draft chose (script_draft.py asks the writer for them), kept to the vocabulary."""
+    try:
+        from strata360.edit import script_draft as SD
+        return clean_words((SD.load_draft(folder) or {}).get('vibes'))
+    except Exception: return []
+
+
+def read(folder):
     from strata360.pipeline import config
+    try: return json.load(open(os.path.join(config.race_dir(folder), FILE)))
+    except (OSError, ValueError): return None
+
+
+def update(folder, style=None, fonts=None, refresh=True):
+    """Choose the project's scheme again and write typography.json, keeping what the user set: `style` (their vibes: a list or words; an empty list gives the choice back to the script writer) and `fonts` ({role: font id, or None to give the role back to the choice}); None leaves each as it is.
+    Raises ValueError for a vibe, role or font outside the library."""
+    from strata360.pipeline import config
+    old = read(folder) or {}; user = list(old.get('style') or []); over = dict(old.get('overrides') or {})
+    if style is not None:
+        bad = [w for w in ([style] if isinstance(style, str) and not re.search(r'[,;\s]', style) else (re.split(r'[,;\s]+', style) if isinstance(style, str) else style)) if str(w).strip() and str(w).strip().lower() not in VIBES]
+        if bad: raise ValueError(f'not vibes of the library: {bad}')
+        user = clean_words(style)
+    for r, fid in (fonts or {}).items():
+        if r not in ROLES: raise ValueError(f'not a role: {r!r}')
+        if fid is None: over.pop(r, None)
+        elif fid not in FONT_TABLE: raise ValueError(f'not a font of the library: {fid!r}')
+        else: over[r] = fid
+    palettes, text = signals(folder); inferred = infer_vibes(palettes, text); script = script_vibes(folder); vibes = combine(inferred, script, user)
+    sch = choose(vibes); sch['sources'] = dict(user=user, script=script, inferred=list(inferred)[:6]); sch['style'] = user; sch['overrides'] = {r: f for r, f in over.items() if r in ROLES}
+    for r, fid in sch['overrides'].items():
+        sch['fonts'][r] = fid; sch['why'][r] = f"{FONT_TABLE[fid]['family']}: chosen by you; {FONT_TABLE[fid]['desc']}"
+    sch['families'] = sorted({FONT_TABLE[i]['family'] for i in sch['fonts'].values()}); sch['basis'] = 'user' if user else ('script' if script else 'project')
     path = os.path.join(config.race_dir(folder), FILE)
-    if not refresh and not style:
-        try: return json.load(open(path))
-        except (OSError, ValueError): pass
-    palettes, text = signals(folder); sch = choose(infer_vibes(palettes, text, style)); sch['style'] = style or None
     try: os.makedirs(os.path.dirname(path), exist_ok=True); tmp = path + '.tmp'; json.dump(sch, open(tmp, 'w'), indent=1); os.replace(tmp, path)
     except OSError: pass
     return sch
+
+
+def for_project(folder, style='', refresh=False):
+    """The project's scheme: typography.json when it exists and still matches what the script writer chose, else chosen now and written. `style` (words) sets the user's vibes; `refresh` chooses again from what the project says about itself. Returns the scheme (a dict with `fonts`)."""
+    old = read(folder)
+    if style: return update(folder, style=style)
+    if old and not refresh and (old.get('sources') or {}).get('script', []) == script_vibes(folder): return old                      # a new script draft with other vibes updates the scheme (unless the user chose their own)
+    return update(folder)
+
+
+def sample_png(fid, text, px=96, color='#ffffff', bg=None):
+    """PNG bytes of `text` set in font `fid` at `px` pixels: transparent unless `bg` is a colour; for showing a font in the app."""
+    import io
+    from PIL import Image, ImageDraw
+    f = load_font(fid, px); box = f.getbbox(text); pad = max(px // 6, 8); w, h = box[2] + pad * 2, (box[3] - min(box[1], 0)) + pad * 2
+    img = Image.new('RGBA', (max(w, 8), max(h, 8)), bg or (0, 0, 0, 0)); ImageDraw.Draw(img).text((pad, pad - min(box[1], 0)), text, font=f, fill=color); out = io.BytesIO(); img.save(out, 'PNG'); return out.getvalue()
 
 
 def signals(folder):
