@@ -733,6 +733,24 @@ def cmd_palette_schemes(a):
     for i, s in enumerate(r['schemes']): print(f"  {i}  {s['label']:14s} {len(s['members']):3d} clips  base {s['scheme']['base']}  accent {s['scheme']['accent']}  mean loss {s['mean_loss']}")
 
 
+def cmd_typography(a):
+    """The typography scheme of a project (render/typography.py): one font per role chosen for the project's vibes, written to typography.json, with a specimen picture; or the whole font library with --fonts."""
+    from strata360.render import typography as TY
+    if a.fonts:
+        for k, f in TY.FONT_TABLE.items(): print(f"{k:18s} {f['family']:22s} {f['category']:10s} vibes: {', '.join(f['vibes']):52s} roles: {', '.join(f['roles'])}")
+        if a.specimen: print('specimen: ' + TY.library_specimen(a.specimen))
+        return
+    from strata360.pipeline import config
+    sch = TY.for_project(a.name, style=a.style or '', refresh=a.refresh); print('vibes: ' + ', '.join(f'{k} {v:.2f}' for k, v in sch['vibes'].items())); print('families: ' + ', '.join(sch['families']))
+    for r in TY.ROLES: print(f"  {r:9s} {sch['fonts'][r]:18s} {sch['why'][r]}")
+    pal = None
+    try:
+        from strata360.analysis import palette_cluster as PC
+        cl = PC.load(a.name); d = cl['schemes'][max(range(len(cl['schemes'])), key=lambda i: len(cl['schemes'][i]['members']))] if cl else next((x for x in PC.load_docs(a.name).values()), None); pal = d and dict(base=d['scheme']['base'], accent=d['scheme']['accent'], light=d['scheme']['light'], bg=d['scheme']['dark'])
+    except Exception: pass
+    out = os.path.join(config.race_dir(a.name), 'typography_specimen.png'); TY.specimen(sch, out, pal); print('specimen: ' + out)
+
+
 def main():
     ap = argparse.ArgumentParser(prog='strata360', description='Automatic editing pipeline for 360 race footage'); sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init', help='create a race from a folder of camera files'); p.add_argument('name'); p.add_argument('--library', required=True)
@@ -749,6 +767,7 @@ def main():
     p.add_argument('--restore', metavar='ARCHIVE', help='unpack this backup (name from --list)'); p.add_argument('--to', help='folder to unpack into (default: backups/restored-<name>)'); p.set_defaults(fn=cmd_backup)
     p = sub.add_parser('mcp', help='MCP tools (stdio) for a local agent: look at clips, transcript, edit plan, script and stills of a running `strata360 serve`, and edit them (backed up, journalled; costly actions wait for your approval in the app)'); p.add_argument('--url', default='http://127.0.0.1:8360', help='the running server'); p.add_argument('--token', help='its token (or STRATA360_SERVER_TOKEN)'); p.add_argument('--folder', help='the project the tools use by default (else the one last opened in the server)'); p.add_argument('--read-only', action='store_true', help='leave out the edit tool'); p.set_defaults(fn=cmd_mcp)
     p = sub.add_parser('palette-schemes', help='a few colour schemes for the whole film instead of one per clip: clusters the palettes of the clips (needs the palette stage), writes palette_schemes.json, which the titles then use'); p.add_argument('name', metavar='FOLDER_OR_RACE'); p.add_argument('--cost', type=float, default=2.0, help='what one more scheme costs in lost accuracy (higher: fewer schemes; --sweep shows the range)'); p.add_argument('--sweep', action='store_true', help='show how many schemes each cost gives, and write nothing'); p.set_defaults(fn=cmd_palette_schemes)
+    p = sub.add_parser('typography', help='the typography scheme of a project: one font per role (display, subtitle, meta, numerals, quote) chosen for its vibes, written to typography.json with a specimen picture; --fonts lists the library'); p.add_argument('name', metavar='FOLDER_OR_RACE', nargs='?'); p.add_argument('--style', help='vibes to ask for, words of the vocabulary (athletic, rugged, elegant, warm, technical ...)'); p.add_argument('--refresh', action='store_true', help='choose again from what the project says about itself'); p.add_argument('--fonts', action='store_true', help='list every font with its vibes and roles'); p.add_argument('--specimen', help='with --fonts: also write a picture of every font to this PNG'); p.set_defaults(fn=cmd_typography)
     p = sub.add_parser('stop-all', help='emergency stop: kill every ffmpeg, ffprobe, pytest and strata360 process of this user (not the web server)'); p.set_defaults(fn=cmd_stop_all)
     p = sub.add_parser('fetch-models', help='download the models the default stages need'); p.add_argument('race', nargs='?'); p.set_defaults(fn=cmd_fetch_models)
     p = sub.add_parser('who', help='cluster the faces, show them, and save which one is you'); p.add_argument('name'); p.add_argument('--me', help='cluster number(s) that are you, comma separated: 101 or 101,103'); p.add_argument('--label', default='me'); p.add_argument('--auto', action='store_true', help='save the suggested wearer as the profile if the suggestion is confident'); p.set_defaults(fn=cmd_who)
