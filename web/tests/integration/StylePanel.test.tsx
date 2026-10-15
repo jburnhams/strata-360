@@ -106,6 +106,11 @@ describe('StylePanel', () => {
     await screen.findByRole('list', { name: 'Colour schemes' }); await screen.findByRole('img', { name: 'DAY 2 in Oswald' }); await new Promise(r => setTimeout(r, 50)); expect(screen.getByRole('img', { name: 'DAY 2 in Oswald' }).getAttribute('src')).toContain('color=%236bb0f3')
   })
 
+  it('still shows a scheme that lacks the newer fields (a file of an earlier version)', async () => {
+    const t = makeTypography(); const old = { ...t, scheme: { fonts: t.scheme.fonts, vibes: t.scheme.vibes } } as unknown as typeof t; mockGet('/api/typography', old)
+    setup(<StylePanel folder="/f" />); expect(await screen.findByRole('heading', { name: 'Display' })).toBeInTheDocument(); expect(screen.getByRole('heading', { name: /Vibes/ })).toHaveTextContent(/worked out from the project/)
+  })
+
   it('has no accessibility violations, with a font grid open too', async () => {
     mockGet('/api/palette-schemes', makePaletteSchemes({ present: true, schemes: [cs()] })); const { user, container } = setup(<StylePanel folder="/f" />)
     await user.click(within(await screen.findByRole('heading', { name: 'Display' }).then(h => h.closest('li')!)).getByRole('button', { name: 'Change font' })); expect(await axe(container)).toHaveNoViolations()

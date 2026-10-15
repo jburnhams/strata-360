@@ -140,6 +140,7 @@ def apply_to_element(el, scheme, kind='progress'):
     el['font'] = scheme['fonts'][role]; return old
 
 
+REQUIRED = {'fonts', 'vibes', 'why', 'alternatives', 'families', 'sources', 'style', 'overrides', 'basis'}               # a stored scheme without all of these is of an earlier version: it is chosen again (keeping what the user set)
 INFERRED_SHARE = 0.4               # what the project says about itself counts this much beside the script writer's or the user's choice
 SCRIPT_WEIGHT, USER_WEIGHT = 1.0, 2.0
 
@@ -180,7 +181,7 @@ def update(folder, style=None, fonts=None, refresh=True):
     """Choose the project's scheme again and write typography.json, keeping what the user set: `style` (their vibes: a list or words; an empty list gives the choice back to the script writer) and `fonts` ({role: font id, or None to give the role back to the choice}); None leaves each as it is.
     Raises ValueError for a vibe, role or font outside the library."""
     from strata360.pipeline import config
-    old = read(folder) or {}; user = list(old.get('style') or []); over = dict(old.get('overrides') or {})
+    old = read(folder) or {}; user = clean_words(old.get('style')); over = dict(old.get('overrides') or {})                      # (a file of an earlier version may hold the style as text)
     if style is not None:
         bad = [w for w in ([style] if isinstance(style, str) and not re.search(r'[,;\s]', style) else (re.split(r'[,;\s]+', style) if isinstance(style, str) else style)) if str(w).strip() and str(w).strip().lower() not in VIBES]
         if bad: raise ValueError(f'not vibes of the library: {bad}')
@@ -205,7 +206,7 @@ def for_project(folder, style='', refresh=False):
     """The project's scheme: typography.json when it exists and still matches what the script writer chose, else chosen now and written. `style` (words) sets the user's vibes; `refresh` chooses again from what the project says about itself. Returns the scheme (a dict with `fonts`)."""
     old = read(folder)
     if style: return update(folder, style=style)
-    if old and not refresh and (old.get('sources') or {}).get('script', []) == script_vibes(folder): return old                      # a new script draft with other vibes updates the scheme (unless the user chose their own)
+    if old and not refresh and REQUIRED <= set(old) and (old.get('sources') or {}).get('script', []) == script_vibes(folder): return old                      # a new script draft with other vibes updates the scheme (unless the user chose their own)
     return update(folder)
 
 

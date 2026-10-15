@@ -23,7 +23,7 @@ export default function StylePanel({ folder }: { folder: string }) {
   }, [folder])
   if (data === undefined) return <PanelSkeleton title="Look and feel" rows={5} />
   if (data === null) return <section className="rounded-xl border border-stone-200 bg-white p-4 text-sm text-stone-500 dark:border-stone-800 dark:bg-stone-900"><b className="text-stone-900 dark:text-stone-100">Look and feel</b><p className="mt-1">The typography could not be loaded.</p></section>
-  const { scheme, library, vibes, script_vibes } = data; const base = schemes?.schemes?.[0]?.base ?? '#e7e5e4'
+  const { library, vibes, script_vibes } = data; const scheme: TypoScheme = { ...data.scheme, overrides: data.scheme.overrides ?? {}, style: data.scheme.style ?? [], sources: data.scheme.sources ?? { user: [], script: [], inferred: [] }, basis: data.scheme.basis ?? 'project', why: data.scheme.why ?? {}, families: data.scheme.families ?? [] }; const base = schemes?.schemes?.[0]?.base ?? '#e7e5e4'
   const apply = async (body: Parameters<typeof api.setTypography>[1]) => {
     setBusy(true); setErr(undefined)
     try { const r = await api.setTypography(folder, body); setData(d => (d ? { ...d, scheme: r.scheme } : d)) } catch (e) { setErr(e instanceof Error ? e.message : 'That did not work.') } finally { setBusy(false) }

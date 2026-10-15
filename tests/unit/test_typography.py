@@ -208,3 +208,21 @@ class TestCli:
         from strata360 import cli
         p = make_project(config=True); cli.cmd_typography(self.args(p.folder, style='elegant')); out = capsys.readouterr().out
         assert 'vibes:' in out and 'display' in out and 'numerals' in out and os.path.exists(p.path(TY.FILE)) and os.path.exists(p.path('typography_specimen.png'))
+
+
+class TestEarlierFiles:
+    """A typography.json written by an earlier version lacks the newer fields: it is rebuilt, keeping what the user had set."""
+    @pytest.fixture
+    def proj(self, make_project): return make_project(config=True)
+
+    def legacy(self, proj, **extra):
+        sch = TY.choose(TY.infer_vibes(text='trail')); sch.update(extra); json.dump(sch, open(proj.path(TY.FILE), 'w')); return sch
+
+    def test_a_file_without_the_new_fields_is_rebuilt(self, proj):
+        self.legacy(proj); s = TY.for_project(proj.folder); assert TY.REQUIRED <= set(s) and s['basis'] == 'project' and TY.REQUIRED <= set(json.load(open(proj.path(TY.FILE))))
+
+    def test_a_legacy_style_given_as_text_is_kept_as_the_users_vibes(self, proj):
+        self.legacy(proj, style='elegant refined'); s = TY.for_project(proj.folder); assert s['style'] == ['elegant', 'refined'] and s['basis'] == 'user'
+
+    def test_a_complete_file_is_returned_as_it_is(self, proj):
+        a = TY.for_project(proj.folder); b = TY.for_project(proj.folder); assert a == b
