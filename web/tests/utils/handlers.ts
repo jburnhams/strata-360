@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeStudioState, makeStudioPreview, makeEditResponse, makeScript2State, makeScriptState, makeVoiceoverState, makeTrackLine, makeTracksListing, makeTrackSeries, makeTrackClip, makeClipDetail, makeFilmState, makeStillState, makeStillList, makeFinalState, makeRoughMix, makeLyrics, makePointCams, makeReviewQueue } from './factories'
+import { makeTypography, makePaletteSchemes, makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClipInfo, makeTranscriptFix, makeMeta, makeClockState, makeTrackOverview, makeWhoState, makeMusicState, makeStudioState, makeStudioPreview, makeEditResponse, makeScript2State, makeScriptState, makeVoiceoverState, makeTrackLine, makeTracksListing, makeTrackSeries, makeTrackClip, makeClipDetail, makeFilmState, makeStillState, makeStillList, makeFinalState, makeRoughMix, makeLyrics, makePointCams, makeReviewQueue } from './factories'
 
 // Default happy-path handlers, one per endpoint. Only the endpoints the tests so far need are here: when a test hits an endpoint that is missing,
 // msw fails it loudly (onUnhandledFrame: 'error'), so add the handler here (with a factory in factories.ts) rather than inline in the test.
@@ -7,6 +7,8 @@ import { makeBrowse, makeNotes, makeProgress, makeStateMatrix, makeSeg, makeClip
 export const handlers = [
   http.get('/api/last', () => HttpResponse.json({ folder: null })),
   http.get('/api/agent/pending', () => HttpResponse.json({ pending: [] })),
+  http.get('/api/typography', () => HttpResponse.json(makeTypography())),
+  http.get('/api/palette-schemes', () => HttpResponse.json(makePaletteSchemes())),
   http.get('/api/agent/journal', () => HttpResponse.json({ entries: [], undo: { available: false, restore_point: null, since: null, changes: 0, sessions: 0 } })),
   http.get('/api/browse', () => HttpResponse.json(makeBrowse())),
   http.get('/api/notes', () => HttpResponse.json(makeNotes())),

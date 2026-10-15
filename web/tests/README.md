@@ -58,6 +58,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/TranscriptPanel.tsx` | 96.55% | done (tooltips difficult to query) |
 | `src/components/ReviewPage.tsx`, `src/phraseDiff.ts` | ~95% | done (`ReviewPage.test.tsx`: queue, badges, both playback speeds and the keys, save/looks right/put back, errors, paging; `phraseDiff.test.ts`: retyped text to word corrections) |
 | `src/components/AskPage.tsx` | ~95% | done (`AskPage.test.tsx`: not-set-up states, asking and the history sent, Enter/Shift+Enter, busy and error states, steps, pictures, the vision box, clip-id links, project change, the edit switch, approval cards, a11y) |
+| `src/components/StylePanel.tsx` | ~98% | done (`StylePanel.test.tsx`: loading and failure, fonts by role with their pictures, where the vibes come from, picking and clearing vibes, the script writer's choice, changing and resetting a role's font, refusals and the saving state, colour schemes, a11y) |
 | `src/usePoll.ts` | 100% | done |
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
 | `src/components/ScriptPanel.tsx` | 96.55% | done (one missed branch) |

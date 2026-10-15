@@ -196,6 +196,11 @@ export interface AgentPending { id: string; action: string; summary: string; why
 export interface AgentAnswer { answer: string; steps: AgentStep[]; images: AgentImage[]; pending?: AgentPending[]; model: string; vision: boolean; write?: boolean; seconds: number }
 export interface AgentUndoState { available: boolean; restore_point: string | null; since: number | null; changes: number; sessions: number }
 export interface AgentDone { ok: boolean; did: string; job: boolean | null; backup: string | null }
+export interface TypoFont { id: string; family: string; category: string; desc: string; vibes: string[]; roles: string[]; caps: boolean; min_em: number }
+export interface TypoScheme { fonts: Record<string, string>; vibes: Record<string, number>; why: Record<string, string>; alternatives: Record<string, string[]>; families: string[]; sources: { user: string[]; script: string[]; inferred: string[] }; style: string[]; overrides: Record<string, string>; basis: 'user' | 'script' | 'project' }
+export interface Typography { scheme: TypoScheme; library: TypoFont[]; vibes: string[]; roles: string[]; script_vibes: string[] }
+export interface ColourScheme { label: string; clips: number; mean_loss: number; tone: string; base: string; accent: string; support: string; light: string; dark: string; outline: string }
+export interface PaletteSchemes { present: boolean; cost?: number; loss_mean?: number; clips?: number; schemes?: ColourScheme[] }
 export interface Notes { folder: string; clips: Record<string, string>; updated: Record<string, string>; vo_must?: { folder: string; folder_ordered: boolean; clips: Record<string, string> } }
 export interface VoPin { id: string; text: string; mode: 'clip' | 'ordered' | 'anywhere'; clip?: string }
 export interface ScriptPins { include?: string[]; exclude?: string[]; vo?: VoPin[]; vo_never?: string[] }
@@ -373,6 +378,10 @@ export const api = {
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   agent: () => call<AgentStatus>('/api/agent'),
+  typography: (folder: string) => call<Typography>('/api/typography?' + q({ folder })),
+  setTypography: (folder: string, body: { style?: string[]; fonts?: Record<string, string | null>; refresh?: boolean }) => call<{ scheme: TypoScheme }>('/api/typography', { folder, ...body }),
+  paletteSchemes: (folder: string) => call<PaletteSchemes>('/api/palette-schemes?' + q({ folder })),
+  typoSample: (font: string, text: string, px: number, color: string) => '/api/typography/sample?' + q({ font, text, px: String(px), color }),
   ask: (folder: string, messages: AgentTurn[], vision = false, write = false) => call<AgentAnswer>('/api/agent/chat', { folder, messages, vision, write }),
   agentPending: (folder: string) => call<{ pending: AgentPending[] }>('/api/agent/pending?' + q({ folder })),
   agentJournal: (folder: string) => call<{ entries: unknown[]; undo: AgentUndoState }>('/api/agent/journal?' + q({ folder, limit: '1' })),

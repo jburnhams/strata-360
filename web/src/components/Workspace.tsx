@@ -11,6 +11,7 @@ import { Skeleton } from './Skeleton'
 import TranscriptPanel from './TranscriptPanel'
 import ReviewPage from './ReviewPage'
 import AskPage from './AskPage'
+import StylePanel from './StylePanel'
 import ScriptPanel from './ScriptPanel'
 import ScriptDraftPanel from './ScriptDraftPanel'
 import VoiceoverPanel from './VoiceoverPanel'
@@ -71,6 +72,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
             <TrackPanel folder={folder} tz={tz} photos={photos} onGapsChanged={() => setPhotoTick(t => t + 1)} onOpenPhoto={openPhoto} onOpenClip={c => { setFocus(undefined); setSel(c) }} onOpenGap={g => { setFocus(undefined); setSel(`@gap:${g}`) }} />
             <PhotosPanel folder={folder} photos={photos} tz={tz} job={photoData?.job} onChanged={() => setPhotoTick(t => t + 1)} onOpen={openPhoto} />
             <MusicPanel folder={folder} />
+            <StylePanel folder={folder} />
             <ClockPanel folder={folder} />
             <WhoPanel folder={folder} />
             <NoteBox folder={folder} title="Notes for the whole folder" placeholder="What was this? Who was there? What is the story of the day, in your own words…" />

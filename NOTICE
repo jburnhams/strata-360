@@ -37,3 +37,9 @@ SIL Open Font License 1.1 (src/strata360/overlay/fonts/OFL.txt).
 
 Map tiles are fetched at render time from the configured service (Thunderforest or OpenStreetMap) and credited on the
 film; they are cached locally under ~/.strata360/tiles and not distributed with this project.
+
+Fonts for titles and overlays (src/strata360/render/title_fonts/, src/strata360/overlay/fonts/); each family's licence text is beside its files (`<family>-OFL.txt`):
+  SIL Open Font License 1.1: Anton, Archivo Black, Barlow, Barlow Condensed, Bebas Neue, DM Serif Display, Inter, Big Shoulders Display, League Gothic, Oswald, Alfa Slab One, Fraunces, Playfair Display,
+    Cormorant Garamond, Space Grotesk, Montserrat, IBM Plex Mono, Caveat. Taken from the Google Fonts repository (https://github.com/google/fonts, `ofl/`), unmodified (the variable fonts are used with their axes pinned).
+  Apache License 2.0: Special Elite (Astigmatic), https://github.com/google/fonts, `apache/specialelite/`.
+  render/typography.py tags each with the vibes it carries and the roles it suits, and chooses one font per role for a project.

@@ -118,3 +118,25 @@ class TestOutsideAgents:
         with make_client() as c: assert '"edit"' in tools(c)
         monkeypatch.setenv('STRATA360_MCP_WRITE', '0')
         with make_client() as c: out = tools(c); assert '"edit"' not in out and '"picture"' in out
+
+
+class TestStyleActions:
+    """The assistant can set the film's vibes and fonts (server/agent_edit.py style.vibes, style.font) through the typography route."""
+    def test_the_actions_are_offered_and_their_bodies_are_the_routes(self):
+        assert 'style.vibes(vibes)' in AE.usage() and 'style.font(role, font?)' in AE.usage()
+        assert AE.body_of('style.vibes', dict(vibes=['rugged', 'quiet'])) == dict(style=['rugged', 'quiet']) and AE.body_of('style.font', dict(role='display', font='anton')) == dict(fonts=dict(display='anton')) and AE.body_of('style.font', dict(role='meta')) == dict(fonts=dict(meta=None))
+
+    def test_vibes_and_a_font_change_the_scheme_through_the_app_and_can_be_undone(self, make_client, project):
+        from strata360.render import typography as TY
+        c = make_client(); post = MT.WriteAsgiBackend(c.app).post
+        out = run(AE.execute(post, project.folder, 'style.vibes', dict(vibes=['elegant', 'refined']))); assert out['ok'] and 'elegant, refined' in out['did']
+        assert TY.read(project.folder)['style'] == ['elegant', 'refined']
+        run(AE.execute(post, project.folder, 'style.font', dict(role='display', font='anton'))); assert TY.read(project.folder)['fonts']['display'] == 'anton'
+        run(AE.execute(post, project.folder, 'style.font', dict(role='display'))); assert TY.read(project.folder)['fonts']['display'] != 'anton' and TY.read(project.folder)['overrides'] == {}
+        run(AE.execute(post, project.folder, 'style.vibes', dict(vibes=[]))); assert TY.read(project.folder)['style'] == []
+
+    def test_a_vibe_or_font_outside_the_library_is_a_clear_error(self, make_client, project):
+        post = MT.WriteAsgiBackend(make_client().app).post
+        with pytest.raises(MT.ToolError, match='not vibes of the library'): run(AE.execute(post, project.folder, 'style.vibes', dict(vibes=['nonsense'])))
+        with pytest.raises(MT.ToolError, match='not a font of the library'): run(AE.execute(post, project.folder, 'style.font', dict(role='display', font='comic')))
+        with pytest.raises(MT.ToolError, match='wrong type'): run(AE.execute(post, project.folder, 'style.vibes', dict(vibes='rugged')))

@@ -14,10 +14,8 @@ import os
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__)); FONT_DIR = os.path.join(HERE, 'title_fonts')
-FONTS = {'bebas': ('BebasNeue-Regular.ttf', 'tall condensed capitals, athletic and clean'), 'anton': ('Anton-Regular.ttf', 'heavy condensed poster capitals, loud'), 'archivo_black': ('ArchivoBlack-Regular.ttf', 'wide heavy sans, bold and modern'),
-         'barlow_cond_light': ('BarlowCondensed-Light.ttf', 'light condensed sans, elegant and technical'), 'barlow_cond_bold': ('BarlowCondensed-Bold.ttf', 'bold condensed sans, sporty and legible'), 'barlow': ('Barlow-Medium.ttf', 'plain medium sans for small lines'),
-         'dm_serif': ('DMSerifDisplay-Regular.ttf', 'high-contrast display serif, editorial and warm'), 'dm_serif_italic': ('DMSerifDisplay-Italic.ttf', 'italic display serif, personal and soft'),
-         'inter': (os.path.join('..', 'overlay', 'fonts', 'Inter-SemiBold.ttf'), 'neutral semibold sans')}
+from strata360.render import typography as TY                                                  # the fonts, with their vibes and roles, live there
+FONTS = {k: (v['file'], v['desc']) for k, v in TY.FONT_TABLE.items()}
 PRESETS_IN = ('fade', 'rise', 'drop', 'pop', 'zoom', 'spin', 'blur_in', 'track_in', 'type', 'wipe', 'slide')
 PRESETS_OUT = ('fade', 'rise', 'blur', 'shrink', 'none')
 EASES = ('linear', 'out_cubic', 'in_out', 'out_expo', 'out_back')
@@ -45,9 +43,8 @@ def contrast(a, b):
 
 
 def font(fid, px):
-    from PIL import ImageFont
     key = (fid, int(round(px)))
-    if key not in _fonts: _fonts[key] = ImageFont.truetype(os.path.normpath(os.path.join(FONT_DIR, FONTS.get(fid, FONTS['inter'])[0])), max(int(round(px)), 4))
+    if key not in _fonts: _fonts[key] = TY.load_font(fid if fid in TY.FONT_TABLE else 'inter', px)                 # an unknown id is the neutral sans, never a crash
     return _fonts[key]
 
 
