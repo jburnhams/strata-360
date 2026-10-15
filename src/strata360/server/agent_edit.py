@@ -51,6 +51,8 @@ ACTIONS = {
     'meta.set': ('/api/meta', dict(title=(_s, False, 'film title'), date=(_s, False, 'date text'), results=(_d, False, '{starters, finishers, finished, position}')), lambda a: 'set the film details', None, False),
     'script.edit': ('/api/script/edit', dict(texts=(_d, True, '{segment: new text}')), lambda a: f"rewrite {len(a['texts'])} script line(s)", None, False),
     'script.pins': ('/api/script2/pins', dict(include=(_l, False, 'clips or lines to include'), exclude=(_l, False, 'to exclude'), vo=(_l, False, 'narration to include'), vo_never=(_l, False, 'narration never to use')), lambda a: 'set the script pins', None, False),
+    'style.vibes': ('/api/typography', dict(vibes=(_l, True, 'vibes of the library, e.g. rugged, outdoors, cinematic; an empty list gives the choice back to the script writer')), lambda a: 'set the vibes of the film to ' + (', '.join(a['vibes']) or 'the script writer\'s choice') + ' (the fonts follow)', None, False),
+    'style.font': ('/api/typography', dict(role=(_s, True, 'display, subtitle, meta, numerals or quote'), font=(lambda v: v is None or _s(v), False, 'a font id of the library, or omit to give the role back to the automatic choice')), lambda a: f"{'set the ' + a['role'] + ' font to ' + str(a['font']) if a.get('font') else 'give the ' + a['role'] + ' font back to the automatic choice'}", None, False),
     'voiceover.use': ('/api/voiceover/use', dict(seg=(_i, True, 'line number'), use=(_s, True, 'synth or recorded')), lambda a: f"use the {a['use']} voice for line {a['seg']}", None, False),
     # background jobs (they start and return at once; see project(view="stages") and the log)
     'script.plan': ('/api/script2/plan', dict(draft=(_s, False, 'a draft file name (default: the newest)')), lambda a: 'make the film plan from the script draft and speak the narration', None, True),
@@ -94,6 +96,8 @@ def body_of(action, args):
     body = dict(args)
     if action.startswith('plan.') and action not in ('plan.propose',): body['action'] = action.split('.')[1]
     if action == 'plan.technique' and 'technique' not in body: body['technique'] = None
+    if action == 'style.vibes': body = dict(style=list(args['vibes']))
+    if action == 'style.font': body = dict(fonts={args['role']: args.get('font')})
     if action == 'plan.lock' and 'locked' not in body: body['locked'] = True
     return body
 

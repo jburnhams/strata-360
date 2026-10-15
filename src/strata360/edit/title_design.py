@@ -159,10 +159,15 @@ def fit_timing(spec, duration, clear=None):
 def _fill_colour(el): return TT.hex_rgb(el['fill']['c1']), TT.hex_rgb(el['fill']['c2'])
 
 
-def enforce(spec, lines, frames, times, boxes, duration, W=960, H=540, clear=None, bottom_clear=0.0, keep_in=None, avoid=(), persons=None, palette=None):
+def enforce(spec, lines, frames, times, boxes, duration, W=960, H=540, clear=None, bottom_clear=0.0, keep_in=None, avoid=(), persons=None, palette=None, typography=None, kind='progress'):
     """Check a spec against the frames (uint8 RGB at `times`, with the faces `boxes` found in each) and correct it. Returns (spec, notes): what was changed and why."""
     spec = fit_timing(normalize(spec, lines), duration, clear); notes = []; notes_orig = {}; els = spec['elements']; vis = [i for i, t in enumerate(times) if spec['timing']['start_s'] <= t <= spec['timing']['end_s']] or list(range(len(times)))
     if not els: return spec, notes
+    if typography:                                                                                                  # the project's fonts by role, before placement (the font decides how much room a word takes)
+        from strata360.render import typography as TY
+        for el in els:
+            old = TY.apply_to_element(el, typography, kind)
+            if old != el['font']: notes.append(f"'{el['text']}': font {el['font']} for its role (the model had {old})")
     bodies = [pb for i in vis for pb in (persons[i] if persons else []) if (pb[2] - pb[0]) * (pb[3] - pb[1]) >= 0.05]
     faces = [fb for i in vis for fb in boxes[i] if (fb[2] - fb[0]) * (fb[3] - fb[1]) >= SMALL_FACE]                  # every face big enough to read; the camera moves, so a place is judged over all the frames the words are on
     def boxes_of(es):
@@ -275,8 +280,8 @@ def parse(text):
     return None
 
 
-def design(frames, lines, kind, duration, server, scene='', models='models', tmp_dir=None, rounds=2, log=print, clear=None, bottom_clear=0.0, keep_in=None, avoid=(), palette=None):
-    """frames: uint8 RGB pictures of the shot at the fractions `SAMPLES` of `duration`. `palette`: the clip's palette document (analysis/palette.py), told to the model as the colours to use. Returns (spec, report): the final spec and what happened (the model's own answer, what the code changed, the critique)."""
+def design(frames, lines, kind, duration, server, scene='', models='models', tmp_dir=None, rounds=2, log=print, clear=None, bottom_clear=0.0, keep_in=None, avoid=(), palette=None, typography=None, kind_of_card='progress'):
+    """frames: uint8 RGB pictures of the shot at the fractions `SAMPLES` of `duration`. `palette`: the clip's palette document (analysis/palette.py), told to the model as the colours to use. `typography`: the project's scheme (render/typography.py): the model is offered only its fonts, and every element is set to its role's font whatever the model chose. Returns (spec, report): the final spec and what happened (the model's own answer, what the code changed, the critique)."""
     import cv2
     from strata360.analysis import palette as PAL
     if palette: scene = (scene + ' ' + PAL.for_prompt(palette)).strip()
@@ -285,15 +290,15 @@ def design(frames, lines, kind, duration, server, scene='', models='models', tmp
     for k in (0, 2, 4):
         p = os.path.join(tmp_dir, f'_title_frame{k}.jpg'); cv2.imwrite(p, cv2.resize(frames[k], (960, 540), interpolation=cv2.INTER_AREA)[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90]); paths.append(p)
     words = ' / '.join(l['text'] for l in lines)
-    prompt = PROMPT.format(kind=kind, secs=duration, times=f'{times[0]}, {times[2]} and {times[4]}', words=json.dumps(words), stats=json.dumps(info), scene=scene or 'not known', clear=("The shot is about the runner's face between %.1f and %.1f seconds: the words must be off the screen by then (or come after), so put their timing in the other part." % tuple(clear)) if clear else '', fonts='; '.join(f'{k} ({v[1]})' for k, v in TT.FONTS.items()),
+    prompt = PROMPT.format(kind=kind, secs=duration, times=f'{times[0]}, {times[2]} and {times[4]}', words=json.dumps(words), stats=json.dumps(info), scene=scene or 'not known', clear=("The shot is about the runner's face between %.1f and %.1f seconds: the words must be off the screen by then (or come after), so put their timing in the other part." % tuple(clear)) if clear else '', fonts='; '.join(f'{k} ({TT.FONTS[k][1]})' for k in (dict.fromkeys(typography['fonts'].values()) if typography else TT.FONTS)),
                            pin=', '.join(TT.PRESETS_IN), pout=', '.join(TT.PRESETS_OUT), eases=', '.join(TT.EASES))
     raw = server.ask(prompt, paths, 1800, temperature=0.8); ans = parse(raw) or {}; report = dict(model_answer=ans, rounds=[])
     if not ans or not ans.get('elements'): log('the model gave no usable composition: the plain stacked title is used')
-    spec, notes = enforce(ans, lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons, palette=palette); report['changes'] = notes
+    spec, notes = enforce(ans, lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons, palette=palette, typography=typography, kind=kind_of_card); report['changes'] = notes
     for r in range(rounds):
         mid = int(round(0.6 * (len(frames) - 1))); title = TT.Title(spec, frames[mid].shape[1], frames[mid].shape[0], duration); t_show = float(np.clip(times[mid], spec['timing']['start_s'] + 2.0, spec['timing']['end_s'] - 0.7))
         shown = title.apply(frames[mid], t_show); p = os.path.join(tmp_dir, '_title_check.jpg'); cv2.imwrite(p, cv2.resize(shown, (960, 540), interpolation=cv2.INTER_AREA)[..., ::-1], [cv2.IMWRITE_JPEG_QUALITY, 90])
         crit = parse(server.ask(CRITIQUE.format(words=json.dumps(words)), [p], 1800)) or {}; report['rounds'].append(crit)
         if crit.get('ok', True) or not crit.get('elements'): break
-        spec, notes2 = enforce(dict(ans, elements=crit['elements']), lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons, palette=palette); report['changes'] += notes2
+        spec, notes2 = enforce(dict(ans, elements=crit['elements']), lines, frames, times, boxes, duration, clear=clear, bottom_clear=bottom_clear, keep_in=keep_in, avoid=avoid, persons=persons, palette=palette, typography=typography, kind=kind_of_card); report['changes'] += notes2
     spec['why'] = ans.get('why', ''); report['blocking'] = blocking(spec, times, boxes, persons, list(avoid), duration, frames[0].shape[1], frames[0].shape[0]); return spec, report

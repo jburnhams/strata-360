@@ -140,3 +140,19 @@ export const makeClipDetail = (o: Partial<import('../../src/api').ClipDetail> = 
   transcript: [], scenes: null, identity: null, candidates: null, preview: true, heading: null, unusable: null, thresholds: null,
   objects: null, places: null, exposure: { mean_lin_range_stops: 3.2 }, thumb: { kind: 'center', t_s: 5, why: 'default' }, track: {}, track_text: 'Track A', ...o
 })
+
+export const makeTypography = (o: { scheme?: Partial<import('../../src/api').TypoScheme>; script_vibes?: string[] } = {}): import('../../src/api').Typography => ({
+  scheme: {
+    fonts: { display: 'oswald', subtitle: 'barlow_cond_bold', meta: 'barlow_cond_bold', numerals: 'barlow_cond_bold', quote: 'playfair' },
+    vibes: { athletic: 1, outdoors: 0.8, rugged: 0.6, cinematic: 0.4, clean: 0.2 }, why: { display: 'Oswald: matches outdoors, rugged', subtitle: 'Barlow Condensed: matches athletic', meta: 'Barlow Condensed: matches athletic', numerals: 'Barlow Condensed: matches athletic', quote: 'Playfair Display: matches cinematic' },
+    alternatives: {}, families: ['Barlow Condensed', 'Oswald', 'Playfair Display'], sources: { user: [], script: [], inferred: ['athletic', 'outdoors'] }, style: [], overrides: {}, basis: 'project', ...o.scheme,
+  },
+  library: [
+    { id: 'oswald', family: 'Oswald', category: 'sans', desc: 'rugged condensed workhorse', vibes: ['rugged', 'outdoors'], roles: ['display', 'subtitle'], caps: true, min_em: 0.04 },
+    { id: 'barlow_cond_bold', family: 'Barlow Condensed', category: 'sans', desc: 'bold condensed sans', vibes: ['athletic', 'clean'], roles: ['subtitle', 'meta', 'numerals'], caps: false, min_em: 0.03 },
+    { id: 'playfair', family: 'Playfair Display', category: 'serif', desc: 'elegant serif', vibes: ['elegant', 'cinematic'], roles: ['display', 'quote'], caps: false, min_em: 0.06 },
+    { id: 'caveat', family: 'Caveat', category: 'hand', desc: 'handwriting', vibes: ['handmade', 'personal'], roles: ['quote'], caps: false, min_em: 0.06 },
+  ],
+  vibes: ['athletic', 'rugged', 'outdoors', 'cinematic', 'elegant', 'warm', 'clean'], roles: ['display', 'subtitle', 'meta', 'numerals', 'quote'], script_vibes: o.script_vibes ?? [],
+})
+export const makePaletteSchemes = (o: Partial<import('../../src/api').PaletteSchemes> = {}): import('../../src/api').PaletteSchemes => ({ present: false, ...o })
