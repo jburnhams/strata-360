@@ -20,6 +20,33 @@ SMALL_FACE = 0.004                                           # a face box this s
 COVER_OK = 0.002                                             # the share of the frame's area of faces a word may cover without being moved
 
 
+SMALL_EM = 0.10                                              # a word at most this tall (as a fraction of the frame height) is small text: lettering to read, not word art
+SMALL_STROKE = 0.045                                         # the outline of small text, as a share of its size: a fixed outline eats the letters of a small word
+SMALL_MARGIN = 0.6                                           # a tinted tone may have this share of the best contrast, as long as it reaches SMALL_AA: colour for small text costs legibility only above the target
+SMALL_AA = 7.0                                               # the contrast small text aims for (WCAG AAA): thin letters have no colour to fall back on
+STRONGER = {'barlow_cond_light': 'barlow_cond_bold'}         # thin weights fall apart small: the sturdier one of the same face
+
+
+def style_from_palette(el, sw, px, used, ei, n):
+    """Dress one element from the clip's palette (`sw`: its swatches) for the area it sits on (`px`: the pixels behind it, (n, 3) floats). Returns a note saying what was done.
+    Display words (size over SMALL_EM) take a saturated hue at a modest contrast, because a heavy opposite-tone outline and a drop shadow carry the legibility. Small words get what thin letters need: a pale or deep tint of the base hue (or a tinted neutral) chosen for
+    contrast of SMALL_AA (the complement's tint first), an outline that scales with their size, a sturdier weight and more tracking, and the accent colour as a soft glow, so the complement is still in the card without asking thin letters to carry it."""
+    from strata360.analysis import palette as PAL
+    neutrals = [x for x in sw if x['role'] == 'neutral']; was = el['fill']['c1']
+    if el['size'] < SMALL_EM:
+        pool = neutrals + [x for x in sw if x['role'] in ('base', 'accent') and x['tone'] in ('light', 'dark')]; c1, ct, sel = PAL.choose(pool, px, ('accent', 'base', 'neutral'), aa=SMALL_AA, margin=SMALL_MARGIN)       # the complement first, then the base hue, a tinted neutral only when neither reaches the contrast
+        accent = next((x['hex'] for x in sw if x['role'] == 'accent' and x['tone'] == 'mid_light'), None); kind = 'small'
+        el['stroke'] = dict(w=round(float(np.clip(SMALL_STROKE * el['size'], 0.0015, 0.005)), 4), color=PAL.choose(neutrals, px, against=c1)[0]); el['shadow'] = dict(el['shadow'], opacity=max(el['shadow']['opacity'], 0.75), blur=max(el['shadow']['blur'], 0.01), dy=max(el['shadow']['dy'], 0.004))
+        if accent: el['glow'] = dict(r=0.012, color=accent, opacity=max(el['glow']['opacity'], 0.4))
+        el['font'] = STRONGER.get(el['font'], el['font']); el['tracking'] = max(el['tracking'], 0.1)
+    else:
+        prefer = ('base', 'accent', 'support') if ei == 0 else ('accent', 'support', 'base'); c1, ct, sel = PAL.choose_coloured(sw, px, prefer, exclude=used[-1:] if n > 1 else ()); kind = 'display'
+        if c1: el['stroke'] = dict(w=float(np.clip(0.03 * el['size'], 0.004, 0.012)), color=PAL.choose(neutrals, px, against=c1)[0]); el['shadow'] = dict(el['shadow'], opacity=max(el['shadow']['opacity'], 0.7), blur=max(el['shadow']['blur'], 0.016), dy=max(el['shadow']['dy'], 0.007))
+    if not c1: return f"'{el['text']}': no palette colour fits"
+    el['fill'] = dict(el['fill'], type='solid', c1=c1, c2=c1)
+    return f"'{el['text']}' ({kind} text): {c1} ({sel['role']} {sel['tone']}) from the palette, contrast {ct:.1f} against the area it is on (the model had {was})"
+
+
 def _luma(rgb): return 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
 
 
@@ -183,13 +210,7 @@ def enforce(spec, lines, frames, times, boxes, duration, W=960, H=540, clear=Non
         bg = [];
         for i in vis:
             f = frames[i].astype(np.float32) / 255.0; Hh, Ww = f.shape[:2]; bg.append(f[int(b[1] * Hh):max(int(b[3] * Hh), int(b[1] * Hh) + 1), int(b[0] * Ww):max(int(b[2] * Ww), int(b[0] * Ww) + 1)].reshape(-1, 3))
-        if palette:                                                                                                       # the colours come from the clip's palette: the one with the most contrast against the area this word is on
-            from strata360.analysis import palette as PAL
-            sw = palette['scheme']['swatches']; px = np.concatenate(bg); used = [o['fill']['c1'] for o in els[:ei]]; prefer = ('base', 'accent', 'support') if ei == 0 else ('accent', 'support', 'base')
-            c1, ct, sel = PAL.choose_coloured(sw, px, prefer, exclude=used[-1:] if len(els) > 1 else ())
-            if c1:
-                was = el['fill']['c1']; el['fill'] = dict(el['fill'], type='solid', c1=c1, c2=c1); el['stroke'] = dict(w=max(el['stroke']['w'], 0.007), color=PAL.choose([s_ for s_ in sw if s_['role'] == 'neutral'], px, against=c1)[0]); el['shadow'] = dict(el['shadow'], opacity=max(el['shadow']['opacity'], 0.7), blur=max(el['shadow']['blur'], 0.016), dy=max(el['shadow']['dy'], 0.007))
-                notes.append(f"'{el['text']}': {c1} ({sel['role']} {sel['tone']}) from the palette, contrast {ct:.1f} against the area it is on (the model had {was})")
+        if palette: notes.append(style_from_palette(el, palette['scheme']['swatches'], np.concatenate(bg), [o['fill']['c1'] for o in els[:ei]], ei, len(els)))                 # the colours come from the clip's palette
         bgc = np.concatenate(bg).mean(0); worst = min(TT.contrast(c, tuple(bgc)) for c in _fill_colour(el))
         if worst < 3.0:
             dark = TT.luminance(_fill_colour(el)[0]) > 0.4; el['stroke'] = dict(w=max(el['stroke']['w'], 0.006), color='#101010' if dark else '#f5f5f5'); el['shadow']['opacity'] = max(el['shadow']['opacity'], 0.55); notes.append(f"'{el['text']}' had contrast {worst:.1f} against the picture: an outline of the opposite tone added")
