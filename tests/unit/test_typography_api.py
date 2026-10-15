@@ -70,6 +70,10 @@ class TestRoutes:
         c = make_client(); SD.save_draft(folder, dict(vibes=['elegant', 'refined'], items=[])); a = self.get(c, folder)['scheme']['fonts']['display']
         SD.save_draft(folder, dict(vibes=['rugged', 'athletic', 'outdoors'], items=[])); b = self.get(c, folder)['scheme']; assert b['sources']['script'] == ['rugged', 'athletic', 'outdoors'] and b['fonts']['display'] != a
 
+    def test_a_newer_draft_without_vibes_does_not_hide_the_vibes_of_an_older_one(self, make_client, folder):
+        c = make_client(); SD.save_draft(folder, dict(vibes=['elegant', 'refined'], items=[])); SD.save_draft(folder, dict(title='no vibes here', items=[]))
+        assert self.get(c, folder)['script_vibes'] == ['elegant', 'refined']; SD.save_draft(folder, dict(vibes=['rugged'], items=[])); assert self.get(c, folder)['script_vibes'] == ['rugged']
+
     def test_the_users_vibes_replace_the_writers_and_survive_a_new_draft(self, make_client, folder):
         c = make_client(); SD.save_draft(folder, dict(vibes=['elegant', 'refined'], items=[]))
         r = c.post('/api/typography', json=dict(folder=folder, style=['rugged', 'athletic'])).json()['scheme']; assert r['basis'] == 'user' and r['sources']['user'] == ['rugged', 'athletic'] and r['style'] == ['rugged', 'athletic'] and set(list(r['vibes'])[:2]) == {'rugged', 'athletic'}

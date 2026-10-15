@@ -164,11 +164,14 @@ def combine(inferred, script=(), user=()):
 
 
 def script_vibes(folder):
-    """The vibes the newest script draft chose (script_draft.py asks the writer for them), kept to the vocabulary."""
+    """The vibes the script writer chose (script_draft.py asks for them): those of the newest draft that has any, kept to the vocabulary. An older draft's vibes stand until a newer one gives its own."""
     try:
         from strata360.edit import script_draft as SD
-        return clean_words((SD.load_draft(folder) or {}).get('vibes'))
-    except Exception: return []
+        for name in reversed(SD.list_drafts(folder)):
+            v = clean_words((SD.load_draft(folder, name) or {}).get('vibes'))
+            if v: return v
+    except Exception: pass
+    return []
 
 
 def read(folder):
