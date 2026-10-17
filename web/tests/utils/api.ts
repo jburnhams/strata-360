@@ -9,10 +9,10 @@ export const mockGet = (path: string, body: Body) => server.use(http.get(path, r
 export const mockDelete = (path: string, body: Body) => server.use(http.delete(path, resolve(body)))
 export const mockPost = (path: string, body: Body) => server.use(http.post(path, resolve(body)))
 /** A JSON error the way FastAPI sends it: `{ detail }` with the given status. */
-export const mockError = (path: string, status: number, detail?: string, method: 'get' | 'post' = 'get') =>
+export const mockError = (path: string, status: number, detail?: string, method: 'get' | 'post' | 'delete' = 'get') =>
   server.use(http[method](path, () => HttpResponse.json(detail === undefined ? {} : { detail }, { status })))
 /** A dropped connection (fetch rejects). */
-export const mockNetworkError = (path: string, method: 'get' | 'post' = 'get') => server.use(http[method](path, () => HttpResponse.error()))
+export const mockNetworkError = (path: string, method: 'get' | 'post' | 'delete' = 'get') => server.use(http[method](path, () => HttpResponse.error()))
 
 export interface Seen { url: URL; method: string; body: unknown }
 /**
