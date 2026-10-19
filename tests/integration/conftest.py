@@ -90,6 +90,38 @@ def processed(processed_template, tmp_path):
     return copy_project(processed_template, tmp_path / 'trip')
 
 
+@pytest.fixture(scope='session')
+def insta360_library(tmp_path_factory):
+    """A read-only footage folder of two synthetic Insta360 X3 recordings 60 s apart (each an .insv pair with its trailer, plus an LRV proxy) and one front-lens file with no partner. See tests/utils/integration_insv.py;
+    skipped when ffmpeg or libx264 is missing."""
+    if not (shutil.which('ffmpeg') and shutil.which('ffprobe')): pytest.skip('ffmpeg/ffprobe not installed')
+    from integration_insv import build_insv, names
+    lib = tmp_path_factory.mktemp('insta360') / 'x3trip'
+    try:
+        build_insv(str(lib), name_time='20240720195607', number=1); build_insv(str(lib), name_time='20240720195707', number=2, lrv=False)
+    except Exception as e: pytest.skip(f'cannot build the synthetic Insta360 clip: {e}')
+    (lib / names('20240720195807', 3)[1]).write_bytes(b'x' * 10)
+    return str(lib)
+
+
+@pytest.fixture(scope='session')
+def insta360_template(tmp_path_factory, insta360_library):
+    """The Insta360 library taken through the model-free stages once for the whole session (read-only: use `insta360_processed`)."""
+    lib = copy_project(insta360_library, tmp_path_factory.mktemp('insta360-processed') / 'x3trip')
+    with pytest.MonkeyPatch.context() as mp:
+        home = os.path.dirname(lib); mp.setenv('STRATA_NO_RESOURCE_LIMITS', '1'); mp.setenv('HOME', home); mp.setenv('USERPROFILE', home)
+        _invoke(['open', lib, '--no-run'])
+        r = _invoke(['run', lib, '--stages', STAGES])
+        assert r.code == 0 and "'ok': 6" in r.out, r.out
+    return lib
+
+
+@pytest.fixture
+def insta360_processed(insta360_template, tmp_path):
+    """A private, writable copy of the processed Insta360 project (2 recordings: ingest, audio and exposure done) -> its footage folder."""
+    return copy_project(insta360_template, tmp_path / 'x3trip')
+
+
 @pytest.fixture
 def served(processed, make_client):
     """`(client, folder)`: the HTTP API over the processed project (roots = its parent folder)."""

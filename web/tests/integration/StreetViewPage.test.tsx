@@ -419,7 +419,7 @@ describe('what is shown to start with, and making a nearby capture a candidate',
     const seen = recordRequests('/api/streetview/promote'); server.use(http.post('/api/streetview/promote', () => HttpResponse.json({ key: 'mapillary:s:1.00', id: 'M+1' })))
     serve(); const { user } = setup(<StreetViewPage folder="/data" initialFilters={SHOW_ALL} />); await screen.findAllByRole('row')
     fireEvent.click(await screen.findByRole('application'), { clientX: 40, clientY: 30 })
-    await user.click(await screen.findByRole('button', { name: 'Make this a candidate' }))
+    await user.click(await screen.findByRole('button', { name: 'Make this a candidate' }, { timeout: 5000 }))              // the lookup after the click can take over a second on a busy CI runner (as the search above allows)
     await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen[0].body).toMatchObject({ folder: '/data', provider: 'mapillary', id: 'm9' })
     expect(await screen.findByText('Already a candidate: section M+1')).toBeInTheDocument()
   })
