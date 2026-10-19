@@ -14,3 +14,4 @@ Conventions: **Learned** = a fact we now rely on. **Tried** = an experiment and 
 - [Generated music, and local upscaling and stills (6 to 8 Oct 2026)](progress/2026-10-music-upscale.md)
 - [Windows port and the GPU renderer (10 Oct 2026)](progress/2026-10-windows-gpu.md)
 - [Insta360 X3 support (13 Oct 2026)](progress/2026-10-insta360.md)
+- [The cold open (19 Oct 2026)](progress/2026-10-cold-open.md)

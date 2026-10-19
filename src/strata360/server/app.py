@@ -585,6 +585,11 @@ def create_app(roots, token=None):
         from strata360.render import preview as PV
         plan = PJ.load(f).get('plan'); return os.path.join(PV.film_dir(f, PV.plan_key(f, plan)), 'status.json') if plan else ''
 
+    def cold_open_changed(f, st):
+        """Whether the cold open chosen now (edit/cold_open.py) differs from the one a finished film was made with (a film from before the cold open counts as made with none)."""
+        from strata360.edit import cold_open as CO
+        return st.get('cold_open', '') != CO.signature(f)
+
     def final_status_path(f):
         from strata360.edit import project as PJ
         from strata360.render import final as FN
@@ -656,6 +661,7 @@ def create_app(roots, token=None):
         running = running or bool(st and st['state'] in ('rendering', 'assembling') and alive(st.get('pid')))
         state = st['state'] if st else ('starting' if running else 'none')
         if st and st['state'] in ('rendering', 'assembling') and not running: state = 'stopped'
+        if st and st['state'] == 'done' and not running and cold_open_changed(f, st): state = 'stopped'; st = dict(st, film='')            # another cold open was chosen since: assembling again reuses every piece
         return dict(state=state, running=running, settings=s, frames_done=(st or {}).get('frames_done', 0), frames_total=(st or {}).get('frames_total', 0), pieces_done=(st or {}).get('pieces_done', 0), pieces_total=(st or {}).get('pieces_total', 0),
                     started=(st or {}).get('started'), error=(st or {}).get('error'), has_file=bool(st and st['state'] == 'done' and os.path.exists(st.get('film', ''))), progress=PG.load(os.path.join(FN.final_dir(f, key), 'progress.json')))
 
@@ -688,7 +694,7 @@ def create_app(roots, token=None):
         f = folder_of(folder); plan = PJ.load(f).get('plan'); s = final_settings(f)
         if not plan: raise HTTPException(404)
         w, h = map(int, s['size'].split('x')); d = FN.final_dir(f, FN.final_key(plan, [w, h], FN.resolve_fps(f, plan, s['fps'], s['half_rate']), s['bitrate'], f, s['upscale']))
-        try: film = json.load(open(os.path.join(d, 'status.json'))).get('film')
+        try: st = json.load(open(os.path.join(d, 'status.json'))); film = None if cold_open_changed(f, st) else st.get('film')
         except (OSError, ValueError): film = None
         if not film or not os.path.exists(film): raise HTTPException(404, 'not rendered yet')
         return FileResponse(film, media_type='video/mp4', filename='film.mp4')

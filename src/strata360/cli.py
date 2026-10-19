@@ -679,6 +679,15 @@ def cmd_bookends(a):
     print(os.path.join(config.race_dir(a.name), 'bookends', 'bookends.json'))
 
 
+def cmd_coldopen(a):
+    """The cold open (edit/cold_open.py): the race's best moment, played before the opening title. Lists the candidates and the one chosen; --pick chooses another (or 'none'), --render makes previews."""
+    from strata360.edit import cold_open as CO
+    try: doc = CO.choose(a.name, a.pick) if a.pick else CO.run(a.name, per=a.per, render=a.render)
+    except ValueError as e: raise SystemExit(str(e))
+    for c in doc['candidates']: print(f"{'*' if c['id'] == doc['chosen'] else ' '} {c['id']:7} {c['score']:.3f}  clip {c['clip']} at {c['clip_start_s']:.1f} s for {c['dur_s']:.1f} s, {c['technique']}: {c['why']}")
+    print(f"chosen: {doc['chosen'] or 'none (no candidate found)'}" + (' (yours)' if doc.get('by') == 'you' else '')); print(os.path.join(CO.out_dir(a.name), 'cold_open.json'))
+
+
 def cmd_titles(a):
     """Design and render the animated title of a bookend candidate with the local vision model (edit/bookends.py title_candidate)."""
     from strata360.edit import bookends
@@ -815,6 +824,7 @@ def main():
     p.add_argument('--clip', help='comma-separated full clip ids (default all)'); p.add_argument('--no-cascade', action='store_true'); p.set_defaults(fn=cmd_clear)
     p = sub.add_parser('set-key', help='store an API key for the voice-over script writer in secrets.env (gitignored)'); p.add_argument('--provider', choices=['vertex', 'gemini', 'anthropic'], default='vertex'); p.add_argument('--clear', action='store_true'); p.set_defaults(fn=cmd_set_key)
     p = sub.add_parser('bookends', help='find candidate openings and endings (a globe zooming onto your face, the start or finish crowd), render previews and let the local vision model choose'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--per', type=int, default=6, help='candidates of each kind'); p.add_argument('--no-render', action='store_true'); p.add_argument('--no-choose', action='store_true'); p.set_defaults(fn=cmd_bookends)
+    p = sub.add_parser('coldopen', help="find the race's best moment for a cold open before the opening title, and choose it (or another)"); p.add_argument('name', metavar='FOLDER'); p.add_argument('--per', type=int, default=5, help='candidates to keep'); p.add_argument('--pick', metavar='ID', help="choose this candidate (for instance cold-1), or 'none' for no cold open"); p.add_argument('--render', action='store_true', help='render a preview of each candidate from the proxies'); p.set_defaults(fn=cmd_coldopen)
     p = sub.add_parser('titles', help='design and render the animated title of a bookend candidate (see bookends) with the local vision model'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--id', required=True, help='candidate id, for instance intro-sequence-0'); p.add_argument('--title'); p.add_argument('--subtitle'); p.add_argument('--meta'); p.set_defaults(fn=cmd_titles)
     p = sub.add_parser('filmtext', help='choose and design word-art cards through the film (progress updates, partial quotes) with the local models; render the preview first'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--n', type=int, default=24, help='how many options to ask the text model for'); p.add_argument('--per-minute', type=float, default=2.0, help='cards the planner may pick per minute of film'); p.add_argument('--reuse', action='store_true', help='pick from the stored options without asking the models again'); p.add_argument('--options-only', action='store_true'); p.set_defaults(fn=cmd_filmtext)
     p = sub.add_parser('render', help='render a flat 4K view (arguments as for the renderer)'); p.add_argument('args', nargs=argparse.REMAINDER); p.set_defaults(fn=cmd_render)

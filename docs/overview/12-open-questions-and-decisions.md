@@ -13,7 +13,7 @@
 2. Are the Insta360 clocks correct and in which timezone? The cameras may differ.
 3. Typical clip length (still unknown; the sample is under 5 s).
 5. Music source and licensing, and whether the tracks are constant-tempo.
-6. Is chronological order strictly required, or are occasional flashbacks or intro teasers allowed?
+6. Is chronological order strictly required, or are occasional flashbacks or intro teasers allowed? *Partly answered (19 Oct 2026): one intro teaser is built, the cold open (`edit/cold_open.py`, [plan](../plan/cold-open.md)): the race's best moment plays before the opening title, then the story runs in order. It is on when `strata360 coldopen` has chosen one, and off with `--pick none` or `STRATA_COLD_OPEN=0`. Flashbacks inside the story are still not allowed.*
 7. Face-blur requirements for other runners and spectators (identity recognition of the user is local-only, see §8.6).
 8. Whether you want to add reference photos on top of the "which one is me?" selection (optional).
 9. Which LLM/vision provider and monthly budget?
