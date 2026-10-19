@@ -17,6 +17,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | --- | --- | --- |
 | `server/app.py` | 60% | partial: auth, browse, last, open, notes, log, clips, clock, who done; the rest of the endpoints todo (transcript, script, voiceover, film, final, music, track, edit, state/clear/stop) |
 | `edit/upscale.py` | 75% | factor choice, tiling, windows, cache and the night gate with a stand-in network; todo: `load` (needs `spandrel` and weights, run by hand) and `streetview_cam.enlarge`/`render(upscale=True)` (only run by hand on the Legends street view clips) |
+| `render/chapters.py` | 94% | done (`test_chapters.py`: chapters at stage changes and inside a window, short ones merged, the opening, untimed windows, titles, stamps, the files, the run's km; ffprobe faked) |
 | `render/progress.py` | 100% | steps and their times, time by kind of work, the log, the throttled atomic file, a file that cannot be written |
 | `render/final.py` (enlarging) | partial | per-shot factor, the renderer size, fitting the enlarged picture, warm-up frames, the key; the render loop itself is covered by `tests/integration/test_render.py` |
 | `render/vr.py`, `render/spherical.py` | 84%, 96% | the sphere's direction per shot or per frame, the panel (view, pin, screen), flat-camera transitions as cuts, the settings and the key, footage and proxy windows with a fake renderer and decoder; the spherical boxes on hand-built MP4 trees (moov before and after the media). The real render is in `tests/integration/test_vr_render.py` |

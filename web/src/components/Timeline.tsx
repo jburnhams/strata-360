@@ -2,6 +2,8 @@ import FilmPreview from './FilmPreview'
 import FinalRender from './FinalRender'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type ClipInfo, type EditResponse, type PlanSegment, type RampReport } from '../api'
+import FilmStrip, { colour } from './FilmStrip'
+import TimelineMap from './TimelineMap'
 import { PanelSkeleton } from './Skeleton'
 import VoiceTrack from './VoiceTrack'
 import WindowPlayer from './WindowPlayer'
@@ -9,8 +11,6 @@ import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').slice(-9)
-const hue = (fam: string) => { let h = 0; for (const c of fam) h = (h * 31 + c.charCodeAt(0)) % 360; return h }
-const colour = (g: { family: string; hero: boolean }) => `hsl(${hue(g.family)} ${g.hero ? 75 : 45}% ${g.hero ? 48 : 52}%)`
 /** A speed ramp in words (edit/hyperlapse.py): how much running it races through, how fast, and whether it lands on the next window. */
 const rampWhy = (g: PlanSegment) => g.ramp ? `a speed ramp: ${g.ramp.lead_s.toFixed(1)} s at real speed, then up to ${Math.round(g.ramp.speed)}x through ${Math.round(g.ramp.src_dur_s - g.dur_s)} s of quiet running${g.ramp.lands ? ', landing where the next window starts' : ''}${g.ramp_from ? ` (was ${g.ramp_from.replace(/_/g, ' ')}: a ramp follows your heading)` : ''}` : ''
 const rampSummary = (r: RampReport[]) => `${r.length} speed ramp${r.length === 1 ? '' : 's'} through ${(r.reduce((a, x) => a + x.to_s - x.from_s, 0) / 60).toFixed(1)} min of running`
@@ -25,14 +25,17 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
   const [bpm, setBpm] = useState(120)
   const [play, setPlay] = useState<PlanSegment>()
   const [sel, setSel] = useState<string>()
+  const [range, setRange] = useState<[number, number] | null>(null)
+  const [anchor, setAnchor] = useState<number>()
+  const [note, setNote] = useState<string>()
   const rows = useRef<Record<string, HTMLTableRowElement | null>>({})
   const info = useMemo(() => Object.fromEntries(clips.map(c => [c.id, c])), [clips])
   const load = () => api.editGet(folder).then(r => { setD(r); setLength(r.edit.settings.length_s); setBpm(r.edit.settings.bpm) }).catch(e => setErr(e.message))
   useEffect(() => { load() }, [folder])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const run = async (f: () => Promise<{ edit: EditResponse['edit'] }>) => {
-    setBusy(true); setErr(undefined)
-    try { const r = await f(); setD(x => (x ? { ...x, edit: r.edit } : x)); await api.editGet(folder).then(setD) } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  const run = async <R extends { edit: EditResponse['edit'] }>(f: () => Promise<R>) => {
+    setBusy(true); setErr(undefined); setNote(undefined)
+    try { const r = await f(); setD(x => (x ? { ...x, edit: r.edit } : x)); await api.editGet(folder).then(setD); return r } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
   }
   if (!d) return err ? <p className="text-red-600">{err}</p> : <PanelSkeleton title="Timeline" rows={8} />
   const plan = d.edit.plan, s = d.edit.settings, ov = d.edit.overrides
@@ -42,6 +45,16 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
     return run(f)
   }
   const total = plan?.film.length_s ?? 1
+  const editable = !!plan && plan.source !== 'script'
+  /** Select window k (shift: the run from the last selected window to k), and show its row. */
+  const select = (k: number, extend: boolean) => {
+    if (!plan) return
+    const a = extend && anchor !== undefined && anchor < plan.segments.length ? anchor : k
+    setRange([Math.min(a, k), Math.max(a, k)]); if (!extend) setAnchor(k)
+    const g = plan.segments[k]; setSel(g.id); rows.current[g.id]?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+  const moveEdge = (wid: string, beats: number) => run(() => api.override(folder, { action: 'edge', wid, beats })).then(r => { if (r?.note?.why) setNote(r.note.why) })
+  const picked = plan && range ? plan.segments.slice(range[0], range[1] + 1) : []
   const input = 'w-20 rounded-lg border border-stone-300 bg-stone-50 px-2 py-1 text-sm dark:border-stone-700 dark:bg-stone-950'
   return (
     <div className="space-y-4">
@@ -70,14 +83,20 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
       {plan && (
         <>
           <VoiceTrack folder={folder} plan={plan} onChanged={load}>
-          <div className="flex h-9 w-full overflow-hidden rounded-lg border border-stone-200 dark:border-stone-800" role="img" aria-label="The film, segment by segment">
-            {plan.segments.map(g => (
-              <button key={g.id} title={`${mmss(g.film_start_s)} ${short(g.clip)} ${g.technique}`} onClick={() => { setSel(g.id); rows.current[g.id]?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }}
-                style={{ width: `${(100 * g.dur_s) / total}%`, background: colour(g), outline: sel === g.id ? '2px solid currentColor' : 'none', outlineOffset: -2 }}
-                className={`border-r border-white/70 text-[9px] leading-none text-white/90 dark:border-stone-900 ${g.locked ? 'ring-1 ring-inset ring-black/50' : ''}`}>{g.locked ? '🔒' : g.ramp ? '⏩' : ''}</button>
-            ))}
-          </div>
+          <FilmStrip segments={plan.segments} total={total} bpm={plan.film.bpm} editable={editable} busy={busy} range={range} onSelect={select} onMoveEdge={moveEdge} />
           </VoiceTrack>
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            {editable ? <>
+              <button disabled={busy || !picked.length || picked.every(g => g.locked)} className="rounded-lg border border-stone-300 px-3 py-1.5 disabled:opacity-50 dark:border-stone-700"
+                title="other moments and techniques for the selected windows (the locked ones and the rest of the film stay as they are)"
+                onClick={() => run(() => api.override(folder, { action: 'suggest', wids: picked.map(g => g.id) }))}>{picked.length > 1 ? `Suggest again (${picked.length} windows)` : 'Suggest again'}</button>
+              {!!d.edit.history && <button disabled={busy} className="rounded-lg border border-stone-300 px-3 py-1.5 disabled:opacity-50 dark:border-stone-700" title="back to the film before the last drag or suggestion"
+                onClick={() => run(() => api.override(folder, { action: 'back' }))}>Step back ({d.edit.history})</button>}
+              <span className="text-stone-500">{picked.length ? `${picked.length} selected · shift-click to select a run` : 'click a window to select it, shift-click for a run'} · drag a cut to move it by beats</span>
+            </> : <span className="text-stone-500">The film is planned from your script: change it in the Film script panel.</span>}
+            {note && <span className="text-amber-700">{note}</span>}
+          </div>
+          <TimelineMap folder={folder} segments={plan.segments} range={range} onSelect={select} />
           <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
             <table className="w-full text-sm">
               <thead className="text-left text-xs text-stone-500"><tr><th className="p-2">film</th><th className="p-2">clip</th><th className="p-2">window</th><th className="p-2">technique</th><th className="p-2">into it</th><th className="p-2">lock</th><th className="p-2">more / less</th><th className="p-2">script</th></tr></thead>

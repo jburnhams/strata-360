@@ -28,7 +28,11 @@ def test_a_transition_carries_both_windows_utc_and_a_generated_clip_has_none():
     tm = TM.build(plan(), 50.0); t = tm['transitions'][0]
     assert t['outgoing']['clip'] == 'A' and t['incoming']['clip'] == 'B' and t['film_out'] - t['film_in'] == 50
     assert t['outgoing']['utc_in'] < t['outgoing']['utc_out'] and t['incoming']['utc_in'] == '2026-02-19T18:30:19.500Z' and t['incoming']['utc_out'] == '2026-02-19T18:30:20.500Z'      # the incoming window is shown half a second early
-    assert tm['windows'][3]['clip'] is None and tm['windows'][3]['synthetic'] and tm['windows'][3]['utc_in'] is None
+    assert tm['windows'][3]['clip'] is None and tm['windows'][3]['synthetic'] and tm['windows'][3]['utc_in'] is None and 'synthetic_seconds' not in tm['windows'][0]
+
+
+def test_a_generated_window_carries_its_clips_length_for_its_race_time():
+    p = plan(); p['segments'][3]['synthetic_seconds'] = 6.0; assert TM.build(p, 50.0)['windows'][3]['synthetic_seconds'] == 6.0
 
 
 def test_utc_at_follows_the_clock_inside_a_window_and_is_none_for_a_generated_clip():

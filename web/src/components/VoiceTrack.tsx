@@ -56,10 +56,9 @@ export default function VoiceTrack({ folder, plan, onChanged, children }: { fold
     } catch { setErr('The browser could not use a microphone (it needs permission, and https or localhost).') }
   }
 
-  if (!v) return <>{children}{err && <p className="text-sm text-red-600">{err}</p>}</>
   return (
     <div className="space-y-1">
-      {v.lines.length > 0 && (
+      {!!v?.lines.length && (
         <div className="relative h-6 w-full" role="group" aria-label="Narration lines">
           {v.lines.map((l, i) => (
             <button key={String(l.seg)} aria-label={`Line ${i + 1}: ${l.text}`} onClick={() => { setSel(l); setMsg(undefined) }}
@@ -69,7 +68,7 @@ export default function VoiceTrack({ folder, plan, onChanged, children }: { fold
           ))}
         </div>
       )}
-      {blocks.length > 0 && (
+      {!!v && blocks.length > 0 && (
         <div className="relative h-4 w-full" role="list" aria-label="Script blocks">
           {blocks.map((b, i) => (
             <span key={`${b.item}-${i}`} role="listitem" aria-label={`Item ${b.item + 1}: ${b.role ? roleName[b.role] : 'picture'}, ${b.dur.toFixed(1)} s`} title={`item ${b.item + 1} · ${b.role ? roleName[b.role] : 'picture'} · ${b.windows} window${b.windows === 1 ? '' : 's'} · ${b.dur.toFixed(1)} s`}
@@ -79,7 +78,7 @@ export default function VoiceTrack({ folder, plan, onChanged, children }: { fold
         </div>
       )}
       {children}
-      <div className="relative h-3 w-full">
+      {v && <div className="relative h-3 w-full">
         {v.beats.length > 0 && (
           <svg className="absolute inset-0 h-full w-full text-stone-400 dark:text-stone-600" viewBox={`0 0 ${total} 10`} preserveAspectRatio="none" role="img" aria-label={`${v.beats.length} beats and ${v.bars.length} bar lines${v.synced ? ' of the music' : ' of the plan\'s tempo'}`}>
             {v.beats.map(t => <line key={t} x1={t} x2={t} y1={0} y2={bars.has(t) ? 10 : 5} stroke="currentColor" strokeWidth={bars.has(t) ? 1.5 : 1} vectorEffect="non-scaling-stroke" />)}
@@ -87,7 +86,7 @@ export default function VoiceTrack({ folder, plan, onChanged, children }: { fold
         )}
         {off.map(o => <span key={o.cut} role="img" aria-label={`Cut ${o.cut} is ${Math.round(o.off_ms)} ms off the beat: ${o.why}`} title={`cut ${o.cut} (${o.film_s.toFixed(1)} s) is ${Math.round(o.off_ms)} ms off the beat: ${o.why}`}
           style={{ left: pct(o.film_s, total) }} className="absolute top-0 -translate-x-1/2 text-[10px] leading-3 text-red-600">▲</span>)}
-      </div>
+      </div>}
       {line && (
         <div className="rounded-lg border border-stone-200 p-2 text-xs dark:border-stone-800">
           <p className="mb-1 text-sm">{line.text}</p>
