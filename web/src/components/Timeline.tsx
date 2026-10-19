@@ -5,6 +5,7 @@ import { api, type ClipInfo, type EditResponse, type PlanSegment, type RampRepor
 import FilmStrip, { colour } from './FilmStrip'
 import TimelineMap from './TimelineMap'
 import { PanelSkeleton } from './Skeleton'
+import VoiceTrack from './VoiceTrack'
 import WindowPlayer from './WindowPlayer'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
@@ -81,7 +82,9 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
 
       {plan && (
         <>
+          <VoiceTrack folder={folder} plan={plan} onChanged={load}>
           <FilmStrip segments={plan.segments} total={total} bpm={plan.film.bpm} editable={editable} busy={busy} range={range} onSelect={select} onMoveEdge={moveEdge} />
+          </VoiceTrack>
           <div className="flex flex-wrap items-center gap-3 text-xs">
             {editable ? <>
               <button disabled={busy || !picked.length || picked.every(g => g.locked)} className="rounded-lg border border-stone-300 px-3 py-1.5 disabled:opacity-50 dark:border-stone-700"

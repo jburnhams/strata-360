@@ -63,6 +63,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
 | `src/components/ScriptPanel.tsx` | 96.55% | done (one missed branch) |
 | `src/components/VoiceoverPanel.tsx` | 100% | done |
+| `src/components/VoiceTrack.tsx` | 100% | done (`VoiceTrack.test.tsx`: lines, blocks, beat ticks and off-beat cuts, a line's take and re-recording with the re-fit message, errors, a11y, drawn inside `Timeline`) |
 | `src/aim.ts` | 100% | done (tested via `unit/aim.test.ts`) |
 | every other file in `src/` | 0% | todo
 | `src/components/Timeline.tsx`, `src/components/FilmStrip.tsx`, `src/components/TimelineMap.tsx` | ~95% | done (interactions and edge cases tested; D1: dragging a cut snapped to beats and to its room, arrow keys, suggest again for one window and a shift-clicked run, step back, the map strip; `unit/FilmStrip.test.ts`: the drag-to-beats rounding)

@@ -1034,3 +1034,49 @@ class TestObjectHiding:
         post(label='Goat '); assert get() == [(0, 'label'), (1, 'label'), (2, None), (3, 'stop')]; assert json.load(open(os.path.join(p.clip_dir(), '..', '..', 'vocab_local.json')))['hide'] == ['goat']
         post(label='goat', hide=False); assert get()[0] == (0, None) and open(os.path.join(p.clip_dir(), 'objects.json')).read() == before
         assert post(clip=CLIP_ID).status_code == 400 and post(label='  ').status_code == 400 and post(clip='nope', id=0).status_code == 404
+
+
+class TestVoiceoverLines:
+    """A script plan line is named by its key (n1a2b3c4d), not a number; a change of its take re-fits only its block (edit/line_refit.py, V6)."""
+    @pytest.fixture
+    def refits(self, monkeypatch):
+        from strata360.edit import line_refit as LR
+        calls = []; monkeypatch.setattr(LR, 'refit_project', lambda f, seg, log=None: calls.append(seg) or dict(mode='refit', seg=seg, delta_s=1.0)); return calls
+
+    def test_choosing_a_take_of_a_script_line_refits_its_block(self, client, project, refits):
+        r = client.post('/api/voiceover/use', json=dict(folder=project.folder, seg='n1a2b3c4d', use='recorded')).json()
+        assert r == dict(ok=True, refit=dict(mode='refit', seg='n1a2b3c4d', delta_s=1.0)) and refits == ['n1a2b3c4d']
+        assert json.load(open(project.path('voiceover', 'state.json')))['use'] == {'n1a2b3c4d': 'recorded'}
+
+    def test_a_numbered_line_of_a_beat_planner_script_is_not_refitted(self, client, project, refits):
+        assert client.post('/api/voiceover/use', json=dict(folder=project.folder, seg=7, use='synth')).json() == dict(ok=True, refit=None) and refits == []
+
+    @pytest.mark.parametrize('seg', ['../x', 'a/b', '', 'n' * 17])
+    def test_a_line_key_that_could_name_another_file_is_refused(self, client, project, seg):
+        assert client.post('/api/voiceover/use', json=dict(folder=project.folder, seg=seg, use='synth')).status_code == 400
+        assert client.delete('/api/voiceover/record', params=dict(folder=project.folder, seg=seg)).status_code in (400, 422)
+
+    def test_a_recording_is_saved_as_a_take_of_the_line_and_its_block_refitted(self, client, project, refits, monkeypatch):
+        from strata360.edit import voiceover as VO
+        saved = []; monkeypatch.setattr(VO, 'save_recording', lambda f, seg, p: saved.append((seg, os.path.getsize(p))))
+        r = client.post('/api/voiceover/record', params=dict(folder=project.folder, seg='n1a2b3c4d'), content=b'\0' * 600).json()
+        assert r['refit']['mode'] == 'refit' and saved == [('n1a2b3c4d', 600)] and refits == ['n1a2b3c4d']
+
+    def test_removing_a_recording_refits_the_block_to_the_voice(self, client, project, refits):
+        assert client.delete('/api/voiceover/record', params=dict(folder=project.folder, seg='n1a2b3c4d')).json() == dict(ok=True, refit=dict(mode='refit', seg='n1a2b3c4d', delta_s=1.0))
+
+    def test_a_refit_that_fails_is_reported_not_raised(self, client, project, monkeypatch):
+        from strata360.edit import line_refit as LR
+        def boom(f, seg, log=None): raise ValueError('bad plan')
+        monkeypatch.setattr(LR, 'refit_project', boom)
+        assert client.post('/api/voiceover/use', json=dict(folder=project.folder, seg='nA', use='synth')).json()['refit'] == dict(mode='error', reason='bad plan')
+
+    def test_the_voice_timeline_of_a_project_without_a_plan_is_empty(self, client, project):
+        assert client.get('/api/voiceover/timeline', params=dict(folder=project.folder)).json() == dict(lines=[], beats=[], bars=[], synced=False, length_s=0.0)
+
+    def test_a_script_lines_takes_can_be_played(self, client, project):
+        os.makedirs(project.path('voiceover', 'recorded')); os.makedirs(project.path('voiceover', 'synth'))
+        open(project.path('voiceover', 'recorded', 'nA-20261019T120000000Z.wav'), 'wb').write(b'you'); open(project.path('voiceover', 'synth', 'nA-0123456789.wav'), 'wb').write(b'voice')
+        assert client.get('/api/voiceover/audio', params=dict(folder=project.folder, seg='nA', source='recorded')).content == b'you'
+        assert client.get('/api/voiceover/audio', params=dict(folder=project.folder, seg='nA', source='synth')).content == b'voice'
+        assert client.get('/api/voiceover/audio', params=dict(folder=project.folder, seg='../x')).status_code == 400
