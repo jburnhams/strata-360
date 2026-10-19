@@ -12,6 +12,7 @@
 
 **Not done yet:**
 - The preview (`strata360 film`) and the GUI do not show the cold open; it is in the final film only, like the bookends.
+- The 360 film (render/vr.py) has no cold open: the piece is a flat picture.
 - The music does not start under the cold open: it plays with its own sound, and the opening title stays silent (as before).
 - `timemap.json` counts frames from the start of the story, not from the start of the delivered file (this was already so for the opening title).
 - An optional vision-model pick between the candidates' previews, as the bookends have.
