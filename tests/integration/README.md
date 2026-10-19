@@ -39,10 +39,11 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 | `edit/optimise.py` | n/a | `test_edit.py` | slow pure computation (see Known issues) |
 | `cli.py` | 35% (this file alone, before the other suites) | `test_cli_commands.py` | catalog, init errors, progress (json and text), open, coverage, backup (make, list, restore), credits, plan-blocks, gaps without a track, doctor. The model and render commands are manual checks |
 | `render/film.py` | 81% | `test_render.py` | composing film pieces |
-| `render/final.py` | 92% | `test_render.py` | final CLI rendering |
+| `render/final.py` | 92% | `test_render.py` | final CLI rendering, the cold open as the first piece with its own sound |
 | `render/flat.py` | 70% | `test_render.py` | flat CLI rendering, seam |
 | `render/preview.py` | 67% | `test_render.py` | preview GUI rendering |
 | `render/proxy.py` | 66% | `test_render.py` | proxy GUI rendering |
+| `audio/mix.py` | n/a | `test_mix.py` | joins, stereo, ducking, loudness; the cold open's sound (`clip_sound`) and the lead before the story (`lead_in`) |
 | `audio/dsp.py` | 63% | `test_audio.py` | core ffmpeg audio operations |
 | `osv/*` | 92% | `test_osv.py` | mp4, telemetry, calibration, meta, pbdump covered on synthetic media |
 

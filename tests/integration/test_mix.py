@@ -80,3 +80,20 @@ def test_the_loudness_target_is_met_with_the_true_peak_under_the_limit(tmp_path)
     lufs, peak = measure(quiet); assert abs(lufs + 14.0) <= 0.5 and peak <= -1.0 + 0.1 and rep['loudness']['target_lufs'] == -14.0 and rep['loudness']['measured']['input_lufs'] != lufs      # a quiet mix is brought up to the target and the report says what it was
     loud = str(tmp_path / 'l.wav'); mix.build_audio(f, dict(plan, segments=[dict(plan['segments'][0], dur_s=15.0)]), loud, 15.0, music_gain=1.0, loudness=-14.0); lufs2, peak2 = measure(loud); assert abs(lufs2 + 14.0) <= 0.5 and peak2 <= -0.9
     sil = str(tmp_path / 's.wav'); r = mix.build_audio(f, dict(film=dict(length_s=2.0), segments=[window('nope', 0.0, 2.0)]), sil, 2.0, loudness=-14.0); assert r['loudness']['measured'] is None and os.path.exists(sil)        # silence: nothing to normalise, no failure
+
+
+def test_the_cold_opens_sound_is_the_clips_own_exactly_its_length_and_faded(tmp_path):
+    f = str(tmp_path); rd = config.race_dir(f); clip(rd, 'A', 700)
+    out = mix.clip_sound(f, 'A', 2.0, 3.0, str(tmp_path / 'open.wav')); x = read(out)
+    assert abs(len(x) / SR - 3.0) < 0.01 and band(x, 0.5, 2.0, 700) > 0.3 and rms(x, 0.0, 0.01) < 0.5 * rms(x, 0.5, 2.0) and rms(x, 2.95, 3.0) < 0.2 * rms(x, 0.5, 2.0)        # faded in and out
+    norm = mix.clip_sound(f, 'A', 2.0, 3.0, str(tmp_path / 'norm.wav'), loudness=-30.0); y = read(norm)
+    assert abs(len(y) / SR - 3.0) < 0.01 and rms(y, 0.5, 2.0) < 0.5 * rms(x, 0.5, 2.0) and not os.path.exists(str(tmp_path / 'norm.wav.pre.wav'))
+    assert mix.clip_sound(f, 'none', 0.0, 1.0, str(tmp_path / 'x.wav')) is None
+
+
+def test_the_films_sound_is_moved_after_the_lead_with_the_cold_opens_sound_first(tmp_path):
+    film = str(tmp_path / 'film.wav'); opening = str(tmp_path / 'open.wav'); tone(film, 1000, 2.0); tone(opening, 400, 1.0)
+    out = mix.lead_in(film, str(tmp_path / 'full.wav'), 1.5, 0.5, opening=opening, opening_s=1.0); x = read(out)
+    assert abs(len(x) / SR - 4.0) < 0.02 and band(x, 0.1, 0.9, 400) > 0.3 and band(x, 0.1, 0.9, 1000) < 0.01                 # the cold open's own sound,
+    assert rms(x, 1.05, 1.45) < 1e-3 and band(x, 1.7, 3.3, 1000) > 0.3 and rms(x, 3.6, 3.95) < 1e-3                          # silence under the title, the film, the silent ending
+    plain = read(mix.lead_in(film, str(tmp_path / 'plain.wav'), 0.5, 0.0)); assert abs(len(plain) / SR - 2.5) < 0.02 and rms(plain, 0.0, 0.45) < 1e-3

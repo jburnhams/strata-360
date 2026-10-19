@@ -337,6 +337,25 @@ def render_bookends(folder, d, size, fps, bitrate, pg):
     return out
 
 
+def render_cold_open(folder, d, size, fps, bitrate, pg, loudness=None):
+    """The cold open (edit/cold_open.py) as a piece of its own: the chosen window from the original footage with the film's framing for its technique, its speech as subtitles, no race overlay; and its own sound. Returns
+    dict(movie, seconds, sound, cues) or None when the project has none; a piece already made is kept."""
+    from strata360.edit import cold_open as CO, framing as FR, techniques as TQ
+    from strata360.render import captions as CP
+    from strata360.audio import mix as MX
+    c = CO.for_film(folder)
+    if c is None: return None
+    W, H = size; g = CO.segment_of(c); n = int(round(c['dur_s'] * fps)); sig = hashlib.sha1(json.dumps([c, size, fps, bitrate, loudness], sort_keys=True, default=str).encode()).hexdigest()[:8]; f = os.path.join(d, f'cold-open-{sig}.mov')
+    cues = [x for x in CP.build_cues(folder, dict(segments=[g])) if x['kind'] == 'speech']                                            # (only its own words: the voice-over belongs to the film)
+    if not os.path.exists(f + '.done'):
+        pg.detail(f"the cold open: {c['id']} (clip {c['clip']} at {c['clip_start_s']:.1f} s)"); lib = TQ.with_cams(TQ.load(), folder); path = FR.resolve_segment(g, lib, FR.clip_data(folder, c['clip'], head=False))
+        src = FinalSource(folder, [g], {g['id']: path}, W, H, fps, progress=pg); caps = CP.Captions(cues, W, H, fps)
+        encode_piece(f, W, H, fps, bitrate, lambda emit: [emit(img) for img in src.frames(0, 0, n)], pg, post=lambda im, i: caps.apply(im, i))
+    sound = os.path.join(d, f'cold-open-{sig}.wav')
+    if not os.path.exists(sound): sound = MX.clip_sound(folder, c['clip'], c['clip_start_s'], n / fps, sound, loudness=loudness)
+    return dict(movie=f, seconds=n / fps, sound=sound, cues=cues)
+
+
 def _prepare(folder, plan, framing, size, fps, upscale, min_zoom, pg):
     """The part of a render every worker does: glides, exposure match, overlay, subtitle cues. Returns (plan, segs, pieces, source, captions)."""
     from strata360.edit import pans as PN
@@ -412,20 +431,18 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
                 pg.detail(f'{len(finished())} of {len(ps)} pieces done, waiting for the other workers'); time.sleep(2)
         for k in kids: k.wait()
         if limit_pieces is not None: status('partial'); pg.finish(); return d
-        with pg.stage('bookends'): bk = render_bookends(folder, d, size, fps, bitrate, pg)
-        lead = bk['intro'][1] if 'intro' in bk else 0.0; tail = bk['outro'][1] if 'outro' in bk else 0.0
-        from strata360.render import captions as CP; CP.write_srt([dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'film.srt'))                  # the subtitles as a file too, beside the film (after the opening)
+        with pg.stage('bookends'): bk = render_bookends(folder, d, size, fps, bitrate, pg); co = render_cold_open(folder, d, size, fps, bitrate, pg, loudness=loudness_target(folder))
+        cold = co['seconds'] if co else 0.0; lead = cold + (bk['intro'][1] if 'intro' in bk else 0.0); tail = bk['outro'][1] if 'outro' in bk else 0.0                                       # the film starts on the cold open, then the opening title, then the story
+        from strata360.render import captions as CP; CP.write_srt((co['cues'] if co else []) + [dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'film.srt'))                  # the subtitles as a file too, beside the film (the story's after the cold open and the opening)
         with pg.stage('timemap'):
             from strata360.render import timemap; timemap.write(plan, fps, d)                                                         # which footage is on screen at every frame (timemap.json and .csv beside the film)
         status('assembling')
         with pg.stage('audio'):
             audio = os.path.join(d, 'audio.wav'); sound = build_audio(folder, plan, audio, total / fps, loudness=loudness_target(folder))          # the film's sound, to its loudness target
-            if lead or tail:                                                                                                                     # the opening and the ending are silent for now: the film's sound is moved after the opening
-                padded = os.path.join(d, 'audio_full.wav'); ms = int(round(lead * 1000)); r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', audio, '-af', f'adelay={ms}:all=1,apad=pad_dur={tail:.3f}', padded], capture_output=True, text=True)
-                if r.returncode: raise RuntimeError(r.stderr[-300:])
-                audio = padded
+            if lead or tail:                                                                                                                     # the cold open plays its own sound; the opening and the ending are silent for now: the film's sound is moved after them
+                from strata360.audio import mix as MX; audio = MX.lead_in(audio, os.path.join(d, 'audio_full.wav'), lead, tail, opening=co['sound'] if co else None, opening_s=cold)
         with pg.stage('assemble'):
-            lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{m}'\n" for m in [bk[w][0] for w in ('intro',) if w in bk] + [os.path.join(d, p['id'] + '.mov') for p in ps] + [bk[w][0] for w in ('outro',) if w in bk])); film = out or os.path.join(d, 'film.mp4')
+            lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{m}'\n" for m in ([co['movie']] if co else []) + [bk[w][0] for w in ('intro',) if w in bk] + [os.path.join(d, p['id'] + '.mov') for p in ps] + [bk[w][0] for w in ('outro',) if w in bk])); film = out or os.path.join(d, 'film.mp4')
             r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
             if r.returncode: status('error', error=r.stderr[-300:]); raise RuntimeError(r.stderr[-300:])
         status('done', finished=time.time(), film=film, sound=sound); pg.finish(); return film
