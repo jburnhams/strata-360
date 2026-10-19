@@ -241,3 +241,23 @@ def test_the_final_film_opens_on_the_cold_open_with_its_own_sound(processed, cli
     assert len(sound) == 1                                                                                              # its own sound
     raw = subprocess.run(['ffmpeg', '-v', 'error', '-i', film, '-f', 'f32le', '-ac', '1', '-ar', '8000', '-'], capture_output=True).stdout; x = np.frombuffer(raw, np.float32)
     assert np.sqrt(np.mean(x[400:2800] ** 2)) > 0.02                                                                   # heard under the cold open
+
+
+def test_a_speed_ramp_window_races_the_overlay_clock_and_the_time_map_through_its_clip(processed, cli, monkeypatch):
+    """Milestone H: a ramp window (edit/hyperlapse.py) plays more of its clip than its length; the final render shows the frames the ramp asks for (the race clock speeds up with them) and the time map agrees."""
+    import datetime as dt
+    from strata360.edit import hyperlapse as HL, project as PJ
+    from strata360 import overlay as OV
+    plan, (c1, c2) = two_window_project(processed, monkeypatch)
+    rp = dict(dur_s=0.5, lead_s=0.1, ramp_s=0.1, tail_s=0.05, speed=2.5); rp['src_dur_s'] = round(float(HL.offsets(rp, 0.5)), 4)
+    plan['segments'][0].update(ramp=rp, src_dur_s=rp['src_dur_s'], utc_end=HL._iso(plan['segments'][0]['utc_start'], rp['src_dur_s']), technique='follow_runner')
+    edit = PJ.load(processed); edit['plan'] = plan; PJ.save(processed, edit)
+    seen = []
+    class Rec:
+        def apply(self, img, t): seen.append(t); return img
+    monkeypatch.setattr(OV, 'for_project', lambda folder, size, tiles=None: Rec())
+    r = cli('final', processed, '--size', '128x64', '--fps', '50', '--bitrate', '1M'); assert r.code == 0
+    d = os.path.join(processed, 'strata360', 'final'); out = os.path.join(d, next(x for x in os.listdir(d) if len(x) == 10))
+    t0 = dt.datetime.fromisoformat('2026-02-21T12:00:07+00:00').timestamp(); first = [t - t0 for t in seen if abs(t - t0) < 5]
+    assert rp['src_dur_s'] > 0.85 and max(first) == pytest.approx(rp['src_dur_s'] + 0.1 - 0.02, abs=0.03)          # 0.9 s of its clip in 0.5 s, then real speed through the half of the dissolve after the cut
+    tm = json.load(open(os.path.join(out, 'timemap.json'))); assert tm['windows'][0]['source_out_s'] == pytest.approx(rp['src_dur_s'], abs=1e-3) and tm['frames'] == 50

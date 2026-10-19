@@ -213,6 +213,7 @@ def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None, loudne
         fin = 2 * hin_eff; fout = 2 * hout; cin = 'tri' if jn[k][1] and k > 0 else 'qsin'; cout = 'tri' if k + 1 < len(segs) and jn[k + 1][1] else 'qsin'; f = []
         if fin > 1e-3: f.append(f'afade=t=in:st=0:d={fin:.4f}:curve={cin}')
         if fout > 1e-3: f.append(f'afade=t=out:st={d - fout:.4f}:d={fout:.4f}:curve={cout}')
+        if g.get('ramp'): f.insert(0, f"afade=t=out:st={hin_eff + float(g['ramp']['lead_s']):.4f}:d={float(g['ramp']['ramp_s']):.4f}:curve=qsin")          # a ramp window (edit/hyperlapse.py): its own sound fades as the picture speeds up, and the music carries the hyperlapse
         start_ms = max(fs[k][0] - hin_eff, 0.0) * 1000.0; f.append(f'adelay={start_ms:.1f}:all=1'); chains.append(f"[{lab}]{','.join(f)}[w{k}]"); labels.append(f'w{k}')
     vo = os.path.join(config.race_dir(folder), 'voiceover', 'voiceover.wav'); has_vo = os.path.exists(vo); tmp = tempfile.mkdtemp(prefix='mix-', dir=os.path.dirname(os.path.abspath(out)) or None); report = dict(windows=len(segs), voice_over=has_vo, music=False)
     try:
