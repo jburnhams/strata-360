@@ -1,0 +1,17 @@
+## Milestone R: the 360 version of the film (19 Oct)
+
+**Goal.** The same edit as the flat film, delivered as an equirectangular 360 video that YouTube 360 and a headset play as a sphere you can look round, with the race overlay and the text kept in view. Until now the only 360 output was DJI's own export of a single clip.
+
+**Built (19 Oct, `render/vr.py`, `render/spherical.py`, `strata360 final --vr`).**
+- **R1. The sphere per window.** Footage windows are rendered from the two lenses with the proxy's equirect renderer (`render/proxy.py` `EquirectRenderer`: the same calibration, stabilisation, carved seam and parallax as the flat film), upright with a level horizon. The sphere is turned about the vertical so the direction the flat shot looks at is straight ahead, where a 360 player starts. `--vr-orient shot` (the default) uses one direction for the whole window, the circular mean of the shot's view, so the world keeps still within a shot and turns only at a cut; `--vr-orient follow` turns it frame by frame with the flat camera. Pitch, roll, field of view, little planets and globes are flat framing and are not used. `--vr-source proxy` turns the proxies instead (a horizontal shift of the equirect picture), for a quick look at the cut.
+- **R2. The overlay pinned in view.** The overlay, subtitles, word-art cards and the bookend titles are drawn on a flat 16:9 panel (`--vr-fov`, 80 degrees wide by default, `--vr-pitch` 0) made from the sphere's own pixels straight ahead, and only the pixels the drawing changed are put back, so the scene behind stays sharp. The panel has as many pixels across its centre as the sphere has there (1,026 x 578 for 3840x1920).
+- **R3. Generated clips and transitions.** Maps, flyovers, photos and street view are flat pictures: they play on the panel as a screen over a dark sphere (taken at the flat 4K film's size when that version exists, else 1080p). Dissolves and dips blend whole spheres; whips and glides move a flat camera, so they are hard cuts in 360.
+- **R4. Delivery.** 2:1 HEVC Main 10 (3840x1920 by default; 5760x2880 or 7680x3840 for a sharper headset), the flat film's sound, subtitles file and time map, and Google's Spherical Video V1 and V2 metadata written into the video track (ffmpeg 6 cannot write it; ffprobe then shows "Spherical Mapping: equirectangular"). The file is `final/<key>/film-360.mp4`; the key includes the 360 settings, so the flat and 360 films never share pieces. Resumable and parallel like the flat render.
+
+**Done means** `tests/unit/test_vr.py`, `tests/unit/test_spherical.py` and `tests/integration/test_vr_render.py` pass (the synthetic clips rendered, assembled and marked), and a Legends render plays as a sphere on YouTube (upload as unlisted) and in a headset, with the overlay readable straight ahead (by hand: not done yet).
+
+**Open.**
+- Judge on Legends: the panel's width and height in a headset (80 degrees may be too wide for the corners), whether `shot` or `follow` is more comfortable on the heading-follow shots, and the seam at the poles (the flat film rarely looks straight up or down; the sphere always shows them).
+- The stick and hand below the camera are in every frame of the sphere: a nadir patch (a logo or the race map on a disc) would hide them.
+- No setting in the Final film panel yet: the 360 version is the command line only.
+- Spatial audio (first-order ambisonics from the four mics, in Later) would let the sound turn with the view; the film's stereo is head-locked.

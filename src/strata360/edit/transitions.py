@@ -29,6 +29,7 @@ def choose(segs, beat_s, bar_beats=4, forced=None, seed_energy=None):
             p = segs[k - 1]; gap = (_t(g['utc_start']) - _t(p['utc_end'])).total_seconds() if g['clip'] != p['clip'] else 0.0
             room = 0.5 * min(p['dur_s'], g['dur_s']); want = None; why = tr['why']
             if g['id'] in forced: want, why = forced[g['id']], 'your choice'
+            elif g['clip'] == p['clip'] and (p.get('ramp') or {}).get('lands'): why = 'a speed ramp lands here: one continuous run (edit/hyperlapse.py)'
             elif g['clip'] != p['clip']:
                 if gap > 6 * 3600: want, why = 'dip', f'{gap / 3600:.0f} h later'
                 elif gap > 1200: want, why = 'dissolve', f'{gap / 60:.0f} min later'

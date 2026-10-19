@@ -92,3 +92,12 @@ def test_a_generated_clip_is_timed_as_the_renderer_plays_it():
     late = dict(gap, source_in_s=10.0)                                                          # the window plays the clip's second half: it opens at 3500 and the checkpoint comes 2 s in
     ch = CH.build(tmap(win(0, 0, 200, 100, 120), late, win(2, 300, 500, 4000, 4020)), SCHED, km, min_s=0)
     assert [(c['t'], c['label']) for c in ch] == [(0.0, 'Stage 1'), (22.0, 'Checkpoint 1'), (28.0, 'Stage 2')]
+
+
+def test_a_speed_ramp_window_starts_its_chapter_where_the_ramp_reaches_the_stage():
+    from strata360.edit import hyperlapse as HL
+    rp = dict(dur_s=20.0, lead_s=2.0, ramp_s=2.0, tail_s=2.0, speed=10.0); src = float(HL.offsets(rp, 20.0))
+    ramp = dict(win(1, 200, 400, 3500, 3500 + src), ramp=rp)                                         # 20 s of film racing through about 150 s of the clip
+    ch = CH.build(tmap(win(0, 0, 200, 100, 120), ramp, win(2, 400, 600, 4000, 4020)), SCHED, km, min_s=0)
+    cp = next(c for c in ch if c['label'] == 'Checkpoint 1'); t = cp['t'] - 20.0
+    assert 2.0 < t < 18.0 and float(HL.offsets(rp, t)) == pytest.approx(100.0, abs=0.2)             # the frame where the ramp's clock reaches the checkpoint (100 s into the clip), not 100 / 150 of the way

@@ -82,6 +82,22 @@ describe('Timeline', () => {
     ask.mockReturnValue(true); await user.click(await findByRole('button', { name: 'Re-plan' })); expect(seen).toHaveLength(1); ask.mockRestore()
   })
 
+  it('shows a speed ramp and turns ramps off with a re-plan', async () => {
+    const ramp = { dur_s: 5, lead_s: 1.75, ramp_s: 0.6, tail_s: 0.3, speed: 12.4, src_dur_s: 52, lands: true }
+    const seg = makePlanSegment({ id: 'w1', clip: 'CAM_1', technique: 'follow_runner', clip_start_s: 10, dur_s: 5, ramp, src_dur_s: 52, ramp_from: 'hold_wide' })
+    const report = [{ id: 'w1', clip: 'CAM_1', film_start_s: 0, dur_s: 5, from_s: 15, to_s: 62, speed: 12.4, lands: true, technique_was: 'hold_wide' }]
+    const editResp = makeEditResponse({ edit: makeEditState({ plan: { generated_at: 'utc', film: { length_s: 5, beats: 10, bpm: 120 }, segments: [seg], clips_in_plan: 1, missing_clips: [], orphaned_overrides: [], technique_seconds: { follow_runner: 5 }, warnings: [], hyperlapse: report } }) })
+    mockGet('/api/edit', editResp); mockPost('/api/edit/propose', { edit: editResp.edit })
+    const seen = recordRequests('/api/edit/propose')
+    const { findByText, getByText, getByRole, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
+    const badge = await findByText('⏩ ×12 to 1:02.0')
+    expect(badge).toHaveAttribute('title', 'a speed ramp: 1.8 s at real speed, then up to 12x through 47 s of quiet running, landing where the next window starts (was hold wide: a ramp follows your heading)')
+    expect(getByText('· 1 speed ramp through 0.8 min of running', { exact: false })).toBeInTheDocument()
+    const box = getByRole('checkbox', { name: 'Speed ramps' }); expect(box).toBeChecked()
+    await user.click(box)
+    expect(seen).toHaveLength(1); expect(seen[0].body).toEqual({ folder: '/data', hyperlapse: false, keep: true, replace: true })
+  })
+
   it('asks for another version of the plan', async () => {
     const editResp = makeEditResponse({
       edit: {

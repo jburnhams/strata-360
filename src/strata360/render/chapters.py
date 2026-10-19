@@ -42,6 +42,12 @@ def build(tm, schedule, km_at=None, lead_s=0.0, end_s=None, min_s=MIN_S):
             s0 = float(w.get('source_in_s') or 0.0); s1 = min(s0 + f1 - f0, secs); pts.append((f0, u0 + min(max(s0, 0.0), secs) / secs * (u1 - u0)))
             pts += [(f0 + x - s0, b) for b in times[1:] for x in [(b - u0) / (u1 - u0) * secs] if s0 < x < s1]
             continue
+        if w.get('ramp') and u1 > u0:                                                                                        # a speed ramp races through its clip: the race time follows the ramp (edit/hyperlapse.py `offsets`, as the time map's `utc_at`)
+            import numpy as np
+            from strata360.edit import hyperlapse as HL
+            t = np.linspace(0.0, f1 - f0, max(2, int(round((f1 - f0) * fps)) + 1)); off = np.asarray(HL.offsets(w['ramp'], t), float); pts.append((f0, u0))
+            pts += [(f0 + float(np.interp(b - u0, off, t)), b) for b in times[1:] if u0 < b < u0 + off[-1]]
+            continue
         pts.append((f0, u0))
         if u1 > u0: pts += [(f0 + (b - u0) / (u1 - u0) * (f1 - f0), b) for b in times[1:] if u0 < b < u1]                    # the stage changes inside the window
     out = []
