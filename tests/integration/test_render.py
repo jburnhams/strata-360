@@ -216,6 +216,26 @@ def shutil_rmtree(p):
     import shutil; shutil.rmtree(p)
 
 
+def test_the_final_film_writes_youtube_chapters_and_the_chapters_command_rewrites_them(processed, cli, monkeypatch):
+    """Chapters: the final render writes chapters.txt beside the film from its time map; `strata360 chapters` writes them again for the newest film (here with a race whose stage changes between the two windows)."""
+    import datetime as dt
+    plan, _ = two_window_project(processed, monkeypatch)
+    from strata360 import overlay as OV
+    from strata360.render import chapters as CH
+    class Rec:
+        def apply(self, img, t): return img
+    monkeypatch.setattr(OV, 'for_project', lambda folder, size, tiles=None: Rec())
+    cli('final', processed, '--size', '128x64', '--bitrate', '1M')
+    d = os.path.join(processed, 'strata360', 'final'); out = os.path.join(d, next(x for x in os.listdir(d) if len(x) == 10))
+    assert os.path.exists(os.path.join(out, 'chapters.txt')) and json.load(open(os.path.join(out, 'chapters.json')))['chapters'] == []          # the project has no run: no chapters, and the film is made all the same
+    ts = lambda s: dt.datetime.fromisoformat(s.replace('Z', '+00:00')).timestamp(); tm = json.load(open(os.path.join(out, 'timemap.json')))
+    sched = [(float('-inf'), 'Before Race'), (ts('2026-02-21T12:00:00Z'), 'Stage 1'), (ts(tm['windows'][1]['utc_in']), 'Stage 2')]
+    monkeypatch.setattr(CH, 'race', lambda folder: (sched, lambda u: (u - sched[1][0]) / 10.0))
+    r = cli('chapters', processed, '--min-s', '0')
+    w1 = tm['windows'][1]['film_in'] / tm['fps']
+    assert r.stdout == f'0:00 Stage 1, km 1\n{CH.stamp(w1)} Stage 2, km 7\n' and open(os.path.join(out, 'chapters.txt')).read() == r.stdout and 'at least 3' in r.stderr
+
+
 def test_the_final_film_opens_on_the_cold_open_with_its_own_sound(processed, cli, monkeypatch):
     """A chosen cold open (edit/cold_open.py) is rendered as its own piece ahead of the story, with the clip's own sound under it, and the film is that much longer."""
     patch_for_synthetic(monkeypatch, processed)

@@ -457,7 +457,9 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
         cold = co['seconds'] if co else 0.0; lead = cold + (bk['intro'][1] if 'intro' in bk else 0.0); tail = bk['outro'][1] if 'outro' in bk else 0.0                                       # the film starts on the cold open, then the opening title, then the story
         from strata360.render import captions as CP; CP.write_srt((co['cues'] if co else []) + [dict(c, t0=c['t0'] + lead, t1=c['t1'] + lead) for c in caps.cues], os.path.join(d, 'film.srt'))                  # the subtitles as a file too, beside the film (the story's after the cold open and the opening)
         with pg.stage('timemap'):
-            from strata360.render import timemap; timemap.write(plan, fps, d)                                                         # which footage is on screen at every frame (timemap.json and .csv beside the film)
+            from strata360.render import timemap; tm = timemap.write(plan, fps, d)                                                    # which footage is on screen at every frame (timemap.json and .csv beside the film)
+            try: from strata360.render import chapters; ch = chapters.write(folder, tm, d, lead, lead + total / fps + tail); pg.note(f"{len(ch['chapters'])} YouTube chapters in chapters.txt" + ('' if ch['youtube'] or not ch['chapters'] else ' (YouTube needs at least 3)'))
+            except Exception as e: pg.note(f'no chapters: {type(e).__name__}: {e}')                                                       # the stage markers for the video's description; never a reason to stop the film
         status('assembling')
         with pg.stage('audio'):
             audio = os.path.join(d, 'audio.wav'); sound = build_audio(folder, plan, audio, total / fps, loudness=loudness_target(folder))          # the film's sound, to its loudness target
