@@ -39,7 +39,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 
 | Source | Lines | Status |
 | --- | --- | --- |
-| `src/api.ts` | 33.82% | partial: client contract tested through the `call` helper; most endpoint wrappers (URL builders, uploads, deletes) todo |
+| `src/api.ts` | 98.29% | done (client contract tested through the `call` helper; endpoint wrappers tested by `api.test.ts`) |
 | `src/App.tsx` | 77.77% | done (the effect's failure branch is the gap) |
 | `src/components/ClockPanel.tsx` | 100% | done |
 | `src/components/TrackPanel.tsx` | 88.46% | done (branches tested via interactions, some fallback cases left) |
