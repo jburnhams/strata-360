@@ -1,5 +1,5 @@
 """The cold open (edit/cold_open.py): the project's own range, windows that keep whole lines, the choice of the best moment, the files the film reads and the `coldopen` command."""
-import argparse, json
+import argparse, json, os
 
 import numpy as np
 import pytest
@@ -162,3 +162,17 @@ def test_the_command_lists_and_picks(make_project, capsys):
     cli.cmd_coldopen(argparse.Namespace(name=p.folder, per=3, pick='cold-1', render=False)); assert 'chosen: cold-1 (yours)' in capsys.readouterr().out
     with pytest.raises(SystemExit, match='no candidate'): cli.cmd_coldopen(argparse.Namespace(name=p.folder, per=3, pick='zzz', render=False))
     assert json.load(open(p.path('cold_open', 'cold_open.json')))['chosen'] == 'cold-1'
+
+
+def test_a_finished_film_made_with_another_cold_open_is_not_the_current_one(make_project, make_client):
+    from strata360.edit import project as PJ
+    from strata360.render import final as FN
+    p = build(make_project); client = make_client(); CO.run(p.folder, log=lambda *a: None)
+    plan = dict(segments=[dict(id='w0', clip='CAM_0002_D', film_start_s=0.0, dur_s=2.0, clip_start_s=0.0)]); PJ.save(p.folder, dict(plan=plan)); p.write_json('final/settings.json', dict(size='1920x1080', fps=50.0))
+    d = FN.final_dir(p.folder, FN.final_key(plan, [1920, 1080], 50.0, '100M', p.folder)); film = p.path('final', 'film.mp4'); open(film, 'wb').write(b'mp4')
+    os.makedirs(d, exist_ok=True); json.dump(dict(state='done', film=film, cold_open=CO.signature(p.folder)), open(os.path.join(d, 'status.json'), 'w'))
+    get = lambda: client.get('/api/final', params=dict(folder=p.folder)).json()
+    assert CO.signature(p.folder).startswith('CAM_0002_D@') and get()['state'] == 'done' and get()['has_file'] and client.get('/api/final/file', params=dict(folder=p.folder)).status_code == 200
+    CO.choose(p.folder, 'cold-1'); st = get()
+    assert st['state'] == 'stopped' and not st['has_file'] and client.get('/api/final/file', params=dict(folder=p.folder)).status_code == 404          # Continue reassembles it with the new cold open
+    CO.choose(p.folder, 'none'); assert CO.signature(p.folder) == ''

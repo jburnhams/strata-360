@@ -445,7 +445,7 @@ def _render_final(folder, plan, framing, size=(3840, 2160), fps=50.0, bitrate='1
             lst = os.path.join(d, 'pieces.txt'); open(lst, 'w').write(''.join(f"file '{m}'\n" for m in ([co['movie']] if co else []) + [bk[w][0] for w in ('intro',) if w in bk] + [os.path.join(d, p['id'] + '.mov') for p in ps] + [bk[w][0] for w in ('outro',) if w in bk])); film = out or os.path.join(d, 'film.mp4')
             r = subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k', '-shortest', '-movflags', '+faststart', film], capture_output=True, text=True)
             if r.returncode: status('error', error=r.stderr[-300:]); raise RuntimeError(r.stderr[-300:])
-        status('done', finished=time.time(), film=film, sound=sound); pg.finish(); return film
+        from strata360.edit import cold_open as CO; status('done', finished=time.time(), film=film, sound=sound, cold_open=CO.signature(folder)); pg.finish(); return film          # (the cold open is not in the key, so its pieces and the story's are kept when only it changes: the server compares this)
     except BaseException as e:
         if pg.state == 'running': pg.fail(e)
         raise

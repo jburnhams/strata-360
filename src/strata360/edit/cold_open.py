@@ -15,6 +15,7 @@ starts there anyway.
   run(folder, per=PER, render=False) -> doc           both, written to <project>/strata360/cold_open/cold_open.json with the best one chosen; `render` adds a preview (mp4 and a 2 x 2 contact picture) of each
   choose(folder, cid) -> doc                          another candidate, or 'none' for no cold open
   for_film(folder) -> candidate | None                what the final film opens with (None without the file, when 'none' is chosen, or with STRATA_COLD_OPEN=0)
+  signature(folder) -> str                            the chosen cold open as a short string ('' for none), recorded with a finished film
   segment_of(c)                                       the plan-segment dict of a candidate (what edit/framing.resolve_segment and the renderer read)
 
 The final film (render/final.py) renders the chosen window from the original footage with the film's own framing for its technique, no race overlay, the clip's own sound (audio/mix.clip_sound) and its speech as subtitles, then cuts to the
@@ -183,6 +184,11 @@ def choose(folder, cid):
     if doc is None: raise ValueError('no cold open candidates yet: run `strata360 coldopen FOLDER` first')
     if cid != 'none' and not any(c['id'] == cid for c in doc['candidates']): raise ValueError(f"no candidate {cid}: the candidates are {', '.join(c['id'] for c in doc['candidates']) or 'none'}")
     doc.update(chosen=cid, by='you'); json.dump(doc, open(p, 'w'), indent=1); return doc
+
+
+def signature(folder):
+    """What the film's cold open is, as a short string ('' for none): the final render records it when it finishes, so a film made with another choice is not taken for the current one."""
+    c = for_film(folder); return f"{c['clip']}@{c['clip_start_s']}+{c['dur_s']}:{c['technique']}" if c else ''
 
 
 def for_film(folder):
