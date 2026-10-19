@@ -83,3 +83,12 @@ def test_the_race_comes_from_the_projects_run(tmp_path, monkeypatch):
     monkeypatch.setattr(TKS, 'current_path', lambda rd: 'run.fit'); monkeypatch.setattr(TKS, 'stage_schedule', lambda rd: SCHED)
     monkeypatch.setattr(TKS, 'read', lambda p: dict(t=T0 + np.arange(10.0) * 100, lat=lat, lon=np.full(10, 6.0)))
     sched, k = CH.race(str(tmp_path)); assert sched == SCHED and k(T0) == 0.0 and k(T0 + 900) == pytest.approx(10.0, abs=0.05) and k(T0 + 450) == pytest.approx(5.0, abs=0.05)
+
+
+def test_a_generated_clip_is_timed_as_the_renderer_plays_it():
+    gap = dict(win(1, 200, 300, 3000, 4000), synthetic_seconds=20.0, source_in_s=0.0)          # 1000 s of race in a 20 s clip, of which the window plays the first 10 s
+    ch = CH.build(tmap(win(0, 0, 200, 100, 120), gap, win(2, 300, 500, 4000, 4020)), SCHED, km)
+    assert [(c['t'], c['label']) for c in ch] == [(0.0, 'Stage 1'), (30.0, 'Stage 2')]          # the checkpoint (3600) is 12 s into the clip: past the window's end, never on screen
+    late = dict(gap, source_in_s=10.0)                                                          # the window plays the clip's second half: it opens at 3500 and the checkpoint comes 2 s in
+    ch = CH.build(tmap(win(0, 0, 200, 100, 120), late, win(2, 300, 500, 4000, 4020)), SCHED, km, min_s=0)
+    assert [(c['t'], c['label']) for c in ch] == [(0.0, 'Stage 1'), (22.0, 'Checkpoint 1'), (28.0, 'Stage 2')]

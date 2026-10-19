@@ -1,7 +1,7 @@
 """YouTube chapter markers for the final film, from its time map (render/timemap.py) and the race's stages (gps/tracks.py `stage_schedule`): written beside the film as `chapters.txt` (ready to paste into the video's description) and `chapters.json`.
 
 A chapter starts wherever the stage of the race on screen changes: "Stage 3, km 42", "Checkpoint 2, km 38" (km is the distance run from the start, at the chapter's first frame), "Start", "Finish", "Before the start", "After the finish"; without routes, "km 12". A window's race time runs
-from its UTC in to its UTC out (a generated clip covers its gap's whole span in its seconds), so a stage that changes inside a window starts a chapter at that frame. Windows without a race time (a photo with none, an untimed clip) stay in the chapter before them.
+from its UTC in to its UTC out (a generated clip as the renderer plays it: its gap's whole span over its own seconds), so a stage that changes inside a window starts a chapter at that frame. Windows without a race time (a photo with none, an untimed clip) stay in the chapter before them.
 YouTube's rules: the first chapter at 0:00 (it takes in the opening), each at least 10 s (a shorter one is merged into a neighbour), and at least three of them, else YouTube shows none (`youtube` is False then; the files are written anyway)."""
 import bisect, datetime as dt, glob, json, os, subprocess
 
@@ -37,7 +37,12 @@ def build(tm, schedule, km_at=None, lead_s=0.0, end_s=None, min_s=MIN_S):
     for w in tm['windows']:
         u0, u1 = _secs(w.get('utc_in')), _secs(w.get('utc_out'))
         if u0 is None: continue
-        u1 = u0 if u1 is None or u1 < u0 else u1; f0, f1 = lead_s + w['film_in'] / fps, lead_s + w['film_out'] / fps; pts.append((f0, u0))
+        u1 = u0 if u1 is None or u1 < u0 else u1; f0, f1 = lead_s + w['film_in'] / fps, lead_s + w['film_out'] / fps; secs = w.get('synthetic_seconds')
+        if secs and u1 > u0:                                                                                                 # a generated clip shows its race span over its own seconds, from where the window starts in it, and holds its last frame after (render/synthetic.py `race_time`)
+            s0 = float(w.get('source_in_s') or 0.0); s1 = min(s0 + f1 - f0, secs); pts.append((f0, u0 + min(max(s0, 0.0), secs) / secs * (u1 - u0)))
+            pts += [(f0 + x - s0, b) for b in times[1:] for x in [(b - u0) / (u1 - u0) * secs] if s0 < x < s1]
+            continue
+        pts.append((f0, u0))
         if u1 > u0: pts += [(f0 + (b - u0) / (u1 - u0) * (f1 - f0), b) for b in times[1:] if u0 < b < u1]                    # the stage changes inside the window
     out = []
     for f, u in pts:
