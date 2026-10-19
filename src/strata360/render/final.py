@@ -18,7 +18,7 @@ from strata360.render import camera as cam, flat, gpu as GPU, grade as GR, seam 
 from strata360.render.film import pieces, render_piece, layout
 from strata360.audio.mix import build_audio
 from strata360.render.progress import Null
-from strata360.edit import upscale as UP
+from strata360.edit import upscale as UP, hyperlapse as HL
 
 
 LOUDNESS_LUFS = -14.0       # the delivered film's integrated loudness (a streaming-platform level); race.json `audio.loudness_lufs` changes it
@@ -96,7 +96,7 @@ class FinalSource:
     """Frames of the planned windows from the original OSV files (uint16 RGB code values, like flat.main)."""
     def __init__(self, folder, segs, framing, W, H, fps, interp='cubic', overlay=None, gains=None, upscale='off', progress=None, source='osv', decode_w=3072, up_min_zoom=None):
         self.folder, self.segs, self.framing, self.W, self.H, self.fps, self.interp, self.overlay, self.gains = folder, segs, framing, W, H, fps, interp, overlay, gains or {}; self.info = {}; self.done = 0
-        self.upscale = UP.normalize(upscale); self.up_w = UP.target_width(self.upscale, W); self.pg, self._factors, self.why = progress or Null(), {}, {}; self.last_only = False; self.up_min_zoom = UP.MIN_ZOOM if up_min_zoom is None else float(up_min_zoom); self.up_min_s = UP.MIN_SECONDS; self.film_synthetic = True; self.cached_only = False; self.source, self.decode_w, self._pinfo, self._eq = source, decode_w, {}, None; self._synth = {}; self._pc = {}        # last_only: only the last frame of a stretch is wanted (a still): the ones before it only settle the seam, so they are not enlarged, graded or given the overlay      # gains: render/grade.py, the exposure match of each footage window
+        self.upscale = UP.normalize(upscale); self.up_w = UP.target_width(self.upscale, W); self.pg, self._factors, self.why = progress or Null(), {}, {}; self.last_only = False; self.up_min_zoom = UP.MIN_ZOOM if up_min_zoom is None else float(up_min_zoom); self.up_min_s = UP.MIN_SECONDS; self.film_synthetic = True; self.cached_only = False; self.source, self.decode_w, self._pinfo, self._eq = source, decode_w, {}, None; self._synth = {}; self._pc = {}; self._ramps = {}        # last_only: only the last frame of a stretch is wanted (a still): the ones before it only settle the seam, so they are not enlarged, graded or given the overlay      # gains: render/grade.py, the exposure match of each footage window
 
     def _boxes(self, clip, osv):
         """t -> [(yaw, pitch, height_deg)] of the people seen near t (edit/clip_views.py), for a seam that goes round them; None when off (`STRATA_SEAM_PEOPLE=0`) or the clip has no people records."""
@@ -170,38 +170,52 @@ class FinalSource:
         except (ValueError, RuntimeError, OSError, StopIteration) as e: self.pg.note(f"{sg['clip']}: cannot be cut from the footage ({e}); the planner's clip is used")
         self._pc[sg['id']] = out; return out
 
+    def source_times(self, sg, a0, a1, ci=None):
+        """Clip seconds of window frames a0..a1 (unclamped): `clip_start_s + i / fps`, or for a ramp window (edit/hyperlapse.py) the ramp's times, with the frames the picker chose from the clip's gyro and
+        accelerometer when `ci` (the clip's record: pts and telemetry) is given. The choice is made once for the whole window (and a little either side, for a transition), so pieces agree."""
+        t = np.arange(a0, a1) / self.fps
+        if not sg.get('ramp'): return sg['clip_start_s'] + t
+        key = (sg['id'], self.fps, ci is not None)
+        if key not in self._ramps:
+            n = int(round(float(sg['dur_s']) * self.fps)); pad = min(n, int(math.ceil(4 * self.fps))); tt = np.arange(-pad, n + pad + 1) / self.fps
+            self._ramps[key] = (-pad, HL.source_times(sg, tt, ci['pts'], ci['T'].get('quat'), ci['T'].get('acc')) if ci is not None else HL.src_time(sg, tt))
+        lo, src = self._ramps[key]; i = np.arange(a0, a1) - lo; inside = (i >= 0) & (i < len(src))
+        return np.where(inside, src[np.clip(i, 0, len(src) - 1)], HL.src_time(sg, t))
+
     def _proxy_frames(self, sg, a0, a1, yaw_extra=None, pose_extra=None):
         """A footage window from the clip's PROXY (upright equirect video, render/preview.py) instead of the original lenses: the quick source of the preview. Everything after the picture is the film's own: the camera path, the projection (EquirectView = the renderer's maths), the exposure match and the race overlay, giving the same RGB code values; a clip with no proxy yet gives a dark card."""
         from strata360.render import preview as PV
         m = a1 - a0
         if m <= 0: return
-        clip, fps = sg['clip'], self.fps
+        clip, fps = sg['clip'], self.fps; src = self.source_times(sg, a0, a1)          # (a ramp window plays its clip faster: edit/hyperlapse.py; the preview takes the ramp's own times, without the frame picker)
         if clip not in self._pinfo:
             p = proxy_of(self.folder, clip); side = json.load(open(os.path.splitext(p)[0] + '.json')) if p else None; self._pinfo[clip] = dict(proxy=p, side=side, stab=None)
         ci = self._pinfo[clip]; gain = self.gains.get(sg['id'])
         def out(img, i):
             img = np.ascontiguousarray(img[..., ::-1]).astype(np.uint16) * 257                                        # BGR 8-bit to the renderer's RGB code values
-            return img if self.overlay is None else self.overlay.apply(img, utc0 + (a0 + i) / fps)
+            return img if self.overlay is None else self.overlay.apply(img, utc0 + float(src[i]) - sg['clip_start_s'])
         utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0
         if not ci['proxy']:
             for i in range(m): yield out(PV.card(self.W, self.H, f'{clip[-9:]}: proxy not made yet'), i)
             return
         if self._eq is None: self._eq = PV.EquirectView(self.W, self.H)
         V = self._eq; path = cam.CameraPath.from_dict(self.framing[sg['id']]); V.set_background(path.bg, **path.bg_opts); side = ci['side']; ez = np.array([0.0, 0.0, 1.0])
-        t_from = sg['clip_start_s'] + a0 / fps; fr_n = len(side['frames']); Ms = None
+        t_from = float(src[0]); fr_n = len(side['frames']); Ms = None
         if path.ref != 'world':                                                          # heading-follow and body paths need the stabilisation of each frame (as the real renderer)
             if ci['stab'] is None: ci['stab'] = PV.stab_matrices(config.source(json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json')))['source_files']['osv'], os.path.join(config.race_dir(self.folder), 'clips', clip)))
-            idx = np.clip(np.round(np.maximum(t_from + np.arange(m) / fps, 0.0) * fps).astype(int), 0, fr_n - 1); Ms = [ci['stab'](side['frames'][j]['source_frame']) for j in idx]
+            idx = np.clip(np.round(np.maximum(src, 0.0) * fps).astype(int), 0, fr_n - 1); Ms = [ci['stab'](side['frames'][j]['source_frame']) for j in idx]
         P = path.evaluate(np.arange(a0, a1) / fps, Ms, fps)
-        W0, H0 = side['size']; dw = min(self.decode_w, W0); dh = dw // 2; lead = max(-t_from, 0.0)                       # time before the clip starts: the first frame is held
-        dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0):.3f}', '-i', ci['proxy'], '-t', f'{(m / fps) + 0.2:.3f}', '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', ffmpeg_rate(fps), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        fr = None; skip = int(round(lead * fps))
+        W0, H0 = side['size']; dw = min(self.decode_w, W0); dh = dw // 2
+        dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0):.3f}', '-i', ci['proxy'], '-t', f'{max(float(src[-1]) - max(t_from, 0.0), 0.0) + 1.0 / fps + 0.2:.3f}', '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', ffmpeg_rate(fps), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        fr = None; want = np.round((np.maximum(src, 0.0) - max(t_from, 0.0)) * fps).astype(int); got = -1; eof = False          # the decoded frame each output frame shows: before the clip starts the first frame is held
         try:
             for i in range(m):
-                if i >= skip or fr is None:                                                  # before the clip starts (skip frames) the first frame is held
+                while (got < want[i] or fr is None) and not eof:                              # (a ramp window skips the frames between; past the end of the clip the last frame is held)
                     buf = dec.stdout.read(dw * dh * 3)
-                    if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3)
-                    elif fr is None: fr = np.zeros((dh, dw, 3), np.uint8)                   # (past the end of the clip the last frame is held)
+                    if len(buf) == dw * dh * 3: fr = np.frombuffer(buf, np.uint8).reshape(dh, dw, 3); got += 1
+                    else:
+                        eof = True
+                        if fr is None: fr = np.zeros((dh, dw, 3), np.uint8)
                 V.set_fov(P['fov'][i] + (float(pose_extra[i][2]) if pose_extra is not None else 0.0), P['dist'][i], (float(pose_extra[i][3]) if pose_extra is not None and len(pose_extra[i]) > 3 and pose_extra[i][3] > 0 else (P['disc'][i] if P['use_disc'] else None)))
                 yaw = P['yaw'][i] + (float(yaw_extra[i]) if yaw_extra is not None else 0.0) + (math.radians(float(pose_extra[i][0])) if pose_extra is not None else 0.0)
                 vdir = cam.direction(yaw, P['pitch'][i] + (math.radians(float(pose_extra[i][1])) if pose_extra is not None else 0.0)); img = V.render(fr, Ms[i].T @ vdir if P['ref'] == 'body' else vdir, ez, float(P['roll'][i]))
@@ -220,7 +234,7 @@ class FinalSource:
         if self.source == 'proxy': yield from self._proxy_frames(sg, a0, a1, yaw_extra, pose_extra); return
         gain = self.gains.get(sg['id']); ci = self._clip(sg['clip']); f = self.shot_factor(sg); R = self._renderer(ci, f); R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
-        path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; t_abs = np.maximum(sg['clip_start_s'] + times, 0.0)
+        path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; src = self.source_times(sg, a0, a1, ci); t_abs = np.maximum(src, 0.0); clock = HL.src_time(sg, times) - sg['clip_start_s']          # (a ramp window's frames: edit/hyperlapse.py)
         pts = ci['pts']; ks = np.minimum(flat.frame_at(pts, t_abs), ci['n'] - 1); quat = ci['T']['quat']             # the frame shown at clip time t is found by the frame timestamps, not by t x fps (a clip whose camera dropped frames has timestamps that jump)
         Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
         utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0            # the window's first frame on the race clock
@@ -245,7 +259,7 @@ class FinalSource:
                     with self.pg.timed('grade'): img = GR.apply(img, gain(max(times[i], 0.0)))         # the exposure match, before the overlay so the numbers are never graded
                 if self.overlay is None: yield img
                 else:
-                    with self.pg.timed('overlay'): img = self.overlay.apply(img, utc0 + times[i])
+                    with self.pg.timed('overlay'): img = self.overlay.apply(img, utc0 + float(clock[i]))          # the race clock races through a ramp: the ramp's own time (the time map's), at most a few source frames from the frame the picker chose
                     yield img           # before any transition blend, so a dissolve cross-fades the two overlays too
         finally:
             for p in (dm, ds):

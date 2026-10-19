@@ -130,11 +130,15 @@ export interface PlanSegment {
   id: string; index: number; clip: string; cand_id: string; film_start_s: number; beats: number; dur_s: number; clip_start_s: number; utc_start: string; utc_end: string
   technique: string; family: string; hero: boolean; forced: boolean; speech: boolean; locked: boolean; options: PlanOption[]; role?: 'clip' | 'vo' | 'broll'; item?: number
   sound?: { gain_db: number; why: string[] }; kind?: string; view?: string; transition?: { type: 'cut' | 'dissolve' | 'dip' | 'whip'; beats: number; dur_s: number; why: string }
+  /** A speed ramp (edit/hyperlapse.py): the window races through the quiet running after it; `src_dur_s` is the clip seconds it plays, `ramp_from` the technique it had before it was made to follow your heading. */
+  ramp?: SpeedRamp; src_dur_s?: number; ramp_from?: string
 }
+export interface SpeedRamp { dur_s: number; lead_s: number; ramp_s: number; tail_s: number; speed: number; src_dur_s: number; lands: boolean }
+export interface RampReport { id: string; clip: string; film_start_s: number; dur_s: number; from_s: number; to_s: number; speed: number; lands: boolean; technique_was: string | null }
 export interface EditState {
-  settings: { length_s: number; bpm: number; bar_beats: number; seed: number; wpm: number; style: string }
+  settings: { length_s: number; bpm: number; bar_beats: number; seed: number; wpm: number; style: string; hyperlapse?: boolean }
   overrides: { locked: { wid: string }[]; tech_force: Record<string, string>; bans_cands: string[]; bans_techs: string[]; clip_weight: Record<string, number>; transitions?: Record<string, string> }
-  plan: null | { source?: 'script' | 'beats'; script?: string; generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[] }
+  plan: null | { source?: 'script' | 'beats'; script?: string; generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[]; hyperlapse?: RampReport[] }
 }
 export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
 export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
@@ -373,7 +377,7 @@ export const api = {
   whoMeUrl: (folder: string, v: number) => '/api/who/me?' + q({ folder, v: String(v) }),
   setWho: (folder: string, me: number[]) => call<{ ok: boolean }>('/api/who', { folder, me }),
   editGet: (folder: string) => call<EditResponse>('/api/edit?' + q({ folder })),
-  propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; keep?: boolean; replace?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
+  propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; hyperlapse?: boolean; keep?: boolean; replace?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
   override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState }>('/api/edit/override', { folder, ...body }),
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
