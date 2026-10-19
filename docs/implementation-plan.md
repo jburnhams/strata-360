@@ -87,5 +87,6 @@ None; the overlay configuration arrived on 1 Oct (A2).
 - [Milestone C: the edit is trustworthy](plan/milestone-c-the-edit-is-trustworthy.md)
 - [Milestone D: editing in the GUI is fast](plan/milestone-d-editing-in-the-gui-is-fast.md)
 - [Milestone E: documentation and test debt (S each, alongside the others)](plan/milestone-e-documentation-and-test-debt.md)
+- [Milestone R: the 360 version of the film (19 Oct)](plan/milestone-r-the-360-film.md)
 - [Later (parked until the film exists)](plan/later.md)
 - [Several tracks per project: runs and routes](plan/several-tracks-per-project-runs-and-rout.md)
