@@ -31,6 +31,9 @@ for, the renderer may take a neighbour instead, and a dynamic programme picks th
   * the speed steady: the step between chosen frames stays close to the one asked for, and no frame strays far from its time.
 At real speed (the lead and the tail) the window is the plain footage, frame for frame.
 
+The beat planner also PLANS ramps (edit/chrono.py, `plan_ramps`): a window before minutes of quiet running is given, up front, the beats it needs to land (the other windows give them), and carries
+`ramp_lead_s`, the lead it keeps; here it is ramped with that lead.
+
 The plan carries the ramp on the segment (`ramp`: dur_s, lead_s, ramp_s, tail_s, speed, src_dur_s, lands) and `src_dur_s`: the seconds of the clip the window plays. `src_time` maps a window's film seconds to clip
 seconds; the renderer, the time map and the sound use it."""
 import datetime as dt
@@ -257,9 +260,9 @@ def apply(segs, clips, lib=None, bans=(), protect=(), st=None, beats=None):
         clip = by_id[g['clip']]; e0 = float(g['clip_start_s']) + float(g['dur_s'])
         nxt = [float(h['clip_start_s']) for h in foot if h is not g and h['clip'] == g['clip'] and float(h['clip_start_s']) >= e0 - CONTIGUOUS_S]
         limit = min(nxt + [float(clip.get('duration_s') or e0)]); blocked = blockers(clip, bans, st)
-        end = quiet_run(e0, limit, blocked); gap = end - e0
-        if gap < st.min_gap_s - 1e-9: continue
-        rp = profile(g['dur_s'], float(g['dur_s']) + gap, st)
+        end = quiet_run(e0, limit, blocked); gap = end - e0; lead = g.get('ramp_lead_s')                    # (a ramp window the planner made long enough to land: chrono.plan_ramps)
+        if gap < (0.0 if lead is not None else st.min_gap_s) - 1e-9 or gap <= 0: continue
+        rp = profile(g['dur_s'], float(g['dur_s']) + gap, st, lead_s=lead)
         if rp is None: continue
         rp['lands'] = bool(nxt) and end >= limit - 1e-6 and rp['src_dur_s'] >= float(g['dur_s']) + gap - 1e-3            # the window ends where the next window of the clip starts: one continuous run
         took = 0.0

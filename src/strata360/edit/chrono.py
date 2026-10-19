@@ -11,15 +11,17 @@ Rules
     (repeats, hero effects, cooldowns, shares), beat-aligned to the music and filling it exactly.
 
 Three steps: (1) split the beats between the clips (concave value, so every clip gets something and long or good clips get more); (2) cut each clip's share into non-overlapping windows
-inside its usable stretches; (3) beam search over the ordered windows for the techniques, seeded so a seed reproduces a plan exactly."""
+inside its usable stretches, and plan the speed ramps (`plan_ramps`: a window before minutes of quiet running is given the beats a hyperlapse needs to race through them and land on the clip's next
+window, edit/hyperlapse.py); (3) beam search over the ordered windows for the techniques, seeded so a seed reproduces a plan exactly."""
 import heapq, math
 from dataclasses import dataclass, field
 import numpy as np
-from strata360.edit import optimise as O, pans as PN
+from strata360.edit import optimise as O, pans as PN, hyperlapse as HL
 
 MIN_SEG_S = 2.0          # shortest window (the shortest everyday technique needs 2 s; whip pans are transitions, not windows)
 MAX_SEG_S = 8.0          # longest window: longer ones are split into adjacent windows, each with its own view
 MAX_CLIP_SHARE = 0.25    # no clip takes more than this share of the film (unless it is the only way to fill it)
+RAMP_SHARE = 0.25        # planned ramp windows take at most this share of the film's beats
 
 
 @dataclass
@@ -47,6 +49,8 @@ class Settings:
     w_keep: float = 1.5
     bans_cands: frozenset = frozenset()                  # stretches (candidate ids) not to use
     clip_weight: dict = field(default_factory=dict)      # clip id -> factor on its share of the film (2 = more, 0.5 = less)
+    ramps: bool = True                                   # plan speed ramps through minutes of quiet running (the project's `hyperlapse` setting)
+    ramp_share: float = RAMP_SHARE
 
 
 @dataclass
@@ -71,6 +75,7 @@ class Seg:
 class Window:
     clip_index: int; cand: object; in_s: float; beats: int; q: float; forced: bool = False
     fixed: bool = False; tech_id: str = None; speech: bool = False     # a locked window: its technique is fixed too
+    ramp_lead: float = None                                            # a planned ramp window: the seconds of its own moment at real speed (its length is what the hyperlapse needs)
 
     @property
     def abs_start(self): return self.cand.start_s + self.in_s
@@ -202,14 +207,41 @@ def rebalance(windows, B, beat_s, st):
         return int(math.floor((nxt - end) / beat_s + 1e-9))
     tot = sum(w.beats for w in windows); guard = 0
     while tot < B and guard < 10000:
-        guard += 1; cands = [w for w in windows if w.beats < bmax and room(w) > 0 and not w.fixed]
+        guard += 1; cands = [w for w in windows if w.beats < bmax and room(w) > 0 and not w.fixed and w.ramp_lead is None]
         if not cands: break
         max(cands, key=lambda w: (w.q, room(w))).beats += 1; tot += 1
     while tot > B and guard < 20000:
-        guard += 1; cands = [w for w in windows if w.beats > bmin and not w.fixed]
+        guard += 1; cands = [w for w in windows if w.beats > bmin and not w.fixed and w.ramp_lead is None]
         if not cands: break
         min(cands, key=lambda w: w.q).beats -= 1; tot -= 1
     return tot
+
+
+def plan_ramps(windows, clips, beat_s, B, st, lib=None):
+    """Planned speed ramps (implementation plan H3), in place: a window followed, before the next window of its clip, by a quiet stretch (edit/hyperlapse.py: nobody talks, you did not skip it, no long
+    unusable footage) that its own length cannot race through gets the fewest beats that let the hyperlapse land on that window (at most MAX_RAMP_WINDOW_S); its lead keeps the length the window had, so
+    its own moment is unchanged. The longest stretches are planned first, while the ramp windows hold at most `ramp_share` of the film; `rebalance` then takes the beats from the other windows.
+    Returns the windows made ramps."""
+    hs = HL.Settings(); t = (lib or {}).get(HL.TECHS[0]); planned = []; cands = []
+    if not st.ramps or HL.TECHS[0] in st.bans_techs or (lib is not None and t is None): return planned
+    bmax = int(hs.max_window_s / beat_s + 1e-9)
+    for i, clip in enumerate(clips):
+        ws = sorted((w for w in windows if w.clip_index == i), key=lambda w: w.abs_start); blocked = HL.blockers(clip, st.bans_cands, hs)
+        for w, n in zip(ws, ws[1:]):
+            want = st.tech_force.get(wid_of(clip['id'], w.abs_start))
+            if w.fixed or w.speech or w.forced or (want and want not in HL.TECHS): continue
+            D0 = w.beats * beat_s; e0 = w.abs_start + D0; S = n.abs_start - w.abs_start
+            if n.abs_start - e0 < hs.min_gap_s - 1e-9 or HL.quiet_run(e0, n.abs_start, blocked) < n.abs_start - 1e-6: continue
+            rp = HL.profile(D0, S, hs)
+            if rp is None or rp['src_dur_s'] >= S - 1e-3: continue                                      # its own length lands (or the stretch is too short to race): hyperlapse.apply ramps it as it is
+            lead = max(hs.lead_min_s, hs.lead_frac * D0)
+            nb = next((b for b in range(w.beats + 1, bmax + 1) if (r := HL.profile(b * beat_s, S, hs, lead_s=lead)) and r['src_dur_s'] >= S - 1e-3), None)
+            if nb is not None: cands.append((n.abs_start - e0, w, nb, lead))
+    used = 0
+    for _, w, nb, lead in sorted(cands, key=lambda c: -c[0]):
+        if used + nb > st.ramp_share * B + 1e-9: continue
+        w.beats = nb; w.ramp_lead = round(lead, 4); used += nb; planned.append(w)
+    return planned
 
 
 # --------------------------------------------------------------------------------------------------------------------------------------------- 3. techniques
@@ -250,7 +282,11 @@ def plan(clips, lib, music, st=None):
     speech_iv = {i: [(c.start_s, c.end_s) for c in cs if getattr(c, 'kind', '') == 'speech'] for i, cs in enumerate(clips_c)}
     for w in windows:                                                                                     # a window on the wearer talking is dialogue, whichever candidate it was cut from
         a, b = w.abs_start, w.abs_start + w.beats * beat_s; w.speech = bool(w.cand.speech) or sum(max(0.0, min(b, y) - max(a, x)) for x, y in speech_iv[w.clip_index]) >= 0.25 * (b - a)
-    if rebalance(windows, B, beat_s, st) != B: raise O.Infeasible('could not fit the windows into the film length: too little usable footage in some clips')
+    before = [w.beats for w in windows]; ramps = plan_ramps(windows, clips, beat_s, B, st, lib)
+    if rebalance(windows, B, beat_s, st) != B and ramps:                                                  # the ramps' beats could not be taken from the other windows: plan without them
+        for w, b in zip(windows, before): w.beats = b; w.ramp_lead = None
+        warnings.append('the speed ramps were left out: the other windows could not give them the beats'); ramps = []
+    if not ramps and sum(w.beats for w in windows) != B and rebalance(windows, B, beat_s, st) != B: raise O.Infeasible('could not fit the windows into the film length: too little usable footage in some clips')
     return assign_techniques(windows, clips, lib, music, st, rng, warnings)
 
 # --------------------------------------------------------------------------------------------------------------------------------------------- 3. techniques
@@ -322,9 +358,12 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
     establishing = [bool(w.speech) and (k == 0 or windows[k - 1].clip_index != w.clip_index or not windows[k - 1].speech) for k, w in enumerate(windows)]          # the first shot of a clip's speaking
     joined = [k > 0 and windows[k].clip_index == windows[k - 1].clip_index and abs(windows[k].abs_start - (windows[k - 1].abs_start + windows[k - 1].beats * beat_s)) <= PN.CONTIGUOUS_S for k in range(len(windows))]          # back to back in one clip: a glide can join them (edit/pans.py)
     for k, w in enumerate(windows):
-        d = w.beats * beat_s; c = getattr(w.cand, 'orig', None) or w.cand; en = music.energy_at(starts[k]); opts = []
+        d = w.beats * beat_s; c = getattr(w.cand, 'orig', None) or w.cand; en = music.energy_at(starts[k]); opts = []; ramp = getattr(w, 'ramp_lead', None) is not None
         for tid in ids:
             t = lib[tid]
+            if ramp:                                                                                      # a planned ramp window follows your heading (edit/hyperlapse.py), however long the hyperlapse makes it
+                if tid in HL.TECHS: opts.append((tid, d ** st.dur_power * (st.w_quality * w.q + st.w_fit)))
+                continue
             if w.speech and not t.dialogue_ok: continue
             if t.id == 'dialogue_hold' and not w.speech: continue
             if t.id == 'selfie_close' and not w.speech and st.tech_force.get(wids[k]) != 'selfie_close' and getattr(w, 'view', None) != 'close': continue            # the close view of you is for the best of the dialogue (or when asked for)
@@ -342,7 +381,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
             base = scale * (st.w_quality * w.q + st.w_fit * f + st.w_dur * durfit) + st.w_energy * scale * (1.0 - abs(0.5 * c.energy + 0.5 * t.energy - en)) + st.tech_bias.get(tid, 0.0) * scale + (st.w_cam * scale if t.cam is not None else 0.0) + st.w_camlist * scale * camera_share(clips[w.clip_index].get('cameras'), tid, w.abs_start, d)
             opts.append((tid, base))
         options.append(sorted(opts, key=lambda x: -x[1])[:8])
-        want = w.tech_id if w.fixed else st.tech_force.get(wids[k])
+        want = w.tech_id if w.fixed else st.tech_force.get(wids[k]) or (opts[0][0] if ramp and opts else None)
         view = getattr(w, 'view', None)
         if not want and view in VIEW_TECH:                                                                  # the script asked for a view of you (mid, close, far): used when the footage allows it
             if any(o[0] == VIEW_TECH[view] for o in opts): want = VIEW_TECH[view]
@@ -394,6 +433,7 @@ def assign_techniques(windows, clips, lib, music, st, rng, warnings, B=None):
         orig = getattr(w.cand, 'orig', None) or w.cand; cs = round(w.abs_start, 3)
         sg = Seg(start=starts[k], beats=w.beats, cand=orig, tech=lib[tid], in_s=round(cs - orig.start_s, 3), clip_index=w.clip_index, clip_start_s=cs, variant_seed=int(rng.integers(0, 2 ** 31 - 1)), forced=w.forced)
         sg._beat_s = beat_s; sg.parts = dict(wid=wids[k], speech=bool(getattr(w, 'speech', False)), options=[dict(tech=o[0], score=round(o[1], 3)) for o in options[k]], fixed=w.fixed, warnings=warnings if k == 0 else []); out.append(sg)
+        if getattr(w, 'ramp_lead', None) is not None: sg.parts['ramp_lead_s'] = w.ramp_lead
     return out
 
 
@@ -419,6 +459,10 @@ def violations(segs, lib, music, clips):
     if hero > 0.2 * music.beats * beat_s + 1e-6: v.append(f'hero effects take {hero:.1f} s (limit 20%)')
     for s in segs:
         d = s.beats * beat_s
+        if s.parts.get('ramp_lead_s') is not None:                                                    # a planned ramp window is as long as its hyperlapse needs, and races on past its stretch
+            if s.tech.id not in HL.TECHS: v.append(f'the ramp window at {s.clip_start_s:.2f} in {s.cand.clip} is {s.tech.id}, not {HL.TECHS[0]}')
+            if d > HL.MAX_RAMP_WINDOW_S + 1e-6: v.append(f'the ramp window at {s.clip_start_s:.2f} in {s.cand.clip} lasts {d:.2f} s (at most {HL.MAX_RAMP_WINDOW_S:g})')
+            continue
         if not (s.tech.dmin - 1e-9 <= d <= s.tech.dmax + 1e-9): v.append(f'{s.tech.id} lasts {d:.2f} s, outside {s.tech.dmin}-{s.tech.dmax}')
         if s.tech.beats == 'bar' and s.beats % music.bar_beats: v.append(f'{s.tech.id} is not a whole number of bars')
         if (s.parts.get('speech') if 'speech' in s.parts else s.cand.speech) and not s.tech.dialogue_ok: v.append(f'{s.tech.id} on speech in {s.cand.id}')

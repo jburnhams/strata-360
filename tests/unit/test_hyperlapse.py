@@ -301,3 +301,45 @@ def test_the_planner_gives_the_ramps_the_beats_the_cuts_sit_on(monkeypatch):
     assert np.allclose(P.film_beats('f', {}, {}, music, dict(seek_s=0.0, delay_s=0.5)), [1.52, 2.01, 2.53])                   # (music that starts after the film)
     monkeypatch.setattr(P, 'beat_list', lambda *a: (_ for _ in ()).throw(OSError('gone')))
     assert np.allclose(P.film_beats('f', {}, {}, music, dict(seek_s=1.0, delay_s=0.0)), np.arange(9) * 0.5)
+
+
+# ---------------------------------------------------------------------------------------------------------------- ramps planned up front (chrono.plan_ramps)
+def win(cs, beats, q=0.5, **kw):
+    from strata360.edit import chrono as CH, optimise as O
+    c = O.Candidate(id='A#00', clip='A', quality=q, energy=0.5, min_dur=1.0, max_dur=600.0, features={}); c.start_s, c.end_s = 0.0, 600.0
+    return CH.Window(0, c, cs, beats, q, **kw)
+
+
+def test_the_planner_gives_a_window_before_minutes_of_quiet_running_the_beats_to_land():
+    from strata360.edit import chrono as CH
+    ws = [win(10.0, 8), win(216.0, 8), win(230.0, 8)]; done = CH.plan_ramps(ws, [clip(dur=300.0)], 0.5, 120, CH.Settings())
+    assert done == [ws[0]] and ws[0].beats == 22 and ws[0].ramp_lead == pytest.approx(1.4) and ws[1].ramp_lead is None       # 11 s: the fewest beats that land 206 s at most 24x; 216 .. 230 is too short to race
+    rp = HL.profile(11.0, 206.0, lead_s=1.4); assert rp['src_dur_s'] == pytest.approx(206.0, abs=2e-3) and rp['speed'] <= HL.MAX_SPEED
+    ws = [win(10.0, 8), win(45.0, 8)]; assert CH.plan_ramps(ws, [clip(dur=300.0)], 0.5, 120, CH.Settings()) == [] and ws[0].beats == 8         # its own length lands: hyperlapse.apply ramps it as it is
+
+
+@pytest.mark.parametrize('kw,why', [
+    (dict(clip=dict(speech=[(100.0, 104.0)])), 'someone talks in the stretch'),
+    (dict(st=dict(ramps=False)), 'the setting is off'),
+    (dict(st=dict(bans_techs=frozenset({'follow_runner'}))), 'following the heading is banned'),
+    (dict(st=dict(tech_force={'A@10.00': 'selfie_hold'})), 'you chose another technique for the window'),
+    (dict(st=dict(ramp_share=0.1)), 'the ramp would take more than its share of the film'),
+    (dict(w=dict(fixed=True)), 'the window is locked'),
+    (dict(w=dict(speech=True)), 'the window is dialogue'),
+    (dict(clip=dict(dur=900.0), far=True), 'a stretch longer than the longest ramp window can land'),
+])
+def test_the_planner_plans_no_ramp_where_it_may_not(kw, why):
+    from strata360.edit import chrono as CH
+    w = win(10.0, 8, **kw.get('w', {})); ws = [w, win(800.0 if kw.get('far') else 216.0, 8)]
+    assert CH.plan_ramps(ws, [clip(**{'dur': 300.0, **kw.get('clip', {})})], 0.5, 120, CH.Settings(**kw.get('st', {}))) == [] and w.beats == 8 and w.ramp_lead is None, why
+
+
+def test_a_planned_ramp_takes_its_beats_from_the_other_windows_and_follows_the_heading():
+    from strata360.edit import chrono as CH, optimise as O, project as P, techniques as TQ
+    f = __import__('test_project_edit').make_project((60, 300, 120)); lib = TQ.load(); clips, _ = P.load_clips(f)
+    music = O.Music(bpm=120.0, beats=120, bar_beats=4, sections=[(0, 10 ** 9, 0.5)])
+    segs = CH.plan(clips, lib, music, CH.Settings(seed=1)); ramps = [s for s in segs if s.parts.get('ramp_lead_s') is not None]
+    assert ramps and all(s.tech.id == 'follow_runner' for s in ramps) and sum(s.beats for s in segs) == 120 and CH.violations(segs, lib, music, clips) == []
+    off = CH.plan(clips, lib, music, CH.Settings(seed=1, ramps=False)); assert not any(s.parts.get('ramp_lead_s') is not None for s in off)
+    ser = P.serialise(segs, clips, music, lib); g = next(x for x in ser if x.get('ramp_lead_s') is not None); rep = HL.apply(ser, clips, lib)
+    assert g['ramp']['lands'] and g['ramp']['lead_s'] == g['ramp_lead_s'] and any(r['id'] == g['id'] and r['lands'] for r in rep)

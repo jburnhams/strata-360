@@ -99,7 +99,7 @@ def _planner(edit, lib, prev_plan, mus=None):
     music = O.Music(bpm=bpm, beats=beats, bar_beats=bar, sections=[tuple(x) for x in mus['sections']] if mus else [(0, 10 ** 9, 0.5)])
     prefer = {g['id']: g['technique'] for g in (prev_plan or {}).get('segments', [])}
     st = CH.Settings(seed=int(s['seed']), locked=tuple(o['locked']), tech_force=dict(o['tech_force']), prefer=prefer, bans_cands=frozenset(o['bans_cands']), bans_techs=frozenset(o['bans_techs']),
-                     clip_weight={k: float(v) for k, v in o['clip_weight'].items()})
+                     clip_weight={k: float(v) for k, v in o['clip_weight'].items()}, ramps=bool(s.get('hyperlapse', True)))
     return music, st
 
 
@@ -111,6 +111,7 @@ def serialise(segs, clips, music, lib, locked_wids=()):
                         dur_s=round(dur, 3), clip_start_s=sg.clip_start_s, in_s=sg.in_s, utc_start=t0.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z', utc_end=(t0 + dt.timedelta(seconds=dur)).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
                         energy=round(float(sg.cand.energy), 3), technique=sg.tech.id, family=sg.tech.family, hero=sg.tech.hero, variant_seed=sg.variant_seed, forced=sg.forced, speech=bool(sg.parts.get('speech', sg.cand.speech)), kind=getattr(sg.cand, 'kind', 'span'), view=getattr(sg.cand, 'view', 'ahead'), locked=sg.parts['wid'] in locked_wids,
                         options=sg.parts['options'], voice_span=sg.parts.get('voice_span')))
+        if sg.parts.get('ramp_lead_s') is not None: out[-1]['ramp_lead_s'] = sg.parts['ramp_lead_s']          # a planned ramp window (chrono.plan_ramps): edit/hyperlapse.py keeps its lead
     return out
 
 
