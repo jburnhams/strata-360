@@ -52,6 +52,11 @@ The reference (kept in `scripts/overlay/`: `layout.xml` and the command line use
 - Record what looks wrong (seams, grade, framing, sound) as issues; they feed milestone C.
 - **Done when:** a finished film with overlay exists, and `progress.md` has the timings and the list of defects.
 
+### A6. YouTube chapters (S; built 19 Oct)
+- **What:** chapter markers for the video's description, one per stage of the race on screen: "Stage 3, km 42", "Checkpoint 2, km 38", "Start", "Finish" (km is the distance run from the start at the chapter's first frame). From the time map (A2) and `gps/tracks.py` `stage_schedule` (the checkpoint split); a generated clip's race time runs across its gap, so a stage that changes inside a window starts its chapter at that frame.
+- **Built:** `render/chapters.py`; the final render writes `chapters.txt` (paste into YouTube) and `chapters.json` beside the film, after the opening (the first chapter takes it in, at 0:00). YouTube's rules are kept: chapters under 10 s join a neighbour, and `youtube` is false when fewer than 3 are left (YouTube then shows none). `strata360 chapters FOLDER [--film DIR] [--min-s 10]` writes and prints them for a film already rendered (the opening's length from its `bookend-intro-*.mov`). A failure never stops the render (a note in the progress log). Tests: `tests/unit/test_chapters.py`, `tests/integration/test_render.py`.
+- **Still to do:** a copy button in the Final film panel; chapters on the Legends film (a track with routes and checkpoints; without routes the chapters are only "km N" and a whole run is one chapter).
+
 ### V7. The script writer as director (design 3 Oct, from the user; to build)
 The writer stops being only a script editor and becomes the **director of a rough draft of the whole film**: it is told about the music, its words, the gaps and what can fill them, and answers with the order, the narration, the gap fills and where things should land. Deterministic rules then fix the precise timings; the user tweaks with the same tools as today (pins, marks, items). The model decides *what and roughly where*; code decides *exactly when*.
 

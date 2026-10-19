@@ -1,6 +1,6 @@
 """The time map of a film (implementation plan A2): which footage is on screen at every frame, written next to the final film as `timemap.json` and `timemap.csv`.
 
-Per WINDOW of the plan: its first and last film frame, the clip and the source seconds it plays, and the UTC at its in and out points (a generated clip has no clip and no UTC of its own; its race time is in `race_utc`, when the plan carries one).
+Per WINDOW of the plan: its first and last film frame, the clip and the source seconds it plays, and the UTC at its in and out points (a generated clip has no clip; its UTC in and out are the race span the whole generated clip covers in its `synthetic_seconds`, played from `source_in_s`: render/synthetic.py `race_time`).
 Per TRANSITION region (a dissolve, dip or whip is centred on the cut): the film frames it covers and both windows' source seconds and UTC at its two ends, since both pictures are on screen. The layout is render/film.layout's, so the frames are the ones the
 renderer cuts the film into. `utc_at(timemap, frame)` answers "what time of the race is on screen at film frame f" (the incoming window after the middle of a transition)."""
 import csv, datetime as dt, json, os
@@ -22,7 +22,7 @@ def build(plan, fps):
     segs = plan['segments']; starts, n, half = layout(segs, fps); wins = []; trs = []
     for k, g in enumerate(segs):
         s0 = float(g.get('clip_start_s') or 0.0); dur = HL.src_dur(g); u0 = g.get('utc_start')                                       # (a ramp window plays more of its clip than its length: edit/hyperlapse.py)
-        wins.append(dict(index=k, id=g.get('id'), film_in=starts[k], film_out=starts[k] + n[k], clip=None if g.get('synthetic') else g.get('clip'), synthetic=bool(g.get('synthetic')), source_in_s=round(s0, 3), source_out_s=round(s0 + dur, 3), utc_in=u0, utc_out=g.get('utc_end') or _utc(u0, dur)))
+        wins.append(dict(index=k, id=g.get('id'), film_in=starts[k], film_out=starts[k] + n[k], clip=None if g.get('synthetic') else g.get('clip'), synthetic=bool(g.get('synthetic')), source_in_s=round(s0, 3), source_out_s=round(s0 + dur, 3), utc_in=u0, utc_out=g.get('utc_end') or _utc(u0, dur), **({'synthetic_seconds': float(g['synthetic_seconds'])} if g.get('synthetic') and g.get('synthetic_seconds') else {})))
         if g.get('ramp'): wins[-1]['ramp'] = g['ramp']
     for k in range(1, len(segs)):
         h = half[k]
