@@ -2,7 +2,7 @@
 
 The plan is a pure function of (candidates, settings, overrides, seed): `propose` recomputes it, and everything the user changes is recorded as an override so a re-plan never loses it.
 
-  edit.settings   length_s, bpm, bar_beats, seed, wpm, style
+  edit.settings   length_s, bpm, bar_beats, seed, wpm, style, hyperlapse (speed ramps through the quiet running between windows: edit/hyperlapse.py)
   edit.overrides  locked       windows kept exactly: {wid, clip, start_s, beats, cand_id, tech}
                   tech_force   {wid: technique}: this window must use that technique
                   bans_cands   stretches (candidate ids) never to use
@@ -15,9 +15,9 @@ A window's id (`wid`) is "<clip id>@<start in the clip, seconds, 2 decimals>"; o
 import datetime as dt, glob, json, os
 from strata360.edit.script_pack import norm_label
 from strata360.pipeline import config
-from strata360.edit import techniques as TQ, chrono as CH, optimise as O
+from strata360.edit import techniques as TQ, chrono as CH, optimise as O, hyperlapse as HL
 
-DEFAULT_SETTINGS = dict(length_s=90.0, bpm=120.0, bar_beats=4, seed=1, wpm=145.0, style='', music=None, music_original=None, music_mode='fixed')      # music: a file inside the project folder (music/track.* or music/built.flac): tempo, bars and energy then come from it; music_original is the uploaded track while the built one is in use; music_mode 'built' means the music is made for the film after the script (the picture sets its length), 'fixed' that the film is cut to the track
+DEFAULT_SETTINGS = dict(length_s=90.0, bpm=120.0, bar_beats=4, seed=1, wpm=145.0, style='', music=None, music_original=None, music_mode='fixed', hyperlapse=True)      # hyperlapse: long quiet running is raced through in speed ramps instead of cut out (edit/hyperlapse.py); music: a file inside the project folder (music/track.* or music/built.flac): tempo, bars and energy then come from it; music_original is the uploaded track while the built one is in use; music_mode 'built' means the music is made for the film after the script (the picture sets its length), 'fixed' that the film is cut to the track
 EMPTY_OVERRIDES = dict(locked=[], tech_force={}, bans_cands=[], bans_techs=[], clip_weight={}, transitions={})
 
 
@@ -167,6 +167,12 @@ def sync_gap_clips(folder, specs, log=print):
     return made
 
 
+def speed_ramps(edit, ser, clips, lib):
+    """The plan's windows followed by long quiet running made into speed ramps (edit/hyperlapse.py), in place, unless the setting is off; returns the report for the plan."""
+    o = edit['overrides']
+    return HL.apply(ser, clips, lib, bans=o['bans_cands'], protect=set(o['tech_force']), st=HL.Settings(enabled=bool(edit['settings'].get('hyperlapse', True))))
+
+
 def insert_synthetic(folder, ser, specs, beat_s):
     """The plan's segments with the generated clips (edit/synthetic.py) put in their places: each is a window of the whole clip, played from its start, `synthetic` naming the video file (the film's sources play it as it is)."""
     from strata360.edit import synthetic as SY
@@ -229,13 +235,14 @@ def plan_from_script(folder, draft_name=None, log=print):
         if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
     ser, sync = beat_sync(folder, edit['settings'], mus, ser, res['lines'], clips, lib, res['warnings'])                       # the cuts moved onto the music's real beats (V5)
     PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)
+    ramps = speed_ramps(edit, ser, clips, lib)                                                                                       # long quiet running raced through instead of cut out (edit/hyperlapse.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
     now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     music_at = dict(file=edit['settings']['music'], offset_s=sync['seek_s'], delay_s=sync['delay_s'], synced=True) if sync else (dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)
     edit['plan'] = dict(generated_at=now, source='script', script=name, film=dict(length_s=sync['length_s'] if sync else round(music.beats * music.beat_s, 3), beats=music.beats, bpm=bpm, bar_beats=bar, music=music_at),
-                        beat_sync=sync, segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [], fit=res.get('fit'), auto_gaps=res.get('auto_gaps') or [])
+                        beat_sync=sync, segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=[], technique_seconds={k: round(v, 2) for k, v in used.items()}, warnings=res['warnings'], anchors=res.get('anchors') or [], over_singing=res.get('over_singing') or [], fit=res.get('fit'), auto_gaps=res.get('auto_gaps') or [], hyperlapse=ramps)
     save(folder, edit); rd = config.race_dir(folder); os.makedirs(os.path.join(rd, 'script2'), exist_ok=True); p = os.path.join(rd, VO.SCRIPT2_LINES); json.dump(dict(draft=name, generated_at=now, lines=res['lines']), open(p + '.tmp', 'w'), indent=1); os.replace(p + '.tmp', p)
     return edit
 
@@ -254,13 +261,14 @@ def propose(folder, settings=None, overrides=None, keep=True):
     locked_w = {g['wid'] for g in edit['overrides']['locked']}; ser = serialise(segs, clips, music, lib, locked_w); wids = {g['id'] for g in ser}
     from strata360.edit import transitions as TR
     for g in ser: g['energy_hi'] = g['energy'] >= 0.6
+    ramps = speed_ramps(edit, ser, clips, lib)                                                                    # long quiet running raced through instead of cut out (edit/hyperlapse.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in edit['overrides'].get('transitions', {}).items() if v in TR.TYPES})
     orphaned = sorted((set(edit['overrides']['tech_force']) | locked_w) - wids)
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
     edit['plan'] = dict(generated_at=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=music.bpm, bar_beats=music.bar_beats, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
                         segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=orphaned, technique_seconds={k: round(v, 2) for k, v in used.items()},
-                        warnings=(segs[0].parts.get('warnings') if segs else []) or [])
+                        warnings=(segs[0].parts.get('warnings') if segs else []) or [], hyperlapse=ramps)
     try:                                                                                                          # the text options the local models made for this plan, if any (edit/film_text.py): the planner is shown them
         from strata360.edit import film_text
         edit['plan'].update(film_text.for_plan(folder, edit['plan']))
