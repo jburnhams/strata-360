@@ -44,7 +44,13 @@ jobs:
         run: brew install ffmpeg
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress -y
+        run: |                                     # the Chocolatey feed often answers 504: try again a few times
+          for ($i = 1; $i -le 4; $i++) {
+            choco install ffmpeg --no-progress -y
+            if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { exit 0 }
+            Write-Host "ffmpeg not installed (try $i of 4); waiting $(15 * $i) s"; Start-Sleep -Seconds (15 * $i)
+          }
+          exit 1
       - name: Check ffmpeg has libx265
         shell: bash
         run: ffmpeg -hide_banner -encoders | grep -q libx265
