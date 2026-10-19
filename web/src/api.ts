@@ -165,6 +165,8 @@ export interface StillState { name: string; state: 'none' | 'queued' | 'renderin
 export interface StillMeta { name: string; key: string; t: number | null; frame: number; fps?: number; size: [number, number] | null; upscale: EnlargeMode | null; model?: string | null; piece?: string; shots?: { id: string; clip: string | null; fov: number | null; factor: number; note: string }[]; rendered?: string; seconds?: number; stages?: Record<string, number>; timings?: Record<string, number>; legacy?: boolean; current: boolean; bytes: number; modified: number }
 export interface StillActive extends StillState { t?: number; size?: string; upscale?: EnlargeMode; label?: string; why?: string }
 export interface StillList { stills: StillMeta[]; active: StillActive[]; auto_count: number }
+export interface OverlaySettings { enabled: boolean; elements: string[]; route_style: string; local_style: string; local_zoom: number; auto_zoom: boolean; zoom_range: number }
+export interface OverlayState { settings: OverlaySettings; elements: { name: string; label: string }[]; styles: { name: string; needs_key: boolean }[]; zoom_min: number; zoom_max: number; key_set: boolean; tiles_cached: number }
 export interface FinalState { state: 'noplan' | 'none' | 'starting' | 'rendering' | 'assembling' | 'done' | 'error' | 'stopped' | 'partial'; running: boolean; settings: { size: string; fps: number; half_rate: boolean; bitrate: string; upscale: EnlargeMode }; frames_done?: number; frames_total?: number; pieces_done?: number; pieces_total?: number; started?: number; error?: string | null; has_file?: boolean; progress?: RenderProgress | null }
 export interface MusicAnalysis { bpm: number; offset_s: number; bar_beats?: number; duration_s: number; usable_beats: number; sections: [number, number, number][]; confidence: number }
 export interface MusicState { file: string | null; name?: string | null; analysis: MusicAnalysis | null; waveform?: number[] | null; spectrogram?: boolean }
@@ -371,6 +373,9 @@ export const api = {
   startFinal: (folder: string, o: { size?: string; fps?: number; half_rate?: boolean; upscale?: EnlargeMode } = {}) => call<{ started: boolean }>('/api/final/start', { folder, ...o }),
   stopFinal: (folder: string) => call<{ ok: boolean }>('/api/final/stop', { folder }),
   finalUrl: (folder: string) => '/api/final/file?' + q({ folder }),
+  overlay: (folder: string) => call<OverlayState>('/api/overlay?' + q({ folder })),
+  saveOverlay: (folder: string, o: Partial<OverlaySettings>) => call<OverlayState>('/api/overlay', { folder, ...o }),
+  setMapKey: (key: string) => call<{ key_set: boolean }>('/api/overlay/key', { key }),
   music: (folder: string) => call<MusicState>('/api/music?' + q({ folder })),
   async uploadMusic(folder: string, file: File) {
     const r = await fetch('/api/music?' + q({ folder, filename: file.name }), { method: 'POST', body: file }); const j = await r.json().catch(() => ({}))

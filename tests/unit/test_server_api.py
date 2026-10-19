@@ -368,6 +368,51 @@ class TestMapTiles:
         self.served(monkeypatch, boom); r = client.get('/api/tiles/osm/5/3/3'); assert r.status_code == 502 and 'HTTP 429' in r.json()['detail']
 
 
+class TestOverlaySettings:
+    @pytest.fixture(autouse=True)
+    def keys(self, tmp_path, monkeypatch):
+        from strata360.edit import llm_remote as L
+        monkeypatch.setattr(L, 'VARS_FILE', str(tmp_path / 'secrets.env')); monkeypatch.delenv('THUNDERFOREST_API_KEY', raising=False)
+
+    def race(self, project): return json.load(open(os.path.join(project.race_dir, 'race.json')))
+
+    def test_the_defaults_and_the_choices_are_shown_without_a_key(self, client, project):
+        o = client.get('/api/overlay', params=dict(folder=project.folder)).json()
+        assert o['settings'] == dict(enabled=True, elements=[e for e in o['settings']['elements']], route_style='tf-landscape', local_style='tf-outdoors', local_zoom=14.0, auto_zoom=True, zoom_range=1.5)
+        assert 'clock' in o['settings']['elements'] and 'credit' not in o['settings']['elements'] and 'credit' not in [e['name'] for e in o['elements']]
+        assert dict(name='osm', needs_key=False) in o['styles'] and o['key_set'] is False and o['tiles_cached'] == 0 and o['zoom_max'] == 18
+
+    def test_changes_are_written_to_race_json_and_the_overlay_thumbnails_are_made_again(self, client, project):
+        th = os.path.join(project.clip_dir(), 'thumb_overlay.jpg'); open(th, 'wb').write(b'old')
+        r = client.post('/api/overlay', json=dict(folder=project.folder, enabled=False, elements=['pace', 'clock'], route_style='osm', local_zoom=12, auto_zoom=False, zoom_range=0.5)).json()
+        assert r['settings'] == dict(enabled=False, elements=['clock', 'pace'], route_style='osm', local_style='tf-outdoors', local_zoom=12.0, auto_zoom=False, zoom_range=0.5)
+        o = self.race(project)['overlay']; assert o['layout'] == {'route_map': {'style': 'osm'}} and o['elements'] == ['clock', 'pace'] and o['auto_zoom'] is False
+        assert not os.path.exists(th)
+
+    def test_saving_what_is_drawn_already_changes_nothing_so_the_film_keeps_its_key(self, client, project):
+        th = os.path.join(project.clip_dir(), 'thumb_overlay.jpg'); open(th, 'wb').write(b'old'); before = self.race(project); cur = client.get('/api/overlay', params=dict(folder=project.folder)).json()['settings']
+        client.post('/api/overlay', json=dict(folder=project.folder, **cur)); assert self.race(project) == before and os.path.exists(th)
+
+    def test_one_style_for_both_maps_is_split_when_one_map_is_changed(self, client, project):
+        cfg = self.race(project); cfg['overlay'] = dict(style='osm', font='/x.ttf'); json.dump(cfg, open(os.path.join(project.race_dir, 'race.json'), 'w'))
+        r = client.post('/api/overlay', json=dict(folder=project.folder, local_style='tf-cycle')).json()['settings']; assert (r['route_style'], r['local_style']) == ('osm', 'tf-cycle')
+        assert self.race(project)['overlay']['font'] == '/x.ttf'                          # what the panel does not show is kept
+
+    @pytest.mark.parametrize('bad', [dict(elements=['nope']), dict(elements='clock'), dict(elements=['credit']), dict(route_style='google'), dict(local_zoom=40), dict(zoom_range='wide'), dict(zoom_range=9)])
+    def test_bad_values_are_refused_and_nothing_is_written(self, client, project, bad):
+        before = self.race(project); assert client.post('/api/overlay', json=dict(folder=project.folder, **bad)).status_code == 400 and self.race(project) == before
+
+    def test_the_map_key_is_stored_but_never_returned_and_can_be_removed(self, client, project):
+        from strata360.edit import llm_remote as L
+        r = client.post('/api/overlay/key', json=dict(key='abcdef0123456789abcdef0123456789')); assert r.json() == dict(key_set=True) and 'abcdef0123456789' not in json.dumps(client.get('/api/overlay', params=dict(folder=project.folder)).json())
+        assert client.get('/api/overlay', params=dict(folder=project.folder)).json()['key_set'] is True and L.secret('THUNDERFOREST_API_KEY') == 'abcdef0123456789abcdef0123456789'
+        assert client.get('/api/tiles/status', params=dict(style='tf-landscape')).json()['ok'] is True
+        assert client.post('/api/overlay/key', json=dict(key='')).json() == dict(key_set=False) and L.secret('THUNDERFOREST_API_KEY') is None
+
+    def test_a_key_that_would_break_the_secrets_file_is_refused(self, client):
+        assert client.post('/api/overlay/key', json=dict(key='abc def\nX=1')).status_code == 400
+
+
 class TestLyricsApi:
     def track(self, project):
         os.makedirs(os.path.join(project.race_dir, 'music'), exist_ok=True); open(os.path.join(project.race_dir, 'music', 'track.mp3'), 'wb').write(b'x'); json.dump(dict(file='music/track.mp3', sig=[1, 2]), open(os.path.join(project.race_dir, 'music.json'), 'w'))

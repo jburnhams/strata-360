@@ -138,3 +138,14 @@ def test_script_writer_uses_the_remote_provider_and_enforces_budgets(claude_key,
     d = S.write_script(facts, 'notes', 10.0, provider='anthropic', model='claude-sonnet-5-5')
     assert len(fake_urlopen.calls) == 2 and 'Fix these problems' in fake_urlopen.calls[1]['body']['messages'][-1]['content'] and d['provider'] == 'anthropic'       # one retry with the exact violations
     l0, l1 = d['lines']; assert l0['text'] == 'A short line.' and l1['text'] == '' and l0['words'] <= l0['budget_words']
+
+
+class TestOtherSecrets:
+    def test_a_secret_is_stored_privately_beside_the_keys_and_can_be_removed(self, monkeypatch):
+        monkeypatch.delenv('MAP_KEY', raising=False); L.set_key('sk-ant-' + 'x' * 40)
+        assert L.set_secret('MAP_KEY', ' abc123def456 ') is True and L.secret('MAP_KEY') == 'abc123def456' and is_private(L.VARS_FILE) and L.key_configured()
+        assert L.set_secret('MAP_KEY', '') is False and L.secret('MAP_KEY') is None and L.key_configured()
+
+    @pytest.mark.parametrize('bad', ['short', 'has space inside', 'two\nlines=1', 'x' * 201])
+    def test_a_value_that_would_break_the_file_is_refused(self, bad):
+        with pytest.raises(L.LLMError): L.set_secret('MAP_KEY', bad)
