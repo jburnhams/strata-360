@@ -418,9 +418,9 @@ describe('what is shown to start with, and making a nearby capture a candidate',
     server.use(http.get('/api/streetview/near', () => HttpResponse.json({ cached: true, result: makeNearResult({ providers: { mapillary: { items: [makeNearItem({ section: null })], radius_m: 100 }, panoramax: { items: [], radius_m: 100 }, google: { items: [], radius_m: 110 } } }), job: null })))
     const seen = recordRequests('/api/streetview/promote'); server.use(http.post('/api/streetview/promote', () => HttpResponse.json({ key: 'mapillary:s:1.00', id: 'M+1' })))
     serve(); const { user } = setup(<StreetViewPage folder="/data" initialFilters={SHOW_ALL} />); await screen.findAllByRole('row')
-    fireEvent.click(await screen.findByRole('application'), { clientX: 40, clientY: 30 })
-    await user.click(await screen.findByRole('button', { name: 'Make this a candidate' }))
+    fireEvent.click(await screen.findByRole('application'), { clientX: 40, clientY: 30 }); await screen.findByLabelText('Nearest street view to the clicked point')
+    await user.click(await screen.findByRole('button', { name: 'Make this a candidate' }, { timeout: 4000 }))          // the look-up answers after the panel is up: on a busy runner (the coverage run) that took over a second
     await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen[0].body).toMatchObject({ folder: '/data', provider: 'mapillary', id: 'm9' })
     expect(await screen.findByText('Already a candidate: section M+1')).toBeInTheDocument()
-  })
+  }, 10000)
 })
