@@ -60,6 +60,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/components/AskPage.tsx` | ~95% | done (`AskPage.test.tsx`: not-set-up states, asking and the history sent, Enter/Shift+Enter, busy and error states, steps, pictures, the vision box, clip-id links, project change, the edit switch, approval cards, a11y) |
 | `src/components/StylePanel.tsx` | ~98% | done (`StylePanel.test.tsx`: loading and failure, fonts by role with their pictures, where the vibes come from, picking and clearing vibes, the script writer's choice, changing and resetting a role's font, refusals and the saving state, colour schemes, a11y) |
 | `src/usePoll.ts` | 100% | done |
+| `src/components/OverlaySettings.tsx` | ~100% | done (`OverlaySettings.test.tsx`: saved settings, saving in layout order, off, undo, refusals, the map key set/removed/needed, disabled while rendering, load failure, a11y) |
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
 | `src/components/ScriptPanel.tsx` | 96.55% | done (one missed branch) |
 | `src/components/VoiceoverPanel.tsx` | 100% | done |

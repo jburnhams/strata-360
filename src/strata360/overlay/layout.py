@@ -39,6 +39,8 @@ ELEMENTS = {   # reference positions on a 1920 x 1080 frame; h/v: the edges the 
     'local_map': dict(kind='local_map', x=1644, y=304, h='right', size=256, radius=35, outline=(255, 0, 0), style='tf-outdoors'),
     'credit': dict(kind='credit', x=1900, y=566, h='right', size=11),
 }
+LABELS = dict(clock='Clock and date', stage='Stage', distance='Distance', pace='Pace', altitude='Altitude', slope='Slope', climb='Climb and descent', heart_rate='Heart rate', route_map='Whole-route map',
+              local_map='Close-up map', profile='Elevation strip', credit='Map credit')        # what the app calls each element (the Final film panel)
 DEFAULTS = dict(enabled=True, line_opacity=1.0, style=None, elements=[e for e in ELEMENTS if e != 'credit'], scale=1.0, map_opacity=0.6, local_zoom=14, auto_zoom=True, zoom_range=1.5, font=None, label_font=None, layout={})
 DASH = '–'
 

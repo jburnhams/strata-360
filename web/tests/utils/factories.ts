@@ -1,4 +1,4 @@
-import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, RoughMix, Lyrics, LyricPhrase, DetectedObject, Region, ObjectsInfo, ReviewItem, ReviewQueue } from '../../src/api'
+import type { Browse, BrowseEntry, Notes, Progress, StateMatrix, Seg, ClipInfo, WordT, StageHealth, Meta, ClockState, TrackOverview, WhoState, MusicState, Gap, GapClip, FilmState, FinalState, OverlayState, RoughMix, Lyrics, LyricPhrase, DetectedObject, Region, ObjectsInfo, ReviewItem, ReviewQueue } from '../../src/api'
 
 // Typed builders for API payloads: sensible defaults, override what the test cares about (`makeBrowse({ can_create: false })`).
 // Add one per interface in src/api.ts as tests need it. Keep the defaults boring and valid.
@@ -81,6 +81,10 @@ export const makeGap = (o: Partial<Gap> = {}): Gap => ({
   daylight: 'twilight->night', before: 'a', after: 'b', default_seconds: 14, clips: [], ...o,
 })
 export const makeFilmState = (o: Partial<FilmState> = {}): FilmState => ({ state: 'none', running: false, ...o })
+export const makeOverlayState = (o: Partial<OverlayState> = {}, settings: Partial<OverlayState['settings']> = {}): OverlayState => ({
+  settings: { enabled: true, elements: ['clock', 'distance', 'route_map'], route_style: 'tf-landscape', local_style: 'tf-outdoors', local_zoom: 14, auto_zoom: true, zoom_range: 1.5, ...settings },
+  elements: [{ name: 'clock', label: 'Clock and date' }, { name: 'distance', label: 'Distance' }, { name: 'pace', label: 'Pace' }, { name: 'route_map', label: 'Whole-route map' }],
+  styles: [{ name: 'tf-outdoors', needs_key: true }, { name: 'tf-landscape', needs_key: true }, { name: 'osm', needs_key: false }], zoom_min: 3, zoom_max: 18, key_set: true, tiles_cached: 12, ...o })
 export const makeFinalState = (o: Partial<FinalState> = {}): FinalState => ({ state: 'none', running: false, settings: { size: '1080p', fps: 30, half_rate: false, bitrate: '20M', upscale: 'off' }, ...o })
 export const makeRoughMix = (o: Partial<RoughMix> = {}): RoughMix => ({ has_plan: true, exists: false, stale: false, stale_because: [], length_s: null, made_at: null, source: 'script', building: false, error: '', log: '', ...o })
 export const makeScriptState = (o: Partial<import('../../src/api').ScriptState> = {}): import('../../src/api').ScriptState => ({ key_configured: true, providers: { anthropic: { models: ['claude-3'], default: 'claude-3', configured: true } }, models: ['claude-3'], llm: { provider: 'anthropic', model: 'claude-3' }, running: false, last_exit: null, log: '', latest: null, scripts: 0, ...o })

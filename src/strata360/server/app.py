@@ -1012,6 +1012,59 @@ def create_app(roots, token=None):
             except TL.MissingKey as e: raise HTTPException(503, str(e))
         return TILES[style]
 
+    MAP_KEY = 'THUNDERFOREST_API_KEY'
+
+    def overlay_state(f):
+        """The overlay settings the Final film panel edits (race.json `overlay`), what can be chosen, and whether the map key is set (never the key itself)."""
+        from strata360.edit import llm_remote as LR
+        from strata360.overlay import layout as LY, tiles as TL
+        raw = config.load(f).get('overlay') or {}
+        try: st = LY.settings(raw)
+        except ValueError as e: raise HTTPException(400, f'race.json overlay: {e}')
+        style = lambda n: st.get('style') or (st['layout'].get(n) or {}).get('style') or LY.ELEMENTS[n]['style']
+        n = sum(len(x) for _, _, x in os.walk(TL.cache_root())) if os.path.isdir(TL.cache_root()) else 0
+        return dict(settings=dict(enabled=bool(st['enabled']), elements=[e for e in st['elements'] if e != 'credit'], route_style=style('route_map'), local_style=style('local_map'), local_zoom=float(st['local_zoom']), auto_zoom=bool(st['auto_zoom']), zoom_range=float(st['zoom_range'])),
+                    elements=[dict(name=e, label=LY.LABELS.get(e, e)) for e in LY.ELEMENTS if e != 'credit'], styles=[dict(name=k, needs_key=bool(v['key'])) for k, v in TL.STYLES.items()],
+                    zoom_min=3, zoom_max=TL.MAX_ZOOM, key_set=bool(LR.secret(MAP_KEY)), tiles_cached=n)
+
+    @api.get('/api/overlay', dependencies=[Depends(auth)])
+    def get_overlay(folder: str): return overlay_state(folder_of(folder))
+
+    @api.post('/api/overlay', dependencies=[Depends(auth)])
+    def post_overlay(body: dict):                                                        # {folder, enabled?, elements?, route_style?, local_style?, local_zoom?, auto_zoom?, zoom_range?}: written to race.json `overlay` (fonts, layout and the rest kept); the film's key changes with it
+        from strata360.overlay import layout as LY, tiles as TL
+        f = folder_of(body.get('folder')); cfg = config.load(f); old = dict(cfg.get('overlay') or {}); o = dict(old); lay = {k: dict(v) for k, v in (o.get('layout') or {}).items()}; cur = overlay_state(f)['settings']   # a value equal to what is drawn now is not written, so the film keeps its key
+        if 'enabled' in body and bool(body['enabled']) != cur['enabled']: o['enabled'] = bool(body['enabled'])
+        if 'elements' in body:
+            els = body['elements']
+            if not isinstance(els, list) or any(e not in LY.ELEMENTS or e == 'credit' for e in els): raise HTTPException(400, 'elements: a list of ' + ', '.join(e for e in LY.ELEMENTS if e != 'credit'))
+            new = [e for e in LY.ELEMENTS if e in els or (e == 'credit' and e in LY.settings(old)['elements'])]          # the drawing order stays the layout's; a credit set by hand in race.json is kept
+            if new != LY.settings(old)['elements']: o['elements'] = new
+        for k, el in (('route_style', 'route_map'), ('local_style', 'local_map')):
+            if k in body and body[k] not in TL.STYLES: raise HTTPException(400, f'{k}: one of ' + ', '.join(TL.STYLES))
+            if k in body and body[k] != cur[k]:
+                lay.setdefault(el, {})['style'] = body[k]
+                if o.get('style'): lay.setdefault('route_map' if el == 'local_map' else 'local_map', {}).setdefault('style', o['style'])
+                o['style'] = None                                                        # one style for both would hide the other map's choice
+        for k, lo, hi in (('local_zoom', 3, TL.MAX_ZOOM), ('zoom_range', 0, 4)):
+            if k in body:
+                try: v = float(body[k])
+                except (TypeError, ValueError): raise HTTPException(400, f'{k}: a number')
+                if not lo <= v <= hi: raise HTTPException(400, f'{k}: between {lo} and {hi}')
+                if v != cur[k]: o[k] = v
+        if 'auto_zoom' in body and bool(body['auto_zoom']) != cur['auto_zoom']: o['auto_zoom'] = bool(body['auto_zoom'])
+        if lay: o['layout'] = lay
+        if o != old:
+            cfg['overlay'] = o; config.save(f, cfg); overlays_changed(f)                 # the thumbnails with the overlay are made again; the film is out of date by its own key
+        return overlay_state(f)
+
+    @api.post('/api/overlay/key', dependencies=[Depends(auth)])
+    def post_overlay_key(body: dict):                                                    # {key}: write-only; stored in secrets.env (mode 600) like set-key, never returned; an empty key removes it
+        from strata360.edit import llm_remote as LR
+        try: ok = LR.set_secret(MAP_KEY, str(body.get('key') or ''))
+        except LR.LLMError as e: raise HTTPException(400, str(e))
+        TILES.clear(); return dict(key_set=ok)                                           # the map styles are made again with the new key
+
     @api.get('/api/tiles/status', dependencies=[Depends(auth)])
     def get_tiles_status(style: str = 'tf-landscape'):                                  # whether the map background can be drawn (and the credit it must carry), for the overview map
         from strata360.overlay import tiles as TL

@@ -3,7 +3,7 @@
 An API key is never stored in the project or the repository. It is read from the environment (`GEMINI_API_KEY` / `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`) or from `~/.strata360/gemini_key` /
 `anthropic_key` (created by `strata360 set-key` or the web app, mode 600). The web app can set it but never shows it again. Privacy: a request carries the text the writer is given (your notes, the words you
 say on camera and their translations, race facts such as pace, climb and time of day, place names, and short scene descriptions). No video, audio, pictures or faces are sent."""
-import json, os, time, urllib.error, urllib.request
+import json, os, re, time, urllib.error, urllib.request
 
 URL = 'https://api.anthropic.com/v1/messages'
 VERSION = '2023-06-01'
@@ -62,6 +62,14 @@ def api_key(provider='anthropic'):
 def secret(name):
     """Any other secret by variable name (the map tile key, for one): the environment, then the project's secrets.env."""
     return os.environ.get(name, '').strip() or _read_vars().get(name) or None
+
+
+def set_secret(name, value):
+    """Store (or, with an empty string, remove) any other secret by variable name in the project's secrets.env (mode 600), like set_key; a value with spaces or line breaks is refused (it would break the file). Returns whether one is set now."""
+    v = _read_vars(); value = (value or '').strip()
+    if not value: v.pop(name, None); _write_vars(v); return bool(secret(name))
+    if not re.fullmatch(r'[A-Za-z0-9_.\-]{8,200}', value): raise LLMError('that does not look like an API key (letters, digits, dots, dashes and underscores only)')
+    v[name] = value; _write_vars(v); return True
 
 
 PAID_ENV = ('GEMINI_PAID_API_KEY',)         # a paid AI Studio key: used for the pro models (the free tier has no quota for them) and as the fallback when the free key is rate limited
