@@ -657,6 +657,29 @@ class TestProposeKeepsAScriptPlan:
         assert client.post('/api/edit/propose', json=dict(folder=project.folder, replace=True)).status_code == 200 and called
 
 
+
+class TestTimelineEditing:
+    def test_edge_suggest_and_back_go_to_the_planner_and_errors_come_back_as_400(self, client, project, monkeypatch):
+        from strata360.edit import project as PJ
+        calls = []
+        monkeypatch.setattr(PJ, 'move_edge', lambda f, wid, beats: calls.append(('edge', wid, beats)) or (dict(plan=None), dict(asked=beats, beats=1, why='moved 1 beat')))
+        monkeypatch.setattr(PJ, 'suggest_again', lambda f, wids: calls.append(('suggest', wids)) or dict(plan=None))
+        monkeypatch.setattr(PJ, 'step_back', lambda f: calls.append(('back',)) or dict(plan=None))
+        post = lambda **b: client.post('/api/edit/override', json=dict(folder=project.folder, **b))
+        r = post(action='edge', wid='C@1.00', beats='3'); assert r.status_code == 200 and r.json()['note']['why'] == 'moved 1 beat'
+        assert post(action='suggest', wids=['a', 'b']).json() == dict(edit=dict(plan=None)) and post(action='back').status_code == 200
+        assert calls == [('edge', 'C@1.00', 3), ('suggest', ['a', 'b']), ('back',)]
+        monkeypatch.setattr(PJ, 'step_back', lambda f: (_ for _ in ()).throw(ValueError('there is no earlier version to step back to')))
+        r = post(action='back'); assert r.status_code == 400 and 'no earlier version' in r.json()['detail']
+
+    def test_the_edit_carries_each_cuts_room_and_the_versions_to_step_back_to(self, client, project, monkeypatch):
+        from strata360.edit import project as PJ
+        seg = dict(id='a', clip='C', clip_start_s=0.0, dur_s=2.0, speech=False, utc_start='2026-02-19T10:00:00.000Z', utc_end='2026-02-19T10:00:02.000Z')
+        monkeypatch.setattr(PJ, 'load', lambda f: dict(settings={}, overrides={}, plan=dict(source='beats', film=dict(bpm=120), segments=[dict(seg), dict(seg, id='b')])))
+        monkeypatch.setattr(PJ, 'edge_room', lambda plan, clips, lib=None: [[-2, 3]]); monkeypatch.setattr(PJ, 'load_clips', lambda f: ([], [])); monkeypatch.setattr(PJ, 'history', lambda f: [1, 2])
+        e = client.get('/api/edit', params=dict(folder=project.folder)).json()['edit']
+        assert e['history'] == 2 and e['plan']['segments'][0]['edge_room'] == [-2, 3] and 'edge_room' not in e['plan']['segments'][1]
+
 class TestTracksCollection:
     """Several tracks per project: runs merge into the race track, routes only show on the overview map."""
 

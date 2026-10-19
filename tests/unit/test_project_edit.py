@@ -235,3 +235,105 @@ def test_gap_items_need_a_gap_in_the_draft_and_a_track():
     os.makedirs(_rd(f), exist_ok=True); json.dump({}, open(_rd(f, 'race.json'), 'w'))
     try: P.apply_gap_items(f, dict(items=[dict(type='gap', clip='G01', seconds=5)])); assert False
     except O.Infeasible as e: assert 'no race track' in str(e)
+
+
+# ---- timeline editing (implementation plan D1) ------------------------------------------------------------------------------------------------------------------------------------------
+_win = lambda g: {k: g[k] for k in ('id', 'clip', 'film_start_s', 'start_beat', 'beats', 'clip_start_s', 'technique', 'variant_seed', 'transition')}
+
+
+def _edge(f, plan, n=2):
+    room = P.edge_room(plan, P.load_clips(f)[0]); return next(k for k, r in enumerate(room) if r[1] >= n), room
+
+
+def test_a_dragged_cut_moves_by_whole_beats_locks_both_windows_and_leaves_the_rest_alone():
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1))['plan']; k, _ = _edge(f, a)
+    e, note = P.move_edge(f, a['segments'][k]['id'], 2); b = e['plan']['segments']; A, B = a['segments'][k], a['segments'][k + 1]
+    assert note == dict(asked=2, beats=2, why=None) and len(b) == len(a['segments'])
+    assert (b[k]['clip_start_s'], b[k]['beats']) == (A['clip_start_s'], A['beats'] + 2) and (b[k + 1]['clip_start_s'], b[k + 1]['beats']) == (round(B['clip_start_s'] + 1.0, 3), B['beats'] - 2)
+    assert b[k]['locked'] and b[k + 1]['locked'] and b[k + 1]['id'] == C.wid_of(B['clip'], B['clip_start_s'] + 1.0) and b[k + 1]['film_start_s'] == B['film_start_s'] + 1.0
+    assert [_win(g) for j, g in enumerate(b) if j not in (k, k + 1)] == [_win(g) for j, g in enumerate(a['segments']) if j not in (k, k + 1)]
+    assert {L['wid'] for L in P.load(f)['overrides']['locked']} == {b[k]['id'], b[k + 1]['id']}
+
+
+def test_a_drag_further_than_the_room_stops_at_the_room_and_says_so():
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1))['plan']; k, room = _edge(f, a, 1)
+    e, note = P.move_edge(f, a['segments'][k]['id'], room[k][1] + 5)
+    assert note['beats'] == room[k][1] and 'as far as the footage' in note['why']
+
+
+def test_a_drag_never_lands_a_cut_inside_the_wearers_words(monkeypatch):
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1))['plan']; k, _ = _edge(f, a, 3); A = a['segments'][k]; end = A['clip_start_s'] + A['dur_s']
+    monkeypatch.setattr(P, '_speech', lambda clips: {A['clip']: [(end + 0.6, end + 1.4)]})              # words from 0.6 s to 1.4 s after the cut: +2 beats (1.0 s) would cut into them
+    e, note = P.move_edge(f, A['id'], 2); assert note['beats'] in (1, 3) and 'into the words' in note['why']
+    assert e['plan']['segments'][k]['beats'] == A['beats'] + note['beats']
+
+
+def test_a_drag_with_every_beat_in_the_words_is_refused(monkeypatch):
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1))['plan']; k, _ = _edge(f, a, 1); A = a['segments'][k]
+    monkeypatch.setattr(P, '_speech', lambda clips: {A['clip']: [(A['clip_start_s'], A['clip_start_s'] + 60)]})
+    try: P.move_edge(f, A['id'], 1); assert False
+    except ValueError as e: assert 'cuts into the words' in str(e)
+    assert P.load(f)['plan']['segments'] == a['segments'] and not P.history(f)                           # nothing changed, nothing to step back to
+
+
+def test_drag_errors_name_the_problem():
+    f = make_project()
+    try: P.move_edge(f, 'C00@0.50', 1); assert False
+    except ValueError as e: assert 'propose one first' in str(e)
+    a = P.propose(f, dict(length_s=60, seed=1))['plan']['segments']
+    for wid, n, msg in ((a[-1]['id'], 1, 'end of the film'), (a[0]['id'], 0, 'at least one beat')):
+        try: P.move_edge(f, wid, n); assert False
+        except ValueError as e: assert msg in str(e)
+    try: P.move_edge(f, 'nope', 1); assert False
+    except KeyError: pass
+
+
+def test_suggest_again_replans_the_unlocked_part_and_leaves_locked_windows_identical():
+    """P5-30: a re-roll of an unlocked section leaves the locked sections byte-identical (and here, every window outside the section too)."""
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1, hyperlapse=False))['plan']['segments']
+    P.set_lock(f, a[5]['id'], True); a = P.load(f)['plan']['segments']; assert a[5]['locked']
+    b = P.suggest_again(f, [a[3]['id'], a[8]['id']])['plan']['segments']
+    keep = lambda segs, ids: [g for g in segs if g['id'] in ids]
+    outside = {g['id'] for j, g in enumerate(a) if j < 3 or j > 8} | {a[5]['id']}
+    assert keep(b, outside) == keep(a, outside)                                                        # byte-identical, options, sound and all
+    assert [(g['clip'], g['clip_start_s'], g['technique']) for g in b] != [(g['clip'], g['clip_start_s'], g['technique']) for g in a]
+    assert sum(g['beats'] for g in b) == sum(g['beats'] for g in a) and P.load(f)['plan']['rerolls'] == 1
+
+
+def test_suggest_again_refuses_a_run_that_is_all_locked_and_a_film_from_the_script():
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1))['plan']['segments']; P.set_lock(f, a[2]['id'], True)
+    try: P.suggest_again(f, [a[2]['id']]); assert False
+    except ValueError as e: assert 'locked' in str(e)
+    try: P.suggest_again(f, ['nope']); assert False
+    except KeyError: pass
+    e = P.load(f); e['plan']['source'] = 'script'; P.save(f, e)
+    for go in (lambda: P.suggest_again(f, [a[0]['id']]), lambda: P.move_edge(f, a[0]['id'], 1)):
+        try: go(); assert False
+        except ValueError as ex: assert 'Film script panel' in str(ex)
+
+
+def test_a_lock_after_a_suggestion_keeps_the_suggestion():
+    f = make_project(); P.propose(f, dict(length_s=60, seed=1)); a = P.load(f)['plan']['segments']
+    b = P.suggest_again(f, [a[2]['id'], a[4]['id']])['plan']['segments']; c = P.set_lock(f, b[3]['id'], True)['plan']['segments']
+    assert [(g['id'], g['beats']) for g in c] == [(g['id'], g['beats']) for g in b] and c[3]['locked']
+    d = P.propose(f, dict(length_s=40))['plan']                                                          # a new length plans the whole film again (the lock is kept)
+    assert d['film']['length_s'] == 40 and b[3]['id'] in {g['id'] for g in d['segments']}
+
+
+def test_step_back_restores_the_film_and_changes_before_the_last_edit_and_keeps_three():
+    f = make_project(); a = P.propose(f, dict(length_s=60, seed=1))['plan']['segments']
+    try: P.step_back(f); assert False
+    except ValueError as e: assert 'no earlier version' in str(e)
+    k, _ = _edge(f, P.load(f)['plan'], 1); P.move_edge(f, a[k]['id'], 1)
+    for _ in range(3): cur = P.load(f)['plan']['segments']; P.suggest_again(f, [cur[-1]['id'], cur[-3]['id']])
+    assert len(P.history(f)) == 3
+    for _ in range(2): P.step_back(f)
+    e = P.step_back(f); assert len(P.history(f)) == 0 and len(e['overrides']['locked']) == 2                 # back to just after the drag (the oldest kept version)
+
+
+def test_edge_room_keeps_the_shortest_window_and_is_empty_for_a_script_film():
+    f = make_project(); plan = P.propose(f, dict(length_s=60, seed=1))['plan']; clips = P.load_clips(f)[0]; room = P.edge_room(plan, clips)
+    bmin = 4                                                                                              # 2 s at 120 bpm
+    assert len(room) == len(plan['segments']) - 1
+    for (lo, hi), A, B in zip(room, plan['segments'], plan['segments'][1:]): assert lo <= 0 <= hi and A['beats'] + lo >= min(bmin, A['beats']) and B['beats'] - hi >= min(bmin, B['beats'])
+    assert P.edge_room(dict(plan, source='script'), clips) == [] and P.windows_of(dict(segments=[dict(id='x')], source='beats')) is None

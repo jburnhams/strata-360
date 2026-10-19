@@ -132,12 +132,18 @@ export interface PlanSegment {
   sound?: { gain_db: number; why: string[] }; kind?: string; view?: string; transition?: { type: 'cut' | 'dissolve' | 'dip' | 'whip'; beats: number; dur_s: number; why: string }
   /** A speed ramp (edit/hyperlapse.py): the window races through the quiet running after it; `src_dur_s` is the clip seconds it plays, `ramp_from` the technique it had before it was made to follow your heading. */
   ramp?: SpeedRamp; src_dur_s?: number; ramp_from?: string
+  /** Timeline editing (D1): how many beats the cut after this window can move earlier (negative) or later, and where the window is on the race (gps/context.py). */
+  edge_room?: [number, number]; pos?: { lat: number; lon: number; km: number | null }
 }
+/** What a dragged cut did (D1): the beats asked for, the beats it moved, and why they differ (null when they do not). */
+export interface EdgeNote { asked: number; beats: number; why: string | null }
 export interface SpeedRamp { dur_s: number; lead_s: number; ramp_s: number; tail_s: number; speed: number; src_dur_s: number; lands: boolean }
 export interface RampReport { id: string; clip: string; film_start_s: number; dur_s: number; from_s: number; to_s: number; speed: number; lands: boolean; technique_was: string | null }
 export interface EditState {
   settings: { length_s: number; bpm: number; bar_beats: number; seed: number; wpm: number; style: string; hyperlapse?: boolean }
   overrides: { locked: { wid: string }[]; tech_force: Record<string, string>; bans_cands: string[]; bans_techs: string[]; clip_weight: Record<string, number>; transitions?: Record<string, string> }
+  /** How many earlier versions of the film are kept to step back to (D1). */
+  history?: number
   plan: null | { source?: 'script' | 'beats'; script?: string; generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[]; hyperlapse?: RampReport[] }
 }
 export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
@@ -383,7 +389,7 @@ export const api = {
   setWho: (folder: string, me: number[]) => call<{ ok: boolean }>('/api/who', { folder, me }),
   editGet: (folder: string) => call<EditResponse>('/api/edit?' + q({ folder })),
   propose: (folder: string, o: { length_s?: number; bpm?: number; seed?: number; hyperlapse?: boolean; keep?: boolean; replace?: boolean }) => call<{ edit: EditState }>('/api/edit/propose', { folder, ...o }),
-  override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState }>('/api/edit/override', { folder, ...body }),
+  override: (folder: string, body: Record<string, unknown>) => call<{ edit: EditState; note?: EdgeNote }>('/api/edit/override', { folder, ...body }),
   clips: (folder: string) => call<{ clips: ClipInfo[] }>('/api/clips?' + q({ folder })),
   notes: (folder: string) => call<Notes>('/api/notes?' + q({ folder })),
   agent: () => call<AgentStatus>('/api/agent'),
