@@ -144,10 +144,18 @@ export interface EditState {
   overrides: { locked: { wid: string }[]; tech_force: Record<string, string>; bans_cands: string[]; bans_techs: string[]; clip_weight: Record<string, number>; transitions?: Record<string, string> }
   /** How many earlier versions of the film are kept to step back to (D1). */
   history?: number
-  plan: null | { source?: 'script' | 'beats'; script?: string; generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[]; hyperlapse?: RampReport[] }
+  plan: null | { source?: 'script' | 'beats'; script?: string; generated_at: string; film: { length_s: number; beats: number; bpm: number }; segments: PlanSegment[]; clips_in_plan: number; missing_clips: string[]; orphaned_overrides: string[]; technique_seconds: Record<string, number>; warnings: string[]; hyperlapse?: RampReport[]; beat_sync?: { seek_s: number; delay_s: number; off_beat: OffBeatCut[] } | null }
 }
-export interface VoiceLine { seg: number; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
-export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: number[]; sped: number[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
+/** A voice-over line's key: a number for a beat-planner script's line, the narration key (n1a2b3c4d) for the script plan's. */
+export type LineKey = number | string
+/** What re-fitting a line's block did after its take changed (edit/line_refit.py): `refit` (the block grew or shrank by `beats`), `same` (no window changed), `replan` (narration over a generated clip: the film was planned again), `none` or `error` (with the reason). */
+export interface RefitReport { mode: 'refit' | 'same' | 'replan' | 'none' | 'error'; seg?: LineKey; item?: number; delta_s?: number; beats?: number; changed?: string[]; warnings?: string[]; reason?: string }
+/** The narration and the music's beats in film time, drawn over the timeline's windows. A line starts where its speech does; `speak_s` is its measured (or, when `estimated`, guessed) length. */
+export interface VoiceTimelineLine { seg: LineKey; text: string; item: number | null; clip: string | null; start_s: number; speak_s: number; room_s: number; estimated: boolean; has_recording: boolean; source: 'synth' | 'recorded'; fit: 'ok' | 'sped' | 'over' | null; overrun_s: number }
+export interface VoiceTimeline { lines: VoiceTimelineLine[]; beats: number[]; bars: number[]; synced: boolean; length_s: number }
+export interface OffBeatCut { cut: number; film_s: number; off_ms: number; why: string }
+export interface VoiceLine { seg: LineKey; text: string; source: 'synth' | 'recorded'; has_recording: boolean; film_start_s: number; window_s: number; room_s: number; natural_s: number; played_s: number; overrun_s: number; tempo: number; fit: 'ok' | 'sped' | 'over'; synth_s: number }
+export interface VoiceoverState { engines: { id: string; label: string; voices: { name: string; lang: string }[] }[]; state: { engine: string | null; voice: string | null; rate: number; use: Record<string, string> }; timings: { script: string; engine: string; voice: string; rate: number; film_length_s: number; lines: VoiceLine[]; measured_wpm: number | null; over: LineKey[]; sped: LineKey[] } | null; script: string | null; cached?: { engine: string; voice: string; rate: number; key: string; measured_wpm: number | null; over: number; sped: number; active: boolean }[]; lines: number; building: boolean; progress?: { state?: string; done?: number; total?: number }; error?: string | null }
 export interface FilmState { state: 'noplan' | 'none' | 'starting' | 'audio' | 'rendering' | 'done' | 'error'; running: boolean; key?: string; frames_done?: number; frames_total?: number; placeholders?: string[]; error?: string | null; length_s?: number }
 /** What a render is doing and how long each part takes (render/progress.py): the steps in order, the time spent so far in each kind of work, and the last lines of its log. */
 export interface RenderProgress { state: 'running' | 'done' | 'error'; started: number; updated: number; error?: string | null; stages: { name: string; state: 'running' | 'done' | 'error'; started: number; seconds: number; detail: string }[]; timings: Record<string, { seconds: number; calls: number }>; log: [number, string][] }
@@ -342,13 +350,15 @@ export const api = {
   objectUrl: (folder: string, clip: string, id: number) => '/api/clip/object?' + q({ folder, clip, id: String(id) }),
   clipAudioUrl: (folder: string, clip: string, kind: 'original' | 'clean' | 'background') => '/api/clip/audio?' + q({ folder, clip, kind }),
   editScript: (folder: string, texts: Record<string, string>) => call<{ saved: string | null; speaking: boolean }>('/api/script/edit', { folder, texts }),
-  voiceoverUse: (folder: string, seg: number, use: 'synth' | 'recorded') => call<{ ok: boolean }>('/api/voiceover/use', { folder, seg, use }),
-  voiceoverAudio: (folder: string, seg?: number, source?: string, track?: string) => '/api/voiceover/audio?' + q(seg === undefined ? (track ? { folder, track } : { folder }) : { folder, seg: String(seg), source: source ?? 'synth' }),
-  async recordVoiceover(folder: string, seg: number, file: Blob) {
+  voiceoverUse: (folder: string, seg: LineKey, use: 'synth' | 'recorded') => call<{ ok: boolean; refit?: RefitReport | null }>('/api/voiceover/use', { folder, seg, use }),
+  voiceoverAudio: (folder: string, seg?: LineKey, source?: string, track?: string) => '/api/voiceover/audio?' + q(seg === undefined ? (track ? { folder, track } : { folder }) : { folder, seg: String(seg), source: source ?? 'synth' }),
+  async recordVoiceover(folder: string, seg: LineKey, file: Blob): Promise<{ ok: boolean; refit?: RefitReport | null }> {
     const r = await fetch('/api/voiceover/record?' + q({ folder, seg: String(seg) }), { method: 'POST', body: file }); const j = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(j.detail || `HTTP ${r.status}`)
+    return j
   },
-  deleteRecording: (folder: string, seg: number) => fetch('/api/voiceover/record?' + q({ folder, seg: String(seg) }), { method: 'DELETE' }),
+  voiceTimeline: (folder: string) => call<VoiceTimeline>('/api/voiceover/timeline?' + q({ folder })),
+  deleteRecording: (folder: string, seg: LineKey) => fetch('/api/voiceover/record?' + q({ folder, seg: String(seg) }), { method: 'DELETE' }),
   film: (folder: string) => call<FilmState>('/api/film?' + q({ folder })),
   startFilm: (folder: string, force = false) => call<{ started: boolean }>('/api/film/start', { folder, force }),
   stopFilm: (folder: string) => call<{ ok: boolean }>('/api/film/stop', { folder }),

@@ -523,38 +523,57 @@ def create_app(roots, token=None):
         from strata360.edit import voiceover as VO
         f = folder_of(body.get('folder')); st = VO.load_state(f)
         if body.get('use') not in ('synth', 'recorded'): raise HTTPException(400, 'use: synth or recorded')
-        st['use'][str(int(body['seg']))] = body['use']; VO.save_state(f, st); return dict(ok=True)
+        seg = line_seg(body.get('seg')); st['use'][str(seg)] = body['use']; VO.save_state(f, st); return dict(ok=True, refit=refit_line(f, seg))
+
+    def line_seg(seg):
+        """A voice-over line's key as the files and timings name it: a number (a beat-planner script's line) or the script plan's narration key such as n1a2b3c4d. Anything else is refused (it names a file)."""
+        s = str(seg if seg is not None else '').strip()
+        if s.isdigit(): return int(s)
+        if not re.fullmatch(r'[0-9A-Za-z]{1,16}', s): raise HTTPException(400, 'no such line')
+        return s
+
+    def refit_line(f, seg):
+        """After a line's take changed: only its block of the film planned from the script is re-fitted to the new length (edit/line_refit.py, V6). The report, or None for a beat-planner script's line."""
+        from strata360.edit import line_refit as LR, optimise as O
+        if isinstance(seg, int): return None
+        try: return LR.refit_project(f, seg, log=lambda *_: None)
+        except (O.Infeasible, OSError, RuntimeError, ValueError, KeyError) as e: return dict(mode='error', reason=str(e)[-300:])
 
     @api.post('/api/voiceover/record', dependencies=[Depends(auth)])
-    async def post_voiceover_record(request: Request, folder: str, seg: int):            # your recording of one line: the raw audio file as the request body (any format ffmpeg reads)
-        import tempfile
+    async def post_voiceover_record(request: Request, folder: str, seg: str):            # your recording of one line: the raw audio file as the request body (any format ffmpeg reads); a script plan line's block is re-fitted to it
+        import asyncio, tempfile
         from strata360.edit import voiceover as VO
-        f = folder_of(folder); data = await request.body()
+        f = folder_of(folder); seg = line_seg(seg); data = await request.body()
         if len(data) < 500 or len(data) > 100 * 1024 * 1024: raise HTTPException(400, 'the recording is empty or too large')
         with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as tf: tf.write(data)
         try: VO.save_recording(f, seg, tf.name)
         except RuntimeError as e: raise HTTPException(400, 'could not read that audio: ' + str(e)[-200:])
         finally: os.remove(tf.name)
-        return dict(ok=True)
+        return dict(ok=True, refit=await asyncio.to_thread(refit_line, f, seg))
 
     @api.delete('/api/voiceover/record', dependencies=[Depends(auth)])
-    def delete_voiceover_record(folder: str, seg: int):
+    def delete_voiceover_record(folder: str, seg: str):
         from strata360.edit import voiceover as VO
-        VO.delete_recording(folder_of(folder), seg); return dict(ok=True)
+        f = folder_of(folder); seg = line_seg(seg); VO.delete_recording(f, seg); return dict(ok=True, refit=refit_line(f, seg))
 
     @api.get('/api/voiceover/audio')
-    def get_voiceover_audio(request: Request, folder: str, seg: int | None = None, source: str = 'track', track: str = ''):   # one line (source synth|recorded) or the whole mixed track; <audio> cannot send headers, so the cookie/query token authenticates
+    def get_voiceover_audio(request: Request, folder: str, seg: str | None = None, source: str = 'track', track: str = ''):   # one line (source synth|recorded) or the whole mixed track; <audio> cannot send headers, so the cookie/query token authenticates
         auth(request); from strata360.edit import voiceover as VO
-        f = folder_of(folder); b = VO.base(f)
+        f = folder_of(folder); b = VO.base(f); seg = None if seg is None else line_seg(seg)
         if seg is None and track and '/' not in track and '..' not in track: p = os.path.join(b, 'tracks', track, 'voiceover.wav')       # one voice's whole track, to compare without switching
         elif seg is None: p = os.path.join(b, 'voiceover.wav')
         elif source == 'recorded': p = VO.recorded_path(f, seg)
         else:
             tm = VO.load_timings(f) or {}; o = next((o for o in tm.get('lines', []) if o['seg'] == seg), None); p = os.path.join(b, o['path']) if o and o['source'] == 'synth' else ''
             if not p or not os.path.exists(p):
-                import glob as g; c = sorted(g.glob(os.path.join(b, 'synth', f'{seg:03d}-*.wav')), key=os.path.getmtime); p = c[-1] if c else ''
+                import glob as g; c = sorted(g.glob(os.path.join(b, 'synth', f'{VO._name(seg)}-*.wav')), key=os.path.getmtime); p = c[-1] if c else ''
         if not p or not os.path.exists(p): raise HTTPException(404, 'not made yet')
         return FileResponse(p, media_type='audio/wav', headers={'Cache-Control': 'no-cache'})
+
+    @api.get('/api/voiceover/timeline', dependencies=[Depends(auth)])
+    def get_voiceover_timeline(folder: str):                                             # the narration lines and the music's beats in film time, drawn over the timeline's windows (V6)
+        from strata360.edit import line_refit as LR
+        return LR.timeline(folder_of(folder))
 
     @api.get('/api/film', dependencies=[Depends(auth)])
     def get_film(folder: str):                                                           # state of the preview of the CURRENT plan: none | rendering | done | error, with progress
