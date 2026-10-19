@@ -13,7 +13,11 @@ Run real ffmpeg/ffprobe on tiny synthetic clips (`tests/utils/synthetic_osv.py`:
 | `library` | `library(n=2, name='trip')` -> a footage folder of `n` distinct clips (own file name and header time, 60 s apart) plus a hidden file and a `notes.txt` that must be ignored. |
 | `processed` | A private, writable copy of a 2-clip project that has been through ingest, audio and exposure (the model-free stages). The original is built **once per session** (`processed_template`, ~6 s); a copy is instant, with absolute paths rewritten. Prefer this to running stages in every test. |
 | `served` | `(client, folder)`: the HTTP API (`make_client`) over `processed`. |
+| `insta360_library` | (session, read-only) a footage folder of two synthetic Insta360 X3 recordings 60 s apart (`tests/utils/synthetic_insv.py`: an `.insv` pair each, 128 px H.264, the rear file with AAC audio and the metadata trailer; an LRV with the first) and one front-lens file without its partner. |
+| `insta360_processed` | A private, writable copy of that library after ingest, audio and exposure (built once per session by `insta360_template`). |
 | `fake_engine` | A speech engine that "speaks" a tone, 0.1 s per word (no TTS model): the `edit.voiceover` module with `ENGINES` replaced (restored by `monkeypatch`). |
+
+`tests/utils/synthetic_insv.py` builds the Insta360 pair: the trailer records 0x101 (model, serial, calibration), 0x300 (1 kHz IMU), 0x400 (exposure) and 0x900 (ISO). The camera holds still and upright, then turns 45 degrees of yaw over the middle of the clip, so the fused orientation and the proxy's world-locked view have a known answer. The calibration is the X3 sample's lens scaled to the 128 px video (the real numbers would crop a small video to the middle of the lens).
 
 Helpers in `tests/utils/library.py`: `make_library`, `copy_project`, `ffprobe`, `make_tone` (a sine WAV), `duration`.
 
@@ -45,8 +49,11 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 | `render/proxy.py` | 66% | `test_render.py` | proxy GUI rendering |
 | `audio/dsp.py` | 63% | `test_audio.py` | core ffmpeg audio operations |
 | `osv/*` | 92% | `test_osv.py` | mp4, telemetry, calibration, meta, pbdump covered on synthetic media |
+| `osv/insta360.py` | 88% (this file alone) | `test_insta360.py` | discovery of the pair, ingest, telemetry (clock, fused orientation through a turn, gravity, ISO and shutter), lens slots at native size, audio and exposure stages, the proxy stage turning with the camera. Not covered: an unknown calibration string, a file with no trailer, other models |
 
 ## Known issues
+
+- `analysis/exposure.py` writes `source.camera = 'dji_osmo_360'` in every `exposure.json`, an Insta360 clip's too (`test_insta360.py::TestIngest::test_exposure_names_the_camera_that_made_the_clip`, xfail).
 
 - `test_edit.py` (the optimiser on synthetic candidates, ~100 s) needs no ffmpeg: it is slow pure computation. Candidate to move to `tests/unit/` with smaller inputs (a job for the unit run), or to mark `slow`.
 - A `RuntimeWarning: overflow encountered in divide` from `render/photo.py:64` appears when the synthetic clip goes through exposure (a division by a zero scale on the synthetic lens). Possible product bug; not hidden here.
