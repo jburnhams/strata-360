@@ -1,9 +1,9 @@
 """An Insta360 X3 recording end to end: discovery of the .insv pair, ingest, telemetry, lens calibration, the audio and exposure stages, and a proxy render, on synthetic files built with ffmpeg
-(tests/utils/synthetic_insv.py: two 128-px H.264 lens files, the rear one with AAC audio and the metadata trailer). No footage, no models. The format is in docs/progress/2026-10-insta360.md."""
+(tests/utils/integration_insv.py: two 128-px H.264 lens files, the rear one with AAC audio and the metadata trailer). No footage, no models. The format is in docs/progress/2026-10-insta360.md."""
 import json, os, pathlib, subprocess
 import numpy as np
 import pytest
-import synthetic_insv as S
+import integration_insv as S
 from conftest import STAGES
 from strata360.osv import calib, insta360, meta, telemetry
 from strata360.pipeline import clips

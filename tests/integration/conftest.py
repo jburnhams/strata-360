@@ -92,10 +92,10 @@ def processed(processed_template, tmp_path):
 
 @pytest.fixture(scope='session')
 def insta360_library(tmp_path_factory):
-    """A read-only footage folder of two synthetic Insta360 X3 recordings 60 s apart (each an .insv pair with its trailer, plus an LRV proxy) and one front-lens file with no partner. See tests/utils/synthetic_insv.py;
+    """A read-only footage folder of two synthetic Insta360 X3 recordings 60 s apart (each an .insv pair with its trailer, plus an LRV proxy) and one front-lens file with no partner. See tests/utils/integration_insv.py;
     skipped when ffmpeg or libx264 is missing."""
     if not (shutil.which('ffmpeg') and shutil.which('ffprobe')): pytest.skip('ffmpeg/ffprobe not installed')
-    from synthetic_insv import build_insv, names
+    from integration_insv import build_insv, names
     lib = tmp_path_factory.mktemp('insta360') / 'x3trip'
     try:
         build_insv(str(lib), name_time='20240720195607', number=1); build_insv(str(lib), name_time='20240720195707', number=2, lrv=False)
