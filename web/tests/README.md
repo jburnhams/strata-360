@@ -63,6 +63,7 @@ Line coverage from `npm run test:coverage:all`. Update the rows you change. `don
 | `src/thumbOverlay.ts` | 100% | done (storage failures are swallowed by design) |
 | `src/components/ScriptPanel.tsx` | 96.55% | done (one missed branch) |
 | `src/components/VoiceoverPanel.tsx` | 100% | done |
+| `src/components/VoiceTrack.tsx` | 100% | done (`VoiceTrack.test.tsx`: lines, blocks, beat ticks and off-beat cuts, a line's take and re-recording with the re-fit message, errors, a11y, drawn inside `Timeline`) |
 | `src/aim.ts` | 100% | done (tested via `unit/aim.test.ts`) |
 | every other file in `src/` | 0% | todo
 | `src/components/Timeline.tsx` | 94.23% | done (interactions and edge cases tested)

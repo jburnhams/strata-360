@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { api, VoiceLine } from '../api'
+import { api, type LineKey, VoiceLine } from '../api'
 import { usePoll } from '../usePoll'
 import { PanelSkeleton } from './Skeleton'
 
@@ -9,7 +9,7 @@ const fitTxt = { ok: 'fits', sped: 'sped up a little to fit', over: 'too long: c
 export default function VoiceoverPanel({ folder }: { folder: string }) {
   const st = usePoll(() => api.voiceover(folder), 2500, [folder])
   const [err, setErr] = useState<string>()
-  const [rec, setRec] = useState<{ seg: number; mr: MediaRecorder } | null>(null)
+  const [rec, setRec] = useState<{ seg: LineKey; mr: MediaRecorder } | null>(null)
   const [eng, setEng] = useState<string>(), [voice, setVoice] = useState<string>(), [rate, setRate] = useState<number>()
   const player = useRef<HTMLAudioElement>(null)
   if (!st) return <PanelSkeleton title="Voice-over audio" rows={3} />
@@ -18,7 +18,7 @@ export default function VoiceoverPanel({ folder }: { folder: string }) {
   const t = st.timings, input = 'rounded-lg border border-stone-300 bg-stone-50 px-2 py-1.5 text-sm dark:border-stone-700 dark:bg-stone-950'
   const build = async () => { setErr(undefined); try { await api.buildVoiceover(folder, { engine: engine?.id, voice: voiceName, rate: rate ?? st.state.rate }) } catch (e) { setErr((e as Error).message) } }
   const play = (url: string) => { const a = player.current; if (a) { a.src = url; void a.play() } }
-  const startRec = async (seg: number) => {
+  const startRec = async (seg: LineKey) => {
     try {
       const s = await navigator.mediaDevices.getUserMedia({ audio: true }); const mr = new MediaRecorder(s); const parts: Blob[] = []
       mr.ondataavailable = e => parts.push(e.data)

@@ -3,6 +3,7 @@ import FinalRender from './FinalRender'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type ClipInfo, type EditResponse, type PlanSegment, type RampReport } from '../api'
 import { PanelSkeleton } from './Skeleton'
+import VoiceTrack from './VoiceTrack'
 import WindowPlayer from './WindowPlayer'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
 
@@ -68,6 +69,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
 
       {plan && (
         <>
+          <VoiceTrack folder={folder} plan={plan} onChanged={load}>
           <div className="flex h-9 w-full overflow-hidden rounded-lg border border-stone-200 dark:border-stone-800" role="img" aria-label="The film, segment by segment">
             {plan.segments.map(g => (
               <button key={g.id} title={`${mmss(g.film_start_s)} ${short(g.clip)} ${g.technique}`} onClick={() => { setSel(g.id); rows.current[g.id]?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }}
@@ -75,6 +77,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
                 className={`border-r border-white/70 text-[9px] leading-none text-white/90 dark:border-stone-900 ${g.locked ? 'ring-1 ring-inset ring-black/50' : ''}`}>{g.locked ? '🔒' : g.ramp ? '⏩' : ''}</button>
             ))}
           </div>
+          </VoiceTrack>
           <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
             <table className="w-full text-sm">
               <thead className="text-left text-xs text-stone-500"><tr><th className="p-2">film</th><th className="p-2">clip</th><th className="p-2">window</th><th className="p-2">technique</th><th className="p-2">into it</th><th className="p-2">lock</th><th className="p-2">more / less</th><th className="p-2">script</th></tr></thead>
