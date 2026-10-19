@@ -100,6 +100,54 @@ def test_skipping_a_window_blocks_that_footage_in_every_candidate():
     assert C.violations(q, LIB, m, clips) == [] and all(s.clip_start_s + s.beats * m.beat_s <= a + 1e-6 or s.clip_start_s >= b - 1e-6 for s in q if s.cand.clip == 'C01')
 
 
+
+def _recs(p):
+    return [dict(clip=s.cand.clip, cand_id=s.cand.id, start_s=s.clip_start_s, beats=s.beats, tech=s.tech.id, variant_seed=s.variant_seed, ramp_lead_s=s.parts.get('ramp_lead_s')) for s in p]
+
+
+_sig = lambda s: (s.start, s.beats, s.cand.id, s.tech.id, s.in_s, s.clip_start_s, s.variant_seed)
+
+
+def test_replan_with_nothing_free_gives_the_same_film_back():
+    clips = make_clips([30, 12, 90, 8, 25]); m = music(); p = C.plan(clips, LIB, m, C.Settings(seed=1))
+    q = C.replan(clips, LIB, m, C.Settings(seed=1), _recs(p))
+    assert [_sig(s) for s in q] == [_sig(s) for s in p]
+
+
+def test_replan_of_a_run_keeps_every_other_window_identical_and_the_film_valid():
+    clips = make_clips([30, 12, 90, 8, 25]); m = music(); p = C.plan(clips, LIB, m, C.Settings(seed=1)); free = {3, 4, 5}; R = sum(p[k].beats for k in free)
+    for seed in range(2, 8):
+        q = C.replan(clips, LIB, m, C.Settings(seed=seed), _recs(p), free=free)
+        assert C.violations(q, LIB, m, clips) == []
+        n = len(q) - len(p) + len(free)                                                                   # the run may come back as more or fewer windows, in the same beats
+        assert [_sig(s) for s in q[:3]] == [_sig(s) for s in p[:3]] and [_sig(s) for s in q[3 + n:]] == [_sig(s) for s in p[6:]] and sum(s.beats for s in q[3:3 + n]) == R
+        lo, hi = p[2], p[6]                                                                               # the new windows lie in the footage between the kept neighbours (the film stays in time order)
+        for s in q[3:3 + n]: assert (s.cand.clip, s.clip_start_s) >= (lo.cand.clip, lo.clip_start_s + lo.beats * m.beat_s - 1e-6) and (s.cand.clip, s.clip_start_s) < (hi.cand.clip, hi.clip_start_s)
+
+
+def test_replan_finds_other_moments_or_techniques_with_another_seed():
+    clips = make_clips([30, 12, 90, 8, 25]); m = music(); p = C.plan(clips, LIB, m, C.Settings(seed=1)); rec = _recs(p)
+    runs = {tuple((s.cand.clip, s.clip_start_s, s.tech.id) for s in C.replan(clips, LIB, m, C.Settings(seed=k), rec, free={7, 8})) for k in range(2, 8)}
+    assert len(runs) >= 2
+
+
+def test_replan_frees_only_the_technique_of_a_kept_window_when_asked():
+    clips = make_clips([30, 12, 90, 8, 25]); m = music(); p = C.plan(clips, LIB, m, C.Settings(seed=1)); rec = _recs(p); rec[4]['tech'] = None
+    q = C.replan(clips, LIB, m, C.Settings(seed=1), rec, tech_free={2})
+    assert [(s.start, s.beats, s.clip_start_s) for s in q] == [(s.start, s.beats, s.clip_start_s) for s in p] and C.violations(q, LIB, m, clips) == []
+    assert [s.tech.id for k, s in enumerate(q) if k not in (2, 4)] == [s.tech.id for k, s in enumerate(p) if k not in (2, 4)]
+
+
+def test_replan_reports_a_window_whose_stretch_is_gone():
+    clips = make_clips([30, 12, 90, 8, 25]); m = music(); p = C.plan(clips, LIB, m, C.Settings(seed=1)); rec = _recs(p); rec[1]['cand_id'] = 'nope'
+    try: C.replan(clips, LIB, m, C.Settings(seed=1), rec); assert False
+    except O.Infeasible as e: assert 'no longer exists' in str(e)
+
+
+def test_a_kept_hero_window_later_in_the_film_counts_against_the_hero_share():
+    clips = make_clips([30, 12, 90, 8, 25]); m = music(); p = C.plan(clips, LIB, m, C.Settings(seed=1))
+    for seed in range(2, 12): assert C.violations(C.replan(clips, LIB, m, C.Settings(seed=seed), _recs(p), free={3, 4, 5}), LIB, m, clips) == []
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
     for f in fns:

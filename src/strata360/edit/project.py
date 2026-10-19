@@ -12,7 +12,7 @@ The plan is a pure function of (candidates, settings, overrides, seed): `propose
   edit.plan       the ordered segments (with the techniques that fit each, for the GUI), totals and warnings
 
 A window's id (`wid`) is "<clip id>@<start in the clip, seconds, 2 decimals>"; overrides whose window no longer exists are reported as orphaned, not silently applied."""
-import datetime as dt, glob, json, os
+import datetime as dt, glob, json, math, os
 import numpy as np
 from strata360.edit.script_pack import norm_label
 from strata360.pipeline import config
@@ -110,7 +110,7 @@ def serialise(segs, clips, music, lib, locked_wids=()):
         out.append(dict(id=sg.parts['wid'], index=i, clip=sg.cand.clip, cand_id=sg.cand.id, cand_start_s=sg.cand.start_s, cand_end_s=sg.cand.end_s, film_start_s=round(sg.start * music.beat_s, 3), start_beat=sg.start, beats=sg.beats,
                         dur_s=round(dur, 3), clip_start_s=sg.clip_start_s, in_s=sg.in_s, utc_start=t0.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z', utc_end=(t0 + dt.timedelta(seconds=dur)).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
                         energy=round(float(sg.cand.energy), 3), technique=sg.tech.id, family=sg.tech.family, hero=sg.tech.hero, variant_seed=sg.variant_seed, forced=sg.forced, speech=bool(sg.parts.get('speech', sg.cand.speech)), kind=getattr(sg.cand, 'kind', 'span'), view=getattr(sg.cand, 'view', 'ahead'), locked=sg.parts['wid'] in locked_wids,
-                        options=sg.parts['options'], voice_span=sg.parts.get('voice_span')))
+                        options=sg.parts['options'], voice_span=sg.parts.get('voice_span'), planned=dict(start_s=sg.clip_start_s, beats=sg.beats, tech=sg.tech.id)))          # planned: the window as the planner made it (the speed ramps may move its cuts afterwards): what a partial re-plan keeps
         if sg.parts.get('ramp_lead_s') is not None: out[-1]['ramp_lead_s'] = sg.parts['ramp_lead_s']          # a planned ramp window (chrono.plan_ramps): edit/hyperlapse.py keeps its lead
     return out
 
@@ -261,15 +261,50 @@ def plan_from_script(folder, draft_name=None, log=print):
 
 def propose(folder, settings=None, overrides=None, keep=True):
     """(Re)compute the plan from the saved settings and overrides (optionally updated by the arguments) and save it. With `keep` the previous techniques are preferred, so a small change does
-    not reshuffle the whole film. Returns the saved edit dict; raises O.Infeasible with the reason when the film cannot be made."""
+    not reshuffle the whole film; and when nothing that shapes the windows changed since the last beat plan (the length, tempo, music, seed, bans, clip weights, the footage), its windows are kept
+    as they are (a lock, a technique or a transition needs no new windows: implementation plan D1), so what you dragged or suggested again stays. Returns the saved edit dict; raises O.Infeasible
+    with the reason when the film cannot be made."""
     edit = load(folder); prev = edit.get('plan') if keep else None
     if settings: edit['settings'].update({k: v for k, v in settings.items() if k in DEFAULT_SETTINGS and v is not None})
     if overrides: edit['overrides'].update(overrides)
     clips, missing = load_clips(folder)
     if not clips: raise O.Infeasible('no candidates yet: the candidates stage has to finish for at least one clip')
-    lib = TQ.with_cams(TQ.load(), folder); mus = music_info(folder, edit['settings']); music, st = _planner(edit, lib, prev, mus)
-    segs = CH.plan(clips, lib, music, st); bad = CH.violations(segs, lib, music, clips)
+    lib = TQ.with_cams(TQ.load(), folder); mus = music_info(folder, edit['settings']); music, st = _planner(edit, lib, prev, mus); inputs = _inputs(edit, clips, music)
+    segs = None
+    if prev and prev.get('source') != 'script' and prev.get('inputs') == inputs and windows_of(prev):
+        locks = {g['wid']: g for g in edit['overrides']['locked']}; recs = windows_of(prev)
+        for r, g in zip(recs, prev['segments']):
+            if g['id'] in locks: r['tech'] = locks[g['id']]['tech']
+        try: segs = _checked(CH.replan(clips, lib, music, st, recs, tech_free={k for k, g in enumerate(prev['segments']) if g['id'] not in locks}), lib, music, clips)
+        except O.Infeasible: segs = None                                                                     # (the kept windows no longer fit: plan the film again)
+    if segs is None: segs = _checked(CH.plan(clips, lib, music, st), lib, music, clips)
+    return _finish(folder, edit, segs, clips, missing, lib, music, mus)
+
+
+def _checked(segs, lib, music, clips):
+    bad = CH.violations(segs, lib, music, clips)
     if bad: raise O.Infeasible('the plan broke its own rules: ' + '; '.join(bad[:4]))
+    return segs
+
+
+def _inputs(edit, clips, music):
+    """A fingerprint of everything that shapes the beat planner's windows (not the locks, forced techniques or transitions, which a partial re-plan applies to the windows it keeps)."""
+    import hashlib
+    s = edit['settings']; o = edit['overrides']
+    key = dict(length_s=s.get('length_s'), seed=s.get('seed'), music=s.get('music'), hyperlapse=s.get('hyperlapse', True), bpm=music.bpm, beats=music.beats, bar=music.bar_beats, bans=sorted(o['bans_cands']), techs=sorted(o['bans_techs']),
+               weights=sorted(o['clip_weight'].items()), clips=[(c['id'], [(x['id'], x['start_s'], x['end_s']) for x in c['candidates']]) for c in sorted(clips, key=lambda c: c['id'])])
+    return hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def windows_of(plan):
+    """The beat plan's windows as the planner made them, in film order, for `chrono.replan`; None for a plan saved before they were recorded (or one planned from the script)."""
+    segs = (plan or {}).get('segments') or []
+    if not segs or plan.get('source') == 'script' or any('planned' not in g for g in segs): return None
+    return [dict(clip=g['clip'], cand_id=g['cand_id'], start_s=g['planned']['start_s'], beats=int(g['planned']['beats']), tech=g['planned']['tech'], variant_seed=g.get('variant_seed'), ramp_lead_s=g.get('ramp_lead_s')) for g in segs]
+
+
+def _finish(folder, edit, segs, clips, missing, lib, music, mus, extra=None):
+    """Serialise the planner's segments into the saved plan (speed ramps, transitions, totals, warnings) and save it; returns the saved edit dict."""
     locked_w = {g['wid'] for g in edit['overrides']['locked']}; ser = serialise(segs, clips, music, lib, locked_w); wids = {g['id'] for g in ser}
     from strata360.edit import transitions as TR
     for g in ser: g['energy_hi'] = g['energy'] >= 0.6
@@ -280,7 +315,7 @@ def propose(folder, settings=None, overrides=None, keep=True):
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
     edit['plan'] = dict(generated_at=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), film=dict(length_s=round(music.beats * music.beat_s, 3), beats=music.beats, bpm=music.bpm, bar_beats=music.bar_beats, music=(dict(file=edit['settings']['music'], offset_s=mus['offset_s']) if mus else None)),
                         segments=ser, clips_in_plan=len({g['clip'] for g in ser}), missing_clips=missing, orphaned_overrides=orphaned, technique_seconds={k: round(v, 2) for k, v in used.items()},
-                        warnings=(segs[0].parts.get('warnings') if segs else []) or [], hyperlapse=ramps)
+                        warnings=(segs[0].parts.get('warnings') if segs else []) or [], hyperlapse=ramps, inputs=_inputs(edit, clips, music), **(extra or {}))
     try:                                                                                                          # the text options the local models made for this plan, if any (edit/film_text.py): the planner is shown them
         from strata360.edit import film_text
         edit['plan'].update(film_text.for_plan(folder, edit['plan']))
@@ -358,6 +393,140 @@ def set_lock(folder, wid, locked):
     if locked:
         g = _segment(edit, wid); L.append(dict(wid=wid, clip=g['clip'], start_s=g['clip_start_s'], beats=g['beats'], cand_id=g['cand_id'], tech=g['technique']))
     edit['overrides']['locked'] = L; save(folder, edit); return propose(folder)
+
+
+# ---- timeline editing (implementation plan D1): drag a cut, suggest a part again, step back ----------------------------------------------------------------------------------------------
+HISTORY_KEEP = 3          # versions of the film kept to step back to
+HISTORY = 'plan_history.json'
+
+
+def _history_path(folder): return os.path.join(config.race_dir(folder), HISTORY)
+
+
+def history(folder):
+    """The versions kept to step back to, oldest first: [{at, plan, overrides}]."""
+    try: h = json.load(open(_history_path(folder)))
+    except (OSError, ValueError): return []
+    return h if isinstance(h, list) else []
+
+
+def _remember(folder, edit):
+    """Keep the film as it is now (its plan and your changes) as the newest version to step back to; only the last HISTORY_KEEP are kept."""
+    if not edit.get('plan'): return
+    h = (history(folder) + [dict(at=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), plan=edit['plan'], overrides=edit['overrides'])])[-HISTORY_KEEP:]
+    p = _history_path(folder); os.makedirs(os.path.dirname(p), exist_ok=True); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(h, open(tmp, 'w')); os.replace(tmp, p)
+
+
+def step_back(folder):
+    """Go back to the version of the film before the last drag or suggestion (its windows and your changes as they were then). ValueError when there is none left."""
+    h = history(folder)
+    if not h: raise ValueError('there is no earlier version to step back to')
+    last = h.pop(); edit = load(folder); edit['plan'] = last['plan']; edit['overrides'] = {**json.loads(json.dumps(EMPTY_OVERRIDES)), **(last.get('overrides') or {})}
+    p = _history_path(folder); tmp = f'{p}.{os.getpid()}.tmp'; json.dump(h, open(tmp, 'w')); os.replace(tmp, p)
+    return save(folder, edit)
+
+
+def _beat_plan(edit):
+    plan = edit.get('plan')
+    if not plan: raise ValueError('there is no film yet: propose one first')
+    if plan.get('source') == 'script': raise ValueError('the film is planned from your script: change it in the Film script panel (dragging cuts and suggesting again work on the beat planner\'s film)')
+    recs = windows_of(plan)
+    if recs is None: raise ValueError('this film was planned before the timeline could be edited: re-plan it first')
+    return plan, recs
+
+
+def _speech(clips):
+    """clip id -> the wearer's speech spans (edit/blocks.py, unpadded): the cut points a drag may not land on."""
+    from strata360.edit import blocks as BL
+    return {c['id']: BL.speech_spans(c, c.get('candidates') or []) for c in clips}
+
+
+def _in_speech(spans, t, tol=0.05): return next(((a, b) for a, b in spans if a + tol < t < b - tol), None)
+
+
+def edge_room(plan, clips, lib=None):
+    """For each window but the last, how far (in beats) the cut after it can move: (earliest, latest), the window before it and the one after it each keeping at least the planner's shortest
+    window, the longest any technique lasts, inside their own stretches and clear of the other windows of their clips. The dialogue rule is applied when the cut is moved (`move_edge`). [] when
+    the film is not the beat planner's."""
+    recs = windows_of(plan)
+    if not recs: return []
+    beat_s = 60.0 / float(plan['film']['bpm']); lib = lib or TQ.load(); st = CH.Settings()
+    _, _, clips_c, by_clip, _ = CH.footage(clips, st, beat_s)
+    bmin = math.ceil(st.min_seg_s / beat_s - 1e-9); bmax = int(max(t.dmax for t in lib.values()) / beat_s + 1e-9)
+
+    def bounds(r):
+        i = by_clip.get(r['clip']); c = next((c for c in clips_c[i] if c.id == r['cand_id']), None) if i is not None else None
+        return (c.start_s, c.end_s) if c else (r['start_s'], r['start_s'] + r['beats'] * beat_s)
+    out = []
+    for k, (a, b) in enumerate(zip(recs, recs[1:])):
+        a_end = a['start_s'] + a['beats'] * beat_s; (_, a_hi), (b_lo, _) = bounds(a), bounds(b)
+        a_next = min([r['start_s'] for j, r in enumerate(recs) if j not in (k, k + 1) and r['clip'] == a['clip'] and r['start_s'] >= a_end - 1e-6] + [a_hi])
+        b_prev = max([r['start_s'] + r['beats'] * beat_s for j, r in enumerate(recs) if j not in (k, k + 1) and r['clip'] == b['clip'] and r['start_s'] + r['beats'] * beat_s <= b['start_s'] + 1e-6] + [b_lo])
+        late = min(b['beats'] - bmin, bmax - a['beats'], int(math.floor((a_next - a_end) / beat_s + 1e-6)))
+        early = min(a['beats'] - bmin, bmax - b['beats'], int(math.floor((b['start_s'] - b_prev) / beat_s + 1e-6)))
+        out.append([-max(early, 0), max(late, 0)])
+    return out
+
+
+def _fits(t, d, beats, music): return t is not None and t.dmin - 1e-9 <= d <= t.dmax + 1e-9 and not (t.beats == 'bar' and beats % music.bar_beats)
+
+
+def move_edge(folder, wid, beats):
+    """Move the cut after window `wid` by `beats` whole beats (later when positive): the window before it gets longer and the one after it starts that much later in its clip (or the other way
+    round), so the rest of the film keeps its place to the beat. The move snaps to the nearest cut, in the same direction, that keeps both windows inside their footage and does not land inside
+    the wearer's words in either clip (the V5 rule: never cut into dialogue). Both windows are then locked as they now are (a technique that no longer fits the new length is chosen again).
+    Returns (edit, note): note = {asked, beats, why}. ValueError when the cut cannot move that way."""
+    edit = load(folder); plan, recs = _beat_plan(edit); beats = int(beats)
+    ids = [g['id'] for g in plan['segments']]
+    if wid not in ids: raise KeyError(f'no such segment {wid}')
+    k = ids.index(wid)
+    if k + 1 >= len(recs): raise ValueError('the end of the film is set by its length, not by a cut')
+    if beats == 0: raise ValueError('move the cut by at least one beat')
+    clips, missing = load_clips(folder); lib = TQ.with_cams(TQ.load(), folder); mus = music_info(folder, edit['settings']); music, st = _planner(edit, lib, plan, mus); beat_s = music.beat_s
+    lo, hi = edge_room(plan, clips, lib)[k]; sp = _speech(clips); a, b = recs[k], recs[k + 1]; why = None
+    reach = range(1, hi + 1) if beats > 0 else range(-1, lo - 1, -1)
+    pick = None
+    for n in sorted(reach, key=lambda n: (abs(n - beats), abs(n))):
+        hit = _in_speech(sp.get(a['clip'], []), a['start_s'] + (a['beats'] + n) * beat_s) or _in_speech(sp.get(b['clip'], []), b['start_s'] + n * beat_s)
+        if hit is None: pick = n; break
+    if pick is None: raise ValueError('the cut cannot move that way: ' + ('the windows have no more footage or length to give' if not len(reach) else 'every beat that way cuts into the words'))
+    if pick != beats:
+        why = f"moved {abs(pick)} beat{'s' if abs(pick) != 1 else ''}, not {abs(beats)}: " + ('as far as the footage and the shortest window allow' if pick == min(max(beats, lo), hi) else 'the nearest beat that does not cut into the words')
+    _remember(folder, edit)
+    a2 = dict(a, beats=a['beats'] + pick, ramp_lead_s=None); b2 = dict(b, start_s=round(b['start_s'] + pick * beat_s, 3), beats=b['beats'] - pick, ramp_lead_s=None)
+    for r in (a2, b2):
+        if not _fits(lib.get(r['tech']), r['beats'] * beat_s, r['beats'], music): r['tech'] = None
+    new = recs[:k] + [a2, b2] + recs[k + 2:]; old_b, new_b = ids[k + 1], CH.wid_of(b['clip'], b2['start_s']); o = edit['overrides']
+    for name in ('tech_force', 'transitions'):
+        if old_b in o.get(name, {}): o[name][new_b] = o[name].pop(old_b)
+    o['locked'] = [L for L in o['locked'] if L['wid'] not in (wid, old_b)]
+    segs = _checked(CH.replan(clips, lib, music, st, new, tech_free={j for j in (k, k + 1) if new[j]['tech'] is None}, jitter=0.0), lib, music, clips)
+    for sg in segs[k:k + 2]: o['locked'].append(dict(wid=sg.parts['wid'], clip=sg.cand.clip, start_s=sg.clip_start_s, beats=sg.beats, cand_id=sg.cand.id, tech=sg.tech.id))
+    return _finish(folder, edit, segs, clips, missing, lib, music, mus, dict(rerolls=plan.get('rerolls', 0))), dict(asked=beats, beats=pick, why=why)
+
+
+def suggest_again(folder, wids):
+    """Plan the windows `wids` again (one window, or a run of them in the film) with a new seed: other moments and techniques for the unlocked ones among them, in the same beats, while every other
+    window of the film (and every locked one) stays exactly as it is (P5-30). Tries a few seeds for a suggestion that differs from what is there. ValueError when every one of them is locked."""
+    edit = load(folder); plan, recs = _beat_plan(edit); want = set(wids); locks = {L['wid'] for L in edit['overrides']['locked']}
+    ids = [g['id'] for g in plan['segments']]; sel = [k for k, g in enumerate(ids) if g in want]
+    if not sel: raise KeyError('none of those windows is in the film')
+    free = {k for k in range(min(sel), max(sel) + 1) if ids[k] not in locks}
+    if not free: raise ValueError('every window there is locked: unlock one to have it suggested again')
+    clips, missing = load_clips(folder); lib = TQ.with_cams(TQ.load(), folder); mus = music_info(folder, edit['settings']); music, st = _planner(edit, lib, plan, mus)
+    import dataclasses
+    sig = lambda segs: [(s.cand.clip, round(s.clip_start_s, 3), s.beats, s.tech.id) for s in segs]
+    before = [(g['clip'], round(g['planned']['start_s'], 3), g['planned']['beats'], g['planned']['tech']) for g in plan['segments']]
+    rr = int(plan.get('rerolls', 0)) + 1; segs = None; last = None
+    for attempt in range(6):
+        s2 = dataclasses.replace(st, seed=int(edit['settings']['seed']) * 1009 + rr * 31 + attempt, prefer={})
+        try: cand = _checked(CH.replan(clips, lib, music, s2, recs, free=free), lib, music, clips)
+        except O.Infeasible as e: last = e; continue
+        segs = cand
+        if sig(cand) != before: break
+    if segs is None: raise last or O.Infeasible('this part of the film cannot be planned again')
+    _remember(folder, edit)
+    return _finish(folder, edit, segs, clips, missing, lib, music, mus, dict(rerolls=rr))
 
 
 def set_clip_weight(folder, clip, factor):

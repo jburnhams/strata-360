@@ -4,7 +4,8 @@ import { setup } from '../utils/render'
 import Timeline from '../../src/components/Timeline'
 import { makeClipInfo, makeEditResponse, makeEditState, makePlanSegment } from '../utils/factories'
 import { mockGet, mockPost, mockError, mockPending, recordRequests } from '../utils/api'
-import { stubMedia } from '../utils/media'
+import { stubBrowserApis, stubMedia, stubRect } from '../utils/media'
+import { fireEvent } from '@testing-library/react'
 
 
 describe('Timeline', () => {
@@ -359,5 +360,108 @@ describe('Timeline', () => {
     const { findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={onOpenClip} />)
     await user.click(await findByText('1'))
     expect(onOpenClip).toHaveBeenCalledWith('CAM_1')
+  })
+
+  describe('timeline editing (D1)', () => {
+    // A 30 s film at 120 bpm (0.5 s a beat) in three windows; the strip is 600 px wide, so a beat is 10 px.
+    const seg3 = () => [
+      makePlanSegment({ id: 'a', clip: 'CAM_1', film_start_s: 0, dur_s: 10, beats: 20, clip_start_s: 0, edge_room: [-4, 3], pos: { lat: 50.1, lon: 5.1, km: 1 } }),
+      makePlanSegment({ id: 'b', clip: 'CAM_1', film_start_s: 10, dur_s: 10, beats: 20, clip_start_s: 30, edge_room: [-2, 6], pos: { lat: 50.2, lon: 5.2, km: 2 } }),
+      makePlanSegment({ id: 'c', clip: 'CAM_2', film_start_s: 20, dur_s: 10, beats: 20, clip_start_s: 5, locked: true, pos: { lat: 50.3, lon: 5.3, km: 3.5 } }),
+    ]
+    const film = (o: Record<string, unknown> = {}) => makeEditResponse({ edit: makeEditState({ history: 0, ...o, plan: { generated_at: 'utc', film: { length_s: 30, beats: 60, bpm: 120 }, segments: seg3(), clips_in_plan: 2, missing_clips: [], orphaned_overrides: [], technique_seconds: { static: 30 }, warnings: [], ...((o.plan as object) ?? {}) } as never }) })
+    let unRect: () => void
+    beforeEach(() => { stubBrowserApis(); unRect = stubRect(600, 36) })
+    afterEach(() => unRect())
+
+    it('drags a cut and sends the move snapped to whole beats', async () => {
+      mockGet('/api/edit', film()); mockPost('/api/edit/override', { edit: film().edit }); const seen = recordRequests('/api/edit/override')
+      const { findAllByRole, findByText } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      const [cut] = await findAllByRole('separator')
+      fireEvent.pointerDown(cut, { clientX: 300 }); fireEvent.pointerMove(window, { clientX: 324 })        // 2.4 beats later: snaps to 2
+      expect(await findByText('+2 beats')).toBeInTheDocument()
+      fireEvent.pointerUp(window, { clientX: 324 })
+      await vi.waitFor(() => expect(seen).toHaveLength(1))
+      expect(seen[0].body).toEqual({ folder: '/data', action: 'edge', wid: 'a', beats: 2 })
+    })
+
+    it('keeps a dragged cut inside the room the server gives it', async () => {
+      mockGet('/api/edit', film()); const seen = recordRequests('/api/edit/override')
+      const { findAllByRole, findByText } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      const [cut] = await findAllByRole('separator')
+      fireEvent.pointerDown(cut, { clientX: 300 }); fireEvent.pointerMove(window, { clientX: 100 })         // 20 beats earlier, but it has room for 4
+      expect(await findByText('-4 beats')).toBeInTheDocument()
+      fireEvent.pointerUp(window, {}); await vi.waitFor(() => expect(seen).toHaveLength(1)); expect(seen[0].body).toMatchObject({ action: 'edge', wid: 'a', beats: -4 })
+    })
+
+    it('sends nothing for a drag of less than half a beat', async () => {
+      mockGet('/api/edit', film()); const seen = recordRequests('/api/edit/override')
+      const { findAllByRole } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      const [cut] = await findAllByRole('separator')
+      fireEvent.pointerDown(cut, { clientX: 300 }); fireEvent.pointerMove(window, { clientX: 304 }); fireEvent.pointerUp(window, {})
+      await new Promise(r => setTimeout(r, 20)); expect(seen).toHaveLength(0)
+    })
+
+    it('shows why the server snapped the cut somewhere else', async () => {
+      mockGet('/api/edit', film()); mockPost('/api/edit/override', { edit: film().edit, note: { asked: 3, beats: 1, why: 'moved 1 beat, not 3: the nearest beat that does not cut into the words' } })
+      const { findAllByRole, findByText, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      const [cut] = await findAllByRole('separator'); cut.focus(); await user.keyboard('{ArrowRight}')
+      expect(await findByText(/does not cut into the words/)).toBeInTheDocument()
+    })
+
+    it('moves a focused cut by one beat with the arrow keys, and only where it has room', async () => {
+      mockGet('/api/edit', film()); const seen = recordRequests('/api/edit/override')
+      const { findAllByRole, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      const cuts = await findAllByRole('separator'); expect(cuts).toHaveLength(2)
+      cuts[1].focus(); await user.keyboard('{ArrowLeft}')
+      await vi.waitFor(() => expect(seen).toHaveLength(1)); expect(seen[0].body).toMatchObject({ action: 'edge', wid: 'b', beats: -1 })
+    })
+
+    it('asks for one window, then a shift-clicked run, to be suggested again', async () => {
+      mockGet('/api/edit', film()); const seen = recordRequests('/api/edit/override')
+      const { findByRole, getByRole, getByTitle, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      expect(await findByRole('button', { name: 'Suggest again' })).toBeDisabled()
+      await user.click(getByTitle(/^0:10.0 1 static/)); await user.click(getByRole('button', { name: 'Suggest again' }))
+      await vi.waitFor(() => expect(seen).toHaveLength(1)); expect(seen[0].body).toEqual({ folder: '/data', action: 'suggest', wids: ['b'] })
+      await user.click(getByTitle(/^0:00.0 1 static/)); await user.keyboard('{Shift>}'); await user.click(getByTitle(/^0:20.0 2 static/)); await user.keyboard('{/Shift}')
+      await user.click(await findByRole('button', { name: 'Suggest again (3 windows)' }))
+      await vi.waitFor(() => expect(seen).toHaveLength(2)); expect(seen[1].body).toEqual({ folder: '/data', action: 'suggest', wids: ['a', 'b', 'c'] })
+    })
+
+    it('cannot suggest a locked window again', async () => {
+      mockGet('/api/edit', film())
+      const { findByTitle, getByRole, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      await user.click(await findByTitle(/^0:20.0 2 static/)); expect(getByRole('button', { name: 'Suggest again' })).toBeDisabled()
+    })
+
+    it('steps back to an earlier version when there is one', async () => {
+      mockGet('/api/edit', film({ history: 2 })); const seen = recordRequests('/api/edit/override')
+      const { findByRole, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      await user.click(await findByRole('button', { name: 'Step back (2)' }))
+      await vi.waitFor(() => expect(seen).toHaveLength(1)); expect(seen[0].body).toEqual({ folder: '/data', action: 'back' })
+    })
+
+    it('shows the server\'s reason when a suggestion is not possible', async () => {
+      mockGet('/api/edit', film()); mockError('/api/edit/override', 400, 'there is no other footage between the windows either side of this part of the film', 'post')
+      const { findByTitle, getByRole, findByText, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      await user.click(await findByTitle(/^0:00.0 1 static/)); await user.click(getByRole('button', { name: 'Suggest again' }))
+      expect(await findByText(/no other footage/)).toBeInTheDocument()
+    })
+
+    it('offers no dragging or suggestions for a film planned from the script', async () => {
+      mockGet('/api/edit', film({ plan: { source: 'script' } }))
+      const { findByText, queryAllByRole, queryByRole } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      expect(await findByText(/change it in the Film script panel/)).toBeInTheDocument()
+      expect(queryAllByRole('separator')).toHaveLength(0); expect(queryByRole('button', { name: 'Suggest again' })).toBeNull()
+    })
+
+    it('draws each window on the map strip and selects it from there', async () => {
+      mockGet('/api/edit', film())
+      const { findByRole, getByRole, user } = setup(<Timeline folder="/data" clips={[]} onOpenClip={vi.fn()} />)
+      const map = await findByRole('img', { name: 'Where each window of the film was filmed' })
+      await vi.waitFor(() => expect(map.querySelector('polyline')).not.toBeNull())
+      const dots = map.querySelectorAll('circle'); expect(dots).toHaveLength(3); expect(dots[2].textContent).toBe('0:20.0 2 · km 3.5')
+      await user.click(dots[0] as Element); expect(getByRole('button', { name: 'Suggest again' })).toBeEnabled()
+    })
   })
 })
