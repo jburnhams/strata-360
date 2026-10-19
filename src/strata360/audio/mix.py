@@ -170,6 +170,38 @@ def _loudnorm(src, out, target, report):
                   output=dict(lufs=float(o['output_i']) if o.get('output_i') not in (None, '-inf') else None, true_peak_dbtp=float(o['output_tp']) if o.get('output_tp') not in (None, '-inf') else None, mode=o.get('normalization_type')))
 
 
+OPEN_FADE_IN_S, OPEN_FADE_OUT_S = 0.08, 0.5          # the cold open's own sound fades in quickly and out before the cut to the title
+
+
+def clip_sound(folder, clip, start_s, dur_s, out, loudness=None):
+    """The cold open's sound (edit/cold_open.py): the clip's own sound over [start_s, start_s + dur_s), voice and all (words marked NEVER USE silenced), centred or stereo as the source is, faded in and out, as a stereo WAV at `out`
+    exactly `dur_s` long; with `loudness` (LUFS) normalised to it like the film. Returns `out`, or None when the clip has no sound."""
+    p = audio_of(folder, clip)
+    if not p: return None
+    d = float(dur_s); mute = mute_filter(never_spans(folder, clip, float(start_s), d)); fo = min(OPEN_FADE_OUT_S, d / 2)
+    chain = f"aresample={SR},{_to_stereo(p, False)}{mute},apad=whole_dur={d:.3f},atrim=0:{d:.3f},afade=t=in:st=0:d={min(OPEN_FADE_IN_S, d / 2):.3f},afade=t=out:st={d - fo:.3f}:d={fo:.3f},alimiter=limit=0.95"
+    pre = out + '.pre.wav' if loudness is not None else out
+    r = subprocess.run(['ffmpeg', '-y', '-v', 'error', '-ss', f'{float(start_s):.3f}', '-t', f'{d:.3f}', '-i', p, '-vn', '-af', chain, '-ar', str(SR), '-ac', '2', pre], capture_output=True, text=True)
+    if r.returncode: raise RuntimeError('cold open sound: ' + r.stderr[-300:])
+    if loudness is not None:
+        _loudnorm(pre, out, float(loudness), {}); os.remove(pre)
+        r = subprocess.run(['ffmpeg', '-y', '-v', 'error', '-i', out, '-af', f'apad=whole_dur={d:.3f},atrim=0:{d:.3f}', out + '.trim.wav'], capture_output=True, text=True)          # (loudnorm may add a few samples)
+        if r.returncode: raise RuntimeError('cold open sound: ' + r.stderr[-300:])
+        os.replace(out + '.trim.wav', out)
+    return out
+
+
+def lead_in(audio, out, lead_s, tail_s, opening=None, opening_s=0.0):
+    """The film's sound `audio` moved `lead_s` later and `tail_s` of silence added after it, written to `out`: what plays under the cold open, the opening title and the ending. `opening` (a WAV `opening_s` long, from `clip_sound`) plays
+    from the start, the rest of the lead is silent."""
+    ms = int(round(float(lead_s) * 1000)); film = f'adelay={ms}:all=1,apad=pad_dur={float(tail_s):.3f}'
+    if not opening: cmd = ['ffmpeg', '-v', 'error', '-y', '-i', audio, '-af', film, out]
+    else: cmd = ['ffmpeg', '-v', 'error', '-y', '-i', audio, '-i', opening, '-filter_complex', f'[0:a]aresample={SR},aformat=channel_layouts=stereo,{film}[f];[1:a]aresample={SR},aformat=channel_layouts=stereo,atrim=0:{float(opening_s):.3f}[o];[o][f]amix=inputs=2:normalize=0:duration=longest[m]', '-map', '[m]', '-ar', str(SR), out]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode: raise RuntimeError(r.stderr[-300:])
+    return out
+
+
 def build_audio(folder, plan, out, total_s, music_gain=0.5, bg_gain=None, loudness=None):
     """Write the film's sound (see the module docstring) to the WAV `out`; returns a report dict (windows, music, voice-over, and with `loudness` the measured loudness before and after)."""
     segs = plan['segments']; fs = film_starts(plan); jn = joins(plan); inputs = []; chains = []; labels = []; n = 0

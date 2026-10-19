@@ -93,12 +93,15 @@ def _duration(path):
 
 
 def for_film(folder, directory=None, min_s=MIN_S):
-    """Write the chapters of a film already rendered (its folder under final/, the newest by default) from its timemap.json; the opening's length is the newest bookend-intro piece's. Returns (directory, the result of `write`)."""
+    """Write the chapters of a film already rendered (its folder under final/, the newest by default) from its timemap.json; what comes before the first window (the cold open and the opening title) is the render's own `lead_s` in chapters.json, else the newest cold-open and bookend-intro pieces' lengths. Returns (directory, the result of `write`)."""
     from strata360.pipeline import config
     if directory is None:
         maps = sorted(glob.glob(os.path.join(config.race_dir(folder), 'final', '*', 'timemap.json')), key=os.path.getmtime)
         if not maps: raise FileNotFoundError('no final film with a time map yet (render one with `strata360 final`)')
         directory = os.path.dirname(maps[-1])
-    tm = json.load(open(os.path.join(directory, 'timemap.json'))); intro = sorted(glob.glob(os.path.join(directory, 'bookend-intro-*.mov')), key=os.path.getmtime)
-    lead = (_duration(intro[-1]) or 0.0) if intro else 0.0; film = os.path.join(directory, 'film.mp4')
+    tm = json.load(open(os.path.join(directory, 'timemap.json'))); film = os.path.join(directory, 'film.mp4'); old = os.path.join(directory, 'chapters.json')
+    try: lead = float(json.load(open(old))['lead_s'])                                                                   # the render's own (the cold open and the opening title)
+    except (OSError, ValueError, KeyError, TypeError):
+        newest = lambda pat: (sorted(glob.glob(os.path.join(directory, pat)), key=os.path.getmtime) or [None])[-1]
+        lead = sum((_duration(f) or 0.0) for f in (newest('cold-open-*.mov'), newest('bookend-intro-*.mov')) if f)
     return directory, write(folder, tm, directory, lead, _duration(film) if os.path.exists(film) else None, min_s)

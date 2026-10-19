@@ -64,11 +64,12 @@ def test_write_and_for_film_put_the_files_beside_the_film(tmp_path, monkeypatch)
     monkeypatch.setattr(CH, 'race', lambda folder: (SCHED, km)); seen = []
     d = tmp_path / 'strata360' / 'final' / 'abc'; d.mkdir(parents=True)
     tm = tmap(win(0, 0, 300, 120, 150), win(1, 300, 600, 3700, 3730), win(2, 600, 900, 4000, 4030)); json.dump(tm, open(d / 'timemap.json', 'w'))
-    (d / 'bookend-intro-1234.mov').write_bytes(b''); (d / 'film.mp4').write_bytes(b'')
-    monkeypatch.setattr(CH, '_duration', lambda p: seen.append(os.path.basename(p)) or {'bookend-intro-1234.mov': 6.0, 'film.mp4': 100.0}[os.path.basename(p)])
-    out, res = CH.for_film(str(tmp_path))
-    assert out == str(d) and res['youtube'] and res['lead_s'] == 6.0 and seen == ['bookend-intro-1234.mov', 'film.mp4']
-    assert (d / 'chapters.txt').read_text() == '0:00 Stage 1, km 0\n0:36 Checkpoint 1, km 10\n1:06 Stage 2, km 11\n' and json.load(open(d / 'chapters.json'))['chapters'][2]['t'] == 66.0
+    for f in ('bookend-intro-1234.mov', 'cold-open-ab.mov', 'film.mp4'): (d / f).write_bytes(b'')
+    monkeypatch.setattr(CH, '_duration', lambda p: seen.append(os.path.basename(p)) or {'bookend-intro-1234.mov': 6.0, 'cold-open-ab.mov': 4.0, 'film.mp4': 100.0}[os.path.basename(p)])
+    out, res = CH.for_film(str(tmp_path))                                                            # the cold open, then the opening title, before the first window
+    assert out == str(d) and res['youtube'] and res['lead_s'] == 10.0 and seen == ['cold-open-ab.mov', 'bookend-intro-1234.mov', 'film.mp4']
+    assert (d / 'chapters.txt').read_text() == '0:00 Stage 1, km 0\n0:40 Checkpoint 1, km 10\n1:10 Stage 2, km 11\n' and json.load(open(d / 'chapters.json'))['chapters'][2]['t'] == 70.0
+    (d / 'cold-open-ab.mov').unlink(); seen.clear(); assert CH.for_film(str(tmp_path), str(d))[1]['lead_s'] == 10.0 and seen == ['film.mp4']       # once written, the render's own lead is kept
 
 
 def test_for_film_without_a_film_says_so(tmp_path):
