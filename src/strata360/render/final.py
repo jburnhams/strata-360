@@ -234,7 +234,7 @@ class FinalSource:
         if self.source == 'proxy': yield from self._proxy_frames(sg, a0, a1, yaw_extra, pose_extra); return
         gain = self.gains.get(sg['id']); ci = self._clip(sg['clip']); f = self.shot_factor(sg); R = self._renderer(ci, f); R.carve_seam = True; R.parallax = True; R.seam = None; R.warp = None; m = a1 - a0                                    # a new stretch of the clip: the seam starts afresh
         if m <= 0: return
-        path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; src = self.source_times(sg, a0, a1, ci); t_abs = np.maximum(src, 0.0)          # (a ramp window's frames: edit/hyperlapse.py)
+        path = cam.CameraPath.from_dict(self.framing[sg['id']]); R.set_background(path.bg, **path.bg_opts); times = np.arange(a0, a1) / self.fps; src = self.source_times(sg, a0, a1, ci); t_abs = np.maximum(src, 0.0); clock = HL.src_time(sg, times) - sg['clip_start_s']          # (a ramp window's frames: edit/hyperlapse.py)
         pts = ci['pts']; ks = np.minimum(flat.frame_at(pts, t_abs), ci['n'] - 1); quat = ci['T']['quat']             # the frame shown at clip time t is found by the frame timestamps, not by t x fps (a clip whose camera dropped frames has timestamps that jump)
         Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
         utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0            # the window's first frame on the race clock
@@ -259,7 +259,7 @@ class FinalSource:
                     with self.pg.timed('grade'): img = GR.apply(img, gain(max(times[i], 0.0)))         # the exposure match, before the overlay so the numbers are never graded
                 if self.overlay is None: yield img
                 else:
-                    with self.pg.timed('overlay'): img = self.overlay.apply(img, utc0 + float(src[i]) - sg['clip_start_s'])          # the race clock of the frame shown (it races through a ramp)
+                    with self.pg.timed('overlay'): img = self.overlay.apply(img, utc0 + float(clock[i]))          # the race clock races through a ramp: the ramp's own time (the time map's), at most a few source frames from the frame the picker chose
                     yield img           # before any transition blend, so a dissolve cross-fades the two overlays too
         finally:
             for p in (dm, ds):
