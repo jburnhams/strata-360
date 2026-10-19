@@ -1169,6 +1169,21 @@ def create_app(roots, token=None):
             try: doc = json.load(open(os.path.join(rd, 'clips', g['clip'], 'audio_events.json')))
             except (OSError, ValueError): continue
             m = SE.window_mix(doc, g['clip_start_s'], g['clip_start_s'] + g['dur_s'], bool(g.get('speech'))); g['sound'] = dict(gain_db=m['gain_db'], why=m['why'])
+        plan = e.get('plan')
+        if plan and plan.get('source') != 'script':                                       # timeline editing (D1): how far each cut can be dragged
+            try: room = PJ.edge_room(plan, PJ.load_clips(f)[0], lib)
+            except Exception: room = []
+            for g, r in zip(plan['segments'], room): g['edge_room'] = r
+        try:                                                                             # where each window is on the race (gps/context.py), for the map strip under the timeline
+            import datetime as dt
+            from strata360.gps import context as X
+            tr = loaded_track(f)
+            for g in (plan or {}).get('segments', []):
+                if not g.get('utc_start') or not g.get('utc_end'): continue
+                a, b = (dt.datetime.fromisoformat(g[k].replace('Z', '+00:00')).timestamp() for k in ('utc_start', 'utc_end')); c = X.context_at(tr, a, b)
+                if c.get('covered'): g['pos'] = dict(lat=c['lat'], lon=c['lon'], km=c.get('distance_km'))
+        except HTTPException: pass
+        e['history'] = len(PJ.history(f))
         return dict(edit=e, techniques=[dict(id=t.id, family=t.family, hero=t.hero, dur=list(t.dur), dialogue_ok=t.dialogue_ok) for t in lib.values()], script=lines)
 
     @api.post('/api/edit/propose', dependencies=[Depends(auth)])
@@ -1180,11 +1195,14 @@ def create_app(roots, token=None):
         except O.Infeasible as e: raise HTTPException(400, str(e))
 
     @api.post('/api/edit/override', dependencies=[Depends(auth)])
-    def post_override(body: dict):                                                       # {folder, action: technique|lock|weight|ban|transition|reset, ...}
+    def post_override(body: dict):                                                       # {folder, action: technique|lock|weight|ban|transition|reset|edge|suggest|back, ...}
         from strata360.edit import project as PJ, optimise as O
-        f = folder_of(body.get('folder')); act = body.get('action')
+        f = folder_of(body.get('folder')); act = body.get('action'); note = None
         try:
-            if act == 'technique': e = PJ.set_technique(f, body['wid'], body.get('technique'))
+            if act == 'edge': e, note = PJ.move_edge(f, body['wid'], int(body['beats']))          # drag the cut after a window by whole beats (D1)
+            elif act == 'suggest': e = PJ.suggest_again(f, list(body['wids']))                    # plan one window or a run of them again (D1)
+            elif act == 'back': e = PJ.step_back(f)
+            elif act == 'technique': e = PJ.set_technique(f, body['wid'], body.get('technique'))
             elif act == 'lock': e = PJ.set_lock(f, body['wid'], bool(body.get('locked', True)))
             elif act == 'transition': e = PJ.set_transition(f, body['wid'], body.get('transition'))
             elif act == 'weight': e = PJ.set_clip_weight(f, body['clip'], body.get('factor'))
@@ -1193,7 +1211,7 @@ def create_app(roots, token=None):
             else: raise HTTPException(400, 'unknown action')
         except (KeyError, ValueError) as ex: raise HTTPException(400, str(ex))
         except O.Infeasible as ex: raise HTTPException(400, str(ex))
-        return dict(edit=e)
+        return dict(edit=e, note=note) if note else dict(edit=e)
 
     @api.get('/api/script2', dependencies=[Depends(auth)])
     def get_script2(folder: str, name: str = ''):                                        # the whole-race script: the newest (or the named) draft, the list of drafts, your saved pins, whether a draft is being written, and the lines the draft plays (a white word is yellow when its line is in `used`)
