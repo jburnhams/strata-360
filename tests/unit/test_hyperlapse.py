@@ -107,7 +107,7 @@ def seg(cs, dur=6.0, clip='A', tech='follow_runner', fs=0.0, **kw):
 def test_a_window_before_quiet_running_ramps_and_lands_on_the_next_window():
     segs = [seg(10.0), seg(60.0, fs=6.0)]; rep = HL.apply(segs, [clip(dur=70.0)])
     g = segs[0]; assert g['ramp']['lands'] and g['src_dur_s'] == pytest.approx(50.0, abs=2e-3) and g['utc_end'] == '2026-02-19T17:00:50.000Z'
-    assert rep == [dict(id='A@10.00', clip='A', film_start_s=0.0, dur_s=6.0, from_s=16.0, to_s=pytest.approx(60.0, abs=2e-3), speed=g['ramp']['speed'], lands=True, technique_was=None)]
+    assert rep == [dict(id='A@10.00', clip='A', film_start_s=0.0, dur_s=6.0, from_s=16.0, to_s=pytest.approx(60.0, abs=2e-3), speed=g['ramp']['speed'], lands=True, technique_was=None, took_s=0.0)]
     assert 'ramp' not in segs[1]                                                                     # the clip ends 4 s after the last window: nothing to race through
 
 
@@ -172,6 +172,48 @@ def test_a_ramp_window_is_not_ramped_twice_and_the_summary_reads_in_minutes():
     assert HL.apply(segs[:1], [clip()]) == [] and segs[0]['ramp'] == first
     assert HL.summary([]) is None and HL.summary(rep).startswith('2 speed ramps race through')
     assert HL.summary(rep[:1]) == f"1 speed ramp race through {(rep[0]['to_s'] - rep[0]['from_s']) / 60:.1f} min of running that would have been cut (up to x{rep[0]['speed']:.0f})"
+
+
+BEATS = np.arange(0, 200.5, 0.5)                                                                     # the music's beats in film seconds (120 bpm)
+
+
+def test_a_window_too_short_to_land_takes_beats_from_the_next_window_of_its_clip():
+    g, h = seg(10.0, beats=12, start_beat=0), seg(216.0, dur=8.0, fs=6.0, beats=16, start_beat=12, in_s=0.0)
+    rep = HL.apply([g, h], [clip(dur=300.0)], beats=BEATS)
+    assert g['ramp']['lands'] and g['src_dur_s'] == pytest.approx(h['clip_start_s'] - 10.0, abs=2e-3) and g['ramp']['speed'] <= HL.MAX_SPEED
+    assert g['dur_s'] == 12.0 and g['ramp']['lead_s'] == pytest.approx(2.1) and g['film_start_s'] == 0.0                     # the fewest beats that land; the window's own moment is unchanged
+    assert h['film_start_s'] == 12.0 and h['dur_s'] == 2.0 and h['clip_start_s'] == 222.0 and h['in_s'] == 6.0 and h['utc_start'] == '2026-02-19T17:00:06.000Z'   # the next window starts later in its clip; its end keeps its film time
+    assert (g['beats'], h['beats'], h['start_beat']) == (24, 4, 24) and rep[0]['took_s'] == 6.0 and rep[0]['to_s'] == pytest.approx(222.0, abs=2e-3)
+    assert 'ramp' not in h                                                                            # (the clip runs on for 76 s, but a 2 s window is too short to ramp)
+
+
+def test_without_the_music_s_beats_or_with_a_locked_or_talking_neighbour_nothing_is_taken():
+    for h, kw in [(seg(216.0, dur=8.0, fs=6.0), dict()), (seg(216.0, dur=8.0, fs=6.0, locked=True), dict(beats=BEATS)), (seg(216.0, dur=8.0, fs=6.0, speech=True), dict(beats=BEATS)),
+                  (seg(216.0, dur=8.0, fs=6.0, role='clip'), dict(beats=BEATS)), (seg(216.0, dur=8.0, fs=6.0, clip='B'), dict(beats=BEATS))]:
+        g = seg(10.0); HL.apply([g, h], [clip(dur=300.0), clip('B')], **kw)
+        assert g['dur_s'] == 6.0 and not g['ramp']['lands'] and h['film_start_s'] == 6.0
+
+
+def test_the_next_window_keeps_its_shortest_length_and_the_window_before_gives_the_rest():
+    class T: family, hero, dmin, dmax = 'hold', False, 4.0, 10.0
+    p, g, h = seg(2.0, dur=6.0, fs=0.0, tech='hold_wide'), seg(10.0, fs=6.0), seg(216.0, dur=8.0, fs=12.0, tech='hold_wide')
+    p['options'] = h['options'] = []; HL.apply([p, g, h], [clip(dur=300.0)], lib={'hold_wide': T}, beats=BEATS)
+    assert g['ramp']['lands'] and h['dur_s'] == 4.0 and h['film_start_s'] == 16.0                                            # 4 s from the next window, down to its technique's shortest
+    assert g['film_start_s'] == 4.0 and p['dur_s'] == 4.0 and g['dur_s'] == 12.0 and g['clip_start_s'] == 10.0 and p['utc_end'] == '2026-02-19T17:00:04.000Z'   # 2 s more from the window before
+
+
+@pytest.mark.parametrize('h,dur,why', [
+    (seg(500.0, dur=8.0, fs=6.0), 510.0, 'a stretch longer than MAX_RAMP_WINDOW_S can cover'),
+    (seg(216.0, dur=3.0, fs=6.0), 220.0, 'a neighbour too short to give enough'),
+])
+def test_when_no_choice_lands_nothing_is_taken(h, dur, why):
+    g = seg(10.0); h0 = dict(h); HL.apply([g, h], [clip(dur=dur)], beats=BEATS)
+    assert g['dur_s'] == 6.0 and not g['ramp']['lands'] and h == h0, why
+
+
+def test_the_next_window_gives_no_beats_from_a_stretch_where_someone_talks():
+    g, h = seg(10.0), seg(216.0, dur=8.0, fs=6.0); HL.apply([g, h], [clip(dur=300.0, speech=[(218.0, 222.0)])], beats=BEATS)
+    assert g['dur_s'] == 6.0 and not g['ramp']['lands'] and h['clip_start_s'] == 216.0
 
 
 def test_quiet_run_and_blockers():
@@ -248,3 +290,14 @@ def test_the_preview_from_the_proxy_skips_the_frames_a_ramp_races_past(tmp_path,
     shown = [int(img[9, 16, 0]) // 257 for img in s.frames(0, 0, 25)]
     assert shown == [int(k) for k in np.round(HL.src_time(g, np.arange(25) / 50.0) * 50)] and shown[-1] > 40                # each film frame shows the proxy frame the ramp asks for
     assert float(made[0].cmd[made[0].cmd.index('-t') + 1]) == pytest.approx(float(HL.src_time(g, 24 / 50.0)) + 1 / 50.0 + 0.2, abs=2e-3)      # it decodes the whole stretch the ramp covers
+
+
+def test_the_planner_gives_the_ramps_the_beats_the_cuts_sit_on(monkeypatch):
+    from strata360.edit import optimise as O, project as P
+    music = O.Music(bpm=120.0, beats=8, bar_beats=4, sections=[(0, 8, 0.5)])
+    assert np.allclose(P.film_beats('f', {}, None, music, None), np.arange(9) * 0.5)                                      # the plan's own grid
+    monkeypatch.setattr(P, 'beat_list', lambda *a: dict(beats=[1.02, 1.51, 2.03], downbeats=[1.02]))
+    assert np.allclose(P.film_beats('f', {}, {}, music, dict(seek_s=1.0, delay_s=0.0)), [0.02, 0.51, 1.03])                   # the track's real beats, in film seconds
+    assert np.allclose(P.film_beats('f', {}, {}, music, dict(seek_s=0.0, delay_s=0.5)), [1.52, 2.01, 2.53])                   # (music that starts after the film)
+    monkeypatch.setattr(P, 'beat_list', lambda *a: (_ for _ in ()).throw(OSError('gone')))
+    assert np.allclose(P.film_beats('f', {}, {}, music, dict(seek_s=1.0, delay_s=0.0)), np.arange(9) * 0.5)

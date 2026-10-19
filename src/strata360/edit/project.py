@@ -13,6 +13,7 @@ The plan is a pure function of (candidates, settings, overrides, seed): `propose
 
 A window's id (`wid`) is "<clip id>@<start in the clip, seconds, 2 decimals>"; overrides whose window no longer exists are reported as orphaned, not silently applied."""
 import datetime as dt, glob, json, os
+import numpy as np
 from strata360.edit.script_pack import norm_label
 from strata360.pipeline import config
 from strata360.edit import techniques as TQ, chrono as CH, optimise as O, hyperlapse as HL
@@ -167,10 +168,20 @@ def sync_gap_clips(folder, specs, log=print):
     return made
 
 
-def speed_ramps(edit, ser, clips, lib):
-    """The plan's windows followed by long quiet running made into speed ramps (edit/hyperlapse.py), in place, unless the setting is off; returns the report for the plan."""
+def speed_ramps(edit, ser, clips, lib, beats=None):
+    """The plan's windows followed by long quiet running made into speed ramps (edit/hyperlapse.py), in place, unless the setting is off; returns the report for the plan. `beats` are the film seconds of
+    the music's beats: a ramp window too short to land may move its cuts onto them, taking beats from its neighbours of the same clip."""
     o = edit['overrides']
-    return HL.apply(ser, clips, lib, bans=o['bans_cands'], protect=set(o['tech_force']), st=HL.Settings(enabled=bool(edit['settings'].get('hyperlapse', True))))
+    return HL.apply(ser, clips, lib, bans=o['bans_cands'], protect=set(o['tech_force']), st=HL.Settings(enabled=bool(edit['settings'].get('hyperlapse', True))), beats=beats)
+
+
+def film_beats(folder, settings, mus, music, sync):
+    """The film seconds of the music's beats the cuts sit on: the track's real beats when the cuts were moved onto them (beat_sync's report), else the plan's own grid of `music.beat_s`."""
+    grid = np.arange(int(music.beats) + 1) * music.beat_s
+    if not sync: return grid
+    try: g = beat_list(folder, settings, mus)
+    except (RuntimeError, OSError, ValueError): g = None
+    return np.asarray(g['beats'], float) - float(sync['seek_s']) + float(sync['delay_s']) if g else grid
 
 
 def insert_synthetic(folder, ser, specs, beat_s):
@@ -235,7 +246,7 @@ def plan_from_script(folder, draft_name=None, log=print):
         if g.get('synthetic') and not os.path.exists(g['synthetic']): res['warnings'].append(f"{g['clip']}: the generated clip is not rendered yet" + '; the film shows a card until it is')
     ser, sync = beat_sync(folder, edit['settings'], mus, ser, res['lines'], clips, lib, res['warnings'])                       # the cuts moved onto the music's real beats (V5)
     PN.swap_for_glides(folder, ser, lib, protect=set(o['tech_force']), log=log)                                                    # shots swapped for equivalent ones where that lets a cut be a glide (edit/pans.py)
-    ramps = speed_ramps(edit, ser, clips, lib)                                                                                       # long quiet running raced through instead of cut out (edit/hyperlapse.py)
+    ramps = speed_ramps(edit, ser, clips, lib, film_beats(folder, edit['settings'], mus, music, sync))                              # long quiet running raced through instead of cut out (edit/hyperlapse.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in o.get('transitions', {}).items() if v in TR.TYPES})
     used = {}
     for g in ser: used[g['technique']] = used.get(g['technique'], 0) + g['dur_s']
@@ -261,7 +272,7 @@ def propose(folder, settings=None, overrides=None, keep=True):
     locked_w = {g['wid'] for g in edit['overrides']['locked']}; ser = serialise(segs, clips, music, lib, locked_w); wids = {g['id'] for g in ser}
     from strata360.edit import transitions as TR
     for g in ser: g['energy_hi'] = g['energy'] >= 0.6
-    ramps = speed_ramps(edit, ser, clips, lib)                                                                    # long quiet running raced through instead of cut out (edit/hyperlapse.py)
+    ramps = speed_ramps(edit, ser, clips, lib, film_beats(folder, edit['settings'], mus, music, None))           # long quiet running raced through instead of cut out (edit/hyperlapse.py)
     TR.choose(ser, music.beat_s, music.bar_beats, forced={k: v for k, v in edit['overrides'].get('transitions', {}).items() if v in TR.TYPES})
     orphaned = sorted((set(edit['overrides']['tech_force']) | locked_w) - wids)
     used = {}

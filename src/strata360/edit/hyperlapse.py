@@ -9,7 +9,12 @@ a RAMP WINDOW. Its length in the film does not change (the cuts stay on the beat
   ramp down eased back to real speed
   tail      real speed again, landing exactly where the next window of the clip starts, so the cut after it joins one continuous run
 
-The speed is solved so the window lands on the next window's start; when the stretch is too long for MAX_SPEED the ramp covers what it can and the cut after it skips the rest, as before.
+The speed is solved so the window lands on the next window's start. When the stretch is too long for MAX_SPEED in the window's own length (H3: a 4 s window covers about 40 s at 24x, and most stretches
+between windows are minutes), the window TAKES BEATS from its neighbours in the film that show the same clip: the cut after it moves later onto a beat of the music (the next window then starts that much
+later in its clip, as a cut moved by beat_sync does, so every other frame keeps its film time; the stretch it gave up is raced through too), and the cut before it earlier (the window before ends sooner).
+The fewest beats that let the ramp land are taken; each neighbour keeps at least its technique's shortest length (DONOR_MIN_S at least), and a ramp window grows to MAX_RAMP_WINDOW_S at most. The lead
+stays the length it had, so the window's own moment is unchanged and every beat taken goes to the hyperlapse. When no choice lands, nothing is taken: the ramp covers what it can and the cut after it skips
+the rest, as before. A neighbour gives no beats when it is locked, holds speech or the script's dialogue, or is a ramp window itself.
 
 A stretch is QUIET when nobody talks in it (the clip's speech stretches), you did not skip it in the GUI (a banned window), no other window of the film shows it, and it holds no unusable footage longer than
 UNUSABLE_MAX_S (a moment of hand over the lens flashes by at 10x; a minute of it does not). Only windows that follow your heading (`follow_runner`) are ramped: a view aimed at a person or at you cannot keep
@@ -42,6 +47,8 @@ MIN_SPEED, MAX_SPEED = 3.0, 24.0       # faster than 24x a run reads as flicker,
 UNUSABLE_MAX_S = 2.0   # unusable footage longer than this ends a quiet stretch
 TECHS = ('follow_runner',)
 CONTIGUOUS_S = 0.05    # (seconds) the next window of the clip may start this far before the ramp window's end
+MAX_RAMP_WINDOW_S = 16.0    # a ramp window that takes beats from its neighbours grows to this at most (about 5 min of running at 24x)
+DONOR_MIN_S = 2.0           # a neighbour that gives beats keeps at least this (and its technique's shortest length)
 
 MAX_RADIUS = 8         # frames: how far the frame picker may move from the frame the speed asks for
 W_BLUR, W_BOB, W_DRIFT, W_VEL = 1.0, 1.0, 0.5, 2.0
@@ -61,14 +68,16 @@ class Settings:
     ramp_s: float = RAMP_S
     tail_s: float = TAIL_S
     unusable_max_s: float = UNUSABLE_MAX_S
+    max_window_s: float = MAX_RAMP_WINDOW_S
+    donor_min_s: float = DONOR_MIN_S
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------- the speed ramp
-def profile(D, S, st=None):
+def profile(D, S, st=None, lead_s=None):
     """The ramp of a window `D` film seconds long that plays `S` seconds of footage: dict(dur_s, lead_s, ramp_s, tail_s, speed, src_dur_s), or None when the window is too short for one or `S` needs less than
-    `min_speed`. The speed is capped at `max_speed`; `src_dur_s` then falls short of `S`."""
+    `min_speed`. The speed is capped at `max_speed`; `src_dur_s` then falls short of `S`. `lead_s` fixes the lead (a window that took beats keeps the lead of its own length)."""
     st = st or Settings(); D, S = float(D), float(S)
-    lead = max(st.lead_min_s, st.lead_frac * D); tail = min(st.tail_s, max(D - lead, 0.0) / 4); L = D - lead - tail          # L: the film seconds from the start of the speed-up to the end of the slow-down
+    lead = float(lead_s) if lead_s is not None else max(st.lead_min_s, st.lead_frac * D); tail = min(st.tail_s, max(D - lead, 0.0) / 4); L = D - lead - tail          # L: the film seconds from the start of the speed-up to the end of the slow-down
     if D < st.min_window_s - 1e-9 or L <= 0: return None
     r = min(st.ramp_s, L / 3); V = (S - D + L - r) / (L - r)                                                                         # S = (D - L) + r (1 + V) + V (L - 2 r): real speed, two half-cosine ramps, the hold
     if V < st.min_speed - 1e-9: return None
@@ -197,11 +206,46 @@ def _iso(utc, add):
     t = dt.datetime.fromisoformat(utc.replace('Z', '+00:00')) + dt.timedelta(seconds=add); return t.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
 
-def apply(segs, clips, lib=None, bans=(), protect=(), st=None):
+def _donor(h, g, lib, st):
+    """The shortest length neighbour `h` of window `g` may be left with when it gives beats to g's ramp, or None when it cannot give any (another clip, not next to g in the film, locked, speech, the
+    script's dialogue, generated, a ramp)."""
+    if h is None or h.get('clip') != g.get('clip') or h.get('synthetic') or h.get('ramp') or h.get('speech') or h.get('voice_span') or h.get('role') == 'clip' or h.get('locked'): return None
+    t = (lib or {}).get(h.get('technique')); return max(st.donor_min_s, float(getattr(t, 'dmin', 0.0) or 0.0))
+
+
+def _beat_index(beats, x):
+    return int(np.argmin(np.abs(beats - x)))
+
+
+def _lengthen(segs, k, e0, limit0, blocked, beats, lib, st):
+    """The ramp for window segs[k] when it takes beats from its neighbours of the same clip (see the module docstring): (ramp, new cut before it, new cut after it, the next window's limit) with the fewest
+    film seconds taken that let it land, or None."""
+    g = segs[k]; D0 = float(g['dur_s']); cs = float(g['clip_start_s']); fs = float(g['film_start_s']); b1 = fs + D0; lead = max(st.lead_min_s, st.lead_frac * D0)
+    h = segs[k + 1] if k + 1 < len(segs) else None; p = segs[k - 1] if k > 0 else None
+    hmin = _donor(h, g, lib, st); pmin = _donor(p, g, lib, st)
+    if hmin is None or abs(float(h['film_start_s']) - b1) > CONTIGUOUS_S or abs(float(h['clip_start_s']) - limit0) > CONTIGUOUS_S: return None        # the next window of the clip must be the next shot of the film
+    if pmin is not None and abs(float(p['film_start_s']) + float(p['dur_s']) - fs) > CONTIGUOUS_S: pmin = None
+    after = [b1] + [float(x) for x in beats if b1 + 1e-6 < x <= float(h['film_start_s']) + float(h['dur_s']) - hmin + 1e-9 and x - fs <= st.max_window_s + 1e-9]
+    before = [fs] + ([float(x) for x in beats[::-1] if float(p['film_start_s']) + pmin - 1e-9 <= x < fs - 1e-6] if pmin is not None else [])
+    best = None
+    for y in before:
+        for x in after:
+            D = x - y; dn = x - b1
+            if D > st.max_window_s + 1e-9 or (x == b1 and y == fs) or (best and D >= best[0] - 1e-9): continue
+            limit = float(h['clip_start_s']) + dn
+            if quiet_run(e0, limit, blocked) < limit - 1e-6: break                                         # the stretch the next window gives up is not quiet: taking more of it cannot help
+            rp = profile(D, limit - cs, st, lead_s=lead)
+            if rp and rp['src_dur_s'] >= limit - cs - 1e-3: best = (D, rp, y, x, limit); break                 # (the first x that lands is the fewest beats from the next window for this y)
+    return best and best[1:]
+
+
+def apply(segs, clips, lib=None, bans=(), protect=(), st=None, beats=None):
     """Turn the plan's windows that are followed by a long quiet stretch into ramp windows, in place (see the module docstring). `clips` are the planner's clip dicts (candidates, unusable, duration_s),
-    `bans` the stretches you skipped (the planner's `bans_cands`), `protect` the windows whose technique you chose. Returns the report: one dict per ramp (window, clip seconds raced through, speed, landing)."""
+    `bans` the stretches you skipped (the planner's `bans_cands`), `protect` the windows whose technique you chose, `beats` the film seconds of the music's beats (the cuts a ramp window may move to when it
+    takes beats from its neighbours; without them it keeps its length). `segs` are in film order. Returns the report: one dict per ramp (window, clip seconds raced through, speed, landing, beats taken)."""
     st = st or Settings(); report = []
     if not st.enabled: return report
+    beats = np.asarray(beats if beats is not None else [], float)
     by_id = {c['id']: c for c in clips}; foot = [g for g in segs if not g.get('synthetic') and g.get('clip') in by_id]
     for k, g in enumerate(segs):
         if g.get('synthetic') or g.get('ramp') or g.get('clip') not in by_id or g.get('speech') or g.get('role') == 'clip' or g.get('locked') or float(g['dur_s']) < st.min_window_s - 1e-9: continue
@@ -212,18 +256,36 @@ def apply(segs, clips, lib=None, bans=(), protect=(), st=None):
             if switch is None or g.get('id') in protect: continue
         clip = by_id[g['clip']]; e0 = float(g['clip_start_s']) + float(g['dur_s'])
         nxt = [float(h['clip_start_s']) for h in foot if h is not g and h['clip'] == g['clip'] and float(h['clip_start_s']) >= e0 - CONTIGUOUS_S]
-        limit = min(nxt + [float(clip.get('duration_s') or e0)])
-        end = quiet_run(e0, limit, blockers(clip, bans, st)); gap = end - e0
+        limit = min(nxt + [float(clip.get('duration_s') or e0)]); blocked = blockers(clip, bans, st)
+        end = quiet_run(e0, limit, blocked); gap = end - e0
         if gap < st.min_gap_s - 1e-9: continue
         rp = profile(g['dur_s'], float(g['dur_s']) + gap, st)
         if rp is None: continue
         rp['lands'] = bool(nxt) and end >= limit - 1e-6 and rp['src_dur_s'] >= float(g['dur_s']) + gap - 1e-3            # the window ends where the next window of the clip starts: one continuous run
+        took = 0.0
+        if not rp['lands'] and nxt and end >= limit - 1e-6 and len(beats):
+            more = _lengthen(segs, k, e0, limit, blocked, beats, lib, st)
+            if more:
+                rp, y, x, lim = more; rp['lands'] = True; h = segs[k + 1]; dn = x - (float(g['film_start_s']) + float(g['dur_s'])); dp = float(g['film_start_s']) - y; took = dn + dp
+                kn = _beat_index(beats, x) - _beat_index(beats, x - dn); kp = _beat_index(beats, y + dp) - _beat_index(beats, y)
+                if dn > 0:
+                    h['film_start_s'] = round(x, 4); h['dur_s'] = round(float(h['dur_s']) - dn, 4); h['clip_start_s'] = round(lim, 4); h['in_s'] = round(float(h.get('in_s') or 0.0) + dn, 4)
+                    if h.get('utc_start'): h['utc_start'] = _iso(h['utc_start'], dn)
+                    if 'beats' in h: h['beats'] -= kn; h['start_beat'] = h.get('start_beat', 0) + kn
+                if dp > 0:
+                    p = segs[k - 1]; p['dur_s'] = round(float(p['dur_s']) - dp, 4)
+                    if p.get('utc_start'): p['utc_end'] = _iso(p['utc_start'], p['dur_s'])
+                    if 'beats' in p: p['beats'] -= kp
+                    g['film_start_s'] = round(y, 4)
+                    if 'start_beat' in g: g['start_beat'] -= kp
+                g['dur_s'] = round(rp['dur_s'], 4)
+                if 'beats' in g: g['beats'] += kn + kp
         if switch is not None:
             g['ramp_from'] = tech; g['technique'] = switch
             if lib is not None and switch in lib: g['family'] = lib[switch].family; g['hero'] = lib[switch].hero
         g['ramp'] = rp; g['src_dur_s'] = rp['src_dur_s']
         if g.get('utc_start'): g['utc_end'] = _iso(g['utc_start'], rp['src_dur_s'])
-        report.append(dict(id=g.get('id'), clip=g['clip'], film_start_s=g.get('film_start_s'), dur_s=g['dur_s'], from_s=round(e0, 3), to_s=round(float(g['clip_start_s']) + rp['src_dur_s'], 3), speed=rp['speed'], lands=rp['lands'], technique_was=switch and tech))
+        report.append(dict(id=g.get('id'), clip=g['clip'], film_start_s=g.get('film_start_s'), dur_s=g['dur_s'], from_s=round(e0, 3), to_s=round(float(g['clip_start_s']) + rp['src_dur_s'], 3), speed=rp['speed'], lands=rp['lands'], technique_was=switch and tech, took_s=round(took, 3)))
     return report
 
 

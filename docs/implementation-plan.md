@@ -83,7 +83,7 @@ None; the overlay configuration arrived on 1 Oct (A2).
 - [Milestone M: the race map and charts (design 2 Oct, morning; defaults in brackets await confirmation)](plan/milestone-m-the-race-map-and-charts.md)
 - [Milestone N: generated clips for the gaps (idea 2 Oct; research done, decisions open)](plan/milestone-n-generated-clips-for-the-gaps.md)
 - [Milestone G: generated music (design 5 Oct; options and plan in `docs/ai-music.md`)](plan/milestone-g-generated-music.md)
-- [Milestone H: speed ramps and hyperlapse (idea 19 Oct; H1 built: quiet running raced through instead of cut out)](plan/milestone-h-speed-ramps-and-hyperlapse.md)
+- [Milestone H: speed ramps and hyperlapse (idea 19 Oct; H1 built: quiet running raced through instead of cut out; H3 built: ramp windows take beats from their neighbours to land)](plan/milestone-h-speed-ramps-and-hyperlapse.md)
 - [Milestone B: rendering is fast enough to iterate (GPU first)](plan/milestone-b-rendering-is-fast-enough-to.md)
 - [Milestone C: the edit is trustworthy](plan/milestone-c-the-edit-is-trustworthy.md)
 - [Milestone D: editing in the GUI is fast](plan/milestone-d-editing-in-the-gui-is-fast.md)
