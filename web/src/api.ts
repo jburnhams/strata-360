@@ -118,7 +118,7 @@ export type WordMark = 'must' | 'never'
 export interface WordT { i?: number; w: string; t0: number; t1: number; p?: number | null; e?: WordEdit; m?: WordMark }
 export interface Seg { si: number; part?: number; play0?: number; play1?: number; words: WordT[]; clip: string; t0: number; t1: number; lang: string; text: string; text_en: string | null; flagged: boolean; who: 'wearer' | 'other' | null }
 export interface ReviewItem {
-  clip: string; si: number; t0: number; t1: number; play0: number; play1: number; lang: string; text: string; words: WordT[]; reviewed: boolean
+  clip: string; si: number; t0: number; t1: number; play0: number; play1: number; lang: string; text: string; words: WordT[]; reviewed: boolean; hidden: boolean
   wps: number | null; logprob: number | null; no_speech: number | null; low_words: number; n_words: number; flags: string[]; priority: number; play_rate: number
 }
 export interface ReviewQueue { items: ReviewItem[]; todo: number; total: number; fast_wps: number; normal_wps: number }
@@ -344,6 +344,7 @@ export const api = {
   editWord: (folder: string, clip: string, seg: number, word: number, text: string | null) => call<{ ok: boolean }>('/api/transcript/edit', text === null ? { folder, clip, seg, word, action: 'clear' } : { folder, clip, seg, word, text }),
   transcriptReview: (folder: string) => call<ReviewQueue>('/api/transcript/review?' + q({ folder })),
   markReviewed: (folder: string, clip: string, seg: number, state = true) => call<{ ok: boolean }>('/api/transcript/reviewed', { folder, clip, seg, state }),
+  hideTranscriptPhrase: (folder: string, clip: string, seg: number, state = true) => call<{ ok: boolean }>('/api/transcript/hide', { folder, clip, seg, state }),
   suggestTranscript: (folder: string) => call<{ started: boolean }>('/api/transcript/suggest', { folder }),
   transcriptFix: (folder: string) => call<{ usage?: { calls: number; input: number; output: number; paid_calls: number; cost_usd: number }; health?: StageHealth | null; calls_made?: number; calls_reused?: number; tokens?: { input: number; output: number }; state: string; done?: number; total?: number; fixes?: number; error?: string }>('/api/transcript/suggest?' + q({ folder })),
   hideObject: (b: { folder: string; clip?: string; id?: number; label?: string; hide: boolean }) => call<{ ok: boolean }>('/api/clip/object/hide', b),

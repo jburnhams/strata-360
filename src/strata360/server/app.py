@@ -276,8 +276,8 @@ def create_app(roots, token=None):
                             thumb=thumb and thumb.split('+')[0], thumb_overlay=bool(thumb and thumb.endswith('+overlay')), audio_original=os.path.exists(d + 'audio_original.flac'), audio_clean=os.path.exists(d + 'audio_clean.flac'), steady=None if not mo else mo['summary']['steady'], in_film=c['clip_id'] in used, candidates=None if not cd else cd['summary']['n']))
         return dict(clips=out)
 
-    def effective(d):                                                                    # the transcript with the user's corrections and marks applied (None when there is none)
-        tr = TE.load_effective(d); return TM.annotate(tr, d) if tr else tr
+    def effective(d, keep_hidden=False):                                                 # the transcript with the user's corrections and marks applied, the hidden phrases emptied (None when there is none)
+        tr = TE.load_effective(d, keep_hidden); return TM.annotate(tr, d) if tr else tr
 
     def word_view(s):                                                                    # the words of a phrase for the editable view: shown text, timing, and the correction (if any)
         return [dict(i=i, w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {}), **({'m': w['mark']} if w.get('mark') else {})) for i, w in enumerate(s.get('words') or [])]
@@ -350,8 +350,8 @@ def create_app(roots, token=None):
     @api.get('/api/transcript/review', dependencies=[Depends(auth)])
     def get_transcript_review(folder: str):                                              # every phrase with words, worst first (low confidence, fast speech, the recogniser's flags): the review queue; reviewed ones come last
         f = folder_of(folder); rd = config.race_dir(f); ds = [d for d in sorted(glob.glob(os.path.join(rd, 'clips', '*', ''))) if _j(d, 'clip.json')]
-        items = TR.queue(ds, effective, lambda d: _j(d, 'clip.json')['clip_id'])
-        return dict(items=items, todo=sum(1 for x in items if not x['reviewed']), total=len(items), fast_wps=TR.FAST_WPS, normal_wps=TR.NORMAL_WPS)
+        items = TR.queue(ds, lambda d: effective(d, keep_hidden=True), lambda d: _j(d, 'clip.json')['clip_id'])
+        return dict(items=items, todo=sum(1 for x in items if not x['reviewed'] and not x['hidden']), total=len(items), fast_wps=TR.FAST_WPS, normal_wps=TR.NORMAL_WPS)
 
     @api.post('/api/transcript/reviewed', dependencies=[Depends(auth)])
     def post_transcript_reviewed(body: dict):                                            # {folder, clip, seg, state?}: you have looked at this phrase (state false puts it back in the queue)
@@ -359,6 +359,13 @@ def create_app(roots, token=None):
         try: si = int(body['seg']); t0 = _j(d, 'transcript.json')['segments'][si]['t0']
         except (KeyError, TypeError, ValueError, IndexError): raise HTTPException(404, 'no such phrase')
         TR.set_reviewed(d, si, t0, body.get('state', True) is not False); return dict(ok=True)
+
+    @api.post('/api/transcript/hide', dependencies=[Depends(auth)])
+    def post_transcript_hide(body: dict):                                                # {folder, clip, seg, state?}: take the whole phrase out of the transcript for the rest of the pipeline (it stays on the review page, last, to be shown again with state false)
+        f = folder_of(body.get('folder')); d = _cd(f, body.get('clip'))
+        try: si = int(body['seg']); t0 = _j(d, 'transcript.json')['segments'][si]['t0']
+        except (KeyError, TypeError, ValueError, IndexError): raise HTTPException(404, 'no such phrase')
+        TE.set_hidden(d, si, t0, body.get('state', True) is not False); return dict(ok=True)
 
     @api.get('/api/meta', dependencies=[Depends(auth)])
     def get_meta_tz(folder: str):

@@ -25,6 +25,12 @@ def test_shaky_parts_are_dropped_and_speech_is_its_own_candidate():
     assert 'scenes' in r['missing'] and cs[0]['start_utc'].startswith('2026-02-19T17:00:0')
 
 
+def test_a_phrase_the_user_hid_from_the_transcript_is_not_speech():
+    from strata360.analysis import transcript_edits as TE
+    d = make(lambda x: 5.0, speech=[(24, 30)]); assert [c for c in C.build(d)['candidates'] if c['features']['speech']]
+    TE.set_hidden(d, 0, 24); assert not [c for c in C.build(d)['candidates'] if c['features']['speech']]
+
+
 def test_chatter_is_not_dialogue_and_never_splits_good_footage():
     d = make(lambda x: 5.0, speech=[(5, 11), (20, 27)], labels=['other', 'wearer']); r = C.build(d); cs = r['candidates']
     sp = [c for c in cs if c['kind'] == 'speech']; assert len(sp) == 1 and 19 <= sp[0]['start_s'] <= 21 and sp[0]['features']['speech'] == 1.0

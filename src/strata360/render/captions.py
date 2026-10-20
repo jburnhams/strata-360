@@ -62,8 +62,10 @@ def speech_cues(folder, plan):
         try: edits = json.load(open(os.path.join(d, 'transcript_edits.json'))).get('edits', {})
         except (OSError, ValueError): edits = {}
         c0, c1, f0 = float(g['clip_start_s']), float(g['clip_start_s']) + float(g['dur_s']), float(g['film_start_s'])
+        from strata360.analysis import transcript_edits as TE
+        gone = TE.hidden_set(d, tj)                                                                                 # phrases the user hid from the transcript
         for i, s in enumerate(tj.get('segments', [])):
-            if s.get('flags') or s.get('suspect') or s['t1'] < c0 or s['t0'] > c1: continue
+            if i in gone or s.get('flags') or s.get('suspect') or s['t1'] < c0 or s['t0'] > c1: continue
             english = s.get('lang', 'en') == 'en' or not s.get('text_en')
             if english: words = [w for w in corrected_words(s, edits, i) if c0 <= w[0] < c1]
             else:

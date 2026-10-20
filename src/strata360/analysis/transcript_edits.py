@@ -57,11 +57,43 @@ def apply(tr, edits):
     return out, stale
 
 
-def load_effective(d):
-    """The clip folder's transcript with corrections applied (None when it has no transcript)."""
+HIDDEN_FILE = 'transcript_hidden.json'      # {"hidden": {"<segment>": {"t0": 3.2, "at": "..."}}}: whole phrases the user took out of the transcript (like a correction, only while the phrase is at the same place)
+
+
+def load_hidden(d):
+    try: return json.load(open(os.path.join(d, HIDDEN_FILE))).get('hidden', {})
+    except (OSError, ValueError): return {}
+
+
+def hidden_set(d, tr):
+    """The segment numbers of `tr` that the user has hidden (a hidden phrase that is no longer at the same place, after a new transcription, is ignored)."""
+    segs = tr.get('segments', []); h = load_hidden(d)
+    return {int(k) for k, e in h.items() if str(k).isdigit() and int(k) < len(segs) and abs(segs[int(k)]['t0'] - e.get('t0', segs[int(k)]['t0'])) <= 0.06}
+
+
+def set_hidden(d, si, t0, state=True):
+    """Hide the phrase `si` (starting at `t0`) from everything after the transcript, or show it again (state False). The recogniser's output and the corrections are not touched."""
+    h = load_hidden(d)
+    if state: h[str(int(si))] = dict(t0=round(float(t0), 2), at=_now())
+    else: h.pop(str(int(si)), None)
+    p = os.path.join(d, HIDDEN_FILE); tmp = p + '.tmp'; json.dump(dict(schema=1, hidden=h), open(tmp, 'w'), indent=1); os.replace(tmp, p)
+
+
+def drop_hidden(tr, d):
+    """A copy of the transcript document with the hidden phrases emptied (same segment numbers and times, no text or words): for everything that reads the transcript, it is as if they were deleted."""
+    tr = copy.deepcopy(tr)
+    for si in hidden_set(d, tr): s = tr['segments'][si]; s.update(text='', words=[], **({'text_en': ''} if 'text_en' in s else {}))
+    return tr
+
+
+def load_effective(d, keep_hidden=False):
+    """The clip folder's transcript with corrections applied (None when it has no transcript), the hidden phrases emptied. `keep_hidden`: leave their words in and flag them (`hidden`): the review page lists them so they can be shown again."""
     p = os.path.join(d, 'transcript.json')
     if not os.path.exists(p): return None
-    return apply(json.load(open(p)), load(d))[0]
+    tr = apply(json.load(open(p)), load(d))[0]
+    if not keep_hidden: return drop_hidden(tr, d)
+    for si in hidden_set(d, tr): tr['segments'][si]['hidden'] = True
+    return tr
 
 
 def _orig(d, si, wi):
