@@ -42,6 +42,12 @@ def test_a_source_recorded_on_another_machine_is_found_beside_the_project(tmp_pa
     assert config.source('/Volumes/x/CAM_2.OSV', clip) == '/Volumes/x/CAM_2.OSV' and config.source(None, clip) is None        # not found: unchanged
 
 
+def test_a_library_recorded_on_another_machine_is_the_folder_the_project_sits_in(tmp_path):
+    proj = tmp_path / 'Legends'; config.save(str(proj), dict(name='x', library='/Volumes/Expansion/Legends', stages=['ingest']))
+    assert config.load(str(proj))['library'] == str(proj)
+    config.save(str(proj), dict(name='x', library=str(tmp_path), stages=['ingest'])); assert config.load(str(proj))['library'] == str(tmp_path)          # one that exists is kept
+
+
 def test_whisper_uses_the_gpu_when_ctranslate2_sees_one(monkeypatch):
     import types
     fake = types.SimpleNamespace(get_cuda_device_count=lambda: 1); monkeypatch.setitem(sys.modules, 'ctranslate2', fake)

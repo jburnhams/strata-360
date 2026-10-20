@@ -17,6 +17,7 @@ NORMAL_WPS = 3.5                # the pace the "normalised" player slows fast sp
 MIN_PACE_WORDS = 4              # a phrase shorter than this has no pace worth the name (two words in half a second is not fast speech)
 MIN_RATE = 0.5                  # but never slower than half speed (it smears)
 LOW_WORD_P = 0.5
+CONTEXT_S = 1.5                 # sound played before the first and after the last word of a phrase, so it is heard in context (the page marks where the phrase itself is)
 FLAG_WEIGHT = dict(hallucination_phrase=1.0, probably_no_speech=1.0, repetition=0.5, low_confidence=0.3)
 
 
@@ -69,7 +70,7 @@ def stats(seg):
 
 
 def queue(clip_dirs, effective, clip_id):
-    """Every phrase with words, worst first: [{clip, si, t0, t1, play0, play1, lang, text, words, ...stats, play_rate, reviewed}]. `effective(d)` is the clip's transcript with corrections applied, `clip_id(d)` its id.
+    """Every phrase with words, worst first: [{clip, si, t0, t1, play0, play1, lang, text, words, ...stats, play_rate, reviewed}]. `effective(d)` is the clip's transcript with corrections applied (and the hidden phrases kept, flagged `hidden`), `clip_id(d)` its id.
     The confidence is the recogniser's, so it does not change when a word is corrected (the correction is what `reviewed` records)."""
     out = []
     for d in clip_dirs:
@@ -79,7 +80,7 @@ def queue(clip_dirs, effective, clip_id):
         for si, s in enumerate(tr.get('segments', [])):
             if not (s.get('text') or '').strip() or not s.get('words'): continue
             st = stats(s); ws = [dict(i=i, w=w['w'], t0=w['t0'], t1=w['t1'], p=w.get('p'), **({'e': w['edit']} if w.get('edit') else {})) for i, w in enumerate(s['words'])]
-            out.append(dict(clip=cid, si=si, t0=s['t0'], t1=s['t1'], play0=round(max(s['words'][0]['t0'] - 0.3, 0.0), 2), play1=round(s['words'][-1]['t1'] + 0.4, 2), lang=s.get('lang', 'en'),
-                            text=s['text'].strip(), words=ws, play_rate=play_rate(st['wps']), reviewed=is_reviewed(r, si, s['t0']), **st))
-    out.sort(key=lambda x: (x['reviewed'], -x['priority'], x['clip'], x['si']))
+            out.append(dict(clip=cid, si=si, t0=s['t0'], t1=s['t1'], play0=round(max(s['words'][0]['t0'] - CONTEXT_S, 0.0), 2), play1=round(s['words'][-1]['t1'] + CONTEXT_S, 2), lang=s.get('lang', 'en'),
+                            text=s['text'].strip(), words=ws, play_rate=play_rate(st['wps']), reviewed=is_reviewed(r, si, s['t0']), hidden=bool(s.get('hidden')), **st))
+    out.sort(key=lambda x: (x['hidden'], x['reviewed'], -x['priority'], x['clip'], x['si']))              # hidden phrases (taken out of the film's transcript) come last of all
     return out

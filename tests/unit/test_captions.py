@@ -22,6 +22,17 @@ def test_corrections_replace_or_remove_words():
     assert [w[2] for w in got] == ['from', 'the', 'night']
 
 
+def test_a_phrase_the_user_hid_from_the_transcript_has_no_subtitle(tmp_path):
+    import json, os
+    from strata360.analysis import transcript_edits as TE
+    from strata360.pipeline import config
+    f = str(tmp_path / 'Race'); d = os.path.join(config.race_dir(f), 'clips', 'C1'); os.makedirs(d)
+    ws = lambda t: [dict(w='hello', t0=t, t1=t + 0.4), dict(w='there', t0=t + 0.5, t1=t + 0.9)]
+    json.dump(dict(segments=[dict(t0=1.0, t1=2.0, lang='en', text='hello there', words=ws(1.0)), dict(t0=5.0, t1=6.0, lang='en', text='hello there', words=ws(5.0))]), open(os.path.join(d, 'transcript.json'), 'w'))
+    plan = dict(segments=[dict(clip='C1', clip_start_s=0.0, dur_s=10.0, film_start_s=0.0)]); assert len(C.speech_cues(f, plan)) == 2
+    TE.set_hidden(d, 1, 5.0); assert [round(c['t0']) for c in C.speech_cues(f, plan)] == [1]
+
+
 def test_a_cue_is_drawn_only_while_it_is_on_and_the_frame_is_otherwise_untouched():
     cap = C.Captions([dict(t0=1.0, t1=3.0, text='Four days across the Ardennes', kind='vo')], 640, 360, 25.0); img = np.full((360, 640, 3), 80, np.uint8)
     assert cap.apply(img, 10) is img and cap.apply(img, 100) is img                                              # before and after: the same array

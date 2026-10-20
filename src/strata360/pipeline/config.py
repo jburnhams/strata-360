@@ -94,6 +94,7 @@ def load(name):
     cfg = copy.deepcopy(DEFAULTS)
     for k, v in json.load(open(p)).items():
         cfg[k] = {**cfg[k], **v} if isinstance(v, dict) and isinstance(cfg.get(k), dict) else v
+    if is_project_path(name) and not (cfg.get('library') and os.path.isdir(cfg['library'])): cfg['library'] = os.path.abspath(str(name))          # a project made on another computer (/Volumes/Expansion/...): its footage is the folder it sits in
     for new, after in ADDED_STAGES:                                                       # stages added after a project was made join it, right after the one they follow
         if 'transcribe' in cfg['stages'] and new not in cfg['stages'] and after in cfg['stages']: cfg['stages'].insert(cfg['stages'].index(after) + 1, new)
     return cfg

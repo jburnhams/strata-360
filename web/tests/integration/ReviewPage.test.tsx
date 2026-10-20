@@ -12,6 +12,7 @@ describe('ReviewPage', () => {
   let audio: HTMLAudioElement | null
   beforeEach(() => {
     media = stubMedia(); audio = null
+    media.play.mockImplementation(function (this: HTMLMediaElement) { audio = this as HTMLAudioElement; return Promise.resolve() })          // the player's one audio element lives across tests, and load() is skipped when the sound is the same
     media.load.mockImplementation(function (this: HTMLMediaElement) { audio = this as HTMLAudioElement; setTimeout(() => this.dispatchEvent(new Event('loadedmetadata')), 0) })
   })
   afterEach(() => { vi.restoreAllMocks() })
@@ -51,11 +52,43 @@ describe('ReviewPage', () => {
     const { user } = setup(<ReviewPage folder="f" />)
     await user.click(await screen.findByRole('button', { name: /slowed to normal pace \(×0.69\)/ }))
     await waitFor(() => expect(media.play).toHaveBeenCalled())
-    expect(audio!.playbackRate).toBe(0.69); expect(audio!.currentTime).toBe(2.9); expect(audio!.src).toContain('kind=clean')
+    expect(audio!.playbackRate).toBe(0.69); expect(audio!.currentTime).toBe(1.7); expect(audio!.src).toContain('kind=clean')
     await user.click(screen.getByRole('button', { name: /original speed/ }))
     await waitFor(() => expect(audio!.playbackRate).toBe(1))
     await user.click(screen.getByRole('button', { name: /original speed/ }))      // pressed again: stops
     await waitFor(() => expect(media.pause).toHaveBeenCalled())
+  })
+
+  it('shows where the phrase is on a timeline and lights the word being heard while it plays', async () => {
+    const { user } = setup(<ReviewPage folder="f" />)
+    const line = await screen.findByRole('img', { name: /the phrase runs from 0:03 to 0:04 of the clip; the player plays from 0:01 to 0:05/ })
+    expect(line).toBeInTheDocument(); expect(screen.queryByTestId('playhead')).not.toBeInTheDocument()       // the sound before and after the phrase is on the bar, the phrase itself marked inside it
+    await user.click(screen.getByRole('button', { name: /original speed/ })); await waitFor(() => expect(media.play).toHaveBeenCalled())
+    audio!.currentTime = 3.7                                                                                    // inside "wear"
+    await waitFor(() => expect(screen.getByText('wear')).toHaveAttribute('aria-current', 'true'))
+    expect(screen.getByText('we')).not.toHaveAttribute('aria-current'); expect(screen.getByTestId('playhead').style.left).toBe(`${((3.7 - 1.7) / 4.2) * 100}%`)
+    audio!.currentTime = 2.0                                                                                    // the lead-in: no word yet
+    await waitFor(() => expect(screen.queryByText('wear')).not.toHaveAttribute('aria-current')); expect(screen.getByText('we')).not.toHaveAttribute('aria-current')
+    await user.click(screen.getByRole('button', { name: /original speed/ }))
+  })
+
+  it('repeats the phrase until stopped, unless looping is switched off (one setting for every player)', async () => {
+    mockGet('/api/transcript/review', queue(makeReviewItem({ si: 0 }), makeReviewItem({ si: 1 }))); const { user } = setup(<ReviewPage folder="f" />)
+    const loops = await screen.findAllByRole('button', { name: /loop/ }); expect(loops).toHaveLength(2); loops.forEach(b => expect(b).toHaveAttribute('aria-pressed', 'true'))      // on by default
+    await user.click(screen.getAllByRole('button', { name: /original speed/ })[0]); await waitFor(() => expect(media.play).toHaveBeenCalled())
+    media.pause.mockClear(); audio!.currentTime = 5.95                                                          // past the end of the span (5.9)
+    await waitFor(() => expect(audio!.currentTime).toBeLessThan(2)); expect(audio!.currentTime).toBeGreaterThanOrEqual(1.7); expect(media.pause).not.toHaveBeenCalled()      // back at its start, still playing
+    await user.click(loops[1]); loops.forEach(b => expect(b).toHaveAttribute('aria-pressed', 'false'))          // switching it off on one player switches it off on all
+    audio!.currentTime = 5.95; await waitFor(() => expect(media.pause).toHaveBeenCalled())                     // now it plays to the end and stops
+    await user.click(loops[0]); loops.forEach(b => expect(b).toHaveAttribute('aria-pressed', 'true'))
+  })
+
+  it('stops the sound when a correction is saved or the phrase is hidden', async () => {
+    mockGet('/api/transcript/review', queue(makeReviewItem({ si: 0 }), makeReviewItem({ si: 1 }))); const { user } = setup(<ReviewPage folder="f" />)
+    await user.click((await screen.findAllByRole('button', { name: /original speed/ }))[0]); await waitFor(() => expect(media.play).toHaveBeenCalled())
+    media.pause.mockClear(); await user.click(screen.getAllByRole('button', { name: 'looks right' })[0]); await waitFor(() => expect(media.pause).toHaveBeenCalled())
+    await user.click(screen.getAllByRole('button', { name: /original speed/ })[0]); await waitFor(() => expect(media.play).toHaveBeenCalledTimes(2))
+    media.pause.mockClear(); await user.click(screen.getAllByRole('button', { name: 'hide' })[0]); await waitFor(() => expect(media.pause).toHaveBeenCalled())
   })
 
   it('has no slowed version for speech that is not fast', async () => {
@@ -135,6 +168,26 @@ describe('ReviewPage', () => {
     expect(await screen.findByLabelText('what was said')).toHaveValue('we are')
     await user.click(screen.getByRole('button', { name: 'looks right' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('disk full')
+  })
+
+  it('hides a phrase with one button', async () => {
+    const hides = recordRequests('/api/transcript/hide'); const { user } = setup(<ReviewPage folder="f" />)
+    await user.click(await screen.findByRole('button', { name: 'hide' }))
+    await waitFor(() => expect(hides).toHaveLength(1)); expect(hides[0].body).toEqual({ folder: 'f', clip: 'CAM_20260101120000_0001_D', seg: 0, state: true })
+  })
+
+  it('lists a hidden phrase last, whatever the filter, with only a way to show it again', async () => {
+    const hides = recordRequests('/api/transcript/hide')
+    mockGet('/api/transcript/review', queue(makeReviewItem({ si: 0 }), makeReviewItem({ si: 1, hidden: true, reviewed: true }))); const { user } = setup(<ReviewPage folder="f" />)
+    await screen.findByText('hidden'); expect(screen.getAllByLabelText('what was said')).toHaveLength(1)           // the hidden one has no box to retype it, and is listed although "show ones I have looked at" is off
+    expect(screen.getAllByRole('button', { name: 'hide' })).toHaveLength(1); expect(screen.queryByRole('button', { name: 'looks right' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'show again' }))
+    await waitFor(() => expect(hides).toHaveLength(1)); expect(hides[0].body).toMatchObject({ seg: 1, state: false })
+  })
+
+  it('shows the error when hiding fails', async () => {
+    mockError('/api/transcript/hide', 500, 'disk full', 'post'); const { user } = setup(<ReviewPage folder="f" />)
+    await user.click(await screen.findByRole('button', { name: 'hide' })); expect(await screen.findByRole('alert')).toHaveTextContent('disk full')
   })
 
   it('shows twenty at a time', async () => {

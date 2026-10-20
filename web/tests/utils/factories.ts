@@ -8,7 +8,7 @@ export const makeWordT = (o: Partial<WordT> = {}): WordT => ({ w: 'hello', t0: 0
 
 export const makeSeg = (o: Partial<Seg> = {}): Seg => ({ si: 0, clip: 'CAM_123', t0: 0, t1: 1, lang: 'en', text: 'hello', text_en: null, flagged: false, who: 'wearer', words: [makeWordT()], ...o })
 
-export const makeReviewItem = (o: Partial<ReviewItem> = {}): ReviewItem => ({ clip: 'CAM_20260101120000_0001_D', si: 0, t0: 3.2, t1: 8.9, play0: 2.9, play1: 9.3, lang: 'en', text: 'we are fine', reviewed: false, wps: 5.1, logprob: -0.7, no_speech: 0.01, low_words: 1, n_words: 3,
+export const makeReviewItem = (o: Partial<ReviewItem> = {}): ReviewItem => ({ clip: 'CAM_20260101120000_0001_D', si: 0, t0: 3.2, t1: 8.9, play0: 1.7, play1: 5.9, lang: 'en', text: 'we are fine', reviewed: false, hidden: false, wps: 5.1, logprob: -0.7, no_speech: 0.01, low_words: 1, n_words: 3,
   flags: [], priority: 1.9, play_rate: 0.69, words: [{ i: 0, w: 'we', t0: 3.2, t1: 3.5, p: 0.9 }, { i: 1, w: 'wear', t0: 3.6, t1: 3.9, p: 0.3 }, { i: 2, w: 'fine', t0: 4.0, t1: 4.4, p: 0.8 }], ...o })
 
 export const makeReviewQueue = (o: Partial<ReviewQueue> = {}): ReviewQueue => ({ items: [makeReviewItem()], todo: 1, total: 1, fast_wps: 4.5, normal_wps: 3.5, ...o })

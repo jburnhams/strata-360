@@ -57,9 +57,21 @@ class TestQueue:
         items = TR.queue([d], TE.load_effective, lambda _: 'C1')
         assert [(x['si'], x['reviewed']) for x in items] == [(3, False), (1, False), (0, True)]                       # the empty phrase is left out
         assert items[2]['words'][0]['w'] == 'tranquil' and items[2]['words'][0]['e']['orig'] == 'calm' and items[1]['play_rate'] < 1.0 and items[0]['play_rate'] == 1.0
-        assert items[1]['play0'] == 9.7 and items[1]['clip'] == 'C1'
+        assert items[1]['play0'] == 8.5 and items[1]['play1'] == round(items[1]['words'][-1]['t1'] + TR.CONTEXT_S, 2) and items[1]['clip'] == 'C1'          # 1.5 s of context either side
+        assert items[2]['play0'] == 0.0                                                                                                            # never before the start of the clip
 
     def test_a_clip_without_a_transcript_is_skipped(self, tmp_path): assert TR.queue([str(tmp_path)], TE.load_effective, lambda _: 'C1') == []
+
+
+class TestHidden:
+    def test_hidden_phrases_are_emptied_unless_asked_for_and_only_while_in_the_same_place(self, tmp_path):
+        d = str(tmp_path); doc = dict(segments=[seg(['keep', 'me'], t0=1.0), seg(['drop', 'me'], t0=5.0)]); json.dump(doc, open(os.path.join(d, 'transcript.json'), 'w'))
+        TE.set_hidden(d, 1, 5.0); s = TE.load_effective(d)['segments']
+        assert (s[0]['text'], len(s[1]['words']), s[1]['text'], s[1]['text_en'], s[1]['t0']) == ('keep me', 0, '', '', 5.0) and len(s) == 2        # same numbers and times, nothing to read
+        k = TE.load_effective(d, keep_hidden=True)['segments']; assert k[1]['text'] == 'drop me' and k[1]['hidden'] and not k[0].get('hidden')
+        assert TE.drop_hidden(doc, d)['segments'][1]['words'] == [] and doc['segments'][1]['words']                                               # the original document is not changed
+        doc['segments'][1]['t0'] = 9.0; json.dump(doc, open(os.path.join(d, 'transcript.json'), 'w')); assert TE.load_effective(d)['segments'][1]['text'] == 'drop me'          # a new transcription: the old hide is ignored
+        TE.set_hidden(d, 1, 9.0); TE.set_hidden(d, 1, 9.0, False); assert TE.load_hidden(d) == {}
 
 
 class TestEndpoints:
@@ -74,6 +86,18 @@ class TestEndpoints:
         assert client.post('/api/transcript/reviewed', json=q).status_code == 200
         r = client.get('/api/transcript/review', params=dict(folder=project.folder)).json(); assert [x['si'] for x in r['items']] == [0, 1] and r['todo'] == 1
         client.post('/api/transcript/reviewed', json=dict(q, state=False)); assert client.get('/api/transcript/review', params=dict(folder=project.folder)).json()['todo'] == 2
+
+    def test_a_hidden_phrase_goes_last_is_gone_for_the_rest_of_the_pipeline_and_can_be_shown_again(self, client, project):
+        project.add_clip(transcript=self.TRANSCRIPT); q = dict(folder=project.folder, clip=CLIP_ID, seg=1); get = lambda: client.get('/api/transcript/review', params=dict(folder=project.folder)).json()
+        assert client.post('/api/transcript/hide', json=q).status_code == 200
+        r = get(); assert [(x['si'], x['hidden']) for x in r['items']] == [(0, False), (1, True)] and r['todo'] == 1 and r['total'] == 2 and r['items'][1]['words']       # last, still there with its words, not counted as to do
+        assert client.post('/api/transcript/reviewed', json=dict(q, seg=0)).status_code == 200; assert [x['si'] for x in get()['items']] == [0, 1]                    # a looked-at phrase still comes before a hidden one
+        assert [s['text'] for s in client.get('/api/transcript', params=dict(folder=project.folder)).json()['segments']] == ['we are fine']                           # the running transcript no longer has it
+        assert client.post('/api/transcript/hide', json=dict(q, state=False)).status_code == 200; r = get()
+        assert [(x['si'], x['hidden']) for x in r['items']] == [(1, False), (0, False)] and r['todo'] == 1
+
+    def test_an_unknown_phrase_cannot_be_hidden(self, client, project):
+        project.add_clip(transcript=self.TRANSCRIPT); assert client.post('/api/transcript/hide', json=dict(folder=project.folder, clip=CLIP_ID, seg=9)).status_code == 404
 
     def test_an_unknown_phrase_is_refused(self, client, project):
         project.add_clip(transcript=self.TRANSCRIPT); assert client.post('/api/transcript/reviewed', json=dict(folder=project.folder, clip=CLIP_ID, seg=9)).status_code == 404

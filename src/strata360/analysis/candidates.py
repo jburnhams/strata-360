@@ -53,6 +53,7 @@ def you_view_arrays(me, h):
 def timeline(d):
     """Per-second arrays for a clip folder: dict(n, steady, expo, speech, me, people, energy, scenic, blocked, setting, ...) plus the raw docs and a `missing` list."""
     sp_doc = _load(d, 'speakers.json'); clip = _load(d, 'clip.json'); mo = _load(d, 'motion.json'); ex = _load(d, 'exposure.json'); au = _load(d, 'audio.json'); tr = _load(d, 'transcript.json'); al = _load(d, 'alignment.json')
+    if tr: from strata360.analysis import transcript_edits as TE; tr = TE.drop_hidden(tr, d)                  # phrases the user hid from the transcript count as no speech
     idn = _load(d, 'identity.json'); sc = _load(d, 'scenes.json'); dur = float(clip['video']['source_frames'] / clip['video']['nominal_fps']); n = max(int(np.floor(dur)), 1); t = np.arange(n) + 0.5
     missing = [k for k, v in (('motion', mo), ('speakers', sp_doc), ('exposure', ex), ('audio', au), ('transcript', tr), ('identity', idn), ('scenes', sc)) if v is None]
     def at(ts, vs, default): return np.interp(t, ts, vs) if len(ts) else np.full(n, default)
