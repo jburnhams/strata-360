@@ -102,10 +102,9 @@ class TestIngest:
         f = ex['frames'][0]['camera']; assert f['iso'] == [S.ISO, S.ISO] and f['shutter_den'] == [250, 250]
         assert ex['sampling']['source_frames'] == FRAMES and ex['frames'][0]['sphere']['coverage'] > 0.9
 
-    @pytest.mark.xfail(strict=True, reason='analysis/exposure.py writes camera="dji_osmo_360" for every clip, whatever made it')
     def test_exposure_names_the_camera_that_made_the_clip(self, insta360_processed):
         ex = load(f'{insta360_processed}/strata360/clips/{CLIP}/exposure.json')
-        assert ex['source']['camera'] != 'dji_osmo_360'
+        assert (ex['source']['camera'], ex['source']['colour_mode']) == ('insta360_x3', 'normal')
 
     def test_unchanged_work_is_not_redone(self, insta360_processed, cli):
         assert 'nothing left to do' in cli('run', insta360_processed, '--stages', STAGES).stdout
