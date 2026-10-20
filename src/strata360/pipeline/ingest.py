@@ -39,6 +39,9 @@ def ingest_clip(clip, cfg):
     pts = video_sample_times(clip.osv); n_rear = len(pts)
     if is_insv: pts = pts[:min(n_rear, n_front)]
     gaps, nominal = frame_gaps(pts)
+    if getattr(clip, 'recovered', False):
+        notes.append('rebuilt from a recording cut short (strata360 recover): the original has no index; this copy has every whole frame up to where it stopped')
+        if is_insv and not insta360.has_motion(clip.osv): notes.append('Insta360 motion and exposure data are written at the end of the file, so this recording has none: treated as held upright (no horizon levelling), ISO and shutter unknown')
     if is_insv and n_front != n_rear: notes.append(f'the lens files differ in length ({n_rear} rear, {n_front} front frames): the shorter decides')
     nominal_fps = round(1.0 / nominal, 3)
     duration = float(pts[-1] - pts[0]) + nominal

@@ -136,6 +136,14 @@ def install_hint():
     return {'darwin': 'brew install ffmpeg exiftool', 'win32': 'winget install Gyan.FFmpeg OliverBetz.ExifTool'}.get(sys.platform, 'sudo apt-get install ffmpeg libimage-exiftool-perl   (or your distribution\'s equivalent)')
 
 
+def cmd_recover(a):
+    from strata360.osv import recover
+    lib = a.folder if os.path.isdir(a.folder) else config.load(a.folder)['library']
+    res = recover.recover_library(lib)
+    if not res: print('no cut-short recordings found')
+    else: print(f"{sum(1 for r in res if 'error' not in r)} rebuilt into {recover.recovered_dir(lib)}; the originals are unchanged")
+
+
 def cmd_doctor(a):
     import importlib, shutil, warnings
     ok = True
@@ -788,6 +796,7 @@ def create_parser():
     p = sub.add_parser('show', help='summarise one clip'); p.add_argument('name'); p.add_argument('clip'); p.set_defaults(fn=cmd_show)
     p = sub.add_parser('report', help='race-level summary (report.json and report.md)'); p.add_argument('name'); p.set_defaults(fn=cmd_report)
     p = sub.add_parser('doctor', help='check the environment'); p.set_defaults(fn=cmd_doctor)
+    p = sub.add_parser('recover', help='rebuild the index of recordings cut short (battery or card ran out) as copies in <footage>/strata360/recovered/, which the pipeline then uses; the originals are only read'); p.add_argument('folder', metavar='FOLDER_OR_RACE'); p.set_defaults(fn=cmd_recover)
     p = sub.add_parser('backup', help='back up the project metadata now (also done every 30 min while changed), list the backups, or unpack one'); p.add_argument('name'); p.add_argument('--list', action='store_true')
     p.add_argument('--restore', metavar='ARCHIVE', help='unpack this backup (name from --list)'); p.add_argument('--to', help='folder to unpack into (default: backups/restored-<name>)'); p.set_defaults(fn=cmd_backup)
     p = sub.add_parser('mcp', help='MCP tools (stdio) for a local agent: look at clips, transcript, edit plan, script and stills of a running `strata360 serve`, and edit them (backed up, journalled; costly actions wait for your approval in the app)'); p.add_argument('--url', default='http://127.0.0.1:8360', help='the running server'); p.add_argument('--token', help='its token (or STRATA360_SERVER_TOKEN)'); p.add_argument('--folder', help='the project the tools use by default (else the one last opened in the server)'); p.add_argument('--read-only', action='store_true', help='leave out the edit tool'); p.set_defaults(fn=cmd_mcp)

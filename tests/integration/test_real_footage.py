@@ -18,7 +18,8 @@ X3_IMU_STEPS_BACK = '2023-09-09 - White Horse 100/VID_20230912_114415_00_023.ins
 X3_CUT_SHORT = '2022-12-06 - Art Birth/VID_20221002_145905_00_224.insv'                 # no moov box: the recording was cut short
 X3_IMU_HOLE = '2023-09-24 - Kidical Mass/VID_20230924_122851_00_033.insv'             # 0.6 s with no IMU samples about a second into the video (56 of 881 clips have such a hole)
 DJI = '2026-02-19 - Legends/CAM_20260221120007_0019_D.OSV'                              # 4.8 s
-DJI_CUT_SHORT = '2026-07-25 - Beacons 100/CAM_20260726113908_0056_D.OSV'
+DJI_CUT_SHORT = '2026-07-25 - Beacons 100/CAM_20260726113908_0056_D.OSV'                # 75 s of media, then zeros: the camera never wrote the rest
+DJI_GOOD_SAME_DAY = '2026-07-25 - Beacons 100/CAM_20260725203130_0055_D.OSV'
 
 
 def real(rel):
@@ -118,18 +119,32 @@ class TestDjiOsmo360:
 
 
 class TestCutShortRecordings:
-    """A recording whose battery or card ran out has no MP4 index; discovery reports it instead of handing it to ingest (where ffprobe failed on it)."""
+    """A recording whose battery or card ran out has no MP4 index. Discovery reports it, or uses the copy `strata360 recover` rebuilt in <folder>/strata360/recovered/ (osv/recover.py)."""
 
-    def test_an_x3_pair_with_no_index_is_reported_not_ingested(self):
-        from strata360.pipeline import clips as C
-        p = real(X3_CUT_SHORT); cl, un = C.discover(os.path.dirname(p))
-        assert '224' not in {c.id.rsplit('_', 1)[1] for c in cl}
-        reasons = {os.path.basename(f): r for f, r in un}
-        assert reasons[os.path.basename(p)] == reasons[os.path.basename(p).replace('_00_', '_10_')] == C.NO_INDEX
-
-    def test_an_osv_with_no_index_is_reported_not_ingested(self):
-        from strata360.pipeline import clips as C
+    @pytest.mark.parametrize('rel', [X3_CUT_SHORT, DJI_CUT_SHORT])
+    def test_is_reported_or_its_recovered_copy_is_used_and_the_original_is_left_alone(self, rel):
+        from strata360.osv import recover as R
         from strata360.osv.mp4 import cut_short
-        p = real(DJI_CUT_SHORT); cl, un = C.discover(os.path.dirname(p))
-        assert cut_short(p) and os.path.splitext(os.path.basename(p))[0] not in {c.id for c in cl}
-        assert {os.path.basename(f): r for f, r in un}[os.path.basename(p)] == C.NO_INDEX
+        from strata360.pipeline import clips as C
+        p = real(rel); lib = os.path.dirname(p); cl, un = C.discover(lib); name = os.path.basename(p)
+        assert cut_short(p)                                                                            # never rewritten in place
+        copy_ = os.path.join(R.recovered_dir(lib), name)
+        if os.path.exists(copy_): assert any(c.recovered and os.path.normpath(c.osv) == os.path.normpath(copy_) for c in cl)
+        else: assert {os.path.basename(f): r for f, r in un}[name] == C.NO_INDEX
+
+    def test_an_x3_lens_file_is_rebuilt_from_a_good_one_of_the_same_day(self, tmp_path):
+        import hashlib, subprocess
+        from strata360.osv import recover as R
+        p = real(X3_CUT_SHORT); before = hashlib.sha1(open(p, 'rb').read()).hexdigest(); tpl = R.template_for(p)
+        assert os.path.basename(tpl) == 'VID_20221002_145901_00_219.insv'
+        r = R.recover(p, tpl, str(tmp_path / os.path.basename(p)), trailer=R.x3_trailer(tpl))
+        assert r['samples'] == {0: 208, 1: 324} and hashlib.sha1(open(p, 'rb').read()).hexdigest() == before
+        assert subprocess.run(['ffmpeg', '-v', 'error', '-i', r['dest'], '-f', 'null', '-'], capture_output=True, text=True).stderr == ''
+
+    def test_the_dji_layout_walk_reproduces_a_good_clips_own_index(self):
+        from strata360.osv import recover as R
+        p = real(DJI_GOOD_SAME_DAY); t = R.Template(p); size = os.path.getsize(p)
+        b = np.memmap(p, np.uint8, 'r', offset=t.first, shape=(size - t.first,)); got, _ = R.Walker(t, b, t.first).run()
+        for i, trak in enumerate(t.traks):
+            o, z = R._samples(trak); n = len(got[i])
+            assert n >= len(o) - 25 and [(a, b_) for a, b_ in got[i]] == list(zip(o[:n].tolist(), z[:n].tolist()))   # all but the audio buffered after the last frame
