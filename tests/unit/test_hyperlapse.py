@@ -240,6 +240,17 @@ def test_the_final_source_plays_the_ramp_and_picks_frames_once_for_the_whole_win
     far = s.source_times(g, 600, 602, ci); assert np.allclose(far, HL.src_time(g, np.arange(600, 602) / FPS))                # outside what was picked: the ramp's times
 
 
+def test_the_decoder_passes_only_the_frames_a_ramp_shows(monkeypatch):
+    from strata360.render import flat, final as FN
+    assert flat.keep_filter([0, 1, 2, 5, 9, 10, 11]) == "select='between(n,0,2)+eq(n,5)+between(n,9,11)'"
+    assert flat.keep_filter([0, 1, 2, 3]) is None and flat.keep_filter([]) is None and flat.keep_filter(range(0, 40000, 3)) is None           # nothing skipped, or too long for a command line
+    order, keep = FN.skipped_frames([100, 100, 104, 130, 131], 100); assert list(order) == [100, 104, 130, 131] and keep == "select='eq(n,0)+eq(n,4)+between(n,30,31)'"
+    assert FN.skipped_frames([7, 8, 8, 9], 7) == (None, None)                                                                  # real speed (a frame may repeat): every frame is read
+    made = []; monkeypatch.setattr(flat.guard, 'popen', lambda cmd, **kw: made.append(cmd) or type('P', (), {})()); monkeypatch.setattr(flat.lensrc, 'lens_size', lambda osv: 64)
+    flat.decoder('/x/CAM.OSV', 1, hw=False, ss=2.0, keep=keep); flat.decoder('/x/CAM.OSV', 1, hw=False, ss=2.0)
+    assert made[0][made[0].index('-vf') + 1] == keep and made[0].index('-ss') < made[0].index('-i') and '-vf' not in made[1]
+
+
 def test_the_time_map_follows_the_ramp():
     from strata360.render import timemap as TM
     g = ramp_seg(); h = dict(id='A@50.00', clip='A', clip_start_s=10.0 + g['src_dur_s'], dur_s=4.0, film_start_s=4.0, utc_start=g['utc_end'], transition=dict(type='dissolve', dur_s=1.0))
@@ -273,23 +284,52 @@ def test_the_planner_ramps_long_quiet_clips_and_the_setting_turns_it_off(tmp_pat
     assert json.load(open(os.path.join(f, 'strata360', 'project.json')))['edit']['settings']['hyperlapse'] is False
 
 
-def test_the_preview_from_the_proxy_skips_the_frames_a_ramp_races_past(tmp_path, monkeypatch):
+def kept(cmd):
+    """The frames a mocked ffmpeg passes: every one, or those its `select` filter names (flat.keep_filter)."""
+    import re
+    vf = cmd[cmd.index('-vf') + 1] if '-vf' in cmd else ''; m = re.search(r"select='([^']*)'", vf)
+    if not m: return None
+    out = []
+    for a, b in re.findall(r'(?:eq|between)\(n,(\d+)(?:,(\d+))?\)', m.group(1)): out += list(range(int(a), int(b or a) + 1))
+    return out
+
+
+def proxy_source(tmp_path, monkeypatch, n=120, pfps=50.0, ramp=None):
+    """A FinalSource on a mocked proxy of `n` frames (proxy frame k is all value k mod 256; frame k shows clip second k / pfps) and the decoders it started."""
     import io, json
     from strata360.render import final as FN, progress as PG
-    n, w, h = 120, 16, 8; frames = b''.join(bytes([k]) * (w * h * 3) for k in range(n))                       # decoded proxy frame k is all value k
+    w, h = 16, 8
     class Dec:
-        def __init__(self, cmd, **kw): self.cmd, self.stdout = cmd, io.BytesIO(frames)
+        def __init__(self, cmd, **kw):
+            self.cmd = cmd; j0 = int(np.ceil(float(cmd[cmd.index('-ss') + 1]) * pfps - 1e-6)) if '-ss' in cmd else 0; keep = kept(cmd)
+            ks = [j0 + k for k in keep] if keep is not None else range(j0, n); self.stdout = io.BytesIO(b''.join(bytes([k % 256]) * (w * h * 3) for k in ks if k < n))
         def terminate(self): pass
         def wait(self): pass
     made = []; monkeypatch.setattr(FN.guard, 'popen', lambda cmd, **kw: made.append(Dec(cmd)) or made[-1])
-    p = tmp_path / 'proxy.mp4'; p.write_bytes(b''); json.dump(dict(size=[w, h], frames=[dict(source_frame=k) for k in range(n)]), open(tmp_path / 'proxy.json', 'w'))
+    p = tmp_path / 'proxy.mp4'; p.write_bytes(b''); json.dump(dict(size=[w, h], nominal_fps=pfps, frames=[dict(proxy_frame=k, source_frame=2 * k, t_s=k / pfps) for k in range(n)]), open(tmp_path / 'proxy.json', 'w'))
     monkeypatch.setattr(FN, 'proxy_of', lambda folder, clip: str(p))
-    rp = dict(dur_s=0.5, lead_s=0.1, ramp_s=0.1, tail_s=0.05, speed=4.0); rp['src_dur_s'] = round(float(HL.offsets(rp, 0.5)), 4)
-    g = dict(id='A@0.00', clip='A', clip_start_s=0.0, dur_s=0.5, ramp=rp, utc_start='2026-02-19T17:00:00Z')
+    rp = ramp or dict(dur_s=0.5, lead_s=0.1, ramp_s=0.1, tail_s=0.05, speed=4.0); rp['src_dur_s'] = round(float(HL.offsets(rp, rp['dur_s'])), 4)
+    g = dict(id='A@0.00', clip='A', clip_start_s=0.0, dur_s=rp['dur_s'], ramp=rp, utc_start='2026-02-19T17:00:00Z')
     s = FN.FinalSource(str(tmp_path), [g], {'A@0.00': dict(ref='world', keyframes=[dict(t=0.0, yaw=0.0, pitch=0.0, fov=90.0)])}, 32, 18, 50.0, progress=PG.Null(), source='proxy')
+    return s, g, made
+
+
+def test_the_preview_from_the_proxy_shows_only_the_frames_a_ramp_asks_for(tmp_path, monkeypatch):
+    s, g, made = proxy_source(tmp_path, monkeypatch)                                                       # no clip.json: no telemetry, so the ramp's own times
     shown = [int(img[9, 16, 0]) // 257 for img in s.frames(0, 0, 25)]
-    assert shown == [int(k) for k in np.round(HL.src_time(g, np.arange(25) / 50.0) * 50)] and shown[-1] > 40                # each film frame shows the proxy frame the ramp asks for
-    assert float(made[0].cmd[made[0].cmd.index('-t') + 1]) == pytest.approx(float(HL.src_time(g, 24 / 50.0)) + 1 / 50.0 + 0.2, abs=2e-3)      # it decodes the whole stretch the ramp covers
+    assert np.all(np.abs(np.array(shown) - HL.src_time(g, np.arange(25) / 50.0) * 50) <= 0.5 + 1e-9) and shown[-1] > 40          # each film frame shows the proxy frame nearest the time the ramp asks for
+    keep = kept(made[0].cmd); assert keep is not None and len(keep) == len(set(shown)) < shown[-1]                            # and only those leave ffmpeg
+    assert '-r' not in made[0].cmd and made[0].cmd[made[0].cmd.index('-frames:v') + 1] == str(len(keep))
+
+
+def test_the_preview_from_the_proxy_picks_the_frames_from_the_clips_telemetry(tmp_path, monkeypatch):
+    from strata360.osv import telemetry as TL
+    n = 1200; rp = dict(dur_s=4.0, lead_s=1.0, ramp_s=0.6, tail_s=0.3, speed=12.0)
+    s, g, made = proxy_source(tmp_path, monkeypatch, n=n, pfps=25.0, ramp=rp)
+    _, acc, quat = running(2 * n); monkeypatch.setattr(type(s), '_osv', lambda self, clip: 'clip.osv'); monkeypatch.setattr(TL, 'read_frames', lambda osv: dict(quat=quat, acc=acc))
+    shown = np.array([int(img[9, 16, 0]) // 257 for img in s.frames(0, 0, 200)])
+    pts = np.arange(n) / 25.0; want = HL.source_times(g, np.arange(200) / 50.0, pts, quat[::2][:n], acc[::2][:n])          # the proxy's frames and the telemetry rows of the source frames they were made from
+    assert np.array_equal(shown, np.round(want * 25).astype(int) % 256) and not np.allclose(want, HL.src_time(g, np.arange(200) / 50.0), atol=0.5 / 25)    # the picker moved some frames
 
 
 def test_the_planner_gives_the_ramps_the_beats_the_cuts_sit_on(monkeypatch):

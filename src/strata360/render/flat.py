@@ -275,10 +275,25 @@ def decode_args(osv, hw=True):
     return (['-flags', '+output_corrupt'] if damaged else (hwmod.hwaccel_args() if hw else [])), damaged
 
 
-def decoder(osv, stream, hw=True, ss=0.0, native=False):
-    """ffmpeg process that writes the frames of one lens stream: rgb48le, or with `native` the codec's own 10-bit YUV (p010le), which render/gpu.py converts on the GPU (read it with `read_frame(p, native=True)`)."""
+SELECT_MAX_CHARS = 16000     # a longer frame list is not passed to ffmpeg (Windows caps a command line at 32767 characters): every frame is read instead
+
+
+def keep_filter(keep):
+    """ffmpeg's `select` filter that passes only the frames numbered `keep` (from 0 at the first frame decoded; sorted), consecutive frames as one `between` run; None when nothing would be skipped or the
+    list is too long for a command line. A speed ramp (edit/hyperlapse.py) shows one frame in up to 24: the frames between are still decoded (an HEVC frame needs the ones before it), but never converted
+    to RGB or sent down the pipe, which at 3840x3840 rgb48 is 88 MB a lens a frame. Seeking instead would decode again from the keyframe before each frame shown."""
+    k = np.unique(np.asarray(keep, int))
+    if len(k) == 0 or k[0] < 0 or k[-1] - k[0] + 1 == len(k): return None
+    runs = np.split(k, np.flatnonzero(np.diff(k) > 1) + 1)
+    terms = [f'eq(n,{r[0]})' if len(r) == 1 else f'between(n,{r[0]},{r[-1]})' for r in runs]; expr = f"select='{'+'.join(terms)}'"
+    return expr if len(expr) <= SELECT_MAX_CHARS else None
+
+
+def decoder(osv, stream, hw=True, ss=0.0, native=False, keep=None):
+    """ffmpeg process that writes the frames of one lens stream: rgb48le, or with `native` the codec's own 10-bit YUV (p010le), which render/gpu.py converts on the GPU (read it with `read_frame(p, native=True)`).
+    `keep`: a `keep_filter` (only those frames come out), else every frame."""
     args, _ = decode_args(osv, hw)
-    vf = lensrc.full_frame_filter(osv, native)
+    vf = ([keep] if keep else []) + lensrc.full_frame_filter(osv, native)
     cmd = ['ffmpeg', '-v', 'error'] + args + (['-ss', f'{ss:.4f}'] if ss > 0 else []) + \
           [*lensrc.lens_input(osv, stream), '-fps_mode', 'passthrough', *(['-vf', ','.join(vf)] if vf else []), '-pix_fmt', 'p010le' if native else 'rgb48le', '-f', 'rawvideo', '-']
     ls = lensrc.lens_size(osv); p = guard.popen(cmd, stdout=subprocess.PIPE, bufsize=ls * ls * BYTES * 2); p.lens_size = ls; return p

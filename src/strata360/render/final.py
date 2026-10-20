@@ -184,32 +184,57 @@ class FinalSource:
         lo, src = self._ramps[key]; i = np.arange(a0, a1) - lo; inside = (i >= 0) & (i < len(src))
         return np.where(inside, src[np.clip(i, 0, len(src) - 1)], HL.src_time(sg, t))
 
+    def _osv(self, clip):
+        d = os.path.join(config.race_dir(self.folder), 'clips', clip); return config.source(json.load(open(os.path.join(d, 'clip.json')))['source_files']['osv'], d)
+
+    def _proxy_telemetry(self, clip):
+        """The frame picker's record of a clip's proxy frames (edit/hyperlapse.py `source_times`): their clip times (proxy.json `t_s`) and the gyro and accelerometer rows of the source frames they were
+        made from (osv/telemetry.py, cached on disk); None when the telemetry cannot be read (the preview then takes the ramp's own times)."""
+        ci = self._pinfo[clip]
+        if 'tel' not in ci:
+            from strata360.osv.telemetry import read_frames
+            ci['tel'] = None
+            try:
+                fr = ci['side']['frames']; T = read_frames(self._osv(clip)); k = np.array([f['source_frame'] for f in fr], int); rows = lambda a: None if a is None or len(a) == 0 else np.asarray(a)[np.minimum(k, len(a) - 1)]
+                ci['tel'] = dict(pts=proxy_times(ci['side']), T=dict(quat=rows(T.get('quat')), acc=rows(T.get('acc'))))
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError) as e: self.pg.note(f'{clip}: no telemetry for the hyperlapse frame picker in the preview ({e})')
+        return ci['tel']
+
     def _proxy_frames(self, sg, a0, a1, yaw_extra=None, pose_extra=None):
         """A footage window from the clip's PROXY (upright equirect video, render/preview.py) instead of the original lenses: the quick source of the preview. Everything after the picture is the film's own: the camera path, the projection (EquirectView = the renderer's maths), the exposure match and the race overlay, giving the same RGB code values; a clip with no proxy yet gives a dark card."""
         from strata360.render import preview as PV
         m = a1 - a0
         if m <= 0: return
-        clip, fps = sg['clip'], self.fps; src = self.source_times(sg, a0, a1)          # (a ramp window plays its clip faster: edit/hyperlapse.py; the preview takes the ramp's own times, without the frame picker)
+        clip, fps = sg['clip'], self.fps
         if clip not in self._pinfo:
             p = proxy_of(self.folder, clip); side = json.load(open(os.path.splitext(p)[0] + '.json')) if p else None; self._pinfo[clip] = dict(proxy=p, side=side, stab=None)
-        ci = self._pinfo[clip]; gain = self.gains.get(sg['id'])
+        ci = self._pinfo[clip]; gain = self.gains.get(sg['id']); ramp = bool(sg.get('ramp')) and bool(ci['proxy'])
+        src = self.source_times(sg, a0, a1, self._proxy_telemetry(clip) if ramp else None); clock = HL.src_time(sg, np.arange(a0, a1) / fps)          # a ramp window (edit/hyperlapse.py): the proxy frames the picker chose, as the final film's; the race clock races with the ramp
         def out(img, i):
             img = np.ascontiguousarray(img[..., ::-1]).astype(np.uint16) * 257                                        # BGR 8-bit to the renderer's RGB code values
-            return img if self.overlay is None else self.overlay.apply(img, utc0 + float(src[i]) - sg['clip_start_s'])
+            return img if self.overlay is None else self.overlay.apply(img, utc0 + float(clock[i]) - sg['clip_start_s'])
         utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0
         if not ci['proxy']:
             for i in range(m): yield out(PV.card(self.W, self.H, f'{clip[-9:]}: proxy not made yet'), i)
             return
         if self._eq is None: self._eq = PV.EquirectView(self.W, self.H)
         V = self._eq; path = cam.CameraPath.from_dict(self.framing[sg['id']]); V.set_background(path.bg, **path.bg_opts); side = ci['side']; ez = np.array([0.0, 0.0, 1.0])
-        t_from = float(src[0]); fr_n = len(side['frames']); Ms = None
+        t_from = float(src[0]); fr_n = len(side['frames']); Ms = None; W0, H0 = side['size']; dw = min(self.decode_w, W0); dh = dw // 2
+        idx = proxy_frame_at(side, src) if ramp else np.clip(np.round(np.maximum(src, 0.0) * fps).astype(int), 0, fr_n - 1)
         if path.ref != 'world':                                                          # heading-follow and body paths need the stabilisation of each frame (as the real renderer)
-            if ci['stab'] is None: ci['stab'] = PV.stab_matrices(config.source(json.load(open(os.path.join(config.race_dir(self.folder), 'clips', clip, 'clip.json')))['source_files']['osv'], os.path.join(config.race_dir(self.folder), 'clips', clip)))
-            idx = np.clip(np.round(np.maximum(src, 0.0) * fps).astype(int), 0, fr_n - 1); Ms = [ci['stab'](side['frames'][j]['source_frame']) for j in idx]
+            if ci['stab'] is None: ci['stab'] = PV.stab_matrices(self._osv(clip))
+            Ms = [ci['stab'](side['frames'][j]['source_frame']) for j in idx]
         P = path.evaluate(np.arange(a0, a1) / fps, Ms, fps)
-        W0, H0 = side['size']; dw = min(self.decode_w, W0); dh = dw // 2
-        dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0):.3f}', '-i', ci['proxy'], '-t', f'{max(float(src[-1]) - max(t_from, 0.0), 0.0) + 1.0 / fps + 0.2:.3f}', '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', ffmpeg_rate(fps), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        fr = None; want = np.round((np.maximum(src, 0.0) - max(t_from, 0.0)) * fps).astype(int); got = -1; eof = False          # the decoded frame each output frame shows: before the clip starts the first frame is held
+        if ramp:                                                                         # by proxy frame, not by time: exactly the frames chosen, and the ones the ramp races past never leave ffmpeg (flat.keep_filter)
+            order = np.unique(idx); keep = flat.keep_filter(order - order[0])
+            if keep is None: order = np.arange(order[0], order[-1] + 1)
+            want = np.searchsorted(order, idx); pfps = float(side.get('nominal_fps') or FPS_PROXY)
+            dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max((order[0] - 0.5) / pfps, 0.0):.4f}', '-i', ci['proxy'], '-an', '-vf', ','.join(([keep] if keep else []) + [f'scale={dw}:{dh}:flags=fast_bilinear']), '-fps_mode', 'passthrough',
+                               '-frames:v', str(len(order)), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        else:
+            dec = guard.popen(['ffmpeg', '-v', 'error', '-ss', f'{max(t_from, 0.0):.3f}', '-i', ci['proxy'], '-t', f'{max(float(src[-1]) - max(t_from, 0.0), 0.0) + 1.0 / fps + 0.2:.3f}', '-an', '-vf', f'scale={dw}:{dh}:flags=fast_bilinear', '-r', ffmpeg_rate(fps), '-pix_fmt', 'bgr24', '-f', 'rawvideo', '-'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            want = np.round((np.maximum(src, 0.0) - max(t_from, 0.0)) * fps).astype(int)
+        fr = None; got = -1; eof = False          # want: the decoded frame each output frame shows (before the clip starts the first frame is held)
         try:
             for i in range(m):
                 while (got < want[i] or fr is None) and not eof:                              # (a ramp window skips the frames between; past the end of the clip the last frame is held)
@@ -241,13 +266,14 @@ class FinalSource:
         Ms = [R.stab_matrix(quat[min(int(j), len(quat) - 1)]) for j in ks]
         utc0 = dt.datetime.fromisoformat(sg['utc_start'].replace('Z', '+00:00')).timestamp() if self.overlay is not None else 0.0            # the window's first frame on the race clock
         P = path.evaluate(times, Ms, self.fps); first = int(ks[0]); ss = max(float(pts[first]) - 0.002, 0.0)
-        nat = GPU.native_decode(); dm, ds = flat.decoder(ci['osv'], 1, ss=ss, native=nat), flat.decoder(ci['osv'], 0, ss=ss, native=nat); k_dec = first - 1; last_seam = None; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
+        order, keep = skipped_frames(ks, first) if sg.get('ramp') else (None, None)                                       # a ramp window: only the frames it shows leave ffmpeg (flat.keep_filter)
+        nat = GPU.native_decode(); dm, ds = flat.decoder(ci['osv'], 1, ss=ss, native=nat, keep=keep), flat.decoder(ci['osv'], 0, ss=ss, native=nat, keep=keep); k_dec = first - 1; r = 0; last_seam = None; cur_m = cur_s = None; ez = np.array([0.0, 0.0, 1.0])
         try:
             for i in range(m):
                 while k_dec < ks[i]:
                     with self.pg.timed('decode'): a, b = flat.read_frame(dm, nat), flat.read_frame(ds, nat)
                     if a is None or b is None: break                                              # past the end of the clip: the last frame is held
-                    cur_m, cur_s = a, b; k_dec += 1
+                    cur_m, cur_s = a, b; k_dec = int(order[r]) if order is not None else k_dec + 1; r += 1
                 if cur_m is None: raise RuntimeError(f"could not read {ci['osv']} at {t_abs[i]:.2f} s")
                 if k_dec != last_seam:
                     with self.pg.timed('seam'): R.update_seam(cur_m, cur_s, people=SM.people_in_layout(ci['boxes'](float(t_abs[i])), lambda d, M=Ms[i]: M @ d) if ci['boxes'] else None)
@@ -266,6 +292,28 @@ class FinalSource:
         finally:
             for p in (dm, ds):
                 p.kill(); p.wait()
+
+
+FPS_PROXY = 25.0      # a proxy's frame rate when its side file does not say (every 2nd frame of 50 fps footage)
+
+
+def proxy_times(side):
+    """Clip seconds of each frame of a proxy (proxy.json `t_s`: from the source frame's own timestamp), else its index over the proxy's rate."""
+    fr = side['frames']; pfps = float(side.get('nominal_fps') or FPS_PROXY)
+    return np.array([float(f['t_s']) if f.get('t_s') is not None else j / pfps for j, f in enumerate(fr)])
+
+
+def proxy_frame_at(side, t):
+    """Index of the proxy frame nearest each clip time `t` (held at the first and last)."""
+    ft = proxy_times(side); t = np.asarray(t, float); j = np.clip(np.searchsorted(ft, t), 1, max(len(ft) - 1, 1))
+    return np.where(np.abs(ft[j - 1] - t) <= np.abs(ft[np.minimum(j, len(ft) - 1)] - t), j - 1, j).clip(0, len(ft) - 1)
+
+
+def skipped_frames(ks, first):
+    """(the source frames a decoder started at frame `first` gives, in order; its `flat.keep_filter`) for a window that shows frames `ks` (increasing), or (None, None) when it shows every frame between
+    or the list does not fit on a command line: then every frame is read, as for any window."""
+    order = np.unique(np.asarray(ks, int)); order = order[order >= first]; keep = flat.keep_filter(order - first)
+    return (order, keep) if keep else (None, None)
 
 
 def encoder_args(bitrate):
