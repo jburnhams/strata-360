@@ -49,7 +49,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `audio/wordtimes.py` | 96% | done: pure math and logic covered |
 | `audio/dsp.py` | 53% | partial: signal metrics and basic functions done; heavy ffmpeg filters todo |
 | `edit/voiceover.py` | 73% | partial: pure math/logic covered; heavy ffmpeg and model downloads skipped/mocked |
-| `cli.py` | 0% | todo: pure parsing good candidates |
+| `cli.py` | 27% | partial: pure argument parsing done, creating the parser is tested; the command logic needs integration tests |
 | `osv/*` | >= 91% | done |
 | `pipeline/runner.py` | 84% | done (integration tests for worker concurrency, claim, cache signatures, clear) |
 | `pipeline/coverage.py` | 100% | done: stage states, blocked decisions, CLI, API (`unit/test_coverage.py`) |

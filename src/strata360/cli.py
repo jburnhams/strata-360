@@ -776,7 +776,7 @@ def cmd_typography(a):
     out = os.path.join(config.race_dir(a.name), 'typography_specimen.png'); TY.specimen(sch, out, pal); print('specimen: ' + out)
 
 
-def main():
+def create_parser():
     ap = argparse.ArgumentParser(prog='strata360', description='Automatic editing pipeline for 360 race footage'); sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('init', help='create a race from a folder of camera files'); p.add_argument('name'); p.add_argument('--library', required=True)
     p.add_argument('--languages'); p.add_argument('--align-languages'); p.add_argument('--whisper-model'); p.add_argument('--clock-offset-hours', type=float, default=0.0)
@@ -836,6 +836,11 @@ def main():
     p = sub.add_parser('titles', help='design and render the animated title of a bookend candidate (see bookends) with the local vision model'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--id', required=True, help='candidate id, for instance intro-sequence-0'); p.add_argument('--title'); p.add_argument('--subtitle'); p.add_argument('--meta'); p.set_defaults(fn=cmd_titles)
     p = sub.add_parser('filmtext', help='choose and design word-art cards through the film (progress updates, partial quotes) with the local models; render the preview first'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--n', type=int, default=24, help='how many options to ask the text model for'); p.add_argument('--per-minute', type=float, default=2.0, help='cards the planner may pick per minute of film'); p.add_argument('--reuse', action='store_true', help='pick from the stored options without asking the models again'); p.add_argument('--options-only', action='store_true'); p.set_defaults(fn=cmd_filmtext)
     p = sub.add_parser('render', help='render a flat 4K view (arguments as for the renderer)'); p.add_argument('args', nargs=argparse.REMAINDER); p.set_defaults(fn=cmd_render)
+    return ap
+
+
+def main():
+    ap = create_parser()
     a = ap.parse_args(); a.fn(a)
 
 
