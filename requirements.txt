@@ -9,6 +9,7 @@ pillow==12.3.0          # the race overlay: text (FreeType) and map tiles (overl
 torch==2.9.1
 torchaudio==2.9.1
 faster-whisper==1.2.1
+av==19.0.1              # also used directly: osv/recover.py decodes AAC frames to split audio runs (faster-whisper depends on it too)
 ctranslate2==4.8.2
 onnxruntime==1.23.2
 transformers==4.57.3
