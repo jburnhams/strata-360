@@ -23,7 +23,7 @@ from strata360 import hw
 from strata360.pipeline import guard
 from strata360.osv.calib import read_slots, Lens, quat_to_R, imu_offsets
 from strata360.osv.telemetry import read_frames, read_exposure, video_pts
-from strata360.osv import source as lensrc
+from strata360.osv import meta, source as lensrc
 from strata360.render import photo as ph
 
 LENS_PX = 960                # analysis resolution of each lens frame (the frame is decoded straight to this size; lens coordinates are in the lens's own pixels, `Lens.size`)
@@ -163,7 +163,7 @@ def _analyse(osv, every=10, quality=None):
     """Exposure statistics for a clip (README 5.9): returns the exposure.json body. If `quality` is a list, the view-quality rows (one a second) are appended to it as (frame, t_s, grids, lens)."""
     a = argparse.Namespace(osv=osv, every=every)
     tel = read_frames(a.osv); exp = read_exposure(a.osv); pts = video_pts(a.osv, 0)
-    ana = Analyser(a.osv); frames = []
+    ana = Analyser(a.osv); frames = []; hdr = meta.header(a.osv)
     for (k, cm), (k2, cs) in zip(decode_stream(a.osv, 1, a.every), decode_stream(a.osv, 0, a.every)):
         assert k == k2
         sph, cov = ana.sphere(cm, cs, tel['quat'][k])
@@ -186,8 +186,8 @@ def _analyse(osv, every=10, quality=None):
         f['naive_gain_to_clip_median'] = round(med / f['sphere']['mean_lin'], 4)
     doc = dict(
         schema_version=SCHEMA_VERSION, tool='strata360.exposure_stats',
-        source=dict(file=os.path.basename(a.osv), camera='dji_osmo_360', colour_mode='normal',
-                    note='colour_mode read from StreamMeta.4 (empty = 0 = Normal); frame indices are decoded-frame indices (match telemetry rows)'),
+        source=dict(file=os.path.basename(a.osv), camera=lensrc.camera_id(hdr['device'], a.osv), colour_mode=hdr['colour_mode'],
+                    note='colour_mode from the clip header (DJI: StreamMeta.4, empty = 0 = Normal; Insta360: always normal); frame indices are decoded-frame indices (match telemetry rows)'),
         time_note='t_s is clip-relative seconds (pts minus first pts). Absolute UTC = clip.json start_utc + t_s. Not stored here (README 5.1).',
         sampling=dict(every_n_frames=a.every, n_samples=len(frames), source_frames=int(len(pts)), lens_analysis_px=LENS_PX,
                       sphere_px=[SPH_W, SPH_H], grid_cells=[GRID_W, GRID_H], grid_cell_deg=15),

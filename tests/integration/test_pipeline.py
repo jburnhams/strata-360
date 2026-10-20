@@ -52,7 +52,7 @@ class TestProcessedFacts:
         d = f'{processed}/strata360/clips/{CLIP}'; clip = load(f'{d}/clip.json'); h = clip['time']['utc_hash']
         au, ex = load(f'{d}/audio.json'), load(f'{d}/exposure.json')
         assert au['summary']['integrated_lufs'] < 0 and au['utc_hash'] == h
-        assert ex['clip_id'] == CLIP and ex['sampling']['n_samples'] > 0 and ex['utc_hash'] == h
+        assert ex['clip_id'] == CLIP and ex['sampling']['n_samples'] > 0 and ex['utc_hash'] == h and ex['source']['camera'] == 'dji_osmo_360'
 
     def test_a_header_out_of_step_with_the_clip_is_detected(self, processed):
         from strata360.pipeline.ingest import check_header

@@ -10,6 +10,13 @@ from strata360.osv import insta360
 def is_insta360(osv): return insta360.is_insv(osv)
 
 
+def camera_id(device, osv):
+    """A short name for the camera that made a clip, from its header's device string: 'dji_osmo_360' for the DJI, 'insta360_x3' for an Insta360 X3 (lower case, spaces to underscores)."""
+    if not insta360.is_insv(osv): return 'dji_osmo_360'
+    d = (device or '').strip().lower(); d = d[len('insta360'):].strip() if d.startswith('insta360') else d
+    return 'insta360_' + ('_'.join(d.split()) or 'unknown')
+
+
 def lens_input(osv, stream):
     """ffmpeg input options that select the video of one lens: stream 1 = front (master), stream 0 = rear."""
     if insta360.is_insv(osv): return ['-i', insta360.lens_file(osv, stream), '-map', '0:v:0']

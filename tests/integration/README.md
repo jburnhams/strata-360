@@ -55,8 +55,6 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 
 ## Known issues
 
-- `analysis/exposure.py` writes `source.camera = 'dji_osmo_360'` in every `exposure.json`, an Insta360 clip's too (`test_insta360.py::TestIngest::test_exposure_names_the_camera_that_made_the_clip`, xfail).
-
 - `test_edit.py` (the optimiser on synthetic candidates, ~100 s) needs no ffmpeg: it is slow pure computation. Candidate to move to `tests/unit/` with smaller inputs (a job for the unit run), or to mark `slow`.
 - A `RuntimeWarning: overflow encountered in divide` from `render/photo.py:64` appears when the synthetic clip goes through exposure (a division by a zero scale on the synthetic lens). Possible product bug; not hidden here.
 - Old files here still assign module globals directly (`R.mem_available_gb = lambda...`, `L.time.sleep = ...`); convert them to `monkeypatch` when you touch them.
