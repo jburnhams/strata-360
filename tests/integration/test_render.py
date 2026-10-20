@@ -281,3 +281,16 @@ def test_a_speed_ramp_window_races_the_overlay_clock_and_the_time_map_through_it
     t0 = dt.datetime.fromisoformat('2026-02-21T12:00:07+00:00').timestamp(); first = [t - t0 for t in seen if abs(t - t0) < 5]
     assert rp['src_dur_s'] > 0.85 and max(first) == pytest.approx(rp['src_dur_s'] + 0.1 - 0.02, abs=0.03)          # 0.9 s of its clip in 0.5 s, then real speed through the half of the dissolve after the cut
     tm = json.load(open(os.path.join(out, 'timemap.json'))); assert tm['windows'][0]['source_out_s'] == pytest.approx(rp['src_dur_s'], abs=1e-3) and tm['frames'] == 50
+
+
+def test_a_ramp_decoder_gives_exactly_the_frames_it_keeps(synthetic_osv):
+    """Milestone H4: the lens decoder of a ramp window passes only the frames it shows (flat.keep_filter), after a seek, and they are the frames reading every one would have given."""
+    from strata360.render import flat
+    from strata360.osv.telemetry import video_pts
+    pts = video_pts(synthetic_osv, 0); first = 10; ss = max(float(pts[first]) - 0.002, 0.0); keep = [0, 3, 4, 11, 20, 21, 22, 35]
+    def read(p):
+        out = []
+        while (f := flat.read_frame(p)) is not None: out.append(f)
+        p.wait(); return out
+    every = read(flat.decoder(synthetic_osv, 1, ss=ss)); some = read(flat.decoder(synthetic_osv, 1, ss=ss, keep=flat.keep_filter(keep)))
+    assert len(some) == len(keep) and all(np.array_equal(a, every[k]) for a, k in zip(some, keep))
