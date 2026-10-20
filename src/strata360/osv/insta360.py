@@ -177,6 +177,8 @@ def read_imu(path):
     a = np.frombuffer(rec[REC_GYRO], np.uint8); a = a[:len(a) // 20 * 20].reshape(-1, 20)
     ts = a[:, :8].copy().view('<u8').ravel().astype(np.float64) / 1e6
     raw = a[:, 8:].copy().view('<u2').reshape(-1, 6).astype(np.float64) - 32768.0
+    keep = ts > np.maximum.accumulate(np.r_[-np.inf, ts[:-1]])                                         # now and then a few ms of samples are written twice (the clock steps back 14 ms): keep only samples later than all before them
+    ts, raw = ts[keep], raw[keep]
     return ts, np.radians(raw[:, 3:] * GYRO_DPS_PER_LSB), raw[:, :3]
 
 
@@ -204,9 +206,15 @@ def device_start(path):
     ets, _ = read_exposure_records(path); return float((ets[1] if len(ets) > 1 else ets[0]) + VIDEO_LATENCY_S)
 
 
+IMU_GAP_S = 0.05      # a block longer than this is a hole in the IMU record (56 of 881 X3 clips lose 0.2 to 1 s about a second into the video)
+RELEVEL_BLOCKS = 40   # after a hole, 'up' is measured again from the next 40 blocks (0.2 s) of accelerometer
+
+
 def fuse(dt, w, a, kp=0.8, block=5):
     """Upright orientation from the gyroscope (rad/s, body axes) and accelerometer (any scale, body axes): Mahony filter, body-to-world quaternions (w, x, y, z), world Z up and yaw starting at 0 (it drifts with the
-    gyro's bias, which has no reference: only the clip's median bias is removed). The accelerometer pulls the 'up' direction back where its length is near gravity (kp per second); running shakes pass through the gate."""
+    gyro's bias, which has no reference: only the clip's median bias is removed). The accelerometer pulls the 'up' direction back where its length is near gravity (kp per second); running shakes pass through the gate.
+    Across a hole in the record (a block longer than IMU_GAP_S) the rotation is unknown: the orientation is held rather than spinning on at the last rate, and 'up' is re-levelled from the accelerometer after it
+    (the shortest turn, so the heading is kept)."""
     n = len(dt) // block * block
     if n < block: return np.tile([1.0, 0.0, 0.0, 0.0], (len(dt), 1))
     dtb = dt[:n].reshape(-1, block).sum(1); wb = w[:n].reshape(-1, block, 3).mean(1); ab = a[:n].reshape(-1, block, 3).mean(1)
@@ -219,6 +227,12 @@ def fuse(dt, w, a, kp=0.8, block=5):
     out = np.empty((len(dtb), 4)); wl = wb.tolist(); al = an.tolist(); gl = gate.tolist(); dl = dtb.tolist()
     for i in range(len(dl)):
         ux, uy, uz = al[i]; vx = 2 * (qx * qz - qw * qy); vy = 2 * (qy * qz + qw * qx); vz = qw * qw - qx * qx - qy * qy + qz * qz
+        if dl[i] > IMU_GAP_S:
+            u = an[i:i + RELEVEL_BLOCKS].mean(0); u /= max(np.linalg.norm(u), 1e-9); c = np.cross(u, [vx, vy, vz]); s = np.linalg.norm(c); ang = np.arctan2(s, float(np.dot(u, [vx, vy, vz])))
+            if s > 1e-9:                                                                               # q <- q * c, c turning the measured up onto the predicted one, so world Z seen from the body is the measured up
+                cw, (cx, cy, cz) = np.cos(ang / 2), np.sin(ang / 2) * c / s
+                qw, qx, qy, qz = qw * cw - qx * cx - qy * cy - qz * cz, qw * cx + qx * cw + qy * cz - qz * cy, qw * cy - qx * cz + qy * cw + qz * cx, qw * cz + qx * cy - qy * cx + qz * cw
+            out[i] = (qw, qx, qy, qz); continue
         k = kp * gl[i]; wx = wl[i][0] + k * (uy * vz - uz * vy); wy = wl[i][1] + k * (uz * vx - ux * vz); wz = wl[i][2] + k * (ux * vy - uy * vx)
         h = 0.5 * dl[i]; dx, dy, dz = wx * h, wy * h, wz * h
         nw = qw - qx * dx - qy * dy - qz * dz; nx = qw * dx + qx + qy * dz - qz * dy; ny = qw * dy - qx * dz + qy + qz * dx; nz = qw * dz + qx * dy - qy * dx + qz

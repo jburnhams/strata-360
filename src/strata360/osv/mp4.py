@@ -1,7 +1,7 @@
 """Minimal MP4 index reader: frame timestamps straight from the sample tables in the `moov` box, without reading the (multi-gigabyte) media data.
 
 ffprobe's packet listing demuxes the whole file, which on a slow external drive is minutes per race. The sample tables are a few hundred KB."""
-import struct
+import os, struct
 import numpy as np
 
 
@@ -21,6 +21,17 @@ def _find(f, start, end, path):
     for typ, s, e in _boxes(f, start, end):
         if typ == path[0]: return (s, e) if len(path) == 1 else _find(f, s, e, path[1:])
     return None
+
+
+def cut_short(path):
+    """Is this an MP4 with no `moov` index? A recording cut short (the battery or card ran out) starts like any MP4 and has its video data but no index, and no reader can open it until the camera maker's
+    app repairs it. Anything that does not start with an `ftyp` box is not judged here (False)."""
+    try:
+        size = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            if f.read(8)[4:8] != b'ftyp': return False
+            return _find(f, 0, size, ['moov']) is None
+    except (OSError, struct.error): return False
 
 
 def _u32(b, o): return struct.unpack('>I', b[o:o + 4])[0]

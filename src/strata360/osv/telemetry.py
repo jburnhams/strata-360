@@ -27,7 +27,7 @@ def read_frames(osv, djmd_stream=3):
     """Returns dict of arrays, one row per djmd packet (= per video frame):
        ts_us (device microseconds), quat (N,4) fields 1..4 in stored order, acc (N,3). Cached on disk (see `_cached`). An Insta360 clip's rows come from its gyro and accelerometer (osv/insta360.py)."""
     from strata360.osv import insta360
-    if insta360.is_insv(osv): return _cached(osv, 'frames-insta360', lambda: insta360.frames_from_imu(osv, video_pts(osv, 0)))
+    if insta360.is_insv(osv): return _cached(osv, 'frames-insta360-2', lambda: insta360.frames_from_imu(osv, video_pts(osv, 0)))
     return _cached(osv, f'frames{djmd_stream}', lambda: _read_frames(osv, djmd_stream))
 
 

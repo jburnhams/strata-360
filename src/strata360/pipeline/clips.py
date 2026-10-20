@@ -2,11 +2,14 @@
 (`..._00_NNN.insv` the rear lens, which carries the metadata and is the clip's primary file, `..._10_NNN.insv` the front lens) with an optional `LRV_..._11_NNN.lrv` proxy (osv/insta360.py).
 The camera is told from the files, so a folder can hold either. Unsupported files are reported, not silently ignored."""
 import hashlib, os, re
+from strata360.osv.mp4 import cut_short
 from dataclasses import dataclass, field
 
 SUPPORTED = {'.osv'}                      # camera recordings this pipeline can process (an .insv pair is recognised by `_pairs`)
 KNOWN_OTHER = {'.insv': 'Insta360 lens file without its partner', '.mp4': 'flat video (an export, not a camera original)', '.lrf': 'proxy (paired automatically)', '.lrv': 'proxy (paired automatically)',
-               '.thm': 'thumbnail', '.jpg': 'photo', '.dng': 'photo', '.insp': 'Insta360 photo'}
+               '.thm': 'thumbnail', '.jpg': 'photo', '.dng': 'photo', '.insp': 'Insta360 photo', '.gpx': 'GPS track (give it to the race as its track; footage folders are not searched for one)',
+               '.fit': 'GPS track (give it to the race as its track; footage folders are not searched for one)', '.insproj': 'Insta360 Studio project', '.wav': 'audio recording'}
+NO_INDEX = "recording cut short (no MP4 index; the battery or card probably ran out): repair it in the camera maker's app (Insta360 Studio, DJI Studio) to use it"
 _INSV = re.compile(r'^(?P<kind>VID|PRO)_(?P<date>\d{8})_(?P<time>\d{6})_(?P<lens>\d{2})_(?P<n>\d{3})$', re.I)
 
 
@@ -46,7 +49,9 @@ def _pairs(insv, lrv):
         else: by.setdefault(('?', p), {})['??'] = p
     clips, odd = [], []
     for key, lens in sorted(by.items()):
-        if '00' in lens and '10' in lens:
+        if '00' in lens and '10' in lens and (cut_short(lens['00']) or cut_short(lens['10'])):
+            odd += [(p, NO_INDEX) for p in lens.values()]
+        elif '00' in lens and '10' in lens:
             d, kind, date, time_, n = key; stem = f'{kind}_{date}_{time_}_{n}'; rear, front = lens['00'], lens['10']
             clips.append(Clip(id=stem, osv=rear, lrf=lrv.get(f'LRV_{date}_{time_}_11_{n}'), size=os.path.getsize(rear) + os.path.getsize(front),
                               fingerprint=hashlib.sha1((fingerprint(rear) + fingerprint(front)).encode()).hexdigest()[:12], filename_time=parse_filename_time(f'{kind}_{date}_{time_}_00_{n}')))
@@ -69,6 +74,7 @@ def discover(library):
             elif ext in KNOWN_OTHER or True: other.append((p, KNOWN_OTHER.get(ext, 'unknown file type')))
     out = []
     for p in sorted(clips):
+        if cut_short(p): other.append((p, NO_INDEX)); continue
         stem = os.path.splitext(os.path.basename(p))[0]
         out.append(Clip(id=stem, osv=p, lrf=lrf.get(stem), size=os.path.getsize(p), fingerprint=fingerprint(p), filename_time=parse_filename_time(stem)))
     pc, odd = _pairs(insv, lrf); out += pc; other += odd; out.sort(key=lambda c: c.id)
