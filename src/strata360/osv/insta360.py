@@ -201,9 +201,19 @@ def read_aaa(path):
     return ts, ((100 * ((ls & 0xFFF80000) >> 19)) >> 6).astype(np.float64)
 
 
+def has_motion(path):
+    """Does the trailer hold the IMU? A recording rebuilt after it was cut short (osv/recover.py) has only the camera record."""
+    return REC_GYRO in read_trailer(path)
+
+
+NO_EXPOSURE_ISO, NO_EXPOSURE_SHUTTER_DEN = 100.0, 100      # what a rebuilt recording, which has no exposure record, reports (clip.json says so in its notes)
+
+
 def device_start(path):
-    """Camera clock (seconds) at the first video frame."""
-    ets, _ = read_exposure_records(path); return float((ets[1] if len(ets) > 1 else ets[0]) + VIDEO_LATENCY_S)
+    """Camera clock (seconds) at the first video frame (0 when the exposure record is missing)."""
+    try: ets, _ = read_exposure_records(path)
+    except ValueError: return 0.0
+    return float((ets[1] if len(ets) > 1 else ets[0]) + VIDEO_LATENCY_S)
 
 
 IMU_GAP_S = 0.05      # a block longer than this is a hole in the IMU record (56 of 881 X3 clips lose 0.2 to 1 s about a second into the video)
@@ -244,7 +254,10 @@ def fuse(dt, w, a, kp=0.8, block=5):
 def frames_from_imu(path, pts):
     """Telemetry rows for video frames at presentation times `pts` (seconds): dict(ts_us, quat (N, 4) w x y z, acc (N, 3) m/s^2)."""
     from scipy.spatial.transform import Rotation as Rot, Slerp
-    t, gyro, acc = read_imu(path); pts = np.asarray(pts, float); pts = pts - pts[0]
+    pts = np.asarray(pts, float); pts = pts - pts[0]
+    if not has_motion(path):                                                                           # rebuilt recording: no IMU; held upright, facing the start direction
+        n = len(pts); return dict(ts_us=np.round(pts * 1e6).astype(np.int64), quat=np.tile([1.0, 0.0, 0.0, 0.0], (n, 1)), acc=np.tile([0.0, 0.0, 9.80665], (n, 1)))
+    t, gyro, acc = read_imu(path)
     wb = gyro @ IMU_TO_BODY.T; ab = acc @ IMU_TO_BODY.T; bias = np.median(wb, 0)
     dt = np.gradient(t); q, dtb, g0 = fuse(dt, wb - bias, ab); block = 5; n = len(dtb) * block
     tb = t[:n].reshape(-1, block).mean(1)                                                              # block mid times
@@ -257,7 +270,12 @@ def frames_from_imu(path, pts):
 
 def exposure_frames(path, pts):
     """Per-frame exposure like the DJI reader's: ISO from the auto-exposure table (100 where there is none), shutter denominator, colour temperature (not recorded: 0), one entry a frame (both lenses share it)."""
-    ets, ex = read_exposure_records(path); pts = np.asarray(pts, float); T = device_start(path) + (pts - pts[0])
+    pts = np.asarray(pts, float)
+    try: ets, ex = read_exposure_records(path)
+    except ValueError:                                                                                 # rebuilt recording: no exposure record
+        d = dict(iso=np.full(len(pts), NO_EXPOSURE_ISO), shutter_den=np.full(len(pts), NO_EXPOSURE_SHUTTER_DEN, np.int64), ct=np.zeros(len(pts), np.int64))
+        return {'djmd3': d, 'djmd4': {k_: v.copy() for k_, v in d.items()}}
+    T = device_start(path) + (pts - pts[0])
     k = np.clip(np.searchsorted(ets, T), 0, len(ets) - 1); e = ex[k]
     iso = np.full(len(pts), 100.0)
     try:

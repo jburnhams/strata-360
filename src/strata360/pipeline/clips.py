@@ -9,7 +9,7 @@ SUPPORTED = {'.osv'}                      # camera recordings this pipeline can 
 KNOWN_OTHER = {'.insv': 'Insta360 lens file without its partner', '.mp4': 'flat video (an export, not a camera original)', '.lrf': 'proxy (paired automatically)', '.lrv': 'proxy (paired automatically)',
                '.thm': 'thumbnail', '.jpg': 'photo', '.dng': 'photo', '.insp': 'Insta360 photo', '.gpx': 'GPS track (give it to the race as its track; footage folders are not searched for one)',
                '.fit': 'GPS track (give it to the race as its track; footage folders are not searched for one)', '.insproj': 'Insta360 Studio project', '.wav': 'audio recording'}
-NO_INDEX = "recording cut short (no MP4 index; the battery or card probably ran out): repair it in the camera maker's app (Insta360 Studio, DJI Studio) to use it"
+NO_INDEX = "recording cut short (no MP4 index; the battery or card probably ran out): run `strata360 recover <folder>` to rebuild a copy the pipeline can use (the original is left as it is)"
 _INSV = re.compile(r'^(?P<kind>VID|PRO)_(?P<date>\d{8})_(?P<time>\d{6})_(?P<lens>\d{2})_(?P<n>\d{3})$', re.I)
 
 
@@ -21,8 +21,9 @@ class Clip:
     size: int = 0
     fingerprint: str = ''
     filename_time: str = None             # timestamp encoded in the file name (DJI: CAM_YYYYMMDDHHMMSS_NNNN_D; Insta360: VID_YYYYMMDD_HHMMSS_00_NNN), as written
+    recovered: bool = False               # the original was cut short; `osv` is the copy with a rebuilt index in <library>/strata360/recovered/ (osv/recover.py)
 
-    def to_dict(self): return dict(id=self.id, osv=self.osv, lrf=self.lrf, size_bytes=self.size, fingerprint=self.fingerprint, filename_time=self.filename_time)
+    def to_dict(self): return dict(id=self.id, osv=self.osv, lrf=self.lrf, size_bytes=self.size, fingerprint=self.fingerprint, filename_time=self.filename_time, recovered=self.recovered)
 
 
 def fingerprint(path, block=1 << 20):
@@ -40,7 +41,18 @@ def parse_filename_time(stem):
     return f'{m["date"][:4]}-{m["date"][4:6]}-{m["date"][6:]}T{m["time"][:2]}:{m["time"][2:4]}:{m["time"][4:]}' if m else None
 
 
-def _pairs(insv, lrv):
+def _usable(path, rec_dir):
+    """(path to use, recovered?) for a camera file: itself, its rebuilt copy when it was cut short and `strata360 recover` made one, or (None, False)."""
+    if not cut_short(path): return path, False
+    r = os.path.join(rec_dir, os.path.basename(path))
+    return (r, True) if os.path.exists(r) and not cut_short(r) else (None, False)
+
+
+def _proxy(path, rec_dir):
+    return _usable(path, rec_dir)[0] if path else None
+
+
+def _pairs(insv, lrv, rec_dir=''):
     """Insta360 recordings from the .insv files found: ([Clip], [(path, reason)]). A recording is the rear-lens file (_00_) with the front-lens file (_10_) of the same number; a lone file is reported."""
     by = {}
     for p in insv:
@@ -49,12 +61,12 @@ def _pairs(insv, lrv):
         else: by.setdefault(('?', p), {})['??'] = p
     clips, odd = [], []
     for key, lens in sorted(by.items()):
-        if '00' in lens and '10' in lens and (cut_short(lens['00']) or cut_short(lens['10'])):
-            odd += [(p, NO_INDEX) for p in lens.values()]
-        elif '00' in lens and '10' in lens:
-            d, kind, date, time_, n = key; stem = f'{kind}_{date}_{time_}_{n}'; rear, front = lens['00'], lens['10']
-            clips.append(Clip(id=stem, osv=rear, lrf=lrv.get(f'LRV_{date}_{time_}_11_{n}'), size=os.path.getsize(rear) + os.path.getsize(front),
-                              fingerprint=hashlib.sha1((fingerprint(rear) + fingerprint(front)).encode()).hexdigest()[:12], filename_time=parse_filename_time(f'{kind}_{date}_{time_}_00_{n}')))
+        if '00' in lens and '10' in lens:
+            (rear, r0), (front, r1) = _usable(lens['00'], rec_dir), _usable(lens['10'], rec_dir)
+            if rear is None or front is None or r0 != r1: odd += [(p, NO_INDEX) for p in lens.values()]; continue
+            d, kind, date, time_, n = key; stem = f'{kind}_{date}_{time_}_{n}'
+            clips.append(Clip(id=stem, osv=rear, lrf=_proxy(lrv.get(f'LRV_{date}_{time_}_11_{n}'), rec_dir), size=os.path.getsize(rear) + os.path.getsize(front),
+                              fingerprint=hashlib.sha1((fingerprint(rear) + fingerprint(front)).encode()).hexdigest()[:12], filename_time=parse_filename_time(f'{kind}_{date}_{time_}_00_{n}'), recovered=r0))
         else:
             for l, p in lens.items(): odd.append((p, 'Insta360 lens file without its partner (needs both _00_ and _10_)' if l in ('00', '10') else 'Insta360 file with an unknown name'))
     return clips, odd
@@ -72,12 +84,13 @@ def discover(library):
             elif ext == '.insv': insv.append(p)
             elif ext in SUPPORTED: clips.append(p)
             elif ext in KNOWN_OTHER or True: other.append((p, KNOWN_OTHER.get(ext, 'unknown file type')))
-    out = []
+    out = []; rec_dir = os.path.join(library, 'strata360', 'recovered')
     for p in sorted(clips):
-        if cut_short(p): other.append((p, NO_INDEX)); continue
+        use, rec = _usable(p, rec_dir)
+        if use is None: other.append((p, NO_INDEX)); continue
         stem = os.path.splitext(os.path.basename(p))[0]
-        out.append(Clip(id=stem, osv=p, lrf=lrf.get(stem), size=os.path.getsize(p), fingerprint=fingerprint(p), filename_time=parse_filename_time(stem)))
-    pc, odd = _pairs(insv, lrf); out += pc; other += odd; out.sort(key=lambda c: c.id)
+        out.append(Clip(id=stem, osv=use, lrf=_proxy(lrf.get(stem), rec_dir), size=os.path.getsize(use), fingerprint=fingerprint(use), filename_time=parse_filename_time(stem), recovered=rec))
+    pc, odd = _pairs(insv, lrf, rec_dir); out += pc; other += odd; out.sort(key=lambda c: c.id)
     ids = [c.id for c in out]
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes: raise RuntimeError(f'duplicate clip names in {library}: {sorted(dupes)} (two cards with the same numbering?): give each card its own sub-folder and race')
