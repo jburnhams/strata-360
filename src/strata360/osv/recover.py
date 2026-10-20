@@ -108,18 +108,15 @@ def _asc(stsd):
 
 
 class AacCheck:
-    """Does a byte range decode as exactly one AAC frame? A cut too early runs out of bits before the END element; two frames together decode as 2048 samples. Needs PyAV (installed with
-    faster-whisper); without it every range passes and the split relies on frame sizes alone."""
+    """Does a byte range decode as exactly one AAC frame? A cut too early runs out of bits before the END element; two frames together decode as 2048 samples. Needs PyAV: without it
+    frame starts inside the data cannot be told from real ones, and the audio would be cut wrongly."""
 
     def __init__(self, asc):
-        self.cc = None
-        try:
-            import av; av.logging.set_level(av.logging.FATAL)
-            self.av = av; self.cc = av.CodecContext.create('aac', 'r'); self.cc.extradata = asc
-        except Exception: pass
+        try: import av
+        except ImportError: raise RuntimeError('recovering audio needs PyAV (pip install av)') from None
+        av.logging.set_level(av.logging.FATAL); self.av = av; self.cc = av.CodecContext.create('aac', 'r'); self.cc.extradata = asc
 
     def __call__(self, data):
-        if self.cc is None: return True
         try: return [f.samples for f in self.cc.decode(self.av.Packet(bytes(data)))] == [1024]
         except Exception: return False
 
