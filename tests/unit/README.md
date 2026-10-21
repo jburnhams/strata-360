@@ -32,7 +32,7 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `analysis/candidates.py`, `edit/project.py`, `gps/anchors.py`, `render/seam.py`, `pipeline/clips.py`, `pipeline/config.py`, `pipeline/resources.py` | 81-91% | partial |
 | `gps/clock.py`, `gps/context.py`, `gps/overview.py` | 100% | done |
 | `overlay/*` | 98-100% | done: fake tile service (`utils/overlay_fakes.py`), synthetic tracks; never the network. `overlay/flyover.py`: camera, style and frames with `mbgl-render` faked (`test_overlay_flyover.py`) |
-| `analysis/thumbs.py` | 46% | partial: the overlay thumbnail done; choosing the moment (`quick`, `best`) needs video |
+| `analysis/thumbs.py` | 100% | done: the overlay thumbnail done; choosing the moment (`quick`, `best`) done with faked video frames |
 | `analysis/palette.py` | ~95% | done (`test_palette.py`: Lab/LCh round trip, hue choice, harmony swatches, per-pixel contrast choice, grey fallback; the frame reader needs ffmpeg and is not run) |
 | `server/mcp_tools.py` | ~95% | done (`test_mcp_tools.py`: each composite tool's digest and limits on canned routes, the tool set read only and small, in-process against the real app, the /mcp mount and its token; the HTTP backend is not run) |
 | `server/agent.py` | ~95% | done (`test_agent.py`: the tool loop with a scripted model, pictures, the optional vision description, HTTP errors, the clip-frame route and the chat routes; no network) |
