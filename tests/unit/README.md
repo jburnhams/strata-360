@@ -44,6 +44,8 @@ Numbers from `pytest tests/unit --cov`. `done` = >= 90%. Modules not listed are 
 | `analysis/objects.py`, `vocab.collect` / `stats_for` | n/a | done: the night, black-frame and wearer gates, candidates from a tile's boxes, de-duplication across tiles, object memory, the whole run with a fake detector, labelling model and lens (routing by the word statistics, audits, stop-list drops, areas, batches), adding up the clips' statistics; `objects_det.py` and `objects_vlm.py` need models (run by hand, see `docs/progress.md`) |
 | `analysis/scenes.py` | n/a | done: first run, reuse of front and rear answers, asking again only for missing ones, front and rear summaries, adaptive times |
 | `analysis/views.py` (crops) | n/a | `crop_plan`, `crop_rays`, `lens_choice`, `CropRenderer` with fake lenses and frames done (`test_views_crop.py`); the rest of the module needs lens frames |
+| `pipeline/meta.py`, `pipeline/notes.py` | 100% | done |
+| `pipeline/stages.py` | 48% | partial: pure decorators and context logic done, heavy worker methods skipped |
 | `pipeline/ingest.py` | 98% | done |
 | `audio/speech.py` | 86% | partial: 101-112 (CLI) todo |
 | `audio/wordtimes.py` | 96% | done: pure math and logic covered |
