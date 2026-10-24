@@ -264,3 +264,116 @@ def test_clear_with_missing_stage(processed):
 def test_work_with_unknown_stage(processed):
     with pytest.raises(SystemExit, match="unknown stage.*fake_stage"):
         runner.work(processed, stages=['fake_stage'])
+
+
+def test_stage_health_with_valid_and_invalid_date(processed):
+    clip = 'CAM_20260221120007_0019_D'
+    runner.update_state(processed, clip, 'audio', {'status': 'ok', 'at': 'invalid-date'})
+    runner.update_state(processed, clip, 'exposure', {'status': 'ok', 'at': '2026-02-21T12:00:07Z'})
+
+    # Needs a failing state to be included in health
+    runner.update_state(processed, clip, 'audio', {'status': 'failed', 'error': 'Test', 'at': 'invalid-date'})
+
+    health = runner.stage_health(processed)
+    assert 'audio' in health
+    assert 'exposure' not in health # Not in health since no failure
+
+def test_stage_health_with_invalid_state_and_multiple_retry(processed, monkeypatch):
+    import time
+    clip = 'CAM_20260221120007_0019_D'
+    # invalid state
+    runner.update_state(processed, clip, 'audio', "invalid_state")
+
+    # Another clip
+    c2 = 'CAM_20260221120107_0020_D'
+    runner.update_state(processed, c2, 'audio', {'status': 'retry', 'attempts': 1, 'wait_s': 10, 'next_try_at': time.time() + 10, 'error': 'err1', 'last_attempt_at': 1})
+    runner.update_state(processed, clip, 'exposure', {'status': 'retry', 'attempts': 2, 'wait_s': 20, 'next_try_at': time.time() + 5, 'error': 'err2', 'last_attempt_at': 2})
+    runner.update_state(processed, c2, 'exposure', {'status': 'retry', 'attempts': 1, 'wait_s': 30, 'next_try_at': time.time() + 15, 'error': 'err3', 'last_attempt_at': 3})
+
+    health = runner.stage_health(processed)
+    assert 'exposure' in health
+    assert health['exposure']['retrying'] == 2
+    assert health['exposure']['last_error'] == 'err3'
+
+def test_cached_thumb_overlay_gets_overlay_signature(processed, monkeypatch):
+    import os
+    cfg = runner.config.load(processed)
+
+    # Write some track.fit so track_signature is not None
+    rd = runner.config.race_dir(processed)
+    track_path = os.path.join(rd, 'track.fit')
+    with open(track_path, 'wb') as f: f.write(b'data1')
+
+    # We need a thumb_overlay stage to evaluate this logic
+    from strata360.pipeline.stages import STAGES
+    # It might not exist natively, so let's mock it
+    class DummyStage:
+        def __init__(self):
+            self.name = 'thumb_overlay'
+            self.deps = []
+            self.needs_track = True
+            self.soft_deps = []
+            self.outputs = []
+            self.version = 1
+            self.keys = []
+
+    dummy_st = DummyStage()
+    clip = 'CAM_20260221120007_0019_D'
+    state = runner.load_state(processed, clip)
+
+    # Run _cached
+    done, key, wait = runner._cached(processed, dummy_st, runner.discover(processed, cfg)[0][0], cfg, state, runner.clip_dir(processed, clip))
+    assert done is False
+    assert key is not None
+    assert 'race_track' not in wait
+
+
+def test_stage_retry_with_progress_and_retryable(processed, monkeypatch):
+    clip = 'CAM_20260221120007_0019_D'
+    class RetryableProgressException(Exception):
+        retryable = True
+        progress = True
+
+    def failing_stage(ctx):
+        raise RetryableProgressException("Simulated retryable error")
+
+    monkeypatch.setattr(runner.STAGES['audio'], 'fn', failing_stage)
+    runner.clear(processed, 'audio', clips=[clip])
+
+    # We should get a retry
+    result = runner.work(processed, max_items=1, stages=['audio'])
+    assert result[(clip, 'audio')] == 'retry'
+
+    state = runner.load_state(processed, clip)
+    assert state['audio']['status'] == 'retry'
+
+def test_workers_cleanup_if_not_alive(processed):
+    import os
+    workers_dir = runner._workers(processed)
+    os.makedirs(workers_dir, exist_ok=True)
+    # create a dummy pid file that doesn't exist
+    with open(os.path.join(workers_dir, '999999'), 'w') as f:
+        f.write("time")
+
+    ws = runner.workers(processed)
+    assert 999999 not in ws
+
+def test_active_items_ignores_invalid_files(processed):
+    import os
+    claims_dir = runner._claims(processed)
+    os.makedirs(claims_dir, exist_ok=True)
+    # create invalid temp file
+    with open(os.path.join(claims_dir, 'invalid.tmp'), 'w') as f: f.write('123')
+    # create unreadable file (simulate index error or empty)
+    with open(os.path.join(claims_dir, 'empty_file'), 'w') as f: pass
+
+    assert runner.active_items(processed) == []
+
+def test_kill_tree_wrapper(processed, monkeypatch):
+    killed = False
+    def fake_kill(pid, sig):
+        nonlocal killed
+        killed = True
+    monkeypatch.setattr(runner.oslib, 'kill_tree', fake_kill)
+    runner.kill_tree(12345)
+    assert killed

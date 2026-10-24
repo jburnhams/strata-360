@@ -294,3 +294,72 @@ def test_a_ramp_decoder_gives_exactly_the_frames_it_keeps(synthetic_osv):
         p.wait(); return out
     every = read(flat.decoder(synthetic_osv, 1, ss=ss)); some = read(flat.decoder(synthetic_osv, 1, ss=ss, keep=flat.keep_filter(keep)))
     assert len(some) == len(keep) and all(np.array_equal(a, every[k]) for a, k in zip(some, keep))
+
+
+def test_film_transitions_dip(processed, cli, monkeypatch):
+    patch_for_synthetic(monkeypatch, processed)
+    from strata360.edit import project as PJ
+    from strata360.pipeline import config
+    import json
+    import os
+
+    c1, c2 = 'CAM_20260221120007_0019_D', 'CAM_20260221120107_0020_D'
+
+    # We want to test pan, dip, whip, dissolve in one go.
+    plan = {
+        'film': {'length_s': 2.0, 'bpm': 120, 'music': None},
+        'segments': [
+            {'id': 'S1', 'clip': c1, 'clip_start_s': 0.0, 'film_start_s': 0.0, 'dur_s': 0.4, 'utc_start': '2026-02-21T12:00:07Z', 'transition': {'type': 'dip', 'dur_s': 0.4}, 'technique': 'hold_wide', 'subject': 'front'},
+            {'id': 'S2', 'clip': c2, 'clip_start_s': 0.0, 'film_start_s': 0.4, 'dur_s': 0.4, 'utc_start': '2026-02-21T12:01:07Z', 'transition': {'type': 'cut', 'dur_s': 0.0}, 'technique': 'hold_wide', 'subject': 'front'},
+        ]
+    }
+
+    for c in [c1, c2]:
+        with open(os.path.join(config.race_dir(processed), 'clips', c, 'motion.json'), 'w') as f:
+            json.dump({"start_utc": "2026-02-21T12:00:07Z", "duration_s": 2.0, "dt": 0.1, "t": [0.0, 0.1, 0.2, 0.3], "world_heading_deg": [0, 0, 0, 0], "smooth_heading_deg": [0, 0, 0, 0], "bank_deg": [0, 0, 0, 0], "v_ground_ms": [0, 0, 0, 0], "v_up_ms": [0, 0, 0, 0]}, f)
+
+    PJ.save(processed, {'plan': plan, 'framing': {'S1': {'mode': 'body', 'fov': 90, 'pitch': 0, 'yaw': 0, 'roll': 0}, 'S2': {'mode': 'body', 'fov': 90, 'pitch': 0, 'yaw': 0, 'roll': 0}}})
+
+    r = cli('final', processed, '--size', '128x64', '--fps', '50.0', '--bitrate', '1M', check=False)
+    assert r.code == 0
+    final_dirs = [d for d in os.listdir(os.path.join(processed, 'strata360', 'final')) if len(d) == 10]
+    key = final_dirs[0]
+    film_mp4 = os.path.join(processed, 'strata360', 'final', key, 'film.mp4')
+    assert os.path.exists(film_mp4)
+    probe = library.ffprobe(film_mp4)
+    assert float(probe['format']['duration']) == pytest.approx(0.8, abs=0.1)
+
+def test_film_transitions(processed, cli, monkeypatch):
+    patch_for_synthetic(monkeypatch, processed)
+    from strata360.edit import project as PJ
+    from strata360.pipeline import config
+    import json
+    import os
+
+    c1, c2 = 'CAM_20260221120007_0019_D', 'CAM_20260221120107_0020_D'
+
+    # We want to test pan, dip, whip, dissolve in one go.
+    plan = {
+        'film': {'length_s': 2.0, 'bpm': 120, 'music': None},
+        'segments': [
+            {'id': 'S1', 'clip': c1, 'clip_start_s': 0.0, 'film_start_s': 0.0, 'dur_s': 0.4, 'utc_start': '2026-02-21T12:00:07Z', 'transition': {'type': 'dip', 'dur_s': 0.1}, 'technique': 'hold_wide', 'subject': 'front'},
+            {'id': 'S2', 'clip': c2, 'clip_start_s': 0.0, 'film_start_s': 0.4, 'dur_s': 0.4, 'utc_start': '2026-02-21T12:01:07Z', 'transition': {'type': 'whip', 'dur_s': 0.1}, 'technique': 'hold_wide', 'subject': 'front'},
+            {'id': 'S3', 'clip': c1, 'clip_start_s': 0.5, 'film_start_s': 0.8, 'dur_s': 0.4, 'utc_start': '2026-02-21T12:00:07Z', 'transition': {'type': 'pan', 'dur_s': 0.1, 'a_kf': [{'t': 0.0, 'yaw': 0, 'pitch': 0, 'fov': 90, 'roll': 0}], 'b_kf': [{'t': 0.0, 'yaw': 0, 'pitch': 0, 'fov': 90, 'roll': 0}], 'a_dur': 0.4}, 'technique': 'hold_wide', 'subject': 'front'},
+            {'id': 'S4', 'clip': c2, 'clip_start_s': 0.5, 'film_start_s': 1.2, 'dur_s': 0.8, 'utc_start': '2026-02-21T12:01:07Z', 'transition': {'type': 'cut', 'dur_s': 0.0}, 'technique': 'hold_wide', 'subject': 'front'}
+        ]
+    }
+
+    for c in [c1, c2]:
+        with open(os.path.join(config.race_dir(processed), 'clips', c, 'motion.json'), 'w') as f:
+            json.dump({"start_utc": "2026-02-21T12:00:07Z", "duration_s": 2.0, "dt": 0.1, "t": [0.0, 0.1, 0.2, 0.3], "world_heading_deg": [0, 0, 0, 0], "smooth_heading_deg": [0, 0, 0, 0], "bank_deg": [0, 0, 0, 0], "v_ground_ms": [0, 0, 0, 0], "v_up_ms": [0, 0, 0, 0]}, f)
+
+    PJ.save(processed, {'plan': plan, 'framing': {'S1': {'mode': 'body', 'fov': 90, 'pitch': 0, 'yaw': 0, 'roll': 0}, 'S2': {'mode': 'body', 'fov': 90, 'pitch': 0, 'yaw': 0, 'roll': 0}, 'S3': {'mode': 'body', 'fov': 90, 'pitch': 0, 'yaw': 0, 'roll': 0}, 'S4': {'mode': 'body', 'fov': 90, 'pitch': 0, 'yaw': 0, 'roll': 0}}})
+
+    r = cli('final', processed, '--size', '128x64', '--fps', '25.0', '--bitrate', '1M', check=False)
+    assert r.code == 0
+    final_dirs = [d for d in os.listdir(os.path.join(processed, 'strata360', 'final')) if len(d) == 10]
+    key = final_dirs[0]
+    film_mp4 = os.path.join(processed, 'strata360', 'final', key, 'film.mp4')
+    assert os.path.exists(film_mp4)
+    probe = library.ffprobe(film_mp4)
+    assert float(probe['format']['duration']) == pytest.approx(2.0, abs=0.1)

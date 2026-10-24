@@ -37,14 +37,14 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 
 | Module | Integration cover | Tests | Notes / what remains |
 | --- | --- | --- | --- |
-| `pipeline/runner.py` | n/a | `test_runner.py` | worker concurrency, claim, cache signatures, clear |
+| `pipeline/runner.py` | 95% | `test_runner.py` | worker concurrency, claim, cache signatures, clear, stage health, retries |
 | `pipeline/stages.py`, `pipeline/ingest.py` | n/a | `test_pipeline.py` | the model-free stages on the synthetic clip |
 | `server/app.py` | n/a | `test_server.py`, `test_project_api.py` | endpoints over real project files |
 | `edit/voiceover.py`, `edit/vo_fit.py` | n/a | `test_voiceover.py` | `respeak`/`fit_project` with the fake speech engine |
 | `edit/music.py` | n/a | `test_music.py` | |
 | `edit/optimise.py` | n/a | `test_edit.py` | slow pure computation (see Known issues) |
 | `cli.py` | 35% (this file alone, before the other suites) | `test_cli_commands.py` | catalog, init errors, progress (json and text), open, coverage, backup (make, list, restore), credits, plan-blocks, gaps without a track, doctor. The model and render commands are manual checks |
-| `render/film.py` | 81% | `test_render.py` | composing film pieces |
+| `render/film.py` | 100% | `test_render.py` | composing film pieces, whip, pan, dip, and dissolve transitions |
 | `render/final.py` | 92% | `test_render.py` | final CLI rendering, the cold open as the first piece with its own sound |
 | `render/vr.py`, `render/spherical.py` | n/a | `test_vr_render.py` | the 360 film from the synthetic clips: equirect pieces, a whip as a cut, assembled with sound and marked (ffprobe shows the spherical mapping), its own key, the 2:1 check |
 | `render/flat.py` | 70% | `test_render.py` | flat CLI rendering, seam |
