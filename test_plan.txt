@@ -1,0 +1,5 @@
+1. We will cover the remaining functions in `strata360/audio/dsp.py` (which are about ~48% un-covered): `load_audio`, `enhance_speech`, `mossformer_denoise`, `condition_ambience`, `_smooth_gain`, `mix_plan`, `apply_gain_db`, `render_mix`, `stoi_approx`, `wer`, `si_sdr`, and `band_si_sdr`.
+2. We will mock `ffmpeg` and subprocesses properly for these heavy-weight functions to ensure testing is hermetic and fast.
+3. We will cover `strata360/audio/speech.py` completely (around 14% un-covered). The remaining un-covered part is just the CLI (`__main__` block), which is lines 102-113.
+4. We will use the existing fakes where appropriate, or write local monkeypatches in the unit test files.
+5. After updating both `tests/unit/test_dsp.py` and `tests/unit/test_speech.py`, we will check coverage and update `fail_under` in `pyproject.toml` and the coverage ledger in `tests/unit/README.md`.
