@@ -16,7 +16,7 @@ export default function App() {
       <h1 className="text-xl font-semibold">Strata 360</h1>
       {picking || !folder ? (
         <>
-          <p className="mb-4 text-sm text-stone-500">Open an existing project or create one: choose the folder with your camera files. Results go in a <code>strata360</code> subfolder next to them.</p>
+          <p className="mb-4 text-sm text-stone-500">Open an existing project or create one: choose the folder with your camera files. Results go in the projects folder the server was started with (<code>--projects</code>), in a folder named after this one; without one, in a <code>strata360</code> subfolder next to the footage.</p>
           <div className="max-w-3xl"><FolderBrowser onChoose={choose} onCancel={folder ? () => setPicking(false) : undefined} /></div>
         </>
       ) : <Workspace folder={folder} onChange={() => setPicking(true)} />}

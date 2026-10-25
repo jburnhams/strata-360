@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, type AgentImage, type AgentPending, type AgentStatus, type AgentStep, type AgentTurn, type AgentUndoState } from '../api'
+import { api, withBase, type AgentImage, type AgentPending, type AgentStatus, type AgentStep, type AgentTurn, type AgentUndoState } from '../api'
 import { PanelSkeleton } from './Skeleton'
 
 // Ask questions about the project in plain words: a hosted model answers by looking things up with read-only tools (the clips, the transcript, the edit plan, the script ...). It cannot change anything.
@@ -93,7 +93,7 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : ''}>
             <div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'bg-emerald-700 text-white' : m.error ? 'bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200' : 'bg-stone-100 dark:bg-stone-800'}`}>
               <div className="whitespace-pre-wrap break-words">{m.role === 'user' ? m.content : inline(m.content, clipIds, onOpenClip)}</div>
-              {m.images && m.images.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{m.images.map(im => <figure key={im.url} className="max-w-xs"><a href={im.url} target="_blank" rel="noreferrer" title="open the picture"><img src={im.url} alt={im.caption} loading="lazy" className="w-full rounded-lg border border-stone-300 dark:border-stone-700" /></a><figcaption className="mt-0.5 text-xs text-stone-500">{im.caption}</figcaption></figure>)}</div>}
+              {m.images && m.images.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{m.images.map(im => <figure key={im.url} className="max-w-xs"><a href={withBase(im.url)} target="_blank" rel="noreferrer" title="open the picture"><img src={withBase(im.url)} alt={im.caption} loading="lazy" className="w-full rounded-lg border border-stone-300 dark:border-stone-700" /></a><figcaption className="mt-0.5 text-xs text-stone-500">{im.caption}</figcaption></figure>)}</div>}
               {m.steps && <Steps steps={m.steps} />}
             </div>
           </div>))}
