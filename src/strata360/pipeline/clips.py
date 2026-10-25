@@ -2,6 +2,7 @@
 (`..._00_NNN.insv` the rear lens, which carries the metadata and is the clip's primary file, `..._10_NNN.insv` the front lens) with an optional `LRV_..._11_NNN.lrv` proxy (osv/insta360.py).
 The camera is told from the files, so a folder can hold either. Unsupported files are reported, not silently ignored."""
 import hashlib, os, re
+from strata360.pipeline import config
 from strata360.osv.mp4 import cut_short
 from dataclasses import dataclass, field
 
@@ -84,7 +85,7 @@ def discover(library):
             elif ext == '.insv': insv.append(p)
             elif ext in SUPPORTED: clips.append(p)
             elif ext in KNOWN_OTHER or True: other.append((p, KNOWN_OTHER.get(ext, 'unknown file type')))
-    out = []; rec_dir = os.path.join(library, 'strata360', 'recovered')
+    out = []; rec_dir = os.path.join(config.race_dir(os.path.abspath(library)), 'recovered')
     for p in sorted(clips):
         use, rec = _usable(p, rec_dir)
         if use is None: other.append((p, NO_INDEX)); continue

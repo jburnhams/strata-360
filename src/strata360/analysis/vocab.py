@@ -276,14 +276,15 @@ def apply(local, proposals, demote=()):
 
 
 def project_paths(root):
-    d = os.path.join(root, 'strata360'); return dict(stats=os.path.join(d, 'vocab_stats.json'), local=os.path.join(d, 'vocab_local.json'))
+    from strata360.pipeline import config
+    d = config.race_dir(root); return dict(stats=os.path.join(d, 'vocab_stats.json'), local=os.path.join(d, 'vocab_local.json'))
 
 
 def collect(root, write=True):
     """The project's StatsBook rebuilt from the repo's seed and the numbers each clip's objects.json recorded (clips are processed in parallel, so each keeps its own; this is the one place they are added up). Written to the
     project's vocab_stats.json unless `write` is False."""
     import glob
-    files = sorted(glob.glob(os.path.join(root, 'strata360', 'clips', '*', 'objects.json')))
+    files = sorted(glob.glob(os.path.join(os.path.dirname(project_paths(root)['stats']), 'clips', '*', 'objects.json')))
     if not files: return StatsBook.read(project_paths(root)['stats'])                    # no clip has recorded anything: keep what the project's file says
     book = StatsBook.read(SEED_FILE); book.sources = list(book.sources)
     for fn in files:

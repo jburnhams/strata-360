@@ -76,7 +76,8 @@ def load_roots(cli_roots):
     if os.path.exists(p):
         try: roots += json.load(open(p)).get('roots', [])
         except ValueError: pass
-    return [os.path.realpath(os.path.expanduser(r)) for r in roots if os.path.isdir(os.path.expanduser(r))]
+    if config.footage_root(): roots.append(config.footage_root())                                       # the footage folder (--footage, STRATA_FOOTAGE or server.json) is always allowed
+    return list(dict.fromkeys([os.path.realpath(os.path.expanduser(r)) for r in roots if os.path.isdir(os.path.expanduser(r))]))
 
 
 def safe_path(roots, path):
@@ -92,17 +93,22 @@ def browse(roots, path):
     real = safe_path(roots, path); items = []; n_footage = 0
     try: names = sorted(os.listdir(real), key=str.lower)
     except OSError as e: raise Forbidden(str(e))
-    is_proj = os.path.exists(os.path.join(real, config.PROJECT_SUBFOLDER, 'race.json'))
+    is_proj = has_project(real)
     for n in ([] if is_proj else names):                                                                  # a project folder is opened as a whole: its sub-folders are not offered
         if n.startswith('.') or n == config.PROJECT_SUBFOLDER: continue
         full = os.path.join(real, n)
         if os.path.isdir(full):
             try: real_child = safe_path(roots, full)
             except Forbidden: continue                                                                    # a symlink pointing out of the roots is not shown
-            items.append(dict(name=n, path=real_child, kind='dir', is_project=os.path.exists(os.path.join(real_child, config.PROJECT_SUBFOLDER, 'race.json'))))
+            items.append(dict(name=n, path=real_child, kind='dir', is_project=has_project(real_child)))
         elif os.path.splitext(n)[1].lower() in clipmod.SUPPORTED: n_footage += 1
     parent = os.path.dirname(real); parent = parent if any(parent == r or parent.startswith(r + os.sep) for r in roots) else None
     return dict(path=real, parent=parent, footage_here=n_footage, is_project=is_proj, can_create=(not is_proj and real not in roots and (n_footage > 0 or has_footage(real))), entries=items)
+
+
+def has_project(folder):
+    try: return os.path.exists(os.path.join(config.race_dir(folder), 'race.json'))
+    except ValueError: return False                                                                       # outside the footage folder
 
 
 def has_footage(folder, depth=3):
@@ -2150,6 +2156,7 @@ def main(argv=None):
     ap.add_argument('--port', type=int, default=8360); ap.add_argument('--token', help='shared secret (required when --host is not 127.0.0.1; generated if omitted)'); ap.add_argument('--reload', action='store_true', help='restart the server when the code changes (workers and renders keep running: they are separate processes)'); a = ap.parse_args(argv)
     roots = load_roots(a.root)
     if not roots: sys.exit('no allowed folders: give --root PATH (repeatable) or list them in ~/.strata360/server.json {"roots": [...]}')
+    a.token = a.token or os.environ.get('STRATA360_SERVER_TOKEN') or None                                    # a service keeps the secret in an environment file, not on the command line
     token = a.token if a.token else (secrets.token_urlsafe(16) if a.host not in ('127.0.0.1', 'localhost') else None)
     print(f'strata360 server on http://{a.host}:{a.port}/' + (f'?token={token}' if token else '')); print('allowed folders:', ', '.join(roots))
     import uvicorn

@@ -419,12 +419,14 @@ def recover(src, template, dest, trailer=None, when=None):
 
 # ---- a whole footage folder -----------------------------------------------------------------------------------------------------------------------------------------------
 
-RECOVERED = 'recovered'      # <library>/strata360/recovered/: the rebuilt copies, under their original names (discovery uses them in place of the originals)
+RECOVERED = 'recovered'      # <project folder>/recovered/: the rebuilt copies, under their original names (discovery uses them in place of the originals)
 _X3 = re.compile(r'^(?P<kind>VID|LRV)_(?P<date>\d{8})_(?P<time>\d{6})_(?P<lens>\d{2})_(?P<n>\d{3})\.(?P<ext>insv|lrv)$', re.I)
 _DJI = re.compile(r'^CAM_(?P<date>\d{8})(?P<time>\d{6})_\d+_\w\.(?P<ext>osv|lrf)$', re.I)
 
 
-def recovered_dir(library): return os.path.join(library, 'strata360', RECOVERED)
+def recovered_dir(library):
+    from strata360.pipeline import config
+    return os.path.join(config.race_dir(os.path.abspath(library)), RECOVERED)
 
 
 def _name_time(fn):
@@ -468,7 +470,7 @@ def template_for(path):
 
 
 def recover_library(library, log=print):
-    """Rebuild every cut-short camera file under `library` into <library>/strata360/recovered/ (originals are only read). Returns [summary dicts]; a file already rebuilt is skipped."""
+    """Rebuild every cut-short camera file under `library` into <project folder>/recovered/ (originals are only read). Returns [summary dicts]; a file already rebuilt is skipped."""
     out = []; dest_dir = recovered_dir(library)
     for src in cut_short_files(library):
         fn = os.path.basename(src); dest = os.path.join(dest_dir, fn)

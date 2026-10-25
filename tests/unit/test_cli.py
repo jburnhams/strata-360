@@ -67,3 +67,19 @@ def test_music_build_command(parser):
     assert args.fidelity == 0.5
     assert args.take == ['A=1', 'B=2']
     assert args.fn == cli.cmd_music_build
+
+
+def test_migrate_projects_copies_each_strata360_folder_to_the_projects_folder_and_leaves_the_footage_alone(tmp_path, monkeypatch, capsys):
+    import argparse
+    from strata360 import cli
+    footage = tmp_path / 'footage'; projects = tmp_path / 'projects'; projects.mkdir()
+    (footage / 'a' / 'strata360' / 'clips').mkdir(parents=True); (footage / 'a' / 'strata360' / 'race.json').write_text('{}'); (footage / 'a' / 'VID.osv').write_text('v')
+    (footage / 'b').mkdir()
+    monkeypatch.setenv('STRATA_FOOTAGE', str(footage)); monkeypatch.setenv('STRATA_PROJECTS', str(projects))
+    cli.cmd_migrate_projects(argparse.Namespace(dry_run=True, force=False)); assert not (projects / 'a').exists()
+    cli.cmd_migrate_projects(argparse.Namespace(dry_run=False, force=False))
+    assert (projects / 'a' / 'race.json').exists() and (projects / 'a' / 'clips').is_dir() and not (projects / 'b').exists()
+    assert (footage / 'a' / 'strata360' / 'race.json').exists()                          # copied, not moved
+    (projects / 'a' / 'race.json').write_text('{"edited": 1}')
+    cli.cmd_migrate_projects(argparse.Namespace(dry_run=False, force=False))             # a second run does not overwrite work done since
+    assert (projects / 'a' / 'race.json').read_text() == '{"edited": 1}' and 'skip' in capsys.readouterr().out

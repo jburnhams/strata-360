@@ -187,7 +187,9 @@ def cmd_doctor(a):
         line('ok' if glob.glob(os.path.join(hf, pat)) else 'warn', name, 'downloads automatically the first time a run needs it')
     line('ok' if os.path.isdir(os.path.expanduser('~/Library/Caches/DeepFilterNet')) or glob.glob(os.path.join(os.path.dirname(sys.executable), '..', 'lib', '*', 'site-packages', 'df')) else 'warn', 'DeepFilterNet (optional enhancer)')
     line('ok' if os.path.exists(oslib.venv_python(os.path.join(os.path.dirname(__file__), '..', '..', '.venv-cv'))) else 'warn', 'MossFormer2 environment .venv-cv (optional enhancer)', 'scripts/setup_env.sh --with-cv')
-    print('races folder:'); rr = config.races_root(); os.makedirs(rr, exist_ok=True); free = shutil.disk_usage(rr).free / 1e9
+    print('projects folder:' if config.projects_root() else 'races folder:'); rr = config.races_root(); base = os.path.abspath(rr)
+    while not os.path.exists(base): base = os.path.dirname(base)                          # nothing is created in the code folder just to measure space
+    free = shutil.disk_usage(base).free / 1e9
     line('ok' if free > 50 else 'warn', f'{os.path.abspath(rr)}: {free:.0f} GB free', 'proxies are about 37 GB per hour of footage')
     print('all required checks passed' if ok else 'some required checks FAILED'); sys.exit(0 if ok else 1)
 
@@ -549,8 +551,45 @@ def cmd_open(a):
     if p['needs']: print('waiting for you:', ', '.join(p['needs']), '(wearer_profile: ./strata360 who FOLDER --auto; camera_clock: ./strata360 clock FOLDER --suggest)')
 
 
+def cmd_paths(a):
+    """Show or save the two folders: where the footage is (only read) and where the projects go. Saved in ~/.strata360/server.json, which every command and server process reads."""
+    f = os.path.expanduser('~/.strata360/server.json')
+    try: d = json.load(open(f))
+    except (OSError, ValueError): d = {}
+    for k in ('footage', 'projects'):
+        v = getattr(a, k)
+        if v:
+            if not os.path.isdir(os.path.expanduser(v)): sys.exit(f'{k} folder not found: {v}')
+            d[k] = os.path.realpath(os.path.expanduser(v))
+    if a.footage or a.projects:
+        os.makedirs(os.path.dirname(f), exist_ok=True); json.dump(d, open(f, 'w'), indent=2)
+    print('footage :', config.footage_root() or '(not set)'); print('projects:', config.projects_root() or '(not set: results go in <footage folder>/strata360/)')
+
+
+def cmd_migrate_projects(a):
+    """Copy every <footage folder>/strata360/ under the footage folder into the projects folder, as <projects>/<same path as the footage folder>/. Copies, never moves: the footage folder is not written to."""
+    import shutil
+    fr, pr = config.footage_root(), config.projects_root()
+    if not (fr and pr): sys.exit('set both folders first: strata360 paths --footage PATH --projects PATH')
+    found = []
+    for root, dirs, _ in os.walk(fr):
+        if config.PROJECT_SUBFOLDER in dirs: found.append(root); dirs[:] = []
+    for folder in sorted(found):
+        src = os.path.join(folder, config.PROJECT_SUBFOLDER); dest = config.race_dir(folder); size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(src) for f in fs) / 1e9
+        if os.path.exists(dest) and not a.force: print(f'skip {dest} (exists; --force replaces it)'); continue
+        print(f'{"would copy" if a.dry_run else "copy"} {src} -> {dest} ({size:.1f} GB)')
+        if a.dry_run: continue
+        tmp = dest + '.partial'; shutil.rmtree(tmp, ignore_errors=True); os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copytree(src, tmp, symlinks=True)                                              # into a temporary name, so an interrupted copy is never taken for a project
+        if os.path.exists(dest): shutil.rmtree(dest)
+        os.rename(tmp, dest)
+    if not found: print('no strata360 folders found under', fr)
+
+
 def cmd_serve(a):
     from strata360.server import app
+    if a.footage and a.projects: cmd_paths(argparse.Namespace(footage=a.footage, projects=a.projects))
+    a.root = list(a.root or []) + ([a.footage] if a.footage else [])
     app.main(sum([['--root', r] for r in (a.root or [])], []) + ['--host', a.host, '--port', str(a.port)] + (['--token', a.token] if a.token else []) + (['--reload'] if a.reload else []))
 
 
@@ -831,7 +870,9 @@ def create_parser():
     p = sub.add_parser('final', help='render the final film at full quality from the original video (resumable; slow); --vr for the 360 version'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--size', default=None, help='3840x2160 by default; 3840x1920 for --vr (2:1)'); p.add_argument('--fps', type=float, default=0.0, help="frames a second; 0 (the default) is the footage's own rate"); p.add_argument('--half-rate', action='store_true', help='half the rate: every other source frame (faster)'); p.add_argument('--bitrate', default='100M'); p.add_argument('--pieces', type=int); p.add_argument('--out'); p.add_argument('--upscale', nargs='?', const='full', default='off', choices=['off', '1080p', '1440p', 'full'], help='enlarge shots that hold too few pixels with the local model, up to the output size or to 1080p / 1440p and then resample'); p.add_argument('--upscale-min-zoom', type=float, default=None, help='enlarge a shot only if more than 0.5 s of it need at least this zoom (default 2.5)'); add_vr_args(p); p.set_defaults(fn=cmd_final)
     p = sub.add_parser('chapters', help='write YouTube chapter markers ("Stage 3, km 42") for a final film from its time map and the race\'s checkpoints, and print them'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--film', help='the film\'s folder under final/ (default: the newest)'); p.add_argument('--min-s', type=float, default=10.0, help='the shortest chapter in seconds (YouTube: 10)'); p.set_defaults(fn=cmd_chapters)
     p = sub.add_parser('film', help='render the streaming preview of the planned film (plan + framing + voice-over)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--px', type=int); p.add_argument('--force', action='store_true'); p.set_defaults(fn=cmd_film)
-    p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.add_argument('--reload', action='store_true', help='restart on code changes'); p.set_defaults(fn=cmd_serve)
+    p = sub.add_parser('serve', help='web server: browse footage folders (inside allowed roots) and drive processing from a browser'); p.add_argument('--root', action='append'); p.add_argument('--footage', help='the footage folder (allowed, read only); saved with --projects'); p.add_argument('--projects', help='where the projects go; saved with --footage'); p.add_argument('--host', default='127.0.0.1'); p.add_argument('--port', type=int, default=8360); p.add_argument('--token'); p.add_argument('--reload', action='store_true', help='restart on code changes'); p.set_defaults(fn=cmd_serve)
+    p = sub.add_parser('paths', help='show or save the footage folder and the projects folder'); p.add_argument('--footage'); p.add_argument('--projects'); p.set_defaults(fn=cmd_paths)
+    p = sub.add_parser('migrate-projects', help='copy the strata360 folders found in footage folders into the projects folder (the footage is not touched)'); p.add_argument('--dry-run', action='store_true'); p.add_argument('--force', action='store_true', help='replace a project that already exists there'); p.set_defaults(fn=cmd_migrate_projects)
     p = sub.add_parser('voice', help='find the wearer\'s own voice among the speakers (vs chatter around them)'); p.add_argument('name'); p.add_argument('--me'); p.add_argument('--auto', action='store_true'); p.add_argument('--label', default='me'); p.set_defaults(fn=cmd_voice)
     p = sub.add_parser('transcript-fix', help='ask the language model (Gemini) to suggest corrections to the recognised words'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--clip', action='append'); p.add_argument('--provider'); p.add_argument('--model'); p.add_argument('--text-only', action='store_true', help='only send the words, not the audio'); p.add_argument('--checks', type=int, default=3, help='checks per excerpt; a fix needs 2 of them'); p.add_argument('--thinking', default='low'); p.set_defaults(fn=cmd_transcript_fix)
     p = sub.add_parser('voiceover', help='speak the script with a local voice and mix the voice-over track (recordings replace lines)'); p.add_argument('name', metavar='FOLDER'); p.add_argument('--engine'); p.add_argument('--voice'); p.add_argument('--rate', type=int); p.add_argument('--list', action='store_true', help='list engines and voices'); p.add_argument('--fetch', action='store_true', help='download the voice model (Kokoro, about 350 MB)'); p.set_defaults(fn=cmd_voiceover)

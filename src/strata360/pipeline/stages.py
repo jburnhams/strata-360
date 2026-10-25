@@ -261,8 +261,9 @@ def scenes(ctx):
        note='the things passed (animals, signs, buildings, vehicles, structures) with a direction: YOLOE boxes on 26 tiles of the original lens frames at the moments the runner moved or the scene changed, named by the detector where its word is trusted by the statistics, else by the local Qwen on a re-rendered crop; skips night footage, black frames and the wearer; needs .venv-vision and models/yoloe')
 def objects(ctx):
     from strata360.analysis import objects as OBJ, sampling, vocab as VOC
+    from strata360.pipeline import config
     from strata360.gps import sun as SUN
-    rd = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); root = os.path.dirname(rd) if os.path.basename(rd) == 'strata360' else rd                 # the footage folder (the results are in <folder>/strata360): where the project's own word list and statistics are
+    rd = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); root = config.footage_of(rd)                 # the footage folder the results belong to: names the project's own word list and statistics
     local_p = VOC.project_paths(root)['local']
     local = json.load(open(local_p)) if os.path.exists(local_p) else None; vocab = VOC.load(local=local); scenes_doc = ctx.read('scenes.json')
     cats = OBJ.categories_of(scenes_doc, vocab); words = VOC.words_for(cats, vocab)

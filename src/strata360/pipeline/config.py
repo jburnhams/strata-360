@@ -1,7 +1,7 @@
 """Race configuration: one `race.json` per race collection (races/<name>/race.json), merged over these defaults.
 
 Every stage declares which config keys it depends on (stages.py), so changing a setting re-runs only the stages that use it."""
-import copy, json, os
+import copy, json, os, re
 from strata360 import hw
 
 DEFAULTS = {
@@ -32,11 +32,25 @@ DEFAULTS = {
 }
 
 
+def _setting(env, key):
+    """A folder setting: the environment variable, else `key` in ~/.strata360/server.json (so the server's worker processes and the command line agree), as a real path; None when unset."""
+    v = os.environ.get(env)
+    if not v:
+        try: v = json.load(open(os.path.expanduser('~/.strata360/server.json'))).get(key)
+        except (OSError, ValueError, AttributeError): v = None
+    return os.path.realpath(os.path.expanduser(v)) if v else None
+
+
+def footage_root(): return _setting('STRATA_FOOTAGE', 'footage')          # where the camera files are (only read)
+def projects_root(): return _setting('STRATA_PROJECTS', 'projects')      # where every project's results go when set: <projects>/<footage folder's path under the footage root>/
+
+
 def races_root():
-    return os.environ.get('STRATA_RACES', os.path.join(os.path.dirname(__file__), '..', '..', '..', 'races'))
+    """The folder of race-name projects (`races/<name>`): STRATA_RACES, else the projects folder when one is set (so nothing is written in the code folder), else `races/` in the repository (the original layout)."""
+    return os.environ.get('STRATA_RACES') or projects_root() or os.path.join(os.path.dirname(__file__), '..', '..', '..', 'races')
 
 
-PROJECT_SUBFOLDER = 'strata360'      # results live in <footage folder>/strata360/ (race.json, clips/, run.log, people/, ...); the GUI just asks for the footage folder
+PROJECT_SUBFOLDER = 'strata360'      # without a projects folder, results live in <footage folder>/strata360/ (race.json, clips/, run.log, people/, ...); the GUI just asks for the footage folder
 
 
 def is_project_path(name):
@@ -47,17 +61,53 @@ def source(path, near):
     """Where a source file recorded in a clip.json really is on THIS machine. The path was stored where the footage was ingested (/Volumes/Expansion/... on the Mac that made the project); when it does not exist here, the file of that name beside the
     project (in `near` or any folder above it, a clip folder for instance) is used, so a project can be opened from another computer or another mount. None stays None."""
     if not path or os.path.exists(path): return path
-    d = os.path.abspath(str(near)); name = os.path.basename(str(path)); last = None
+    d = os.path.abspath(str(near)); name = re.split(r'[\\/]', str(path))[-1]; last = None            # a path made on Windows has backslashes
     while d != last:
         if os.path.isfile(os.path.join(d, name)): return os.path.join(d, name)
+        if os.path.isfile(os.path.join(d, 'race.json')) and projects_root():                    # the project folder: the footage is elsewhere, in the folder it is named after
+            found = _footage_index(footage_of(d)).get(name)
+            if found: return found
         last, d = d, os.path.dirname(d)
     return path
 
 
+_FOOTAGE_INDEX = {}
+
+
+def _footage_index(folder):
+    """{file name: path} of the files under a footage folder (found once per folder and process)."""
+    if folder not in _FOOTAGE_INDEX:
+        idx = {}
+        for root, dirs, files in os.walk(folder):
+            dirs[:] = [x for x in dirs if x != PROJECT_SUBFOLDER]
+            for fn in files: idx.setdefault(fn, os.path.join(root, fn))
+        _FOOTAGE_INDEX[folder] = idx
+    return _FOOTAGE_INDEX[folder]
+
+
+def _relative_to_footage(folder):
+    """The path of a footage folder under the footage root: the name its project folder has under the projects folder."""
+    fr = footage_root()
+    if not fr: raise ValueError('a projects folder needs a footage folder too: give --footage PATH (or STRATA_FOOTAGE, or "footage" in ~/.strata360/server.json)')
+    rel = os.path.relpath(os.path.realpath(os.path.abspath(str(folder))), fr)
+    if rel == '.' or rel == os.pardir or rel.startswith(os.pardir + os.sep): raise ValueError(f'{folder} is not a folder inside the footage folder {fr}')
+    return rel
+
+
 def race_dir(name):
-    """`name` is either a race name (races/<name>, the old layout) or a footage folder (any path): the results then live in <folder>/strata360/."""
-    if is_project_path(name): return os.path.abspath(os.path.join(str(name), PROJECT_SUBFOLDER))
+    """`name` is either a race name (<races root>/<name>, the old layout) or a footage folder (any path). Its results live in <projects>/<same folder name>/ when a projects folder is set, else in <folder>/strata360/."""
+    if is_project_path(name):
+        pr = projects_root()
+        if pr: return os.path.join(pr, _relative_to_footage(name))
+        return os.path.abspath(os.path.join(str(name), PROJECT_SUBFOLDER))
     return os.path.abspath(os.path.join(races_root(), name))
+
+
+def footage_of(rd):
+    """The footage folder whose results are in the project folder `rd` (the reverse of race_dir for a footage folder)."""
+    rd = os.path.abspath(str(rd)); pr = projects_root()
+    if pr and os.path.realpath(rd).startswith(pr + os.sep): return os.path.join(footage_root(), os.path.relpath(os.path.realpath(rd), pr))
+    return os.path.dirname(rd) if os.path.basename(rd) == PROJECT_SUBFOLDER else rd
 
 
 TRACK_NAMES = ('track.fit', 'track.gpx')      # the race track lives at <project>/track.fit or track.gpx (uploaded in the GUI or copied there)
