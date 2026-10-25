@@ -40,7 +40,9 @@ def test_hevc_is_ten_bit_and_tagged_on_request(monkeypatch):
 
 def test_decode_acceleration_only_on_macos_unless_overridden(monkeypatch):
     monkeypatch.setattr(hw.sys, 'platform', 'darwin'); assert hw.hwaccel_args() == ['-hwaccel', 'videotoolbox']
-    monkeypatch.setattr(hw.sys, 'platform', 'linux'); assert hw.hwaccel_args() == []
+    monkeypatch.setattr(hw.sys, 'platform', 'linux'); monkeypatch.setattr(hw, '_cuda_decode_works', lambda: False); assert hw.hwaccel_args() == []
+    monkeypatch.setattr(hw, '_cuda_decode_works', lambda: True); assert hw.hwaccel_args() == ['-hwaccel', 'cuda']              # an NVIDIA GPU that decodes here is used
+    monkeypatch.setenv('STRATA_HWACCEL', 'none'); assert hw.hwaccel_args() == []; monkeypatch.delenv('STRATA_HWACCEL')
     monkeypatch.setenv('STRATA_HWACCEL', 'cuda'); assert hw.hwaccel_args() == ['-hwaccel', 'cuda']
     monkeypatch.setattr(hw.sys, 'platform', 'darwin'); monkeypatch.setenv('STRATA_HWACCEL', 'none'); assert hw.hwaccel_args() == []
 

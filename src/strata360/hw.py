@@ -1,7 +1,7 @@
 """Platform-aware ffmpeg hardware options: decode acceleration and video encoders, chosen from the OS and from what this ffmpeg build offers.
 
 macOS uses VideoToolbox, Windows uses NVENC when the build has it, and everything else (Linux, or anything missing) falls back to software
-(libx264 / libx265), so the pipeline runs anywhere ffmpeg does. Overrides: STRATA_ENCODER=software forces software encoding,
+(libx264 / libx265), so the pipeline runs anywhere ffmpeg does. Decoding on Linux uses an NVIDIA GPU (CUDA) when a test decode works. Overrides: STRATA_ENCODER=software forces software encoding,
 STRATA_HWACCEL=none|<ffmpeg hwaccel name> sets the decode acceleration."""
 import functools, os, subprocess, sys, time
 
@@ -15,10 +15,24 @@ def _ffmpeg_list(kind):
 def has_encoder(name): return f' {name} ' in _ffmpeg_list('encoders')
 
 
+@functools.lru_cache(maxsize=None)
+def _cuda_decode_works():
+    """Does this ffmpeg decode HEVC on an NVIDIA GPU here? A one-frame 10-bit test clip is decoded with `-hwaccel cuda`. ffmpeg falls back to software and still exits 0 when the GPU, the driver or the memory is not there, so the test is that it says nothing on stderr."""
+    if ' cuda ' not in f' {_ffmpeg_list("hwaccels").replace(chr(10), " ")} ': return False
+    try:
+        mk = subprocess.run(['ffmpeg', '-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=s=512x512:r=1', '-frames:v', '1', '-pix_fmt', 'yuv420p10le', '-c:v', 'libx265', '-x265-params', 'log-level=none', '-f', 'hevc', '-'], capture_output=True, timeout=60)
+        if mk.returncode != 0 or not mk.stdout: return False
+        r = subprocess.run(['ffmpeg', '-hide_banner', '-v', 'error', '-hwaccel', 'cuda', '-f', 'hevc', '-i', '-', '-f', 'null', '-'], input=mk.stdout, capture_output=True, timeout=60)
+        return r.returncode == 0 and not r.stderr.strip()
+    except (OSError, subprocess.SubprocessError): return False
+
+
 def hwaccel_args():
-    """Input option for decoding the lens streams: VideoToolbox on macOS, D3D11VA on Windows, otherwise software decode (always works)."""
+    """Input option for decoding the lens streams: VideoToolbox on macOS, D3D11VA on Windows, CUDA (NVDEC) on Linux when the test decode works, otherwise software decode (always works). Measured on an NVIDIA GTX 1050: one lens stream decoded 6x faster and with 15x less CPU than software; two 3840 x 3840 10-bit streams at once need more than its 2 GB (ffmpeg then falls back to software for the second)."""
     want = os.environ.get('STRATA_HWACCEL')
-    if want is None: want = {'darwin': 'videotoolbox', 'win32': 'd3d11va'}.get(sys.platform, 'none')       # d3d11va is NVDEC on NVIDIA, and measured 3x faster than software on the 3840x3840 10-bit HEVC lenses
+    if want is None:
+        want = {'darwin': 'videotoolbox', 'win32': 'd3d11va'}.get(sys.platform)       # d3d11va is NVDEC on NVIDIA, and measured 3x faster than software on the 3840x3840 10-bit HEVC lenses
+        if want is None: want = 'cuda' if sys.platform.startswith('linux') and _cuda_decode_works() else 'none'
     return [] if want in ('', 'none') else ['-hwaccel', want]
 
 
