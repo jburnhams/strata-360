@@ -191,3 +191,260 @@ def test_attaching_puts_the_options_in_the_saved_plan_and_drops_the_old_ones(pro
 def test_attaching_without_a_plan_changes_nothing(project):
     from strata360.edit import project as PJ
     F.attach(project.folder); assert PJ.load(project.folder)['plan'] is None
+
+
+# ---- facts, quotes, run, design, hud_boxes ----
+
+def test_facts_for(tmp_path, monkeypatch):
+    from strata360.pipeline import config
+    from strata360.gps import track as TRK, context as X
+    import os
+
+    cdir = str(tmp_path)
+    monkeypatch.setattr(config, 'load', lambda f: {'project': {'track': 't.gpx'}})
+    monkeypatch.setattr(config, 'track_path', lambda f, cfg: os.path.join(cdir, 't.gpx'))
+    monkeypatch.setattr(TRK, 'load', lambda f: {})
+
+    def mock_context(tr, t0, t1, tz):
+        if t0 == 1000.0:
+            return {'covered': True, 'race_day': 1, 'local_time': '12:00', 'distance_km': 10.0, 'percent_of_distance': 10.0, 'elapsed_h': 1.0, 'altitude_m': 100.0, 'daylight': 'day', 'gradient_pct': 0.0}
+        return {'covered': False}
+
+    monkeypatch.setattr(X, 'context_at', mock_context)
+
+    plan = {'segments': [
+        {'synthetic': True},
+        {'utc_start': '1970-01-01T00:16:40Z', 'dur_s': 10.0, 'film_start_s': 5.0, 'clip': 'C00000001'},
+        {'utc_start': '1970-01-01T00:00:00Z', 'dur_s': 10.0, 'film_start_s': 0.0, 'clip': 'C00000000'}
+    ]}
+
+    facts = F.facts_for(cdir, plan)
+    assert len(facts) == 1
+    assert facts[0]['t'] == 5.0
+    assert facts[0]['clip'] == 'C00000001'
+
+    monkeypatch.setattr(config, 'track_path', lambda f, cfg: None)
+    assert F.facts_for(cdir, plan) == []
+
+def test_quotes_for(monkeypatch):
+    from strata360.render import captions as CP
+    monkeypatch.setattr(CP, 'build_cues', lambda f, p: [
+        {'t0': 5.0, 'kind': 'speech', 'text': 'short'},
+        {'t0': 15.0, 'kind': 'speech', 'text': 'one two three four'}
+    ])
+    quotes = F.quotes_for('f', {})
+    assert len(quotes) == 1
+    assert quotes[0]['text'] == 'one two three four'
+    assert quotes[0]['t'] == 15.0
+
+
+def test_hud_boxes(monkeypatch):
+    from strata360.pipeline import config
+    from strata360.overlay import layout as L
+    monkeypatch.setattr(config, 'load', lambda f: {'overlay': {'enabled': True}})
+    monkeypatch.setattr(config, 'track_path', lambda f, cfg: 't.gpx')
+    monkeypatch.setattr(L, 'settings', lambda cfg: {'elements': ['route_map'], 'layout': {'route_map': {'x': 100, 'y': 100, 'size': 256}, 'local_map': {'x': 200, 'y': 200, 'size': 256}}})
+
+    class MockPatch:
+        shape = (100, 100, 4)
+        def __init__(self, t):
+            self.t = t
+        def __getitem__(self, idx):
+            import numpy as np
+            class MockMask:
+                def mean(self): return 1.0 if self.t else 0.0
+                def __gt__(self, other): return self
+            return MockMask()
+
+    class MockOverlay:
+        def patches(self, utc):
+            yield 500, 500, MockPatch(True)
+            yield 100, 100, MockPatch(False)
+
+    import strata360.overlay as OVL
+    monkeypatch.setattr(OVL, 'build', lambda cfg, tp, size, maps=False: MockOverlay())
+
+    plan = {'segments': [
+        {'film_start_s': 5.0, 'dur_s': 10.0, 'utc_start': '1970-01-01T00:00:00Z'}
+    ]}
+
+    boxes = F.hud_boxes('f', plan, 10.0)
+    assert len(boxes) > 0
+
+
+    monkeypatch.setattr(config, 'load', lambda f: {'overlay': {'enabled': False}})
+    assert F.hud_boxes('f', plan, 10.0) == []
+
+def test_design_cards(monkeypatch):
+    from strata360.render import captions as CP
+    monkeypatch.setattr(CP, 'build_cues', lambda f, p: [])
+
+    class MockCap:
+        def __init__(self, *args, **kwargs): pass
+        def apply(self, f, t, **kwargs): return f
+        def boxes(self, t0, t1): return []
+    monkeypatch.setattr(CP, 'Captions', MockCap)
+
+    from strata360.edit import title_design as TD
+    monkeypatch.setattr(TD, 'design', lambda *args, **kwargs: (
+        {'elements': [], 'timing': {}}, {'changes': [], 'blocking': {'score': 2.0}}
+    ))
+
+    from strata360.analysis import palette_cluster as PC
+    monkeypatch.setattr(PC, 'for_clip', lambda f, c: None)
+
+    from strata360.render import typography as TY
+    monkeypatch.setattr(TY, 'for_project', lambda f: None)
+
+    monkeypatch.setattr(F, 'frames_of_film', lambda *args, **kwargs: [None, None])
+    monkeypatch.setattr(F, 'hud_boxes', lambda *args, **kwargs: [])
+
+    cards = [
+        {'id': 'c1', 't': 5.0, 'dur_s': 2.0, 'type': 'quote', 'lines': [{'text': 'hello'}], 'spec': {'elements': []}},
+        {'id': 'c2', 't': 5.5, 'dur_s': 2.0, 'type': 'progress', 'lines': [{'text': 'world'}], 'shot': {'calm': 'top'}}
+    ]
+
+    plan = {'segments': [{'film_start_s': 0.0, 'dur_s': 10.0, 'clip': 'C01'}]}
+
+    F.design_cards('f', cards, None, '/key', plan=plan)
+    assert cards[1]['changes'] == []
+    assert cards[1]['blocking']['score'] == 2.0
+
+def test_run(monkeypatch, tmp_path):
+    from strata360.pipeline import config
+    cdir = str(tmp_path)
+    monkeypatch.setattr(config, 'race_dir', lambda f: cdir)
+    import json, os
+    os.makedirs(os.path.join(cdir, 'film-new'))
+    open(os.path.join(cdir, 'film-new', 'index.m3u8'), 'w').write('')
+
+    plan = {'edit': {'plan': {'film': {'length_s': 100.0}}}}
+    with open(os.path.join(cdir, 'project.json'), 'w') as f:
+        json.dump(plan, f)
+
+    odoc = {
+        'length_s': 100.0,
+        'options': [
+            {'id': 'o1', 't': 10.0, 'dur_s': 2.0, 'score': 8.0, 'type': 'quote', 'lines': [{'text': 'hello'}], 'worth': 5.0, 'shot': {'obscure_risk': 2, 'excitement': 2, 'calm': 'none', 'verdict': 'ok'}},
+            {'id': 'o2', 't': 20.0, 'dur_s': 2.0, 'score': 2.0, 'type': 'progress', 'lines': [{'text': 'world'}], 'worth': 5.0, 'shot': {'obscure_risk': 2, 'excitement': 2, 'calm': 'none', 'verdict': 'ok'}}
+        ]
+    }
+    with open(os.path.join(cdir, 'film_text_options.json'), 'w') as f:
+        json.dump(odoc, f)
+
+    monkeypatch.setattr(F, 'latest_preview', lambda f: os.path.join(cdir, 'film-new'))
+
+    from strata360.analysis import vlm
+    class MockServer:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(vlm, 'Server', MockServer)
+    monkeypatch.setattr(vlm, 'llm_files', lambda: ['llm'])
+    monkeypatch.setattr(vlm, 'model_files', lambda: ['mm1', 'mm2'])
+
+    def mock_design(f, cards, *args, **kwargs):
+        for c in cards:
+            c['blocking'] = {'score': 1.0}
+        return cards
+    monkeypatch.setattr(F, 'design_cards', mock_design)
+
+    monkeypatch.setattr(F, 'attach', lambda f: None)
+
+    from strata360.render import preview as PVW
+    monkeypatch.setattr(PVW, 'plan_key', lambda f, p: 'key')
+
+    F.run('f', reuse=True)
+
+    with open(os.path.join(cdir, 'film_text_options.json')) as f:
+        new_odoc = json.load(f)
+    assert new_odoc['options'][0]['blocking']['score'] == 1.0
+
+    with open(os.path.join(cdir, 'film_text.json')) as f:
+        doc = json.load(f)
+    assert len(doc['cards']) == 1
+    assert doc['cards'][0]['id'] == 'o1'
+
+def test_run_generates_options_if_missing(monkeypatch, tmp_path):
+    from strata360.pipeline import config
+    cdir = str(tmp_path)
+    monkeypatch.setattr(config, 'race_dir', lambda f: cdir)
+    import json, os
+    os.makedirs(os.path.join(cdir, 'film-new'))
+    open(os.path.join(cdir, 'film-new', 'index.m3u8'), 'w').write('')
+
+    plan = {'edit': {'plan': {'film': {'length_s': 100.0}}}}
+    with open(os.path.join(cdir, 'project.json'), 'w') as f:
+        json.dump(plan, f)
+
+    odoc = {
+        'length_s': 100.0,
+        'options': [
+            {'id': 'o1', 't': 10.0, 'dur_s': 2.0, 'score': 8.0, 'type': 'quote', 'lines': [{'text': 'hello'}], 'worth': 5.0, 'shot': {'obscure_risk': 2, 'excitement': 2, 'calm': 'none', 'verdict': 'ok'}}
+        ]
+    }
+
+    monkeypatch.setattr(F, 'options', lambda f, p, n, log: odoc)
+    monkeypatch.setattr(F, 'latest_preview', lambda f: os.path.join(cdir, 'film-new'))
+
+    from strata360.analysis import vlm
+    class MockServer:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(vlm, 'Server', MockServer)
+    monkeypatch.setattr(vlm, 'llm_files', lambda: ['llm'])
+    monkeypatch.setattr(vlm, 'model_files', lambda: ['mm1', 'mm2'])
+
+    monkeypatch.setattr(F, 'design_cards', lambda *args, **kwargs: [])
+    monkeypatch.setattr(F, 'attach', lambda f: None)
+
+    from strata360.render import preview as PVW
+    monkeypatch.setattr(PVW, 'plan_key', lambda f, p: 'key')
+
+    F.run('f', reuse=False)
+
+    with open(os.path.join(cdir, 'film_text.json')) as f:
+        doc = json.load(f)
+    assert len(doc['cards']) == 0
+
+def test_options(monkeypatch, tmp_path):
+    from strata360.pipeline import config
+    cdir = str(tmp_path)
+    monkeypatch.setattr(config, 'race_dir', lambda f: cdir)
+    import os
+    os.makedirs(os.path.join(cdir, 'film-new'))
+
+    monkeypatch.setattr(F, 'latest_preview', lambda f: os.path.join(cdir, 'film-new'))
+
+    plan = {'film': {'length_s': 100.0}, 'segments': []}
+
+    monkeypatch.setattr(F, 'facts_for', lambda f, p: [])
+    monkeypatch.setattr(F, 'quotes_for', lambda f, p: [])
+
+    from strata360.render import captions as CP
+    monkeypatch.setattr(CP, 'build_cues', lambda f, p: [])
+
+    from strata360.analysis import vlm
+    class MockServer:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(vlm, 'Server', MockServer)
+    monkeypatch.setattr(vlm, 'llm_files', lambda: ['llm'])
+    monkeypatch.setattr(vlm, 'model_files', lambda: ['mm1', 'mm2'])
+
+    monkeypatch.setattr(F, 'propose', lambda f, q, l, srv, n: ([
+        {'t': 10.0, 'type': 'quote', 'dur_s': 2.0, 'lines': [{'text': 'hello'}], 'worth': 5.0}
+    ], []))
+
+    monkeypatch.setattr(F, 'judge_shot', lambda o, k, c, srv, t: {'verdict': 'ok', 'excitement': 5.0, 'obscure_risk': 5.0, 'calm': 'top'})
+
+    from strata360.render import preview as PVW
+    monkeypatch.setattr(PVW, 'plan_key', lambda f, p: 'key')
+
+    F.options('f', plan)
+    import json
+    with open(os.path.join(cdir, 'film_text_options.json')) as f:
+        doc = json.load(f)
+    assert doc['options'][0]['score'] > 0
