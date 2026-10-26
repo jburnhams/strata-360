@@ -47,6 +47,7 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 | `render/film.py` | 100% | `test_render.py` | composing film pieces, whip, pan, dip, and dissolve transitions |
 | `render/final.py` | 92% | `test_render.py` | final CLI rendering, the cold open as the first piece with its own sound |
 | `render/vr.py`, `render/spherical.py` | n/a | `test_vr_render.py` | the 360 film from the synthetic clips: equirect pieces, a whip as a cut, assembled with sound and marked (ffprobe shows the spherical mapping), its own key, the 2:1 check |
+| `render/still.py` | 96% | `test_still.py` | still pictures of the final film: moment picking, frame metadata, render logic, and CLI |
 | `render/flat.py` | 70% | `test_render.py` | flat CLI rendering, seam |
 | `render/preview.py` | 67% | `test_render.py` | preview GUI rendering |
 | `render/proxy.py` | 66% | `test_render.py` | proxy GUI rendering |
