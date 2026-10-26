@@ -6,7 +6,7 @@ import pytest
 from strata360.edit import project as PJ
 from strata360.render import still
 
-from tests.integration.test_render import patch_for_synthetic, two_window_project
+from test_render import patch_for_synthetic, two_window_project
 
 def test_pick_moments():
     """Milestone I1: moments are picked based on differing clips and tightness, spreading over time."""
