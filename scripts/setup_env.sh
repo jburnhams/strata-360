@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the strata360 environment from scratch (macOS Apple Silicon, Python 3.13, Homebrew ffmpeg + exiftool).
 #   scripts/setup_env.sh [--with-cv] [--no-dfn] [--fetch-models]
-# Environment variables: VENV (default .venv), PYTHON (default python3), CV_VENV (default .venv-cv)
+# Environment variables: VENV (default .venv), PYTHON (default python3), CV_VENV (default .venv-cv), SKIP_ROCM=1 (keep PyPI's torch on an AMD machine)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${VENV:-$ROOT/.venv}"; PYTHON="${PYTHON:-python3}"; CV_VENV="${CV_VENV:-$ROOT/.venv-cv}"
@@ -23,6 +23,16 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
   "$VENV/bin/pip" install --force-reinstall --no-deps "$TMP"/numpy-*.whl
 else
   "$VENV/bin/pip" install "numpy==$NUMPY_VERSION"
+fi
+# AMD GPU on Linux (no NVIDIA card): PyPI's torch is the CUDA build (with GBs of nvidia-* packages); swap it for the ROCm 6.4 build of the same version (requirements.txt pins torch and torchaudio 2.9.1; the wheel bundles ROCm, about 15 GB installed).
+# The chip is read from /sys/class/kfd (gfx_target_version, 100300 = gfx1030 = RDNA2 and newer); the HSA_OVERRIDE_GFX_VERSION a Radeon 780M needs is set by strata360/__init__.py. SKIP_ROCM=1 keeps the PyPI build.
+amd_gfx() { for f in /sys/class/kfd/kfd/topology/nodes/*/properties; do [ -r "$f" ] && awk '$1=="vendor_id"{v=$2} $1=="gfx_target_version"{g=$2} END{ if (v==4098) print g+0 }' "$f"; done 2>/dev/null | sort -n | tail -1 | grep . || echo 0; }
+if [ "$(uname -s)" = "Linux" ] && ! command -v nvidia-smi >/dev/null 2>&1 && [ "${SKIP_ROCM:-0}" != 1 ] && [ "$(amd_gfx)" -ge 100300 ]; then
+  say "AMD GPU (gfx_target_version $(amd_gfx)): torch with ROCm 6.4 instead of the CUDA build"
+  TORCH_VERSION=$(sed -n 's/^torch==\([0-9.]*\).*/\1/p' "$ROOT/requirements.txt" | head -1)
+  "$VENV/bin/pip" uninstall -y triton $("$VENV/bin/pip" list --format=freeze | sed -n 's/^\(nvidia-[^=]*\)==.*/\1/p') >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install --force-reinstall --index-url https://download.pytorch.org/whl/rocm6.4 "torch==$TORCH_VERSION" "torchaudio==$TORCH_VERSION" torchvision --extra-index-url https://pypi.org/simple   # torchvision too: the PyPI one is built for the CUDA torch ("operator torchvision::nms does not exist"); the resolver picks the one that matches torch
+  PYTHONPATH="$ROOT/src" "$VENV/bin/python" -c "import strata360, torch; assert torch.cuda.is_available(), 'torch (ROCm) does not see the GPU'; x = torch.ones(256, 256, device='cuda'); print('ROCm torch OK on', torch.cuda.get_device_name(0), float((x @ x).sum()))"
 fi
 if [ "$DFN" = 1 ]; then
   say "DeepFilterNet (optional enhancer)"

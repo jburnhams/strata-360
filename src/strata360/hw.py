@@ -102,9 +102,17 @@ def gpu_device():
     except Exception: return 'cpu'
 
 
+def gpu_is_amd():
+    """True when torch's 'cuda' device is an AMD GPU (ROCm/HIP build). On the Radeon of a Ryzen the same GPU draws the screen, so it is treated like Apple's GPU (polite duty), not like a discrete NVIDIA card."""
+    try:
+        import torch
+        return bool(torch.version.hip) and torch.cuda.is_available()
+    except Exception: return False
+
+
 def gpu_duty():
-    """The share of the time a GPU job may keep the GPU busy. 0.6 on a Mac, where the same GPU draws the screen and has no priorities; flat out (1.0) on CUDA, where Windows shares the card between processes (the 5070 Ti ran six renders and the desktop at once)."""
-    default = 1.0 if gpu_device() == 'cuda' else GPU_DUTY
+    """The share of the time a GPU job may keep the GPU busy. 0.6 on a Mac, where the same GPU draws the screen and has no priorities; flat out (1.0) on NVIDIA CUDA, where Windows shares the card between processes (the 5070 Ti ran six renders and the desktop at once)."""
+    default = 1.0 if gpu_device() == 'cuda' and not gpu_is_amd() else GPU_DUTY
     try: return min(max(float(os.environ.get('STRATA_GPU_DUTY', default)), 0.1), 1.0)
     except ValueError: return default
 
