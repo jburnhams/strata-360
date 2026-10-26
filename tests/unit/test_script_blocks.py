@@ -92,3 +92,121 @@ def test_unknown_blocks_empty_text_and_invalid_json(llm):
     assert S.check_blocks(dict(lines=[dict(block=7, text='x'), dict(block='a', text='y')]), f) == [(7, 'no such block'), (-1, "line with a bad block number 'a'")]
     llm.reply({}, {}); d = S.write_block_script(f, '', 20)
     assert d['lines'] == [] and d['remaining_problems'][0]['problem'] == 'not valid JSON' and d['llm_debug'] is not None
+
+
+# ---- segment facts and script (implementation plan V1) ----
+
+def segment(i, target, wearer_says=False, clip=None):
+    return dict(id=f'S{i:02d}', index=i, start_s=0.0, dur_s=target, clip=clip or f'C{i:02d}', in_s=10.0,
+                start_utc='2026-02-19T10:00:00Z', features={'speech': wearer_says})
+
+
+def test_segment_facts_subtract_the_dialogue_from_the_budget():
+    s = segment(0, 20, wearer_says=True)
+    c = dict(clip='C00', start_utc='2026-02-19T10:00:00Z', start_s=0, end_s=60, features={'speech': True})
+    f = S.segment_facts(s, c, None, None, {'clips': {'C00': 'note'}})
+    assert f['clip_note'] == 'note'
+    assert f['wearer_says'] == []
+
+def test_build_messages():
+    f = [dict(index=0, seconds=20, clip='C00', wearer_says=['hello'])]
+    m = S.build_messages('folder note', f, 20)
+    assert 'folder note' in m[1]['content']
+    assert 'hello' in m[1]['content']
+
+def test_check_segments():
+    f = [dict(index=0, seconds=20, clip='C00', wearer_says=['hello'])]
+    assert S.check(dict(lines=[dict(seg=0, text='x')]), f) == [(0, '1 words but the budget is 0 (the runner speaks here)')]
+    assert S.check(dict(lines=[dict(seg=1, text='x')]), f) == [(1, 'no such segment')]
+
+def test_write_script(llm):
+    f = [dict(index=0, seconds=20, clip='C00', film_start_s=0.0)]
+    llm.reply(dict(lines=[dict(seg=0, text='Ok.')]))
+    d = S.write_script(f, '', 20)
+    assert d['lines'][0]['text'] == 'Ok.'
+
+def test_write_script_retry(llm):
+    f = [dict(index=0, seconds=10, clip='C00', film_start_s=0.0)]
+    # first reply is too long
+    n = S.budget_words(10.0)
+    far = ' '.join(['word'] * (n * 3)) + '.'
+    llm.reply(dict(lines=[dict(seg=0, text=far)]), dict(lines=[dict(seg=0, text='Ok.')]))
+    d = S.write_script(f, '', 10)
+    assert d['lines'][0]['text'] == 'Ok.'
+
+def test_write_script_cuts_if_still_too_long(llm):
+    f = [dict(index=0, seconds=10, clip='C00', film_start_s=0.0)]
+    # both replies are too long
+    n = S.budget_words(10.0)
+    far = ' '.join(['word'] * (n * 3)) + '.'
+    llm.reply(dict(lines=[dict(seg=0, text=far)]), dict(lines=[dict(seg=0, text=far)]))
+    d = S.write_script(f, '', 10)
+    # The script should cut it to fit the budget.
+    assert d['lines'][0]['words'] <= n
+
+def test_words_in_window(tmp_path):
+    cdir = str(tmp_path)
+    import os
+    os.makedirs(os.path.join(cdir, 'C00'))
+
+    # Missing transcript
+    assert S.words_in_window(cdir, 'C00', 0, 10) == []
+
+    # Empty transcript
+    with open(os.path.join(cdir, 'C00', 'transcript.json'), 'w') as f:
+        import json
+        json.dump({'segments': []}, f)
+    assert S.words_in_window(cdir, 'C00', 0, 10) == []
+
+    # Transcript without words, full phrase returned
+    with open(os.path.join(cdir, 'C00', 'transcript.json'), 'w') as f:
+        json.dump({'segments': [{'t0': 2.0, 't1': 5.0, 'text': 'hi there', 'flags': []}]}, f)
+    assert S.words_in_window(cdir, 'C00', 0, 10) == ['hi there']
+
+    # Transcript with words, partial phrase returned
+    with open(os.path.join(cdir, 'C00', 'transcript.json'), 'w') as f:
+        json.dump({'segments': [{'t0': 2.0, 't1': 6.0, 'text': 'a b c d', 'words': [{'w': 'a', 't0': 2, 't1': 3}, {'w': 'b', 't0': 3, 't1': 4}, {'w': 'c', 't0': 4, 't1': 5}, {'w': 'd', 't0': 5, 't1': 6}], 'flags': []}]}, f)
+    # alignment missing
+    # words t0+0.15, t1+0.15:
+    # a: 2.15, 3.15 -> 2.65
+    # b: 3.15, 4.15 -> 3.65
+    # window 0 to 3.0: catches 'a'
+    assert S.words_in_window(cdir, 'C00', 0, 3.0) == ['a …']
+    # window 3.0 to 10: catches 'b', 'c', 'd'
+    assert S.words_in_window(cdir, 'C00', 3.0, 10) == ['… b c d']
+
+    # foreign text
+    with open(os.path.join(cdir, 'C00', 'transcript.json'), 'w') as f:
+        json.dump({'segments': [{'t0': 2.0, 't1': 6.0, 'text': 'un deux trois quatre', 'text_en': 'one two three four', 'lang': 'fr', 'words': [{'w': 'un', 't0': 2, 't1': 3}, {'w': 'deux', 't0': 3, 't1': 4}, {'w': 'trois', 't0': 4, 't1': 5}, {'w': 'quatre', 't0': 5, 't1': 6}], 'flags': []}]}, f)
+    # catches 'un' (index 0). n=4, lo=0, hi=1. text_en[0:1] -> 'one'
+    assert S.words_in_window(cdir, 'C00', 0, 3.0) == ['one …']
+
+    # With alignment
+    with open(os.path.join(cdir, 'C00', 'alignment.json'), 'w') as f:
+        json.dump({'segments': [{'index': 0, 'words': [{'a0': 2, 'a1': 3, 'ok': True}]}]}, f)
+    assert S.words_in_window(cdir, 'C00', 0, 3.0) == ['one …']
+
+def test_parse_json():
+    assert S._parse_json('hello {"a": 1} world') == {'a': 1}
+    assert S._parse_json('hello {"a": 1,]') is None
+
+def test_segment_facts_reads_places_and_scenes(tmp_path):
+    cdir = str(tmp_path)
+    import os
+    os.makedirs(os.path.join(cdir, 'C00'))
+
+    with open(os.path.join(cdir, 'C00', 'places.json'), 'w') as f:
+        import json
+        json.dump({'covered': True, 'summary': {'text': 'Paris', 'road': 'Rue'}, 'points': [{'nearby': [{'name': 'Tower'}]}]}, f)
+
+    with open(os.path.join(cdir, 'C00', 'scenes.json'), 'w') as f:
+        json.dump({'items': [{'ok': True, 'view': 'front', 't_s': 2, 'setting': 'city', 'description': 'busy', 'tags': ['tag1'], 'weather': 'sun'}]}, f)
+
+    s = segment(0, 20, wearer_says=False)
+    c = dict(clip='C00', start_utc='2026-02-19T10:00:00Z', start_s=0, end_s=60, features={'speech': False})
+    f = S.segment_facts(s, c, cdir, None, {})
+    assert 'Paris, on Rue' in f['place']
+    assert 'Tower' in f['place']
+    assert 'city: busy' in f['sees']
+    assert 'tag1' in f['tags']
+    assert 'sun' in f['weather']
