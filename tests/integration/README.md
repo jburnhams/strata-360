@@ -39,7 +39,7 @@ Not gated. Numbers come from `pytest tests/integration -n auto --cov --cov-fail-
 | --- | --- | --- | --- |
 | `pipeline/runner.py` | 95% | `test_runner.py` | worker concurrency, claim, cache signatures, clear, stage health, retries |
 | `pipeline/stages.py`, `pipeline/ingest.py` | n/a | `test_pipeline.py` | the model-free stages on the synthetic clip |
-| `server/app.py` | n/a | `test_server.py`, `test_project_api.py` | endpoints over real project files |
+| `server/app.py` | n/a | `test_server.py`, `test_project_api.py`, `test_roughmix_api.py` | endpoints over real project files |
 | `edit/voiceover.py`, `edit/vo_fit.py` | n/a | `test_voiceover.py` | `respeak`/`fit_project` with the fake speech engine |
 | `edit/music.py` | n/a | `test_music.py` | |
 | `edit/optimise.py` | n/a | `test_edit.py` | slow pure computation (see Known issues) |
