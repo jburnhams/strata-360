@@ -51,10 +51,10 @@ def translate_text(text, lang):
 
 
 def load_models(model='small', translate_model=None):
-    from faster_whisper import WhisperModel
-    from strata360 import hw
-    m = WhisperModel(model, device=hw.whisper_args()[0], compute_type=hw.whisper_args()[1])
-    return m, (m if translate_model in (None, model) else WhisperModel(translate_model, device=hw.whisper_args()[0], compute_type=hw.whisper_args()[1]))
+    """The Whisper model (and the one for Whisper's own translate task): from strata-models when it runs (remote_whisper), else loaded here."""
+    from strata360.audio.remote_whisper import whisper_model
+    m = whisper_model(model)
+    return m, (m if translate_model in (None, model) else whisper_model(translate_model))
 
 
 def speech_chunks(x16, max_len=18.0, merge_gap=0.6, pad=0.25):
