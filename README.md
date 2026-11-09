@@ -28,6 +28,8 @@ Command-line equivalents (`open`, `run`, `progress`, `script`, `voiceover`, `fil
 
 ```bash
 uv sync                                  # light dependencies and the dev tools (.venv); the heavy model stack stays in requirements*.txt
+uv pip install torch torchvision --index https://download.pytorch.org/whl/cpu   # the unit tests of the GPU code run on the CPU build (use your CUDA build on a GPU machine)
+uv pip install einops safetensors && uv pip install --no-deps spandrel==0.4.2   # the denoise model loader, without its torch pin
 scripts/check                            # the gate: lockfile, ruff, format, pyright, ty, unit tests with coverage (--fast skips the tests)
 uv run pytest tests/unit --cov           # fast unit suite with coverage
 uv run pytest tests/integration -n auto  # needs ffmpeg with libx265
