@@ -1,7 +1,9 @@
 import numpy as np
-import pytest
-from hypothesis import given, strategies as st
-from strata360.gps.clock import step_series, step_windows, estimate, sun_elevation_deg, scene_brightness
+from hypothesis import given
+from hypothesis import strategies as st
+
+from strata360.gps.clock import estimate, scene_brightness, step_series, step_windows, sun_elevation_deg
+
 
 class TestStepWindows:
     def test_finds_dominant_frequency(self):
@@ -36,37 +38,43 @@ class TestStepWindows:
         windows = step_windows(acc, t, fps)
         assert len(windows) == 0
 
+
 class TestStepSeries:
     def test_calls_step_windows_correctly(self, monkeypatch):
         called = []
+
         def mock_read_frames(osv):
             called.append(osv)
-            return {'ts_us': np.arange(0, 10000000, 20000), 'acc': np.ones((500, 3))} # 50 fps, 10 seconds
-        monkeypatch.setattr('strata360.gps.clock.read_frames', mock_read_frames)
+            return {"ts_us": np.arange(0, 10000000, 20000), "acc": np.ones((500, 3))}  # 50 fps, 10 seconds
+
+        monkeypatch.setattr("strata360.gps.clock.read_frames", mock_read_frames)
 
         res = step_series("test.mp4")
         assert "test.mp4" in called
         # Constant acceleration -> no AC component -> no valid steps found
         assert len(res) == 0
 
+
 class TestEstimate:
     def make_track(self):
         n = 100
-        t = np.arange(1000.0, 1100.0) # 100 seconds
-        cadence = np.ones(n) * 150.0 # 2.5 Hz = 150 spm
-        speed = np.ones(n) * 3.0 # > 0.3
-        return {'t': t, 'cadence': cadence, 'speed': speed}
+        t = np.arange(1000.0, 1100.0)  # 100 seconds
+        cadence = np.ones(n) * 150.0  # 2.5 Hz = 150 spm
+        speed = np.ones(n) * 3.0  # > 0.3
+        return {"t": t, "cadence": cadence, "speed": speed}
 
     def test_perfect_match(self):
         track = self.make_track()
-        track['cadence'] = np.ones(100) * 75.0 # 2.5 Hz
+        track["cadence"] = np.ones(100) * 75.0  # 2.5 Hz
         # camera recorded a clip starting at true time 1020, but it thinks it's 1010
         # true = camera + offset -> 1020 = 1010 + 10 -> offset = 10
         # series is at offset 0 relative to clip start
-        windows = np.array([
-            [2.0, 2.5, 0.9],
-            [3.0, 2.5, 0.9],
-        ])
+        windows = np.array(
+            [
+                [2.0, 2.5, 0.9],
+                [3.0, 2.5, 0.9],
+            ]
+        )
         series = [(1010.0, windows)]
         offsets = np.array([0.0, 10.0, 20.0])
 
@@ -99,6 +107,7 @@ class TestEstimate:
         assert n == 5
         assert np.isnan(scores[0])
 
+
 class TestSunElevation:
     def test_sun_elevation_known_values(self):
         # 2024-03-20 12:00:00 UTC (Vernal Equinox roughly)
@@ -120,13 +129,14 @@ class TestSunElevation:
         elev = sun_elevation_deg(lat, lon, t)
         assert -90.5 <= elev <= 90.5
 
+
 class TestSceneBrightness:
     def test_calculates_stops_correctly(self):
         doc = {
-            'frames': [
-                {'t_s': 0.1, 'camera': {'shutter_den': [100, 100], 'iso': [100, 100]}},
-                {'t_s': 0.2, 'camera': {'shutter_den': [200, 200], 'iso': [100, 100]}},
-                {'t_s': 0.3, 'camera': {'shutter_den': [100, 100], 'iso': [200, 200]}},
+            "frames": [
+                {"t_s": 0.1, "camera": {"shutter_den": [100, 100], "iso": [100, 100]}},
+                {"t_s": 0.2, "camera": {"shutter_den": [200, 200], "iso": [100, 100]}},
+                {"t_s": 0.3, "camera": {"shutter_den": [100, 100], "iso": [200, 200]}},
             ]
         }
         t, b = scene_brightness(doc)
@@ -139,10 +149,10 @@ class TestSceneBrightness:
 
     def test_handles_zeros(self):
         doc = {
-            'frames': [
-                {'t_s': 0.1, 'camera': {'shutter_den': [0, 0], 'iso': [0, 0]}},
+            "frames": [
+                {"t_s": 0.1, "camera": {"shutter_den": [0, 0], "iso": [0, 0]}},
             ]
         }
         t, b = scene_brightness(doc)
         assert len(b) == 1
-        assert b[0] == 0.0 # log2(max(0,1)) - log2(max(0,1)) = 0
+        assert b[0] == 0.0  # log2(max(0,1)) - log2(max(0,1)) = 0

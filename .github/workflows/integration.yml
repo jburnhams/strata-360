@@ -28,12 +28,11 @@ jobs:
       STRATA_HWACCEL: none
       STRATA_ENCODER: software
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: '3.13'
-          cache: pip
-          cache-dependency-path: requirements-test.txt
+          enable-cache: true
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -56,9 +55,10 @@ jobs:
       - name: Check ffmpeg has libx265
         shell: bash
         run: ffmpeg -hide_banner -encoders | grep -q libx265
-      - run: pip install -r requirements-test.txt
+      - run: uv sync --locked
+      - uses: ./.github/actions/torch-cpu
       - name: Integration tests (synthetic clip built with ffmpeg; no footage or models needed)
-        run: pytest tests/integration -n auto --durations=10
+        run: uv run --no-sync pytest tests/integration -n auto --durations=10
 
   web:
     runs-on: ubuntu-latest
@@ -66,8 +66,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 26.x
           cache: npm

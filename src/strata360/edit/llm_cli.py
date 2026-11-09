@@ -4,33 +4,63 @@
 
 REQUEST_JSON: {"messages": [{"role": "system"|"user"|"assistant", "content": "..."}], "max_tokens": 1500, "temperature": 0.7, "json": true}
 OUT_JSON: {"text": "...", "seconds": s, "tokens": n}. With "json": true the first {...} in the answer is also parsed into "parsed" (null when it does not parse)."""
-import argparse, json, os, re, time
+
+import argparse
+import json
+import os
+import re
+import time
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('request'); ap.add_argument('out')
-    ap.add_argument('--model', default=os.path.join(os.path.dirname(__file__), '..', '..', '..', 'models', 'qwen25-7b-instruct-4bit')); a = ap.parse_args()
-    req = json.load(open(a.request)); t0 = time.time()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("request")
+    ap.add_argument("out")
+    ap.add_argument(
+        "--model",
+        default=os.path.join(os.path.dirname(__file__), "..", "..", "..", "models", "qwen25-7b-instruct-4bit"),
+    )
+    a = ap.parse_args()
+    req = json.load(open(a.request))
+    t0 = time.time()
     from strata360.analysis import vlm
-    if vlm.use_llama() and not (a.model and os.path.isdir(os.path.abspath(a.model))):                         # no MLX: the local text model through llama.cpp (analysis/vlm.py)
-        with vlm.Server(a.model if a.model and a.model.endswith('.gguf') else None, text=True) as srv: text = srv.chat(req['messages'], int(req.get('max_tokens', 1500)), float(req.get('temperature', 0.7)))
+
+    if vlm.use_llama() and not (
+        a.model and os.path.isdir(os.path.abspath(a.model))
+    ):  # no MLX: the local text model through llama.cpp (analysis/vlm.py)
+        with vlm.Server(a.model if a.model and a.model.endswith(".gguf") else None, text=True) as srv:
+            text = srv.chat(req["messages"], int(req.get("max_tokens", 1500)), float(req.get("temperature", 0.7)))
         out = dict(text=text, seconds=round(time.time() - t0, 1), tokens=max(len(text) // 4, 1))
     else:
-        from mlx_lm import load, generate
+        from mlx_lm import generate, load
         from mlx_lm.sample_utils import make_sampler
-        model, tok = load(os.path.abspath(a.model)); t0 = time.time()
-        prompt = tok.apply_chat_template(req['messages'], add_generation_prompt=True, tokenize=False)
-        text = generate(model, tok, prompt=prompt, max_tokens=int(req.get('max_tokens', 1500)), sampler=make_sampler(temp=float(req.get('temperature', 0.7)), top_p=0.95), verbose=False)
+
+        model, tok = load(os.path.abspath(a.model))
+        t0 = time.time()
+        prompt = tok.apply_chat_template(req["messages"], add_generation_prompt=True, tokenize=False)
+        text = generate(
+            model,
+            tok,
+            prompt=prompt,
+            max_tokens=int(req.get("max_tokens", 1500)),
+            sampler=make_sampler(temp=float(req.get("temperature", 0.7)), top_p=0.95),
+            verbose=False,
+        )
         out = dict(text=text, seconds=round(time.time() - t0, 1), tokens=len(tok.encode(text)))
-    if req.get('json'):
-        m = re.search(r'\{.*\}', text, re.S); out['parsed'] = None
+    if req.get("json"):
+        m = re.search(r"\{.*\}", text, re.S)
+        out["parsed"] = None
         if m:
-            try: out['parsed'] = json.loads(m.group(0))
+            try:
+                out["parsed"] = json.loads(m.group(0))
             except ValueError:
-                try: out['parsed'] = json.loads(re.sub(r',\s*([}\]])', r'\1', m.group(0)))
-                except ValueError: pass
-    json.dump(out, open(a.out, 'w'), indent=1); print(f"{out['tokens']} tokens in {out['seconds']} s")
+                try:
+                    out["parsed"] = json.loads(re.sub(r",\s*([}\]])", r"\1", m.group(0)))
+                except ValueError:
+                    pass
+    json.dump(out, open(a.out, "w"), indent=1)
+    print(f"{out['tokens']} tokens in {out['seconds']} s")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

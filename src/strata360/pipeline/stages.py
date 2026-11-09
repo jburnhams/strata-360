@@ -1,9 +1,12 @@
 """Pipeline stages. Each stage: a name, a version (bump it when the code changes results), the config keys it depends on, its dependencies
 and its output files. The runner (runner.py) skips a stage when its cache key is unchanged, so re-running is cheap and changing a setting
 re-runs only what it affects."""
-import functools, json, os, time
-from dataclasses import dataclass, field
-from typing import Callable
+
+import functools
+import json
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
 
 STAGES = {}
 ORDER = []
@@ -14,300 +17,693 @@ class Stage:
     name: str
     version: int
     fn: Callable
-    keys: tuple = ()          # config keys this stage's result depends on
-    deps: tuple = ()          # stages whose outputs it reads
+    keys: tuple = ()  # config keys this stage's result depends on
+    deps: tuple = ()  # stages whose outputs it reads
     outputs: tuple = ()
-    default: bool = True      # part of the default `run`
-    note: str = ''
-    soft_deps: tuple = ()      # stages whose output is used when present and waited for before a NEW item starts (they do not enter the key: finished results stay valid)
-    retries: int = 2           # how many times a failed item is tried again (waiting longer each time; see pipeline/retry.py) before it counts as failed
+    default: bool = True  # part of the default `run`
+    note: str = ""
+    soft_deps: tuple = ()  # stages whose output is used when present and waited for before a NEW item starts (they do not enter the key: finished results stay valid)
+    retries: int = 2  # how many times a failed item is tried again (waiting longer each time; see pipeline/retry.py) before it counts as failed
     needs_track: bool = False  # uses the race GPS track: waits until one is set, and is redone when the track or the clip-to-track time alignment changes
 
 
-def stage(name, version, keys=(), deps=(), outputs=(), default=True, note='', needs_track=False, soft_deps=(), retries=2):
+def stage(
+    name, version, keys=(), deps=(), outputs=(), default=True, note="", needs_track=False, soft_deps=(), retries=2
+):
     def deco(fn):
-        STAGES[name] = Stage(name, version, fn, tuple(keys), tuple(deps), tuple(outputs), default, note, tuple(soft_deps), retries, needs_track); ORDER.append(name); return fn
+        STAGES[name] = Stage(
+            name,
+            version,
+            fn,
+            tuple(keys),
+            tuple(deps),
+            tuple(outputs),
+            default,
+            note,
+            tuple(soft_deps),
+            retries,
+            needs_track,
+        )
+        ORDER.append(name)
+        return fn
+
     return deco
 
 
 class Ctx:
     """What a stage sees for one clip."""
+
     def __init__(self, clip, cfg, clip_dir, log):
         self.clip, self.cfg, self.dir, self.log = clip, cfg, clip_dir, log
-    def path(self, name): return os.path.join(self.dir, name)
-    def read(self, name): return json.load(open(self.path(name)))
+
+    def path(self, name):
+        return os.path.join(self.dir, name)
+
+    def read(self, name):
+        return json.load(open(self.path(name)))
+
     def write(self, name, obj):
-        tmp = self.path(name) + '.tmp'
-        with open(tmp, 'w') as f: json.dump(obj, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, self.path(name))                       # atomic: a crash never leaves a half-written artefact
+        tmp = self.path(name) + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, self.path(name))  # atomic: a crash never leaves a half-written artefact
+
     @property
-    def clip_json(self): return self.read('clip.json')
+    def clip_json(self):
+        return self.read("clip.json")
+
     def stamped(self, obj):
         from strata360.pipeline.ingest import stamp
+
         return stamp(self.clip_json, obj)
 
 
 @functools.lru_cache(maxsize=2)
-def _whisper(model): 
+def _whisper(model):
     from strata360.audio import speech
+
     return speech.load_models(model)
 
 
-@stage('ingest', 1, keys=('camera_clock',), outputs=('clip.json',), note='clip facts and the definitive UTC time (README 5.1)')
+@stage(
+    "ingest",
+    1,
+    keys=("camera_clock",),
+    outputs=("clip.json",),
+    note="clip facts and the definitive UTC time (README 5.1)",
+)
 def ingest(ctx):
     from strata360.pipeline.ingest import ingest_clip
-    ctx.write('clip.json', ingest_clip(ctx.clip, ctx.cfg))
+
+    ctx.write("clip.json", ingest_clip(ctx.clip, ctx.cfg))
 
 
 def audio_src(ctx):
     """The clip's sound as stored by the audio_extract stage (lossless, so the stages that read it need not open the big video file), else the video file itself: the same samples."""
-    p = ctx.path('audio_original.flac')
+    p = ctx.path("audio_original.flac")
     return p if os.path.exists(p) else ctx.clip.osv
 
 
-@stage('audio_extract', 1, outputs=('audio_original.flac',), deps=('ingest',), note='the clip\'s sound saved on its own, lossless: the original audio every later step and the player use')
+@stage(
+    "audio_extract",
+    1,
+    outputs=("audio_original.flac",),
+    deps=("ingest",),
+    note="the clip's sound saved on its own, lossless: the original audio every later step and the player use",
+)
 def audio_extract(ctx):
     import subprocess
-    out = ctx.path('audio_original.flac')
-    subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', ctx.clip.osv, '-vn', '-map', '0:a:0', '-c:a', 'flac', '-compression_level', '5', out + '.part.flac'], check=True); os.replace(out + '.part.flac', out)
+
+    out = ctx.path("audio_original.flac")
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            ctx.clip.osv,
+            "-vn",
+            "-map",
+            "0:a:0",
+            "-c:a",
+            "flac",
+            "-compression_level",
+            "5",
+            out + ".part.flac",
+        ],
+        check=True,
+    )
+    os.replace(out + ".part.flac", out)
 
 
-@stage('audio_clean', 1, outputs=('audio_clean.flac',), deps=('audio_extract',), note='the sound cleaned for listening and for the film (DeepFilterNet3, capped so the crowd and the place stay); the recogniser keeps using the original')
+@stage(
+    "audio_clean",
+    1,
+    outputs=("audio_clean.flac",),
+    deps=("audio_extract",),
+    note="the sound cleaned for listening and for the film (DeepFilterNet3, capped so the crowd and the place stay); the recogniser keeps using the original",
+)
 def audio_clean(ctx):
     from strata360.audio import dsp
-    y = dsp.clean_for_playback(dsp.load_audio(ctx.path('audio_original.flac'), 1)[:, 0]); out = ctx.path('audio_clean.flac'); dsp.write_flac(out + '.part.flac', y); os.replace(out + '.part.flac', out)
+
+    y = dsp.clean_for_playback(dsp.load_audio(ctx.path("audio_original.flac"), 1)[:, 0])
+    out = ctx.path("audio_clean.flac")
+    dsp.write_flac(out + ".part.flac", y)
+    os.replace(out + ".part.flac", out)
 
 
-@stage('audio_background', 1, outputs=('audio_background.flac',), deps=('audio_extract',), default=False,
-       note='the sound without the speech: the background (wind, footsteps, nature, crowd murmur) as its own track, for the sound classifier and the final mix (TIGER-DnR effects model; slow on the CPU, about real time on the Apple GPU: set STRATA_GPU=1)')
+@stage(
+    "audio_background",
+    1,
+    outputs=("audio_background.flac",),
+    deps=("audio_extract",),
+    default=False,
+    note="the sound without the speech: the background (wind, footsteps, nature, crowd murmur) as its own track, for the sound classifier and the final mix (TIGER-DnR effects model; slow on the CPU, about real time on the Apple GPU: set STRATA_GPU=1)",
+)
 def audio_background(ctx):
-    from strata360.audio import dsp, background as BG
-    y = BG.separate(dsp.load_audio(ctx.path('audio_original.flac'), 1)[:, 0], log=ctx.log); out = ctx.path('audio_background.flac'); dsp.write_flac(out + '.part.flac', y); os.replace(out + '.part.flac', out)
+    from strata360.audio import background as BG
+    from strata360.audio import dsp
+
+    y = BG.separate(dsp.load_audio(ctx.path("audio_original.flac"), 1)[:, 0], log=ctx.log)
+    out = ctx.path("audio_background.flac")
+    dsp.write_flac(out + ".part.flac", y)
+    os.replace(out + ".part.flac", out)
 
 
-@stage('audio_events', 1, outputs=('audio_events.json',), deps=('audio_extract',), soft_deps=('audio_background',), note='what the sound is, second by second (sound-event classifier, 527 AudioSet classes grouped into speech, shouting, cheering, crowd, breathing, footsteps, wind, handling noise, nature, water, vehicles, music, bells, beeps) with a suggested role and level for the film')
+@stage(
+    "audio_events",
+    1,
+    outputs=("audio_events.json",),
+    deps=("audio_extract",),
+    soft_deps=("audio_background",),
+    note="what the sound is, second by second (sound-event classifier, 527 AudioSet classes grouped into speech, shouting, cheering, crowd, breathing, footsteps, wind, handling noise, nature, water, vehicles, music, bells, beeps) with a suggested role and level for the film",
+)
 def audio_events(ctx):
     from strata360.analysis import sound_events as SE
-    doc = SE.classify(ctx.path('audio_original.flac'))
-    if os.path.exists(ctx.path('audio_background.flac')): doc['background'] = SE.classify(ctx.path('audio_background.flac'))      # the same classifier on the sound without the speech: what the place sounds like
-    ctx.write('audio_events.json', ctx.stamped(doc))
+
+    doc = SE.classify(ctx.path("audio_original.flac"))
+    if os.path.exists(ctx.path("audio_background.flac")):
+        doc["background"] = SE.classify(
+            ctx.path("audio_background.flac")
+        )  # the same classifier on the sound without the speech: what the place sounds like
+    ctx.write("audio_events.json", ctx.stamped(doc))
 
 
-@stage('audio', 1, outputs=('audio.json',), deps=('ingest',), soft_deps=('audio_extract',), note='levels, loudness, clipping, wind/speech/crowd/ambience labels (README 5.10)')
+@stage(
+    "audio",
+    1,
+    outputs=("audio.json",),
+    deps=("ingest",),
+    soft_deps=("audio_extract",),
+    note="levels, loudness, clipping, wind/speech/crowd/ambience labels (README 5.10)",
+)
 def audio(ctx):
     from strata360.audio import dsp
+
     an = dsp.analyse_array(dsp.load_audio(audio_src(ctx)))
-    ctx.write('audio.json', ctx.stamped(dict(source=os.path.basename(ctx.clip.osv), **an)))
+    ctx.write("audio.json", ctx.stamped(dict(source=os.path.basename(ctx.clip.osv), **an)))
 
 
-@stage('transcribe', 1, keys=('languages', 'whisper_model'), outputs=('transcript.json',), deps=('ingest',), soft_deps=('audio_extract',),
-       note='multilingual transcript, per-segment language, English translation, hallucination flags (README 5.11)')
+@stage(
+    "transcribe",
+    1,
+    keys=("languages", "whisper_model"),
+    outputs=("transcript.json",),
+    deps=("ingest",),
+    soft_deps=("audio_extract",),
+    note="multilingual transcript, per-segment language, English translation, hallucination flags (README 5.11)",
+)
 def transcribe(ctx):
     from strata360.audio import dsp, speech
-    m, tm = _whisper(ctx.cfg['whisper_model'])
-    x = dsp.load_audio(audio_src(ctx), 1)[:, 0]; x16 = dsp.ffmpeg_filter(x, dsp.SR, 'anull', out_sr=16000)[:, 0]     # raw audio: enhancement lowers word accuracy (docs/progress.md)
-    segs = speech.transcribe_multilingual(x16, m, tm, ctx.cfg['languages'])
-    ctx.write('transcript.json', ctx.stamped(dict(source=os.path.basename(ctx.clip.osv), model=ctx.cfg['whisper_model'], translate_model='opus-mt',
-                                                   denoise='none', languages=ctx.cfg['languages'], segments=segs)))
+
+    m, tm = _whisper(ctx.cfg["whisper_model"])
+    x = dsp.load_audio(audio_src(ctx), 1)[:, 0]
+    x16 = dsp.ffmpeg_filter(x, dsp.SR, "anull", out_sr=16000)[
+        :, 0
+    ]  # raw audio: enhancement lowers word accuracy (docs/progress.md)
+    segs = speech.transcribe_multilingual(x16, m, tm, ctx.cfg["languages"])
+    ctx.write(
+        "transcript.json",
+        ctx.stamped(
+            dict(
+                source=os.path.basename(ctx.clip.osv),
+                model=ctx.cfg["whisper_model"],
+                translate_model="opus-mt",
+                denoise="none",
+                languages=ctx.cfg["languages"],
+                segments=segs,
+            )
+        ),
+    )
 
 
-@stage('align', 1, keys=('align_languages',), outputs=('alignment.json',), deps=('transcribe',), soft_deps=('audio_extract',),
-       note='accurate word start/end and safe cut points (README 5.11); whisper word times are not used for edits')
+@stage(
+    "align",
+    1,
+    keys=("align_languages",),
+    outputs=("alignment.json",),
+    deps=("transcribe",),
+    soft_deps=("audio_extract",),
+    note="accurate word start/end and safe cut points (README 5.11); whisper word times are not used for edits",
+)
 def align(ctx):
     from strata360.audio.align import align_transcript
-    ctx.write('alignment.json', ctx.stamped(align_transcript(audio_src(ctx), ctx.read('transcript.json'), ctx.cfg['align_languages'])))
+
+    ctx.write(
+        "alignment.json",
+        ctx.stamped(align_transcript(audio_src(ctx), ctx.read("transcript.json"), ctx.cfg["align_languages"])),
+    )
 
 
-@stage('transcript_check', 1, keys=('transcript_check',), outputs=('transcript_check.json',), deps=('transcribe', 'audio_clean'), default=False, retries=100,
-       note='checks the transcript against the cleaned audio with Gemini (speech-only excerpts of 30-60 s, several checks each, only fixes they agree on are kept) and stores them as corrections. Paid API calls: opt-in, every reply is cached on disk')
+@stage(
+    "transcript_check",
+    1,
+    keys=("transcript_check",),
+    outputs=("transcript_check.json",),
+    deps=("transcribe", "audio_clean"),
+    default=False,
+    retries=100,
+    note="checks the transcript against the cleaned audio with Gemini (speech-only excerpts of 30-60 s, several checks each, only fixes they agree on are kept) and stores them as corrections. Paid API calls: opt-in, every reply is cached on disk",
+)
 def transcript_check(ctx):
     from strata360.analysis import transcript_fix as TF
-    c = ctx.cfg.get('transcript_check') or {}
-    if c.get('mode') == 'transcribe':                                                                      # the transcription model alone
+
+    c = ctx.cfg.get("transcript_check") or {}
+    if c.get("mode") == "transcribe":  # the transcription model alone
         from strata360.analysis import transcribe35 as T35
-        ctx.write('transcript_check.json', ctx.stamped(T35.apply_clip(ctx.cfg['library'], ctx.clip.id, log=ctx.log))); return
-    if c.get('pool'): kw = dict(pool=c['pool'], **{k: c[k] for k in ('min_calls', 'max_calls', 'accept', 'min_votes', 'patience', 'pair', 'transcriber') if k in c})       # the adaptive ensemble
-    else: kw = dict(runs=int(c.get('runs', 3)), min_votes=int(c.get('min_votes', 2)), provider=c.get('provider'), model=c.get('model'))      # the fixed vote
-    ctx.write('transcript_check.json', ctx.stamped(TF.check_clip(ctx.cfg['library'], ctx.clip.id, thinking=c.get('thinking', 'low'), log=ctx.log, **kw)))
+
+        ctx.write("transcript_check.json", ctx.stamped(T35.apply_clip(ctx.cfg["library"], ctx.clip.id, log=ctx.log)))
+        return
+    if c.get("pool"):
+        kw = dict(
+            pool=c["pool"],
+            **{
+                k: c[k]
+                for k in ("min_calls", "max_calls", "accept", "min_votes", "patience", "pair", "transcriber")
+                if k in c
+            },
+        )  # the adaptive ensemble
+    else:
+        kw = dict(
+            runs=int(c.get("runs", 3)),
+            min_votes=int(c.get("min_votes", 2)),
+            provider=c.get("provider"),
+            model=c.get("model"),
+        )  # the fixed vote
+    ctx.write(
+        "transcript_check.json",
+        ctx.stamped(
+            TF.check_clip(ctx.cfg["library"], ctx.clip.id, thinking=c.get("thinking", "low"), log=ctx.log, **kw)
+        ),
+    )
 
 
-@stage('exposure', 2, keys=('exposure_every_frames',), outputs=('exposure.json', 'view_quality.npz'), deps=('ingest',),
-       note='brightness statistics every N frames for a later auto-gain (README 5.9), and once a second a quality map of the whole sphere (detail, contrast, colour, which lens) and the balance of detail between the lenses (view_quality.npz)')
+@stage(
+    "exposure",
+    2,
+    keys=("exposure_every_frames",),
+    outputs=("exposure.json", "view_quality.npz"),
+    deps=("ingest",),
+    note="brightness statistics every N frames for a later auto-gain (README 5.9), and once a second a quality map of the whole sphere (detail, contrast, colour, which lens) and the balance of detail between the lenses (view_quality.npz)",
+)
 def exposure(ctx):
     from strata360.analysis.exposure import analyse, save_quality
-    rows = []; doc = analyse(ctx.clip.osv, ctx.cfg['exposure_every_frames'], quality=rows)
-    if rows: save_quality(ctx.path('view_quality.npz'), rows)
-    ctx.write('exposure.json', ctx.stamped(doc))
+
+    rows = []
+    doc = analyse(ctx.clip.osv, ctx.cfg["exposure_every_frames"], quality=rows)
+    if rows:
+        save_quality(ctx.path("view_quality.npz"), rows)
+    ctx.write("exposure.json", ctx.stamped(doc))
 
 
-@stage('motion', 2, outputs=('motion.json',), deps=('ingest',),
-       note='heading, turn rate, shake (steadiness), stationary time, running cadence from telemetry alone (fast)')
+@stage(
+    "motion",
+    2,
+    outputs=("motion.json",),
+    deps=("ingest",),
+    note="heading, turn rate, shake (steadiness), stationary time, running cadence from telemetry alone (fast)",
+)
 def motion(ctx):
     from strata360.analysis.motion import analyse
-    ctx.write('motion.json', ctx.stamped(analyse(ctx.clip.osv)))
+
+    ctx.write("motion.json", ctx.stamped(analyse(ctx.clip.osv)))
 
 
-@stage('proxy', 6, keys=('proxy',), outputs=('proxy.mp4', 'proxy.json'), deps=('ingest',),
-       note='the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, H.264 with audio, about 16 Mbps): the detectors, the scene model, thumbnails AND the browser player all use this one file instead of the lens files (slow: about 10x real time)')
+@stage(
+    "proxy",
+    6,
+    keys=("proxy",),
+    outputs=("proxy.mp4", "proxy.json"),
+    deps=("ingest",),
+    note="the clip rendered once as an upright, stabilised equirect (3840x1920, 25 fps, H.264 with audio, about 16 Mbps): the detectors, the scene model, thumbnails AND the browser player all use this one file instead of the lens files (slow: about 10x real time)",
+)
 def proxy(ctx):
     from strata360.render.proxy import make_proxy
-    p = ctx.cfg['proxy']
-    make_proxy(ctx.clip.osv, ctx.path('proxy.mp4'), p['size'], p['every_frames'], p['bitrate'], p.get('encoder', 'h264'))
+
+    p = ctx.cfg["proxy"]
+    make_proxy(
+        ctx.clip.osv, ctx.path("proxy.mp4"), p["size"], p["every_frames"], p["bitrate"], p.get("encoder", "h264")
+    )
 
 
-@stage('quality', 1, outputs=('quality_grid.npz',), deps=('proxy',), note='how good each direction looks, on a 15 degree grid twice a second, from plain image measurements (detail, blur, haze, contrast, colour, blown out or black): the guardrails for choosing a view (about a tenth of real time)')
+@stage(
+    "quality",
+    1,
+    outputs=("quality_grid.npz",),
+    deps=("proxy",),
+    note="how good each direction looks, on a 15 degree grid twice a second, from plain image measurements (detail, blur, haze, contrast, colour, blown out or black): the guardrails for choosing a view (about a tenth of real time)",
+)
 def quality(ctx):
     from strata360.analysis import quality_grid as QG
-    QG.save(ctx.path(QG.FILE), QG.analyse(ctx.path('proxy.mp4')))
+
+    QG.save(ctx.path(QG.FILE), QG.analyse(ctx.path("proxy.mp4")))
 
 
-@stage('palette', 1, outputs=('palette.json',), deps=('proxy', 'ingest'), note='a colour scheme for the clip\'s animated and overlaid text: the colours really in the footage (Lab clusters of the horizon band), a base hue, its complementary accent and a split-complement, tinted light and dark neutrals and an outline, each moved in lightness until it reads against the footage (contrast 4.5); the title designer is given it (a few seconds)')
+@stage(
+    "palette",
+    1,
+    outputs=("palette.json",),
+    deps=("proxy", "ingest"),
+    note="a colour scheme for the clip's animated and overlaid text: the colours really in the footage (Lab clusters of the horizon band), a base hue, its complementary accent and a split-complement, tinted light and dark neutrals and an outline, each moved in lightness until it reads against the footage (contrast 4.5); the title designer is given it (a few seconds)",
+)
 def palette(ctx):
     from strata360.analysis import palette as PAL
-    v = ctx.clip_json['video']; ctx.write(PAL.FILE, ctx.stamped(PAL.analyse(ctx.path('proxy.mp4'), v['source_frames'] / v['nominal_fps'])))
+
+    v = ctx.clip_json["video"]
+    ctx.write(PAL.FILE, ctx.stamped(PAL.analyse(ctx.path("proxy.mp4"), v["source_frames"] / v["nominal_fps"])))
 
 
-@stage('cameras', 1, keys=('camera_seed',), outputs=('cameras.json',), deps=('quality', 'motion', 'identity'), soft_deps=('scenes', 'people'),
-       note='the clip\'s virtual cameras, best first: heading, you, person, scenery (nobody in view) and about one free camera per 15 s, each with a start, an end, a score and its aim; seeded variety (setting camera_seed; no video decoding)')
+@stage(
+    "cameras",
+    1,
+    keys=("camera_seed",),
+    outputs=("cameras.json",),
+    deps=("quality", "motion", "identity"),
+    soft_deps=("scenes", "people"),
+    note="the clip's virtual cameras, best first: heading, you, person, scenery (nobody in view) and about one free camera per 15 s, each with a start, an end, a score and its aim; seeded variety (setting camera_seed; no video decoding)",
+)
 def cameras(ctx):
-    from strata360.edit import cameras as CM, clip_views
-    v = clip_views.load(str(ctx.dir), ctx.clip.osv); seed = int(ctx.cfg.get('camera_seed', 0))
-    ctx.write('cameras.json', ctx.stamped(dict(seed=seed, cameras=CM.build(v, seed))))
+    from strata360.edit import cameras as CM
+    from strata360.edit import clip_views
+
+    v = clip_views.load(str(ctx.dir), ctx.clip.osv)
+    seed = int(ctx.cfg.get("camera_seed", 0))
+    ctx.write("cameras.json", ctx.stamped(dict(seed=seed, cameras=CM.build(v, seed))))
 
 
-@stage('lens', 1, outputs=('lens_check.json',), deps=('ingest',), note='once a second, per lens, how much of the lens picture is covered by something smooth and near (a hand or finger, fog, water): for clear_nadir, so a planet, tunnel or spin is not shown with a hand over the lens (reads the lens files at low resolution)')
+@stage(
+    "lens",
+    1,
+    outputs=("lens_check.json",),
+    deps=("ingest",),
+    note="once a second, per lens, how much of the lens picture is covered by something smooth and near (a hand or finger, fog, water): for clear_nadir, so a planet, tunnel or spin is not shown with a hand over the lens (reads the lens files at low resolution)",
+)
 def lens(ctx):
     from strata360.analysis import lens_check as LC
+
     ctx.write(LC.FILE, ctx.stamped(LC.analyse(ctx.clip.osv)))
 
 
-@stage('thumb', 1, outputs=('thumb_quick.jpg',), deps=('motion',), soft_deps=('proxy',), note='a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early')
+@stage(
+    "thumb",
+    1,
+    outputs=("thumb_quick.jpg",),
+    deps=("motion",),
+    soft_deps=("proxy",),
+    note="a quick thumbnail (steadiest moment, looking ahead) so the clip list has pictures early",
+)
 def thumb(ctx):
     from strata360.analysis.thumbs import quick
+
     quick(ctx.clip.osv, str(ctx.dir))
 
 
-@stage('places', 2, keys=('places',), outputs=('places.json',), deps=('ingest',), needs_track=True,
-       note='where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)')
+@stage(
+    "places",
+    2,
+    keys=("places",),
+    outputs=("places.json",),
+    deps=("ingest",),
+    needs_track=True,
+    note="where the clip was: address and named places near its start, middle and end (OpenStreetMap web services; needs the race track; cached; sends those coordinates online)",
+)
 def _track_file(ctx):
     """The race track of the clip's project (track.fit / track.gpx in the project folder, or the older `gps` setting)."""
     from strata360.gps import tracks
-    root = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); tp = tracks.current_path(root) or ctx.cfg.get('gps')
-    if not tp or not os.path.exists(tp): raise RuntimeError('no race track (track.fit / track.gpx in the project folder): add it in the app, then redo this stage')
+
+    root = os.path.abspath(os.path.join(str(ctx.dir), "..", ".."))
+    tp = tracks.current_path(root) or ctx.cfg.get("gps")
+    if not tp or not os.path.exists(tp):
+        raise RuntimeError(
+            "no race track (track.fit / track.gpx in the project folder): add it in the app, then redo this stage"
+        )
     return root, tp
 
 
 def places(ctx):
     from strata360.analysis.places import analyse
     from strata360.gps import track
+
     root, tp = _track_file(ctx)
-    ctx.write('places.json', ctx.stamped(analyse(ctx.read('clip.json'), track.load(tp), os.path.join(root, 'cache', 'places'), ctx.cfg)))
+    ctx.write(
+        "places.json",
+        ctx.stamped(analyse(ctx.read("clip.json"), track.load(tp), os.path.join(root, "cache", "places"), ctx.cfg)),
+    )
     from strata360.analysis.places import rebuild_locations
-    rebuild_locations(root)                                                        # the race-wide locations.json in the project folder
+
+    rebuild_locations(root)  # the race-wide locations.json in the project folder
 
 
-@stage('sun', 1, keys=('timezone',), outputs=('sun.json',), deps=('ingest',), needs_track=True,
-       note='how high the sun was at the start, middle and end of the clip (day, golden hour, twilight or night), from the clip time and where the race track says it was; no network. The clip card and the scene labels read this field')
+@stage(
+    "sun",
+    1,
+    keys=("timezone",),
+    outputs=("sun.json",),
+    deps=("ingest",),
+    needs_track=True,
+    note="how high the sun was at the start, middle and end of the clip (day, golden hour, twilight or night), from the clip time and where the race track says it was; no network. The clip card and the scene labels read this field",
+)
 def sun(ctx):
-    from strata360.gps import sun as SUN, track
+    from strata360.gps import sun as SUN
+    from strata360.gps import track
+
     root, tp = _track_file(ctx)
-    ctx.write('sun.json', ctx.stamped(SUN.analyse(ctx.read('clip.json'), track.load(tp), ctx.cfg.get('timezone') or 'Europe/Brussels')))
+    ctx.write(
+        "sun.json",
+        ctx.stamped(SUN.analyse(ctx.read("clip.json"), track.load(tp), ctx.cfg.get("timezone") or "Europe/Brussels")),
+    )
 
 
-@stage('people', 2, keys=('people_every_frames',), outputs=('people.json', 'faces.npy', 'faces_thumbs.npy'), deps=('ingest',), soft_deps=('proxy',), default=False,
-       note='persons and faces on body-frame views (YOLO11 pose + InsightFace), deduplicated across views (slow: minutes per clip; needs .venv-vision and models/)')
+@stage(
+    "people",
+    2,
+    keys=("people_every_frames",),
+    outputs=("people.json", "faces.npy", "faces_thumbs.npy"),
+    deps=("ingest",),
+    soft_deps=("proxy",),
+    default=False,
+    note="persons and faces on body-frame views (YOLO11 pose + InsightFace), deduplicated across views (slow: minutes per clip; needs .venv-vision and models/)",
+)
 def people(ctx):
     import numpy as np
+
     from strata360.analysis.people import analyse
-    doc, emb, th = analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['people_every_frames'])
-    ctx.write('people.json', ctx.stamped(doc)); np.save(ctx.path('faces.npy'), emb); np.save(ctx.path('faces_thumbs.npy'), th)
+
+    doc, emb, th = analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg["people_every_frames"])
+    ctx.write("people.json", ctx.stamped(doc))
+    np.save(ctx.path("faces.npy"), emb)
+    np.save(ctx.path("faces_thumbs.npy"), th)
 
 
-@stage('identity', 2, keys=('profile',), outputs=('identity.json',), deps=('people',),
-       note='which detected person is the wearer (face profile from `who`), who else is in shot; needs profiles/<profile>.npz')
+@stage(
+    "identity",
+    2,
+    keys=("profile",),
+    outputs=("identity.json",),
+    deps=("people",),
+    note="which detected person is the wearer (face profile from `who`), who else is in shot; needs profiles/<profile>.npz",
+)
 def identity(ctx):
-    import numpy as np, os
+    import os
+
+    import numpy as np
+
     from strata360.analysis import identity as I
     from strata360.pipeline import config
-    path = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), '..', '..')), ctx.cfg)
-    if not os.path.exists(path): raise RuntimeError(f'no wearer profile {path}: run ./strata360 who RACE --me N (or --auto) first')
-    ctx.write('identity.json', ctx.stamped(I.analyse_clip(ctx.read('people.json'), np.load(ctx.path('faces.npy')), I.load_profile(path))))
+
+    path = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), "..", "..")), ctx.cfg)
+    if not os.path.exists(path):
+        raise RuntimeError(f"no wearer profile {path}: run ./strata360 who RACE --me N (or --auto) first")
+    ctx.write(
+        "identity.json",
+        ctx.stamped(I.analyse_clip(ctx.read("people.json"), np.load(ctx.path("faces.npy")), I.load_profile(path))),
+    )
 
 
-@stage('face_view', 1, outputs=('face_view.json',), deps=('identity', 'proxy'), default=False,
-       note='how clearly the wearer\'s face is seen once a second (YOLO pose: nose and both eyes on a stabilised crop of the proxy), so the close view of you is kept for clear faces; needs .venv-vision and models/')
+@stage(
+    "face_view",
+    1,
+    outputs=("face_view.json",),
+    deps=("identity", "proxy"),
+    default=False,
+    note="how clearly the wearer's face is seen once a second (YOLO pose: nose and both eyes on a stabilised crop of the proxy), so the close view of you is kept for clear faces; needs .venv-vision and models/",
+)
 def face_view(ctx):
     from strata360.analysis import face_view as FV
-    ctx.write('face_view.json', ctx.stamped(FV.analyse(str(ctx.dir), ctx.clip.osv, ctx.log)))
+
+    ctx.write("face_view.json", ctx.stamped(FV.analyse(str(ctx.dir), ctx.clip.osv, ctx.log)))
 
 
-@stage('scenes', 4, keys=('scenes_every_s', 'scenes_sampling', 'scenes_px', 'scenes_fov'), outputs=('scenes.json',), deps=('ingest',), soft_deps=('proxy', 'quality', 'sun'), default=False,
-       note='what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags; and a scenery-only score with clarity that ignores people) from a local VLM on a wide front view and a wide rear view, labelled separately (each label has a direction), at the moments the runner has moved or the scene has changed (a fixed interval without the quality grid and the track; slow: minutes per clip)')
+@stage(
+    "scenes",
+    4,
+    keys=("scenes_every_s", "scenes_sampling", "scenes_px", "scenes_fov"),
+    outputs=("scenes.json",),
+    deps=("ingest",),
+    soft_deps=("proxy", "quality", "sun"),
+    default=False,
+    note="what is in shot (setting, people, light, weather, how scenic/lively, lens problems, tags; and a scenery-only score with clarity that ignores people) from a local VLM on a wide front view and a wide rear view, labelled separately (each label has a direction), at the moments the runner has moved or the scene has changed (a fixed interval without the quality grid and the track; slow: minutes per clip)",
+)
 def scenes(ctx):
     from strata360.analysis.scenes import analyse
-    try: previous = ctx.read('scenes.json')
-    except (OSError, ValueError): previous = None
+
+    try:
+        previous = ctx.read("scenes.json")
+    except (OSError, ValueError):
+        previous = None
     from strata360.gps import sun as SUN
+
     times = None
-    if ctx.cfg.get('scenes_sampling', 'adaptive') == 'adaptive':                    # when the runner moved or the scene changed (the race track and the quality grid are used when there are any)
+    if (
+        ctx.cfg.get("scenes_sampling", "adaptive") == "adaptive"
+    ):  # when the runner moved or the scene changed (the race track and the quality grid are used when there are any)
         from strata360.analysis import sampling
-        try: tp = _track_file(ctx)[1]
-        except RuntimeError: tp = None
+
+        try:
+            tp = _track_file(ctx)[1]
+        except RuntimeError:
+            tp = None
         times = sampling.times_for(str(ctx.dir), tp)
-    ctx.write('scenes.json', ctx.stamped(analyse(ctx.clip.osv, str(ctx.dir), ctx.cfg['scenes_every_s'], px=int(ctx.cfg.get('scenes_px', 512)), fov=float(ctx.cfg.get('scenes_fov', 120.0)), previous=previous, times=times, sun=SUN.load(str(ctx.dir)))))
+    ctx.write(
+        "scenes.json",
+        ctx.stamped(
+            analyse(
+                ctx.clip.osv,
+                str(ctx.dir),
+                ctx.cfg["scenes_every_s"],
+                px=int(ctx.cfg.get("scenes_px", 512)),
+                fov=float(ctx.cfg.get("scenes_fov", 120.0)),
+                previous=previous,
+                times=times,
+                sun=SUN.load(str(ctx.dir)),
+            )
+        ),
+    )
 
 
-@stage('objects', 1, outputs=('objects.json',), deps=('ingest', 'scenes'), soft_deps=('quality', 'sun', 'exposure', 'identity'), default=False,
-       note='the things passed (animals, signs, buildings, vehicles, structures) with a direction: YOLOE boxes on 26 tiles of the original lens frames at the moments the runner moved or the scene changed, named by the detector where its word is trusted by the statistics, else by the local Qwen on a re-rendered crop; skips night footage, black frames and the wearer; needs .venv-vision and models/yoloe')
+@stage(
+    "objects",
+    1,
+    outputs=("objects.json",),
+    deps=("ingest", "scenes"),
+    soft_deps=("quality", "sun", "exposure", "identity"),
+    default=False,
+    note="the things passed (animals, signs, buildings, vehicles, structures) with a direction: YOLOE boxes on 26 tiles of the original lens frames at the moments the runner moved or the scene changed, named by the detector where its word is trusted by the statistics, else by the local Qwen on a re-rendered crop; skips night footage, black frames and the wearer; needs .venv-vision and models/yoloe",
+)
 def objects(ctx):
-    from strata360.analysis import objects as OBJ, sampling, vocab as VOC
+    from strata360.analysis import objects as OBJ
+    from strata360.analysis import sampling
+    from strata360.analysis import vocab as VOC
     from strata360.gps import sun as SUN
-    rd = os.path.abspath(os.path.join(str(ctx.dir), '..', '..')); root = os.path.dirname(rd) if os.path.basename(rd) == 'strata360' else rd                 # the footage folder (the results are in <folder>/strata360): where the project's own word list and statistics are
-    local_p = VOC.project_paths(root)['local']
-    local = json.load(open(local_p)) if os.path.exists(local_p) else None; vocab = VOC.load(local=local); scenes_doc = ctx.read('scenes.json')
-    cats = OBJ.categories_of(scenes_doc, vocab); words = VOC.words_for(cats, vocab)
-    try: tp = _track_file(ctx)[1]
-    except RuntimeError: tp = None
+
+    rd = os.path.abspath(os.path.join(str(ctx.dir), "..", ".."))
+    root = (
+        os.path.dirname(rd) if os.path.basename(rd) == "strata360" else rd
+    )  # the footage folder (the results are in <folder>/strata360): where the project's own word list and statistics are
+    local_p = VOC.project_paths(root)["local"]
+    local = json.load(open(local_p)) if os.path.exists(local_p) else None
+    vocab = VOC.load(local=local)
+    scenes_doc = ctx.read("scenes.json")
+    cats = OBJ.categories_of(scenes_doc, vocab)
+    words = VOC.words_for(cats, vocab)
+    try:
+        tp = _track_file(ctx)[1]
+    except RuntimeError:
+        tp = None
     times = sampling.times_for(str(ctx.dir), tp)
-    if times is None: times = [float(t) for t in range(1, int(ctx.clip_json['video']['source_frames'] / ctx.clip_json['video']['nominal_fps']), 5)]
+    if times is None:
+        times = [
+            float(t)
+            for t in range(1, int(ctx.clip_json["video"]["source_frames"] / ctx.clip_json["video"]["nominal_fps"]), 5)
+        ]
     rj = lambda n: ctx.read(n) if os.path.exists(ctx.path(n)) else None
-    doc = OBJ.analyse(ctx.clip.osv, str(ctx.dir), times, words, stats=VOC.stats_for(root), vocab=vocab, categories=cats, sun=SUN.load(str(ctx.dir)), exposure=rj('exposure.json'), focus=(rj('focus.json') or {}).get('samples'),
-                      clip=os.path.basename(str(ctx.dir)), scenes=scenes_doc, crops_to=ctx.path('objects'), log=ctx.log)
-    ctx.write('objects.json', ctx.stamped(doc))
+    doc = OBJ.analyse(
+        ctx.clip.osv,
+        str(ctx.dir),
+        times,
+        words,
+        stats=VOC.stats_for(root),
+        vocab=vocab,
+        categories=cats,
+        sun=SUN.load(str(ctx.dir)),
+        exposure=rj("exposure.json"),
+        focus=(rj("focus.json") or {}).get("samples"),
+        clip=os.path.basename(str(ctx.dir)),
+        scenes=scenes_doc,
+        crops_to=ctx.path("objects"),
+        log=ctx.log,
+    )
+    ctx.write("objects.json", ctx.stamped(doc))
 
 
-@stage('speakers', 1, outputs=('speakers.json', 'speakers.npy'), deps=('transcribe',), soft_deps=('audio_extract',),
-       note='speaker embedding and level of every speech segment; labelled wearer/other once the wearer voice is known (`strata360 voice`)')
+@stage(
+    "speakers",
+    1,
+    outputs=("speakers.json", "speakers.npy"),
+    deps=("transcribe",),
+    soft_deps=("audio_extract",),
+    note="speaker embedding and level of every speech segment; labelled wearer/other once the wearer voice is known (`strata360 voice`)",
+)
 def speakers(ctx):
-    import numpy as np, os
+    import os
+
+    import numpy as np
+
     from strata360.analysis import voices
-    doc, emb = voices.analyse(audio_src(ctx), ctx.read('transcript.json'), str(ctx.dir))
+
+    doc, emb = voices.analyse(audio_src(ctx), ctx.read("transcript.json"), str(ctx.dir))
     from strata360.pipeline import config
-    prof = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), '..', '..')), ctx.cfg, voice=True)
+
+    prof = config.profile_path(os.path.abspath(os.path.join(str(ctx.dir), "..", "..")), ctx.cfg, voice=True)
     if os.path.exists(prof) and len(emb):
         lab, sim = voices.label(emb, prof)
-        for s, l, m in zip(doc['segments'], lab, sim): s['label'] = l; s['sim'] = m
-    ctx.write('speakers.json', ctx.stamped(doc)); np.save(ctx.path('speakers.npy'), emb)
+        for s, l, m in zip(doc["segments"], lab, sim):
+            s["label"] = l
+            s["sim"] = m
+    ctx.write("speakers.json", ctx.stamped(doc))
+    np.save(ctx.path("speakers.npy"), emb)
 
 
-@stage('candidates', 7, outputs=('candidates.json',), deps=('motion', 'exposure', 'audio', 'transcribe', 'align', 'speakers', 'identity', 'scenes', 'quality'), soft_deps=('lens',),
-       note='the usable spans of the clip (only shake, a blocked lens or bad exposure make footage unusable) and overlapping candidates on them: different ways to see the same footage, in priority order (no video decoding)')
+@stage(
+    "candidates",
+    7,
+    outputs=("candidates.json",),
+    deps=("motion", "exposure", "audio", "transcribe", "align", "speakers", "identity", "scenes", "quality"),
+    soft_deps=("lens",),
+    note="the usable spans of the clip (only shake, a blocked lens or bad exposure make footage unusable) and overlapping candidates on them: different ways to see the same footage, in priority order (no video decoding)",
+)
 def candidates(ctx):
     from strata360.analysis.candidates import build
-    ctx.write('candidates.json', ctx.stamped(build(str(ctx.dir))))
+
+    ctx.write("candidates.json", ctx.stamped(build(str(ctx.dir))))
 
 
-@stage('thumb_best', 1, outputs=('thumb.jpg',), deps=('candidates', 'identity', 'scenes'), soft_deps=('proxy',), note='the better thumbnail: best candidate, most attractive moment, the wearer when clearly in view')
+@stage(
+    "thumb_best",
+    1,
+    outputs=("thumb.jpg",),
+    deps=("candidates", "identity", "scenes"),
+    soft_deps=("proxy",),
+    note="the better thumbnail: best candidate, most attractive moment, the wearer when clearly in view",
+)
 def thumb_best(ctx):
     from strata360.analysis.thumbs import best
+
     best(ctx.clip.osv, str(ctx.dir))
 
 
-@stage('thumb_overlay', 5, keys=('overlay', 'timezone'), outputs=('thumb_overlay.jpg',), deps=('thumb',), soft_deps=('thumb_best',), needs_track=True,
-       note='the thumbnail with the race overlay as the film will show it (maps need the map key in secrets.env; without it the numbers only); the app shows it when its "overlay" switch is on')
+@stage(
+    "thumb_overlay",
+    5,
+    keys=("overlay", "timezone"),
+    outputs=("thumb_overlay.jpg",),
+    deps=("thumb",),
+    soft_deps=("thumb_best",),
+    needs_track=True,
+    note='the thumbnail with the race overlay as the film will show it (maps need the map key in secrets.env; without it the numbers only); the app shows it when its "overlay" switch is on',
+)
 def thumb_overlay(ctx):
     from strata360.analysis.thumbs import with_overlay
+
     with_overlay(str(ctx.dir), ctx.cfg, _track_file(ctx)[1])
-
-
-

@@ -1,3 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "strata-360"
+version = "0.1.0"
+description = "Processes 360-degree video: stitching, reframing, enhancement, transcription and a review web app"
+readme = "README.md"
+requires-python = ">=3.11"
+# The LIGHT dependencies: what the unit and integration suites and the server skeleton need. The full machine environment (torch, faster-whisper, transformers, the detector models;
+# exact pins, a macOS numpy build, a ROCm torch on AMD) is still requirements.txt / requirements-vision.txt / requirements-cv.txt and scripts/setup_env.*: it is deliberately
+# not in the lock, because the right build depends on the machine. Dependabot keeps those files current through its pip ecosystem.
+dependencies = [
+    "numpy>=2.2",
+    "scipy>=1.14",
+    "opencv-python-headless>=4.10",
+    "pillow>=10",               # the race overlay (overlay/draw.py)
+    "pyyaml",
+    "loguru",
+    "fastapi",
+    "uvicorn",
+    "av>=14",                   # PyAV: osv/recover.py checks each AAC frame it cuts by decoding it
+    "strata-python",            # the strata-check gate (and, later, the shared server code)
+    "strata-models-client",     # Whisper through strata-models (the GPU owner) when it runs; standard library only
+    "tzdata; sys_platform == 'win32'",
+]
+
+[project.scripts]
+strata360 = "strata360.cli:main"
+
+[dependency-groups]
+# torch is NOT locked (see above). CI installs the CPU build after `uv sync` (.github/actions/torch-cpu) so that the tests that need it run; use `uv run --no-sync` or `uv sync --inexact` afterwards.
+dev = [
+    "httpx>=0.27",
+    "pytest>=8",
+    "pytest-cov>=5",
+    "hypothesis",               # property-based tests for numeric/parsing code
+    "pytest-randomly",          # random test order + seeded RNGs: finds order dependence (reproduce with -p randomly -p "randomly_seed=N")
+    "pytest-timeout",           # a hung test fails instead of hanging CI
+    "pytest-xdist",             # pytest -n auto
+    "diff-cover",               # coverage of the lines a change touches: diff-cover coverage.xml --compare-branch origin/main
+    "ruff",
+    "pyright",
+    "ty",
+    "mcp>=2,<3",                # the read-only agent tools (server/mcp_tools.py): their tests run, not skip
+    "numba",                    # compiles the seam solver (render/seam.py); its parallel-render tests run, not skip
+]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.uv.sources]
+# strata-python tracks main (no tag): uv.lock pins the commit, `uv lock --upgrade-package strata-python` moves it
+strata-python = { git = "https://github.com/jburnhams/strata-python" }
+strata-models-client = { git = "https://github.com/jburnhams/strata-models", subdirectory = "client" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/strata360"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests/utils"]
 testpaths = ["tests/unit", "tests/integration"]
@@ -20,8 +80,89 @@ show_missing = false
 fail_under = 74
 
 [tool.ruff]
-line-length = 400            # the codebase uses long, dense lines on purpose
+line-length = 120
 target-version = "py311"
+extend-exclude = ["web", "spike", "docs"]
 
 [tool.ruff.lint]
-select = ["E9", "F63", "F7", "F82"]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PT", "S", "TID"]
+ignore = [
+    "E501",    # the formatter wraps code; long comments and docstrings stay (the house style comments the why)
+    "C408",    # dict(a=1) and list() calls are the house style for records
+    "PT018",   # `assert a and b` is kept: one line says what holds
+    "E731",    # short named lambdas
+    "E741",    # one-letter names in short comprehensions
+    "SIM115",  # files opened for the life of an object are closed by it
+    "RUF005", "RUF046", "RUF001", "RUF002", "RUF003", "RUF043", "RUF012", "UP031", "B008",   # style-only findings, in code that is fine as written
+    "B904", "B905", "RUF059", "RUF007",   # existing code: raises inside except, zips without strict, unused unpacked names; fixing them is its own change
+    "S110", "S112", "S301", "S307", "S310", "S314", "S324", "S603", "S607", "SIM105", "S608",   # best-effort cleanup, hashes for cache keys, our own pickles and subprocesses (ffmpeg, exiftool)
+    "PT012", "PT013", "PT006",
+    "RUF071", "B005", "RUF017", "UP022", "RUF015", "RUF057", "B018",   # existing code, to be looked at one rule at a time (RUF071 and B005 can be real bugs)
+    "B023", "B007", "F841", "C416", "C401", "SIM102", "PT011", "PT028", "B017", "E402", "E721",   # existing code, to be cleaned up one rule at a time (B023 and F841 first: they can hide bugs)
+    "S101", "S102", "S108", "S610",   # asserts as internal checks, exec of our own generated code, temp paths in examples: existing code, one rule at a time
+    "B011", "PT015", "PT017", "SIM108", "SIM113", "SIM222", "SIM401", "RUF013", "RUF034",
+    "S311",    # random is used for jitter and sampling, never for secrets
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"pytest.importorskip".msg = "Do not skip when a dependency is missing: install it (locally and in CI) and let the test fail if it is not there. A deliberate skip is a marker with a reason, see AGENTS.md (Testing)."
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/**" = ["S101"]
+"tests/**" = ["S101", "S104", "S105", "S106", "S108", "S603", "S607"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+# Ratchet: files listed here are checked strictly; the rest (typed in follow-up PRs) in basic mode. Add a file when it is fully annotated; never remove one.
+strict = ["src/strata360/__init__.py"]
+# Findings in the code that is not yet in the strict list are warnings, so they are visible without blocking: dict(...) literals whose value types pyright narrows too far,
+# and SQLAlchemy/NumPy stubs. They become errors file by file as each file moves into the list.
+reportArgumentType = "warning"
+reportCallIssue = "warning"
+reportIndexIssue = "warning"
+reportOptionalOperand = "warning"
+reportOptionalSubscript = "warning"
+reportOptionalMemberAccess = "warning"
+reportOperatorIssue = "warning"
+reportAttributeAccessIssue = "warning"
+reportMissingImports = "warning"      # the full machine environment (torch, faster-whisper, transformers...) is not in the lock
+reportMissingTypeStubs = "warning"
+reportPossiblyUnbound = "warning"
+reportReturnType = "warning"
+reportAssignmentType = "warning"
+reportGeneralTypeIssues = "warning"
+reportOptionalCall = "warning"
+reportOptionalContextManager = "warning"
+reportPrivateImportUsage = "warning"
+reportUnhashable = "warning"
+reportTypedDictNotRequiredAccess = "warning"
+reportOptionalIterable = "warning"
+reportRedeclaration = "warning"       # version-dependent definitions
+
+[tool.ty.rules]
+# ty exits 1 on warnings too, so the rules below are off, not warnings. pyright (above) reports the same code as visible warnings and is the ratchet; turn a rule back on
+# here once pyright's matching warning is gone.
+call-non-callable = "ignore"
+import-not-found = "ignore"
+invalid-assignment = "ignore"
+invalid-argument-type = "ignore"
+no-matching-overload = "ignore"
+not-subscriptable = "ignore"
+missing-attribute = "ignore"
+unresolved-global = "ignore"
+unsupported-operator = "ignore"
+missing-union-attribute = "ignore"
+incompatible-method-override = "ignore"
+invalid-context-manager = "ignore"
+invalid-parameter-default = "ignore"
+possibly-missing-submodule = "ignore"
+pydantic-discarded-extra-argument = "ignore"
+invalid-return-type = "ignore"
+lost-keyword-for-regular-parameter = "ignore"
+not-iterable = "ignore"
+too-many-positional-arguments = "ignore"
+unknown-argument = "ignore"
+redundant-condition = "ignore"
+

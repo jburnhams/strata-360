@@ -8,12 +8,19 @@ Model (Kannala-Brandt, 5 terms):  theta_d = theta*(1 + k1 th^2 + k2 th^4 + k3 th
   u = cx + fx*theta_d*cos(phi),  v = cy + fy*theta_d*sin(phi)
 Body frame: X right, Y forward, Z up. Master lens looks along +Y, slave along -Y.
 """
-import struct, numpy as np
-from strata360.osv.pbdump import parse, packets, first_packet
+
+import struct
+
+import numpy as np
+
+from strata360.osv.pbdump import first_packet, parse
+
 
 def read_slots(osv_path, djmd_stream=3):
     from strata360.osv import insta360
-    if insta360.is_insv(osv_path): return insta360.slots(osv_path)
+
+    if insta360.is_insv(osv_path):
+        return insta360.slots(osv_path)
     pk = first_packet(osv_path, djmd_stream)
     sm = [v for f, w, v in parse(pk) if f == 2][0]
     f6 = [v for f, w, v in parse(sm) if f == 6][0]
@@ -22,23 +29,34 @@ def read_slots(osv_path, djmd_stream=3):
         if w == 2 and len(v) == 264:
             d = {}
             for ff, ww, vv in parse(v):
-                if ww == 5: d[ff] = struct.unpack('<f', vv)[0]
+                if ww == 5:
+                    d[ff] = struct.unpack("<f", vv)[0]
                 elif ww == 2 and ff in (22, 23) and len(vv) == 56:
-                    d['poly_x' if ff == 22 else 'poly_y'] = np.array(struct.unpack('<14f', vv))   # 14-point occlusion polygon (selfie-stick side)
+                    d["poly_x" if ff == 22 else "poly_y"] = np.array(
+                        struct.unpack("<14f", vv)
+                    )  # 14-point occlusion polygon (selfie-stick side)
                 elif ww == 2 and ff == 28:
-                    q = {a: struct.unpack('<f', c)[0] for a, b, c in parse(vv)}
-                    d['q'] = np.array([q[1], q[2], q[3], q[4]])
+                    q = {a: struct.unpack("<f", c)[0] for a, b, c in parse(vv)}
+                    d["q"] = np.array([q[1], q[2], q[3], q[4]])
             slots[f] = d
     return slots
 
+
 def quat_to_R(q):
-    q = np.asarray(q, dtype=np.float64); w, x, y, z = q / np.linalg.norm(q)
-    return np.array([[1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w)],
-                     [2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w)],
-                     [2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)]])
+    q = np.asarray(q, dtype=np.float64)
+    w, x, y, z = q / np.linalg.norm(q)
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ]
+    )
+
 
 import os as _os
-_DATA = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'data')
+
+_DATA = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data")
 
 
 def imu_offsets(osv=None):
@@ -46,28 +64,39 @@ def imu_offsets(osv=None):
     upright and in the body frame (osv/insta360.py), so its offsets are the identity: pass the clip's `osv` path to get them."""
     if osv is not None:
         from strata360.osv import insta360
-        if insta360.is_insv(osv): return np.eye(3), np.eye(3)
-    return np.load(_os.path.join(_DATA, 'osmo360_imu_offsets.npy'))
+
+        if insta360.is_insv(osv):
+            return np.eye(3), np.eye(3)
+    return np.load(_os.path.join(_DATA, "osmo360_imu_offsets.npy"))
 
 
 class Lens:
     def __init__(self, slot):
         self.fx, self.fy, self.cx, self.cy = slot[1], slot[2], slot[3], slot[4]
         self.k = np.array([slot[5], slot[6], slot[7], slot[8], slot[15]])
-        self.R = quat_to_R(slot['q'])
-        self.size = int(slot.get(10) or 3840)                              # the calibration's lens size in pixels (callers use the video's real size, osv/source.py `lens_size`)
+        self.R = quat_to_R(slot["q"])
+        self.size = int(
+            slot.get(10) or 3840
+        )  # the calibration's lens size in pixels (callers use the video's real size, osv/source.py `lens_size`)
+
     def project(self, d_body, scale=1.0):
         """body-frame unit dirs (N,3) -> pixel (u,v) in the lens image at `scale`, plus theta (rad)."""
-        d = np.einsum('nj,ij->ni', np.asarray(d_body, dtype=np.float64), self.R)   # einsum: avoids a broken Accelerate matmul seen on this Mac
-        th = np.arccos(np.clip(d[:, 2], -1, 1)); phi = np.arctan2(d[:, 1], d[:, 0])
+        d = np.einsum(
+            "nj,ij->ni", np.asarray(d_body, dtype=np.float64), self.R
+        )  # einsum: avoids a broken Accelerate matmul seen on this Mac
+        th = np.arccos(np.clip(d[:, 2], -1, 1))
+        phi = np.arctan2(d[:, 1], d[:, 0])
         thd = th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5)))
         return (self.cx + self.fx * thd * np.cos(phi)) * scale, (self.cy + self.fy * thd * np.sin(phi)) * scale, th
 
     def rim_radius(self, theta_deg=97.59):
         """Radius in lens pixels of the edge of the usable image circle (where theta reaches `theta_deg`), the rim the stick polygon is closed out to."""
-        th = np.radians(theta_deg); return float(self.fx * th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5))))
+        th = np.radians(theta_deg)
+        return float(self.fx * th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5))))
 
     def edge_theta(self, radius_px=1900.0):
-        th = np.linspace(0, np.pi, 4000); thd = th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5)))
-        r = self.fx * thd; ok = np.where(np.diff(r) > 0)[0]
+        th = np.linspace(0, np.pi, 4000)
+        thd = th * (1 + sum(self.k[i] * th ** (2 * (i + 1)) for i in range(5)))
+        r = self.fx * thd
+        ok = np.where(np.diff(r) > 0)[0]
         return th, r

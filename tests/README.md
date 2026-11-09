@@ -1,6 +1,6 @@
 # Python tests
 
-pytest 8, pytest-cov, **hypothesis**, **pytest-randomly**, **pytest-timeout**, pytest-xdist, diff-cover (`pip install -r requirements-test.txt`). The web tests are in `web/tests` (see `web/tests/README.md`).
+pytest 8, pytest-cov, **hypothesis**, **pytest-randomly**, **pytest-timeout**, pytest-xdist, diff-cover (`uv sync`). The web tests are in `web/tests` (see `web/tests/README.md`).
 
 This file holds only what **both** Python suites share, and it is rarely edited. Each suite keeps its own notes and ledger so that parallel work on them does not collide:
 
@@ -42,7 +42,7 @@ Unit-test work and integration-test work may run at the same time on separate br
 | Coverage gate | `fail_under` in `pyproject.toml` (the only writer) | none: integration coverage is informational |
 
 - Don't edit a file the other column owns. If you truly need a shared fixture or helper changed, add your own variant in a file you own (an `integration_*.py` helper, a fixture in `tests/integration/conftest.py`) and note the duplication in your README. Never rewrite `tests/conftest.py` or an existing helper's behaviour from integration work.
-- Don't edit `tests/README.md` (this file), `AGENTS.md`, `CLAUDE.md`, `requirements-test.txt` or `.github/workflows/*` unless the task cannot be done without it; say why in the PR.
+- Don't edit `tests/README.md` (this file), `AGENTS.md`, `CLAUDE.md`, `uv.lock` or `.github/workflows/*` unless the task cannot be done without it; say why in the PR.
 - Module ownership, so both don't pick the same slice: integration work takes `cli.py`, `pipeline/runner.py`, `pipeline/stages.py`, `render/*`, `edit/music.py`, the film audio mix, and the `server/app.py` endpoints that need real media (thumb, preview, film/final job control, uploads). Unit work takes everything else, including the pure parts of those modules that need no ffmpeg (argument parsing, config and path logic, helpers) and the other `server/app.py` endpoints. When a module is on both sides, unit work covers pure functions and integration work covers real-media behaviour. Check the other suite's README ledger first.
 - Pure logic found in integration work is not moved to `tests/unit/` by that run: list it under "Known issues" in `tests/integration/README.md` as a candidate for the unit run.
 

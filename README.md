@@ -27,9 +27,10 @@ Command-line equivalents (`open`, `run`, `progress`, `script`, `voiceover`, `fil
 ## Tests
 
 ```bash
-pip install -r requirements-test.txt
-pytest tests/unit --cov                  # fast unit suite with coverage
-pytest tests/integration -n auto         # needs ffmpeg with libx265
+uv sync                                  # light dependencies and the dev tools (.venv); the heavy model stack stays in requirements*.txt
+scripts/check                            # the gate: lockfile, ruff, format, pyright, ty, unit tests with coverage (--fast skips the tests)
+uv run pytest tests/unit --cov           # fast unit suite with coverage
+uv run pytest tests/integration -n auto  # needs ffmpeg with libx265
 cd web && npm run test:coverage          # web unit tests
 ```
 

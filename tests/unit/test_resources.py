@@ -1,75 +1,154 @@
 """Resource guards: extra workers only with lots of free memory, lowest priority, heavy stages one at a time. Run: .venv/bin/python tests/test_resources.py"""
-import os, subprocess, sys, tempfile
+
+import os
+import subprocess
+import sys
+import tempfile
+
 import pytest
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src'))
-from strata360.pipeline import resources as R, runner, config
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src"))
+from strata360.pipeline import config, runner
+from strata360.pipeline import resources as R
 
 
 def test_extra_workers_need_plenty_of_free_memory_and_an_idle_machine():
-    R.mem_available_gb = lambda: 30.0; R.busy = lambda cfg=None: False; R.DEFAULTS = dict(R.DEFAULTS, max_workers=2)                  # (a big NVIDIA machine defaults to more)
-    assert R.may_start_extra_worker(0)[0] and R.may_start_extra_worker(1)[0] and not R.may_start_extra_worker(2)[0]                # first always; a second with 30 GB free; not beyond the limit of 2
-    R.mem_available_gb = lambda: 6.0; ok, why = R.may_start_extra_worker(1); assert not ok and 'free' in why and R.may_start_extra_worker(0)[0]
-    R.mem_available_gb = lambda: 30.0; R.busy = lambda cfg=None: True; ok, why = R.may_start_extra_worker(1); assert not ok and 'busy' in why
-    cfg = dict(resources=dict(max_workers=1)); R.busy = lambda cfg=None: False; assert not R.may_start_extra_worker(1, cfg)[0]      # configurable
+    R.mem_available_gb = lambda: 30.0
+    R.busy = lambda cfg=None: False
+    R.DEFAULTS = dict(R.DEFAULTS, max_workers=2)  # (a big NVIDIA machine defaults to more)
+    assert (
+        R.may_start_extra_worker(0)[0] and R.may_start_extra_worker(1)[0] and not R.may_start_extra_worker(2)[0]
+    )  # first always; a second with 30 GB free; not beyond the limit of 2
+    R.mem_available_gb = lambda: 6.0
+    ok, why = R.may_start_extra_worker(1)
+    assert not ok and "free" in why and R.may_start_extra_worker(0)[0]
+    R.mem_available_gb = lambda: 30.0
+    R.busy = lambda cfg=None: True
+    ok, why = R.may_start_extra_worker(1)
+    assert not ok and "busy" in why
+    cfg = dict(resources=dict(max_workers=1))
+    R.busy = lambda cfg=None: False
+    assert not R.may_start_extra_worker(1, cfg)[0]  # configurable
 
 
 def test_a_worker_waits_for_memory_and_load_before_starting_an_item():
-    seen = []; R.time.sleep = lambda s: seen.append(s)
-    R.busy = lambda cfg=None: False; mem = iter([2.0, 2.0, 20.0]); R.mem_available_gb = lambda: next(mem)
-    assert R.wait_for_headroom('scenes', None, None, lambda m: None) and len(seen) == 2                                              # scenes needs about 9 GB: waited twice, then went
-    R.mem_available_gb = lambda: 20.0; loads = iter([True, False]); R.busy = lambda cfg=None: next(loads); seen.clear()
-    assert R.wait_for_headroom('proxy', None, None, lambda m: None) and len(seen) == 1
-    R.mem_available_gb = lambda: 0.5; assert not R.wait_for_headroom('proxy', None, None, lambda m: None, max_wait=-1)             # gives up when told to
+    seen = []
+    R.time.sleep = lambda s: seen.append(s)
+    R.busy = lambda cfg=None: False
+    mem = iter([2.0, 2.0, 20.0])
+    R.mem_available_gb = lambda: next(mem)
+    assert (
+        R.wait_for_headroom("scenes", None, None, lambda m: None) and len(seen) == 2
+    )  # scenes needs about 9 GB: waited twice, then went
+    R.mem_available_gb = lambda: 20.0
+    loads = iter([True, False])
+    R.busy = lambda cfg=None: next(loads)
+    seen.clear()
+    assert R.wait_for_headroom("proxy", None, None, lambda m: None) and len(seen) == 1
+    R.mem_available_gb = lambda: 0.5
+    assert not R.wait_for_headroom("proxy", None, None, lambda m: None, max_wait=-1)  # gives up when told to
 
 
 def test_heavy_stages_have_a_concurrency_cap_and_light_ones_do_not():
-    assert R.STAGE_MAX_CONCURRENT['scenes'] == 1 and R.STAGE_MAX_CONCURRENT['proxy'] == 1 and R.STAGE_MAX_CONCURRENT['people'] == 1 and 'places' not in R.STAGE_MAX_CONCURRENT
-    f = tempfile.mkdtemp(); os.makedirs(os.path.join(f, 'strata360'))
-    assert runner._stage_count(f, 'scenes') == 0 and runner.claim(f, 'A', 'scenes') and runner._stage_count(f, 'scenes') == 1
-    assert runner.claim(f, 'B', 'scenes')                                                                                            # claims themselves do not enforce the cap (the worker loop does)
+    assert (
+        R.STAGE_MAX_CONCURRENT["scenes"] == 1
+        and R.STAGE_MAX_CONCURRENT["proxy"] == 1
+        and R.STAGE_MAX_CONCURRENT["people"] == 1
+        and "places" not in R.STAGE_MAX_CONCURRENT
+    )
+    f = tempfile.mkdtemp()
+    os.makedirs(os.path.join(f, "strata360"))
+    assert (
+        runner._stage_count(f, "scenes") == 0
+        and runner.claim(f, "A", "scenes")
+        and runner._stage_count(f, "scenes") == 1
+    )
+    assert runner.claim(f, "B", "scenes")  # claims themselves do not enforce the cap (the worker loop does)
 
 
-@pytest.mark.skipif(sys.platform == 'win32', reason='nice values do not exist on Windows (oslib.lower_priority uses a priority class; see test_oslib)')
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="nice values do not exist on Windows (oslib.lower_priority uses a priority class; see test_oslib)",
+)
 def test_low_priority_really_lowers_the_niceness():
-    code = "import sys; sys.path.insert(0, %r); import os; from strata360.pipeline import resources as R; R.low_priority(); print(os.nice(0), os.environ['OMP_NUM_THREADS'])" % os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src')
-    out = subprocess.run([sys.executable, '-c', code], stdout=subprocess.PIPE, text=True).stdout.split(); assert out[1] == '2', out
-    if sys.platform == 'darwin': assert int(out[0]) > 0, out                    # macOS also moves the process to the background task class, which reports a lower niceness (9 on the CI runners)
-    else: assert out[0] == '19', out
+    code = (
+        "import sys; sys.path.insert(0, %r); import os; from strata360.pipeline import resources as R; R.low_priority(); print(os.nice(0), os.environ['OMP_NUM_THREADS'])"
+        % os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "src")
+    )
+    out = subprocess.run([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True).stdout.split()
+    assert out[1] == "2", out
+    if sys.platform == "darwin":
+        assert int(out[0]) > 0, (
+            out
+        )  # macOS also moves the process to the background task class, which reports a lower niceness (9 on the CI runners)
+    else:
+        assert out[0] == "19", out
 
 
-if __name__ == '__main__':
-    fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]; bad = 0
+if __name__ == "__main__":
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    bad = 0
     for f in fns:
-        try: f(); print('ok  ', f.__name__)
-        except AssertionError as e: bad += 1; print('FAIL', f.__name__, e)
-    print(f'{len(fns) - bad}/{len(fns)} passed'); sys.exit(bad)
+        try:
+            f()
+            print("ok  ", f.__name__)
+        except AssertionError as e:
+            bad += 1
+            print("FAIL", f.__name__, e)
+    print(f"{len(fns) - bad}/{len(fns)} passed")
+    sys.exit(bad)
 
 
 def test_no_resource_limits_switch_skips_the_waiting(monkeypatch):
     from strata360.pipeline import resources as R
-    monkeypatch.setattr(R, 'mem_available_gb', lambda: 0.1); monkeypatch.setenv('STRATA_NO_RESOURCE_LIMITS', '1')
-    assert R.wait_for_headroom('exposure', None, None, log=lambda *_: None, max_wait=0) is True               # with no memory at all it still goes ahead
-    monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS'); assert R.wait_for_headroom('exposure', None, None, log=lambda *_: None, poll=0, max_wait=0) is False
+
+    monkeypatch.setattr(R, "mem_available_gb", lambda: 0.1)
+    monkeypatch.setenv("STRATA_NO_RESOURCE_LIMITS", "1")
+    assert (
+        R.wait_for_headroom("exposure", None, None, log=lambda *_: None, max_wait=0) is True
+    )  # with no memory at all it still goes ahead
+    monkeypatch.delenv("STRATA_NO_RESOURCE_LIMITS")
+    assert R.wait_for_headroom("exposure", None, None, log=lambda *_: None, poll=0, max_wait=0) is False
 
 
 def test_the_cli_does_not_start_a_second_worker_without_the_memory_for_it(monkeypatch, capsys):
     from strata360 import cli
-    monkeypatch.setattr(config, 'load', lambda name: {}); monkeypatch.setattr(runner, 'workers', lambda name: [4242])
-    monkeypatch.setattr(R, 'mem_available_gb', lambda: 5.0); monkeypatch.setattr(R, 'busy', lambda cfg=None: False)
-    assert not cli.worker_allowed('p') and 'already running (pid 4242)' in capsys.readouterr().out
-    monkeypatch.setattr(runner, 'workers', lambda name: []); assert cli.worker_allowed('p')                                          # the first worker is always allowed
+
+    monkeypatch.setattr(config, "load", lambda name: {})
+    monkeypatch.setattr(runner, "workers", lambda name: [4242])
+    monkeypatch.setattr(R, "mem_available_gb", lambda: 5.0)
+    monkeypatch.setattr(R, "busy", lambda cfg=None: False)
+    assert not cli.worker_allowed("p") and "already running (pid 4242)" in capsys.readouterr().out
+    monkeypatch.setattr(runner, "workers", lambda name: [])
+    assert cli.worker_allowed("p")  # the first worker is always allowed
 
 
 def test_a_big_nvidia_machine_gets_more_workers_and_the_light_stages_run_in_copies(monkeypatch):
-    import os, sys
-    monkeypatch.setattr(sys, 'platform', 'win32'); monkeypatch.setattr(os, 'cpu_count', lambda: 32); monkeypatch.setattr(R, 'vram_free_gb', lambda: 14.0); monkeypatch.setattr(R, 'mem_total_gb', lambda: 64.0)
-    d = R.machine_defaults(); assert d['max_workers'] == 4 and d['threads'] == 4
-    monkeypatch.setattr(R, 'DEFAULTS', d); caps = R.concurrent_caps(); assert caps['proxy'] == 4 and caps['transcribe'] == 2 and caps['scenes'] == 1
-    monkeypatch.setattr(R, 'vram_free_gb', lambda: None); assert R.machine_defaults()['max_workers'] == 2                                  # no NVIDIA GPU: the Mac numbers
-    monkeypatch.setattr(sys, 'platform', 'darwin'); monkeypatch.setattr(R, 'vram_free_gb', lambda: 14.0); assert R.machine_defaults()['max_workers'] == 2
+    import os
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "cpu_count", lambda: 32)
+    monkeypatch.setattr(R, "vram_free_gb", lambda: 14.0)
+    monkeypatch.setattr(R, "mem_total_gb", lambda: 64.0)
+    d = R.machine_defaults()
+    assert d["max_workers"] == 4 and d["threads"] == 4
+    monkeypatch.setattr(R, "DEFAULTS", d)
+    caps = R.concurrent_caps()
+    assert caps["proxy"] == 4 and caps["transcribe"] == 2 and caps["scenes"] == 1
+    monkeypatch.setattr(R, "vram_free_gb", lambda: None)
+    assert R.machine_defaults()["max_workers"] == 2  # no NVIDIA GPU: the Mac numbers
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(R, "vram_free_gb", lambda: 14.0)
+    assert R.machine_defaults()["max_workers"] == 2
 
 
 def test_a_stage_waits_for_free_gpu_memory(monkeypatch):
-    monkeypatch.delenv('STRATA_NO_RESOURCE_LIMITS', raising=False); monkeypatch.setattr(R, 'mem_available_gb', lambda: 30.0); monkeypatch.setattr(R, 'busy', lambda cfg=None: False); free = iter([2.0, 9.0]); seen = []
-    monkeypatch.setattr(R, 'vram_free_gb', lambda: next(free)); monkeypatch.setattr(R.time, 'sleep', lambda s: None)
-    assert R.wait_for_headroom('scenes', log=seen.append) and any('GPU memory' in m for m in seen)
+    monkeypatch.delenv("STRATA_NO_RESOURCE_LIMITS", raising=False)
+    monkeypatch.setattr(R, "mem_available_gb", lambda: 30.0)
+    monkeypatch.setattr(R, "busy", lambda cfg=None: False)
+    free = iter([2.0, 9.0])
+    seen = []
+    monkeypatch.setattr(R, "vram_free_gb", lambda: next(free))
+    monkeypatch.setattr(R.time, "sleep", lambda s: None)
+    assert R.wait_for_headroom("scenes", log=seen.append) and any("GPU memory" in m for m in seen)
