@@ -79,7 +79,8 @@ def test_gpu_is_on_by_default_and_the_duty_cycle_leaves_gaps(monkeypatch):
     calls = []
     monkeypatch.setenv("STRATA_GPU_DUTY", "0.5")
     monkeypatch.setattr(hw.time, "sleep", calls.append)
-    f = hw.gpu_throttled(lambda x: x + 1, device="mps")
+    # "cuda", not "mps": with torch installed, torch.mps.synchronize() on a macOS VM without Metal crashes the interpreter (segfault in CI), while torch.cuda.synchronize() without CUDA only raises, which gpu_throttled swallows
+    f = hw.gpu_throttled(lambda x: x + 1, device="cuda")
     assert f(1) == 2 and len(calls) == 1  # a throttled call returns its result and pauses once
 
 
