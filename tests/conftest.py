@@ -34,6 +34,7 @@ def isolated_home(tmp_path_factory, monkeypatch):
     monkeypatch.setenv('HOME', str(home)); monkeypatch.setenv('USERPROFILE', str(home))
     monkeypatch.setenv('STRATA_RACES', str(base / 'races'))
     for k in ('ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY'): monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv('STRATA360_MODELS', 'local')                 # never the strata-models service a developer machine may run (tests/unit/test_remote_whisper.py turns it on with a fake client)
     return home
 
 
