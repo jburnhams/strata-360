@@ -1,5 +1,5 @@
 # Light dependencies for the unit and integration suites (no torch, whisper or models). The CI workflows install exactly this.
-numpy>=2.2
+numpy>=2.5.4
 scipy>=1.14
 opencv-python-headless>=4.10
 pillow>=10                     # the race overlay (overlay/draw.py)
