@@ -16,7 +16,7 @@ transformers==4.57.3
 tokenizers==0.22.1
 sentencepiece==0.2.2
 sacremoses==0.2.0
-huggingface-hub==0.36.0
+huggingface-hub==2.4.0
 scikit-image==0.26.0
 pyyaml==6.0.3
 loguru==0.7.3
