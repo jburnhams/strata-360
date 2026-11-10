@@ -1,0 +1,18 @@
+name: torch (CPU build) and the denoise model loader
+description: >
+  torch is not in uv.lock (the right build depends on the card, see pyproject.toml). The tests of the GPU code run on the torch CPU device, so CI installs the CPU build
+  after `uv sync`, then spandrel without its dependencies so that it cannot replace it (scripts/setup_env.sh does the same).
+runs:
+  using: composite
+  steps:
+    - name: torch and torchvision, CPU build (a runner has no GPU)
+      if: runner.os != 'macOS'
+      shell: bash
+      run: uv pip install torch torchvision --index https://download.pytorch.org/whl/cpu
+    - name: torch and torchvision on macOS (the default wheel; the MPS tests run only where Metal is available, which a CI VM may not have)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: uv pip install torch torchvision
+    - name: spandrel without its dependencies
+      shell: bash
+      run: uv pip install einops safetensors && uv pip install --no-deps spandrel==0.4.2

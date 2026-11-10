@@ -2,15 +2,23 @@
 
 `<race dir>/synthetic.json` = {"clips": [{id, kind, t0, t1, duration_s, seconds, speedup, fps, style, key, status, file?}]}. A synthetic clip covers [t0, t1] of the race (UTC, ISO) and is shown in
 `seconds` of film: its speed-up is duration_s / seconds. `key` identifies what would be rendered (the span, the length, the kind, the style, the frame rate and, when set, the size), so a render is reused while it is unchanged."""
-import datetime as dt, hashlib, json, math, os
 
-FILE = 'synthetic.json'
-KINDS = ('map', 'flyover')          # the animated 2D map (overlay/mapclip.py) and the 3D terrain flyover (overlay/flyover.py)
-SIZES = {'flyover': '3840x2160'}    # the picture size a kind is made at when none is asked for (the 2D map: the renderer's 1920x1080); 4K for the flyover
+import datetime as dt
+import hashlib
+import json
+import math
+import os
+
+FILE = "synthetic.json"
+KINDS = ("map", "flyover")  # the animated 2D map (overlay/mapclip.py) and the 3D terrain flyover (overlay/flyover.py)
+SIZES = {
+    "flyover": "3840x2160"
+}  # the picture size a kind is made at when none is asked for (the 2D map: the renderer's 1920x1080); 4K for the flyover
 MIN_SECONDS = 2.0
 
 
-def _iso(t): return dt.datetime.fromtimestamp(float(t), dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+def _iso(t):
+    return dt.datetime.fromtimestamp(float(t), dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def default_seconds(duration_s):
@@ -18,151 +26,339 @@ def default_seconds(duration_s):
     return round(min(max(6.0 + 6.0 * math.log2(1.0 + duration_s / 3600.0), 6.0), 45.0), 1)
 
 
-SHORT_S = 5.0                 # a clip shorter than this is a 2D map: a flyover has no time to show the land
+SHORT_S = 5.0  # a clip shorter than this is a 2D map: a flyover has no time to show the land
 DRAMATIC_RELIEF_M, FLAT_RELIEF_M, SHORT_KM = 900.0, 300.0, 10.0
 
 
 def choose_kind(gap, seconds, last=None):
     """How the planner draws a gap, so that the script only says that there is one and for how long: a 3D flyover where the land is the story (a big climb or descent: ascent plus descent of 900 m or more), a 2D map for a short clip (under 5 s), a short hop (under 10 km) or flat ground (under 300 m of relief); in between
     it alternates with the kind chosen just before (`last`), so the film has both. 2D maps are the cheap, quick change of picture; flyovers cost minutes of machine time each."""
-    relief = float(gap.get('ascent_m') or 0) + float(gap.get('descent_m') or 0); km = float(gap.get('distance_km') or 0)
-    if seconds < SHORT_S or km < SHORT_KM or relief < FLAT_RELIEF_M: return 'map'
-    if relief >= DRAMATIC_RELIEF_M: return 'flyover'
-    return 'map' if last == 'flyover' else 'flyover'
+    relief = float(gap.get("ascent_m") or 0) + float(gap.get("descent_m") or 0)
+    km = float(gap.get("distance_km") or 0)
+    if seconds < SHORT_S or km < SHORT_KM or relief < FLAT_RELIEF_M:
+        return "map"
+    if relief >= DRAMATIC_RELIEF_M:
+        return "flyover"
+    return "map" if last == "flyover" else "flyover"
 
 
 def key_of(c):
-    blob = json.dumps([c['kind'], c['t0'], c['t1'], round(c['seconds'], 2), c['fps'], c.get('style') or {}] + ([c['size']] if c.get('size') else []), sort_keys=True)
+    blob = json.dumps(
+        [c["kind"], c["t0"], c["t1"], round(c["seconds"], 2), c["fps"], c.get("style") or {}]
+        + ([c["size"]] if c.get("size") else []),
+        sort_keys=True,
+    )
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
 def footage_fps(folder, default=30.0):
     """The frame rate most of the project's footage was shot at (`video.nominal_fps` of each clip.json, by clip count), so a generated clip moves at the rate of the film and is not resampled unevenly; `default` when no clip says."""
     from strata360.pipeline import config
+
     rates = {}
-    try: rd = config.race_dir(folder); names = os.listdir(os.path.join(rd, 'clips'))
-    except OSError: return float(default)
+    try:
+        rd = config.race_dir(folder)
+        names = os.listdir(os.path.join(rd, "clips"))
+    except OSError:
+        return float(default)
     for n in names:
-        try: r = float(json.load(open(os.path.join(rd, 'clips', n, 'clip.json')))['video']['nominal_fps'])
-        except (OSError, ValueError, KeyError, TypeError): continue
+        try:
+            r = float(json.load(open(os.path.join(rd, "clips", n, "clip.json")))["video"]["nominal_fps"])
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
         rates[r] = rates.get(r, 0) + 1
     return max(rates, key=rates.get) if rates else float(default)
 
 
-def make(gap, seconds=None, speedup=None, kind='map', style=None, fps=None, t0=None, t1=None, id=None, size=None, approved=True, by='planner', folder=None):
+def make(
+    gap,
+    seconds=None,
+    speedup=None,
+    kind="map",
+    style=None,
+    fps=None,
+    t0=None,
+    t1=None,
+    id=None,
+    size=None,
+    approved=True,
+    by="planner",
+    folder=None,
+):
     """The clip for a gap (or for a stretch of it: `t0` and `t1` in epoch seconds), by length in the film or by speed-up (not both; neither gives the default). `fps` None: the footage's own rate when the `folder` is given (else 30), so the map moves at the film's frame rate."""
-    if fps is None: fps = footage_fps(folder) if folder else 30.0
-    if kind not in KINDS: raise ValueError(f'kind: one of {KINDS}')
-    if seconds is not None and speedup is not None: raise ValueError('give the length in the film or the speed-up, not both')
-    a, b = float(gap['t0'] if t0 is None else t0), float(gap['t1'] if t1 is None else t1)
-    if not gap['t0'] - 1e-6 <= a < b <= gap['t1'] + 1e-6: raise ValueError('the stretch must lie inside the gap')
+    if fps is None:
+        fps = footage_fps(folder) if folder else 30.0
+    if kind not in KINDS:
+        raise ValueError(f"kind: one of {KINDS}")
+    if seconds is not None and speedup is not None:
+        raise ValueError("give the length in the film or the speed-up, not both")
+    a, b = float(gap["t0"] if t0 is None else t0), float(gap["t1"] if t1 is None else t1)
+    if not gap["t0"] - 1e-6 <= a < b <= gap["t1"] + 1e-6:
+        raise ValueError("the stretch must lie inside the gap")
     dur = b - a
     if speedup is not None:
-        if speedup < 1: raise ValueError('speed-up: 1 or more'); 
+        if speedup < 1:
+            raise ValueError("speed-up: 1 or more")
         seconds = dur / speedup
-    elif seconds is None: seconds = default_seconds(dur)
-    if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
-    c = dict(id=id or gap['id'], kind=kind, gap=gap['id'], t0=_iso(a), t1=_iso(b), duration_s=round(dur, 1), seconds=round(float(seconds), 2), speedup=round(dur / float(seconds), 1), fps=float(fps), style=style or {}, status='planned')
+    elif seconds is None:
+        seconds = default_seconds(dur)
+    if seconds < MIN_SECONDS:
+        raise ValueError(f"a clip shorter than {MIN_SECONDS:g} s is not useful")
+    c = dict(
+        id=id or gap["id"],
+        kind=kind,
+        gap=gap["id"],
+        t0=_iso(a),
+        t1=_iso(b),
+        duration_s=round(dur, 1),
+        seconds=round(float(seconds), 2),
+        speedup=round(dur / float(seconds), 1),
+        fps=float(fps),
+        style=style or {},
+        status="planned",
+    )
     size = size or SIZES.get(kind)
     if size:
-        try: w, h = (int(x) for x in str(size).lower().split('x'))
-        except ValueError: raise ValueError('size: WIDTHxHEIGHT, such as 3840x2160')
-        if w < 320 or h < 180: raise ValueError('size: at least 320x180')
-        c['size'] = f'{w}x{h}'
-    c['approved'] = bool(approved)                                                              # kept for older plans: no clip waits for approval any more
-    c['by'] = by                                                                                  # who chose its kind: the planner (it may change it) or the user (it stays)
-    c['key'] = key_of(dict(c, t0=round(a), t1=round(b))); return c
+        try:
+            w, h = (int(x) for x in str(size).lower().split("x"))
+        except ValueError:
+            raise ValueError("size: WIDTHxHEIGHT, such as 3840x2160")
+        if w < 320 or h < 180:
+            raise ValueError("size: at least 320x180")
+        c["size"] = f"{w}x{h}"
+    c["approved"] = bool(approved)  # kept for older plans: no clip waits for approval any more
+    c["by"] = by  # who chose its kind: the planner (it may change it) or the user (it stays)
+    c["key"] = key_of(dict(c, t0=round(a), t1=round(b)))
+    return c
 
 
 def load(folder):
     from strata360.pipeline import config
-    try: d = json.load(open(os.path.join(config.race_dir(folder), FILE)))
-    except (OSError, ValueError): d = {}
-    d.setdefault('clips', []); return d
+
+    try:
+        d = json.load(open(os.path.join(config.race_dir(folder), FILE)))
+    except (OSError, ValueError):
+        d = {}
+    d.setdefault("clips", [])
+    return d
 
 
 def save(folder, doc):
     from strata360.pipeline import config
-    rd = config.race_dir(folder); os.makedirs(rd, exist_ok=True); p = os.path.join(rd, FILE); tmp = p + '.tmp'; json.dump(doc, open(tmp, 'w'), indent=1); os.replace(tmp, p); return doc
+
+    rd = config.race_dir(folder)
+    os.makedirs(rd, exist_ok=True)
+    p = os.path.join(rd, FILE)
+    tmp = p + ".tmp"
+    json.dump(doc, open(tmp, "w"), indent=1)
+    os.replace(tmp, p)
+    return doc
 
 
 def upsert(folder, clip):
     """Add the clip, or replace the one with its id. A changed key means the old render no longer matches: the status goes back to planned and the file is forgotten."""
-    doc = load(folder); old = next((c for c in doc['clips'] if c['id'] == clip['id']), None)
-    if old and old.get('key') == clip['key']: clip = dict(clip, status=old.get('status', clip['status']), approved=bool(old.get('approved', True)) or bool(clip.get('approved', True)), **({'file': old['file']} if old.get('file') else {}))
-    doc['clips'] = sorted([c for c in doc['clips'] if c['id'] != clip['id']] + [clip], key=lambda c: c['t0']); save(folder, doc); return clip
+    doc = load(folder)
+    old = next((c for c in doc["clips"] if c["id"] == clip["id"]), None)
+    if old and old.get("key") == clip["key"]:
+        clip = dict(
+            clip,
+            status=old.get("status", clip["status"]),
+            approved=bool(old.get("approved", True)) or bool(clip.get("approved", True)),
+            **({"file": old["file"]} if old.get("file") else {}),
+        )
+    doc["clips"] = sorted([c for c in doc["clips"] if c["id"] != clip["id"]] + [clip], key=lambda c: c["t0"])
+    save(folder, doc)
+    return clip
 
 
 def remove(folder, clip_id):
-    doc = load(folder); n = len(doc['clips']); doc['clips'] = [c for c in doc['clips'] if c['id'] != clip_id]; save(folder, doc); return len(doc['clips']) < n
+    doc = load(folder)
+    n = len(doc["clips"])
+    doc["clips"] = [c for c in doc["clips"] if c["id"] != clip_id]
+    save(folder, doc)
+    return len(doc["clips"]) < n
 
 
-MODES = ('set', 'min')
-MAX_SECONDS = 45.0             # the longest a gap is shown (script_pack.MAX_GAP_S)
+MODES = ("set", "min")
+MAX_SECONDS = 45.0  # the longest a gap is shown (script_pack.MAX_GAP_S)
 
 
 def settings(folder):
     """What you chose for each gap, apart from the clip: {gap id: {kind: 'map' | 'flyover' | None (the planner chooses), mode: 'set' (exactly `seconds` in the film) | 'min' (at least `seconds`, the plan may make it longer) | None, seconds, must: use it in the film}}."""
-    return load(folder).get('settings') or {}
+    return load(folder).get("settings") or {}
 
 
 def gap_settings(folder, gid):
-    s = settings(folder).get(gid) or {}; return dict(kind=s.get('kind'), mode=s.get('mode'), seconds=s.get('seconds'), must=bool(s.get('must')))
+    s = settings(folder).get(gid) or {}
+    return dict(kind=s.get("kind"), mode=s.get("mode"), seconds=s.get("seconds"), must=bool(s.get("must")))
 
 
 def set_settings(folder, gid, **fields):
     """Change some of a gap's settings (kind, mode, seconds, must); None clears kind and mode. Raises ValueError for a value that is not allowed. Returns the gap's settings."""
     cur = gap_settings(folder, gid)
     for k, v in fields.items():
-        if k not in cur: raise ValueError(f'unknown setting {k}')
+        if k not in cur:
+            raise ValueError(f"unknown setting {k}")
         cur[k] = v
-    if cur['kind'] not in (None,) + KINDS: raise ValueError(f'kind: one of {", ".join(KINDS)}, or none')
-    if cur['mode'] not in (None,) + MODES: raise ValueError('mode: set or min')
-    if cur['mode']:
-        try: sec = float(cur['seconds'])
-        except (TypeError, ValueError): raise ValueError('give the length in seconds')
-        if not MIN_SECONDS <= sec <= MAX_SECONDS: raise ValueError(f'the length: {MIN_SECONDS:g} to {MAX_SECONDS:g} seconds')
-        cur['seconds'] = round(sec, 2)
-    else: cur['seconds'] = None
-    cur['must'] = bool(cur['must']); doc = load(folder); allset = doc.setdefault('settings', {})
-    if cur['kind'] is None and cur['mode'] is None and not cur['must']: allset.pop(gid, None)
-    else: allset[gid] = cur
-    if not allset: doc.pop('settings', None)
-    save(folder, doc); return cur
+    if cur["kind"] not in (None,) + KINDS:
+        raise ValueError(f"kind: one of {', '.join(KINDS)}, or none")
+    if cur["mode"] not in (None,) + MODES:
+        raise ValueError("mode: set or min")
+    if cur["mode"]:
+        try:
+            sec = float(cur["seconds"])
+        except (TypeError, ValueError):
+            raise ValueError("give the length in seconds")
+        if not MIN_SECONDS <= sec <= MAX_SECONDS:
+            raise ValueError(f"the length: {MIN_SECONDS:g} to {MAX_SECONDS:g} seconds")
+        cur["seconds"] = round(sec, 2)
+    else:
+        cur["seconds"] = None
+    cur["must"] = bool(cur["must"])
+    doc = load(folder)
+    allset = doc.setdefault("settings", {})
+    if cur["kind"] is None and cur["mode"] is None and not cur["must"]:
+        allset.pop(gid, None)
+    else:
+        allset[gid] = cur
+    if not allset:
+        doc.pop("settings", None)
+    save(folder, doc)
+    return cur
 
 
-PHOTO_SIZE = '3840x2160'        # a photo clip is made at 4K from the photo (the film scales it down for the preview)
+PHOTO_SIZE = "3840x2160"  # a photo clip is made at 4K from the photo (the film scales it down for the preview)
 
 
 def make_photo(entry, seconds, motion, fps=30.0):
     """The clip for a photo (a still with a pan and zoom, edit/photo_motion.py) shown for `seconds`: id P3 for photo p3, kind `photo`, covering the one moment it was taken (t0 = t1), so the film's overlay shows the race as it was then. `motion` is the photo's {style, seconds, seed}."""
-    pid = str(entry['id']).upper(); iso = _iso(entry['taken_utc'])
-    if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
-    c = dict(id=pid, kind='photo', photo=entry['id'], gap=None, t0=iso, t1=iso, duration_s=0.0, seconds=round(float(seconds), 2), speedup=1.0, fps=float(fps), style=dict(style=motion['style'], seed=int(motion['seed'])), status='planned', size=PHOTO_SIZE, approved=True, by='planner')
-    c['key'] = hashlib.sha1(json.dumps([c['kind'], entry['id'], entry.get('file'), round(c['seconds'], 2), c['fps'], c['style'], PHOTO_SIZE, 1], sort_keys=True).encode()).hexdigest()[:12]; return c
+    pid = str(entry["id"]).upper()
+    iso = _iso(entry["taken_utc"])
+    if seconds < MIN_SECONDS:
+        raise ValueError(f"a clip shorter than {MIN_SECONDS:g} s is not useful")
+    c = dict(
+        id=pid,
+        kind="photo",
+        photo=entry["id"],
+        gap=None,
+        t0=iso,
+        t1=iso,
+        duration_s=0.0,
+        seconds=round(float(seconds), 2),
+        speedup=1.0,
+        fps=float(fps),
+        style=dict(style=motion["style"], seed=int(motion["seed"])),
+        status="planned",
+        size=PHOTO_SIZE,
+        approved=True,
+        by="planner",
+    )
+    c["key"] = hashlib.sha1(
+        json.dumps(
+            [c["kind"], entry["id"], entry.get("file"), round(c["seconds"], 2), c["fps"], c["style"], PHOTO_SIZE, 1],
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()[:12]
+    return c
 
 
-STREETVIEW_SIZE = '3840x2160'    # a street view clip is made at 4K (the film scales it down for the preview)
-STREETVIEW_VERSION = 1           # bumped when the camera changes so the clips are made again
+STREETVIEW_SIZE = "3840x2160"  # a street view clip is made at 4K (the film scales it down for the preview)
+STREETVIEW_VERSION = 1  # bumped when the camera changes so the clips are made again
 
 
 def make_streetview(sec, seconds, t0, t1, fps=30.0):
     """The clip for a chosen street view section `sec` (an entry of streetview.annotate, with its label V1..) shown for `seconds`: kind `streetview`, covering [t0, t1] (epoch seconds) of the race, the time the runner took over the section, so the
     film's overlay runs through those minutes as the view moves along the road."""
-    if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
-    a, b = float(t0), float(t1); c = dict(id=sec['label'], kind='streetview', photo=None, gap=None, t0=_iso(a), t1=_iso(b), duration_s=round(b - a, 1), seconds=round(float(seconds), 2), speedup=round((b - a) / float(seconds), 1), fps=float(fps),
-                                      style=dict(section=sec['key'], provider=sec['provider'], pictures=sec['frames'], camera=sec['kind'], hires=bool(sec.get('hires'))), status='planned', size=STREETVIEW_SIZE, approved=True, by='planner')
-    c['key'] = hashlib.sha1(json.dumps([c['kind'], sec['key'], sec['frames'], round(c['seconds'], 2), c['fps'], STREETVIEW_SIZE, STREETVIEW_VERSION, round(a), round(b)] + (['hires', 'dolly1'] if sec.get('hires') else []), sort_keys=True).encode()).hexdigest()[:12]; return c
+    if seconds < MIN_SECONDS:
+        raise ValueError(f"a clip shorter than {MIN_SECONDS:g} s is not useful")
+    a, b = float(t0), float(t1)
+    c = dict(
+        id=sec["label"],
+        kind="streetview",
+        photo=None,
+        gap=None,
+        t0=_iso(a),
+        t1=_iso(b),
+        duration_s=round(b - a, 1),
+        seconds=round(float(seconds), 2),
+        speedup=round((b - a) / float(seconds), 1),
+        fps=float(fps),
+        style=dict(
+            section=sec["key"],
+            provider=sec["provider"],
+            pictures=sec["frames"],
+            camera=sec["kind"],
+            hires=bool(sec.get("hires")),
+        ),
+        status="planned",
+        size=STREETVIEW_SIZE,
+        approved=True,
+        by="planner",
+    )
+    c["key"] = hashlib.sha1(
+        json.dumps(
+            [
+                c["kind"],
+                sec["key"],
+                sec["frames"],
+                round(c["seconds"], 2),
+                c["fps"],
+                STREETVIEW_SIZE,
+                STREETVIEW_VERSION,
+                round(a),
+                round(b),
+            ]
+            + (["hires", "dolly1"] if sec.get("hires") else []),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()[:12]
+    return c
 
 
-POINTCAM_SIZE = '2560x1440'      # a point camera clip is made at 1440p from the clip's proxy or the street view pictures (the film scales it)
-POINTCAM_VERSION = 1             # bumped when the camera changes so the clips are made again
+POINTCAM_SIZE = "2560x1440"  # a point camera clip is made at 1440p from the clip's proxy or the street view pictures (the film scales it)
+POINTCAM_VERSION = 1  # bumped when the camera changes so the clips are made again
 
 
 def make_pointcam(cam, seconds, t0, t1, fps=25.0, provider=None):
     """The clip for a point camera (edit/pointcam.py, id C1..) shown for `seconds`: kind `pointcam`, covering [t0, t1] (epoch seconds) of the race, the time its shot covers, so the film's overlay runs through those minutes. `provider` is the street view
     provider when it looks from a street view section (for the credits)."""
-    if seconds < MIN_SECONDS: raise ValueError(f'a clip shorter than {MIN_SECONDS:g} s is not useful')
-    a, b = float(t0), float(t1); look = {k: cam[k] for k in ('lat', 'lon', 'height_m', 'before_m', 'after_m', 'fov_near', 'fov_far', 'smooth_s')}
-    c = dict(id=cam['id'], kind='pointcam', photo=None, gap=None, t0=_iso(a), t1=_iso(b), duration_s=round(b - a, 1), seconds=round(float(seconds), 2), speedup=round((b - a) / float(seconds), 1), fps=float(fps), style=dict(source=cam['source'], provider=provider, **look), status='planned', size=POINTCAM_SIZE, approved=True, by='planner')
-    c['key'] = hashlib.sha1(json.dumps([c['kind'], cam['id'], cam['source'], look, round(cam['t_pass'], 1), round(c['seconds'], 2), c['fps'], POINTCAM_SIZE, POINTCAM_VERSION, round(a), round(b)], sort_keys=True).encode()).hexdigest()[:12]; return c
+    if seconds < MIN_SECONDS:
+        raise ValueError(f"a clip shorter than {MIN_SECONDS:g} s is not useful")
+    a, b = float(t0), float(t1)
+    look = {k: cam[k] for k in ("lat", "lon", "height_m", "before_m", "after_m", "fov_near", "fov_far", "smooth_s")}
+    c = dict(
+        id=cam["id"],
+        kind="pointcam",
+        photo=None,
+        gap=None,
+        t0=_iso(a),
+        t1=_iso(b),
+        duration_s=round(b - a, 1),
+        seconds=round(float(seconds), 2),
+        speedup=round((b - a) / float(seconds), 1),
+        fps=float(fps),
+        style=dict(source=cam["source"], provider=provider, **look),
+        status="planned",
+        size=POINTCAM_SIZE,
+        approved=True,
+        by="planner",
+    )
+    c["key"] = hashlib.sha1(
+        json.dumps(
+            [
+                c["kind"],
+                cam["id"],
+                cam["source"],
+                look,
+                round(cam["t_pass"], 1),
+                round(c["seconds"], 2),
+                c["fps"],
+                POINTCAM_SIZE,
+                POINTCAM_VERSION,
+                round(a),
+                round(b),
+            ],
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()[:12]
+    return c

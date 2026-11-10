@@ -1,45 +1,63 @@
 """overlay/mapclip.py: the animated gap map: frame k shows the race at t0 + k * speedup / fps, the marker moves a steady number of pixels, the zoom follows the speed, and a clip encodes."""
+
 import numpy as np
 import pytest
 from overlay_fakes import T0, TileServer, race_track
+
 from strata360.edit import llm_remote as L
-from strata360.overlay import mapclip as MC, tiles as TL
+from strata360.overlay import mapclip as MC
+from strata360.overlay import tiles as TL
 from strata360.overlay.series import Series
 
 
 @pytest.fixture(autouse=True)
 def no_keys(tmp_path, monkeypatch):
-    monkeypatch.setattr(L, 'VARS_FILE', str(tmp_path / 'secrets.env')); monkeypatch.delenv('THUNDERFOREST_API_KEY', raising=False)
+    monkeypatch.setattr(L, "VARS_FILE", str(tmp_path / "secrets.env"))
+    monkeypatch.delenv("THUNDERFOREST_API_KEY", raising=False)
 
 
 @pytest.fixture
-def tiles(tmp_path): return TL.Tiles('osm', cache_dir=str(tmp_path / 'tiles'), fetch=TileServer())
+def tiles(tmp_path):
+    return TL.Tiles("osm", cache_dir=str(tmp_path / "tiles"), fetch=TileServer())
 
 
 @pytest.fixture
-def series(): return Series(race_track(n=3600, speed=3.0, grade=0.02))
+def series():
+    return Series(race_track(n=3600, speed=3.0, grade=0.02))
 
 
-def clip(series, tiles, seconds=4.0, fps=10.0, **kw): return MC.MapClip(series, T0 + 300, T0 + 3300, seconds, fps=fps, size=(320, 180), tiles=tiles, **kw)
+def clip(series, tiles, seconds=4.0, fps=10.0, **kw):
+    return MC.MapClip(series, T0 + 300, T0 + 3300, seconds, fps=fps, size=(320, 180), tiles=tiles, **kw)
 
 
 def test_frame_k_shows_the_race_at_speedup_times_k_over_fps(series, tiles):
-    c = clip(series, tiles); assert c.frames == 40 and c.speedup == pytest.approx(3000 / 4.0)
-    assert c.time(0) == T0 + 300 and c.time(10) == pytest.approx(T0 + 300 + 10 * 750 / 10) and c.time(40) == pytest.approx(T0 + 3300)
+    c = clip(series, tiles)
+    assert c.frames == 40 and c.speedup == pytest.approx(3000 / 4.0)
+    assert (
+        c.time(0) == T0 + 300
+        and c.time(10) == pytest.approx(T0 + 300 + 10 * 750 / 10)
+        and c.time(40) == pytest.approx(T0 + 3300)
+    )
     assert np.allclose(c.times()[:3], [c.time(0), c.time(1), c.time(2)])
 
 
 def test_a_frame_is_an_rgb_picture_of_the_frame_size(series, tiles):
-    f = clip(series, tiles).frame(5); assert f.shape == (180, 320, 3) and f.dtype == np.uint8
+    f = clip(series, tiles).frame(5)
+    assert f.shape == (180, 320, 3) and f.dtype == np.uint8
 
 
 def test_the_marker_is_drawn_where_the_runner_is(series, tiles):
-    c = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles); f = c.frame(20); blue = (f[..., 2] > 200) & (f[..., 0] < 60) & (f[..., 1] < 160); ys, xs = np.nonzero(blue)
+    c = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles)
+    f = c.frame(20)
+    blue = (f[..., 2] > 200) & (f[..., 0] < 60) & (f[..., 1] < 160)
+    ys, xs = np.nonzero(blue)
     assert len(xs) > 5 and abs(np.median(xs) - 480) < 40 and abs(np.median(ys) - 270) < 40
 
 
 def test_the_camera_follows_the_runner_and_the_marker_moves_steadily(series, tiles):
-    c = clip(series, tiles); k = 2.0 ** c.z; px = np.hypot(np.diff(c.pos[0]) * k[1:], np.diff(c.pos[1]) * k[1:])
+    c = clip(series, tiles)
+    k = 2.0**c.z
+    px = np.hypot(np.diff(c.pos[0]) * k[1:], np.diff(c.pos[1]) * k[1:])
     assert np.all(np.isfinite(px)) and px[5:-5].max() < 0.02 * c.W and px[5:-5].min() > 0.001 * c.W
 
 
@@ -49,35 +67,78 @@ def test_the_zoom_is_closer_when_the_clip_is_slower(series, tiles):
 
 
 def test_the_picture_has_no_overlay_the_film_adds_its_own(series, tiles):
-    c = clip(series, tiles); assert not hasattr(c, 'overlay') and not hasattr(c, 'gap') and c.frame(3).shape == (180, 320, 3)
+    c = clip(series, tiles)
+    assert not hasattr(c, "overlay") and not hasattr(c, "gap") and c.frame(3).shape == (180, 320, 3)
 
 
 def test_a_stretch_without_length_is_refused(series, tiles):
-    with pytest.raises(ValueError): MC.MapClip(series, T0 + 100, T0 + 100, 5, size=(320, 180), tiles=tiles)
+    with pytest.raises(ValueError):
+        MC.MapClip(series, T0 + 100, T0 + 100, 5, size=(320, 180), tiles=tiles)
 
 
 def test_render_writes_an_mp4(series, tiles, tmp_path):
-    import shutil, subprocess
-    if not shutil.which('ffmpeg'): pytest.skip('no ffmpeg')
-    out = str(tmp_path / 'x' / 'g.mp4'); seen = []; MC.render(clip(series, tiles, seconds=1.0, fps=10.0), out, progress=lambda d, n: seen.append((d, n)), bitrate='1M')
-    assert seen[-1] == (10, 10) and not (tmp_path / 'x' / 'g.mp4.part.mp4').exists()
-    n = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', out], capture_output=True, text=True).stdout.strip(); assert n == '10'
+    import shutil
+    import subprocess
+
+    if not shutil.which("ffmpeg"):
+        pytest.skip("no ffmpeg")
+    out = str(tmp_path / "x" / "g.mp4")
+    seen = []
+    MC.render(clip(series, tiles, seconds=1.0, fps=10.0), out, progress=lambda d, n: seen.append((d, n)), bitrate="1M")
+    assert seen[-1] == (10, 10) and not (tmp_path / "x" / "g.mp4.part.mp4").exists()
+    n = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-count_frames",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+            out,
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert n == "10"
 
 
 def test_the_whole_route_on_screen_is_drawn_in_one_colour_and_the_stretch_is_not_marked(series, tiles, monkeypatch):
     from strata360.overlay import draw as D
-    calls = []; real = D.route_line
-    monkeypatch.setattr(D, 'route_line', lambda img, u, v, colour=(230, 20, 20), width=3.0: (calls.append((tuple(colour), int(np.isfinite(u).sum()))), real(img, u, v, colour, width))[1])
-    c = clip(series, tiles); c.frame(3)
+
+    calls = []
+    real = D.route_line
+    monkeypatch.setattr(
+        D,
+        "route_line",
+        lambda img, u, v, colour=(230, 20, 20), width=3.0: (
+            calls.append((tuple(colour), int(np.isfinite(u).sum()))),
+            real(img, u, v, colour, width),
+        )[1],
+    )
+    c = clip(series, tiles)
+    c.frame(3)
     coloured = [(col, n) for col, n in calls if col != (0, 0, 0)]
-    assert coloured == [(MC.ROUTE, len(series.route_lat))]                                          # every point of the route, in one colour: no red-behind, white-ahead split, no stretch drawn differently
+    assert coloured == [
+        (MC.ROUTE, len(series.route_lat))
+    ]  # every point of the route, in one colour: no red-behind, white-ahead split, no stretch drawn differently
 
 
 def test_the_start_checkpoints_and_finish_are_drawn_under_the_runner_as_on_the_overlay_maps(series, tiles):
     blue = lambda img: int((np.abs(img.astype(int) - (29, 78, 216)).sum(2) < 60).sum())
-    lat = np.interp(T0 + 300, series._pt, series.route_lat); lon = np.interp(T0 + 300, series._pt, series.route_lon)
+    lat = np.interp(T0 + 300, series._pt, series.route_lat)
+    lon = np.interp(T0 + 300, series._pt, series.route_lon)
     places = dict(start=(lat - 0.002, lon), finish=(lat + 0.02, lon), checkpoints=[(3, lat + 0.0009, lon)])
-    plain = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles); marked = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles, places=places)
-    a, b = plain.frame(0), marked.frame(0); assert blue(b) - blue(a) > 8 and not np.array_equal(a, b)                                               # the numbered checkpoint ahead of the runner
-    d = np.abs(a.astype(int) - b.astype(int)).sum(2) > 0; assert d.mean() < 0.05                                                                           # only the badges changed
-    assert np.array_equal(plain.frame(5), MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles, places=None).frame(5))
+    plain = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles)
+    marked = MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles, places=places)
+    a, b = plain.frame(0), marked.frame(0)
+    assert blue(b) - blue(a) > 8 and not np.array_equal(a, b)  # the numbered checkpoint ahead of the runner
+    d = np.abs(a.astype(int) - b.astype(int)).sum(2) > 0
+    assert d.mean() < 0.05  # only the badges changed
+    assert np.array_equal(
+        plain.frame(5),
+        MC.MapClip(series, T0 + 300, T0 + 3300, 4.0, fps=10.0, size=(960, 540), tiles=tiles, places=None).frame(5),
+    )

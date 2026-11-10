@@ -1,12 +1,14 @@
 import struct
 
+
 def pack_varint(n):
-    res = b''
+    res = b""
     while n > 127:
-        res += struct.pack('B', (n & 0x7F) | 0x80)
+        res += struct.pack("B", (n & 0x7F) | 0x80)
         n >>= 7
-    res += struct.pack('B', n)
+    res += struct.pack("B", n)
     return res
+
 
 def pack_msg(field, wire, data):
     k = (field << 3) | wire
