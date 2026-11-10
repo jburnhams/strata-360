@@ -3,18 +3,18 @@
 #     bad values from matmul on the M4 test machine), and
 #   - installs deepfilternet without its numpy<2 pin and patches its removed-torchaudio import (scripts/patch_deepfilternet.py).
 # numpy is installed by the script and deliberately not listed here.
-scipy==1.16.3
+scipy==1.17.1
 opencv-python==4.12.0.88
 pillow==12.3.0          # the race overlay: text (FreeType) and map tiles (overlay/)
-torch==2.9.1
-torchaudio==2.9.1
+torch==2.15.0
+torchaudio==2.11.1
 faster-whisper==1.2.1
 av==19.0.1              # also used directly: osv/recover.py decodes AAC frames to split audio runs (faster-whisper depends on it too)
-ctranslate2==4.8.2
-onnxruntime==1.23.2
+ctranslate2==4.8.5
+onnxruntime==1.31.1
 transformers==4.57.3
-tokenizers==0.22.1
-sentencepiece==0.2.2
+tokenizers==0.23.3
+sentencepiece==0.2.3
 sacremoses==0.2.0
 huggingface-hub==0.36.0
 scikit-image==0.26.0
