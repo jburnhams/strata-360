@@ -21,7 +21,7 @@ scikit-image==0.26.0
 pyyaml==6.0.3
 loguru==0.7.3
 appdirs==1.4.4
-packaging==23.2
+packaging==26.3
 fastapi
 uvicorn
 mcp>=2,<3               # the read-only agent tools (server/mcp_tools.py): /mcp on the server and `strata360 mcp`; optional: without it the server just has no /mcp
