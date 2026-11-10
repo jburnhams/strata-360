@@ -1,6 +1,6 @@
 # Light dependencies for the unit and integration suites (no torch, whisper or models). The CI workflows install exactly this.
 numpy>=2.2
-scipy>=1.14
+scipy>=1.18.1
 opencv-python-headless>=4.10
 pillow>=10                     # the race overlay (overlay/draw.py)
 pyyaml
@@ -18,4 +18,4 @@ pytest-timeout                 # a hung test fails instead of hanging CI
 pytest-xdist                   # pytest -n auto
 diff-cover                     # coverage of the lines a change touches: diff-cover coverage.xml --compare-branch origin/main
 tzdata                         # IANA timezone database, needed on Windows for zoneinfo
-av>=14                         # PyAV: osv/recover.py checks each AAC frame it cuts by decoding it
+av>=19.0.2                         # PyAV: osv/recover.py checks each AAC frame it cuts by decoding it
