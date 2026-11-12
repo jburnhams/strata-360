@@ -1,4 +1,5 @@
-"""The voice-over track: the script spoken by a local synthetic voice (Kokoro, an open neural model that runs locally on macOS, Windows and Linux), placed on the film timeline, so timings and previews are realistic. Any line can later be replaced by your own
+"""The voice-over track: the script spoken by a synthetic voice (strata-models' `speak` role when that service runs, with the voice its eval
+chose, at an even pace; else Kokoro here, an open neural model that runs locally on macOS, Windows and Linux), placed on the film timeline, so timings and previews are realistic. Any line can later be replaced by your own
 recording; the mix then uses the recording for that line and the synthetic voice for the rest.
 
 Files in `<project>/voiceover/`:
@@ -227,7 +228,71 @@ def _el_speak(voice, rate, text, out):
         w.writeframes(pcm)
 
 
+# ---- strata-models: the service that owns the GPU on omarchy speaks for us (role `speak`). Its eval (speak-narration) chose the model,
+# voice and settings: voice "chosen" asks for exactly that; the Kokoro voices are offered too, spoken by the service's copy of the same model.
+SM_APP = "strata-360"
+SM_CHOSEN = "chosen"
+_SM = {}
+
+
+def _sm():
+    try:
+        import strata_models_client as sm
+    except ImportError:
+        return None
+    return sm
+
+
+def _sm_available():
+    """The service runs and serves `speak` (STRATA360_MODELS=local keeps everything here)."""
+    if os.environ.get("STRATA360_MODELS", "").lower() == "local":
+        return False
+    sm = _sm()
+    if not (sm and sm.available()):
+        return False
+    try:
+        return _sm_role_model() is not None
+    except (sm.Unavailable, sm.JobFailed):
+        return False
+
+
+def _sm_role_model():
+    """The model serving `speak` now, asked at most once a minute: part of every "chosen" line's cache key and of the track's signature, so a
+    new choice is spoken again."""
+    now = time.monotonic()
+    if "model" not in _SM or now - _SM["at"] > 60:
+        _SM.update(model=_sm().role_model("speak"), at=now)
+    return _SM["model"]
+
+
+def _sm_voices():
+    return [dict(name=SM_CHOSEN, label=f"Chosen by eval ({_sm_role_model()})", group="Chosen", lang="en_GB")] + [
+        dict(name=n, label=n[3:].title(), group="Kokoro, " + GROUPS[n[:2]], lang="en_GB") for n in DEFAULT_VOICES
+    ]
+
+
+def _sm_speak(voice, rate, text, out):
+    """`rate` is asked for as a pace (wpm, measured by the service in syllables, so every line comes out at it whatever its words); the
+    service also cuts pauses between words to 0.45 s, so a line's length is its words at that pace."""
+    import shutil
+
+    sm = _sm()
+    kw = dict(wpm=float(min(max(rate, 90), 240)))
+    r = (
+        sm.speak(text, app=SM_APP, **kw)
+        if voice in (None, SM_CHOSEN)
+        else sm.speak(text, app=SM_APP, model="kokoro-v1", voice=voice, **kw)
+    )
+    shutil.copyfile(r["path"], out)
+
+
+def voice_id(engine, voice):
+    """What the line's audio depends on besides its words and rate: the voice, and for the service's chosen voice, the model that chose it."""
+    return f"{voice}@{_sm_role_model()}" if engine == "strata-models" and voice in (None, SM_CHOSEN) else voice
+
+
 ENGINES = {
+    "strata-models": ("strata-models (the voice its eval chose)", _sm_available, _sm_voices, _sm_speak),
     "elevenlabs": ("ElevenLabs (hosted, British male)", _el_available, _el_voices, _el_speak),
     "kokoro": ("Kokoro (open model, British male)", _kokoro_available, voices, _kokoro_speak),
 }
@@ -249,7 +314,7 @@ def pick(state):
     av = available_engines()
     if not av:
         raise RuntimeError(
-            "the voice model is not installed: run `strata360 fetch-models --voice` (about 350 MB, Kokoro, Apache 2.0) and `pip install kokoro-onnx`"
+            "no voice: start strata-models (it speaks with the voice its eval chose), or install Kokoro here: `strata360 fetch-models --voice` (about 350 MB, Apache 2.0) and `pip install kokoro-onnx`"
         )
     e = next((x for x in av if x["id"] == state.get("engine")), av[0])
     names = [v["name"] for v in e["voices"]]
@@ -380,7 +445,7 @@ def _name(seg):
 
 
 def synth_path(folder, seg, text, engine, voice, rate):
-    h = hashlib.sha1(f"{engine}|{voice}|{rate}|{text}".encode()).hexdigest()[:10]
+    h = hashlib.sha1(f"{engine}|{voice_id(engine, voice)}|{rate}|{text}".encode()).hexdigest()[:10]
     return os.path.join(base(folder), "synth", f"{_name(seg)}-{h}.wav")
 
 
@@ -477,7 +542,8 @@ def signature(folder, script, st, total):
     }
     return hashlib.sha1(
         json.dumps(
-            [script, st["engine"], st["voice"], st["rate"], rec, st["use"], round(total, 2)], sort_keys=True
+            [script, st["engine"], voice_id(st["engine"], st["voice"]), st["rate"], rec, st["use"], round(total, 2)],
+            sort_keys=True,
         ).encode()
     ).hexdigest()[:12]
 

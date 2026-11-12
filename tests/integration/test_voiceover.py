@@ -186,7 +186,7 @@ class TestVoices:
 
     def test_no_engine_is_reported_clearly(self, monkeypatch, fake_engine):
         monkeypatch.setattr(fake_engine, "ENGINES", {"none": ("None", lambda: False, lambda: [], None)})
-        with pytest.raises(RuntimeError, match="voice model is not installed"):
+        with pytest.raises(RuntimeError, match="no voice"):
             fake_engine.pick({})
 
 
