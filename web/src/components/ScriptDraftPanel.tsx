@@ -8,7 +8,7 @@ import { PanelSkeleton } from './Skeleton'
 import Phrase from './Phrase'
 import WordMarker from './WordMarker'
 import RoughMixPlayer from './RoughMixPlayer'
-import { Button, Input, NativeSelect, Textarea, Tooltip } from 'strata-react'
+import { Button, Checkbox, Input, NativeSelect, Textarea, Tooltip } from 'strata-react'
 
 const KIND: Record<ScriptItem['type'], { label: string; cls: string }> = {
   vo: { label: 'narration', cls: 'bg-info-subtle text-info' },
@@ -86,7 +86,7 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="type-body-sm font-semibold">Film script</h3>
         <label className="type-caption text-muted-foreground">length (s) <Input type="number" min={30} value={target} onChange={e => setTarget(e.target.value)} placeholder="music / automatic" className="ml-1" /></label>
-        <label className="flex items-center gap-1 type-caption text-muted-foreground"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> ignore the music</label>
+        <Checkbox label="ignore the music" checked={auto} onCheckedChange={(checked: boolean) => setAuto(checked)} />
         <Button variant="default" disabled={busy || st.running || !st.key_configured} onClick={() => go(!!draft)}>{st.running ? 'writing…' : draft ? 'Revise this draft' : 'Write a draft'}</Button>
         {draft && <Tooltip label="start again without the current draft"><Button disabled={busy || st.running || !st.key_configured} onClick={() => go(false)}>New draft</Button></Tooltip>}
       </div>

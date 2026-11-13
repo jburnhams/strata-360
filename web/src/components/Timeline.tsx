@@ -8,7 +8,7 @@ import { PanelSkeleton } from './Skeleton'
 import VoiceTrack from './VoiceTrack'
 import WindowPlayer from './WindowPlayer'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
-import { Button, NativeSelect, Tooltip } from 'strata-react'
+import { Button, Checkbox, NativeSelect, Tooltip } from 'strata-react'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').slice(-9)
@@ -68,7 +68,7 @@ export default function Timeline({ folder, clips, onOpenClip }: { folder: string
           <label>Tempo (bpm)<input type="number" min={60} max={200} value={bpm} onChange={e => setBpm(Number(e.target.value))} className={`${input} ml-2`} /></label>
           <Button variant="default" disabled={busy} onClick={() => ownPlan(() => api.propose(folder, { length_s: length, bpm, keep: true, replace: true }))}>{plan ? 'Re-plan' : 'Propose a film'}</Button>
           {plan && <Tooltip label="a different arrangement of techniques (same moments)"><Button disabled={busy} onClick={() => ownPlan(() => api.propose(folder, { seed: s.seed + 1, keep: false, replace: true }))}>Another version</Button></Tooltip>}
-          {plan && <label className="flex items-center gap-1" title="long quiet running between two windows of a clip is raced through in a fast, stabilised hyperlapse instead of being cut out"><input type="checkbox" disabled={busy} checked={s.hyperlapse !== false} onChange={e => ownPlan(() => api.propose(folder, { hyperlapse: e.target.checked, keep: true, replace: true }))} />Speed ramps</label>}
+          {plan && <Checkbox label="Speed ramps" checked={s.hyperlapse !== false} onCheckedChange={(checked: boolean) => ownPlan(() => api.propose(folder, { hyperlapse: checked, keep: true, replace: true }))} disabled={busy} title="long quiet running between two windows of a clip is raced through in a fast, stabilised hyperlapse instead of being cut out" />}
           {(Object.keys(ov.tech_force).length + Object.keys(ov.transitions ?? {}).length + ov.locked.length + ov.bans_cands.length + ov.bans_techs.length + Object.keys(ov.clip_weight).length) > 0 &&
             <Button variant="link" size="sm" disabled={busy} onClick={() => run(() => api.override(folder, { action: 'reset' }))}>clear my changes</Button>}
           {busy && <span className="text-muted-foreground">planning…</span>}

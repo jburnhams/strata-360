@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type OverlaySettings as Settings, type OverlayState } from '../api'
-import { Button } from 'strata-react'
+import { Button, Checkbox } from 'strata-react'
 
 const STYLE_LABEL: Record<string, string> = { 'tf-outdoors': 'Outdoors (contours, paths)', 'tf-landscape': 'Landscape (towns, relief)', 'tf-cycle': 'Cycle', 'tf-transport': 'Transport', 'tf-atlas': 'Atlas', osm: 'OpenStreetMap (no key)' }
 const styleLabel = (s: { name: string; needs_key: boolean }) => STYLE_LABEL[s.name] ?? s.name
@@ -30,9 +30,9 @@ export default function OverlaySettings({ folder, disabled = false }: { folder: 
       <summary className="cursor-pointer type-body-sm font-medium">Overlay <span className="font-normal text-muted-foreground">· {draft.enabled ? `${draft.elements.length} elements` : 'off'}{keyNeeded && !st.key_set ? ' · map key missing' : ''}</span></summary>
       <fieldset disabled={disabled || saving} className="mt-3 space-y-3">
         <legend className="sr-only">Overlay settings</legend>
-        <label className="block type-body-sm"><input type="checkbox" checked={draft.enabled} onChange={e => set({ enabled: e.target.checked })} /> Draw the race overlay on the film</label>
+        <Checkbox label="Draw the race overlay on the film" checked={draft.enabled} onCheckedChange={(checked: boolean) => set({ enabled: checked })} />
         <div role="group" aria-label="Elements" className="flex flex-wrap gap-x-4 gap-y-1">
-          {st.elements.map(e => <label key={e.name} className="type-body-sm"><input type="checkbox" checked={draft.elements.includes(e.name)} disabled={!draft.enabled} onChange={ev => set({ elements: st.elements.map(x => x.name).filter(x => x === e.name ? ev.target.checked : draft.elements.includes(x)) })} /> {e.label}</label>)}
+          {st.elements.map(e => <Checkbox key={e.name} label={`${e.label}`} checked={draft.elements.includes(e.name)} onCheckedChange={(checked: boolean) => set({ elements: st.elements.map(x => x.name).filter(x => x === e.name ? checked : draft.elements.includes(x)) })} disabled={!draft.enabled} />)}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {map('Whole-route map style', 'route_style')}
@@ -40,7 +40,7 @@ export default function OverlaySettings({ folder, disabled = false }: { folder: 
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="type-body-sm">Close-up zoom <input type="number" className={sel + ' w-20'} min={st.zoom_min} max={st.zoom_max} step={0.5} value={draft.local_zoom} onChange={e => set({ local_zoom: Number(e.target.value) })} /></label>
-          <label className="type-body-sm" title="The close-up zooms in where the map is busy and out on straight stretches, within this many levels of the zoom above."><input type="checkbox" checked={draft.auto_zoom} onChange={e => set({ auto_zoom: e.target.checked })} /> Zoom by itself</label>
+          <Checkbox label="Zoom by itself" checked={draft.auto_zoom} onCheckedChange={(checked: boolean) => set({ auto_zoom: checked })} title="The close-up zooms in where the map is busy and out on straight stretches, within this many levels of the zoom above." />
           <label className="type-body-sm">by up to <input type="number" className={sel + ' w-20'} min={0} max={4} step={0.5} value={draft.zoom_range} disabled={!draft.auto_zoom} onChange={e => set({ zoom_range: Number(e.target.value) })} /> levels</label>
         </div>
         <div className="flex items-center gap-3">

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type UIEvent } from 're
 import { api, type StillActive, type StillMeta } from '../api'
 import { dur } from './RenderProgress'
 import { clock, enlargeLabel, enlargeShort, sizeLabel } from './stillModes'
-import { Button, NativeSelect } from 'strata-react'
+import { Button, Checkbox, NativeSelect } from 'strata-react'
 
 const when = (m: StillMeta) => new Date(m.rendered ?? m.modified * 1000).toLocaleString()
 const mb = (b: number) => `${(b / 1e6).toFixed(1)} MB`
@@ -26,7 +26,7 @@ export default function StillGallery({ folder, stills, active, loading }: { fold
       <div className="mb-2 flex flex-wrap items-center gap-3 type-body-sm">
         <h5 className="font-semibold">All stills ({stills.length})</h5>
         <label>Order <NativeSelect size="sm" value={order} onChange={e => setOrder(e.target.value as 'newest' | 'film')}><option value="newest">newest first</option><option value="film">by film time</option></NativeSelect></label>
-        {stills.some(s => !s.current) && <label><input type="checkbox" checked={onlyCurrent} onChange={e => setOnlyCurrent(e.target.checked)} /> Only the current plan</label>}
+        {stills.some(s => !s.current) && <Checkbox label="Only the current plan" checked={onlyCurrent} onCheckedChange={(checked: boolean) => setOnlyCurrent(checked)} />}
         {picked.length > 0 && <button className={chip} onClick={() => setPicked([])}>clear comparison ({picked.length})</button>}
       </div>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">

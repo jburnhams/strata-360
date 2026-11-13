@@ -1,6 +1,6 @@
 import { api, type Photo } from '../api'
 import PhotoMotion from './PhotoMotion'
-import { Button } from 'strata-react'
+import { Button, Checkbox } from 'strata-react'
 
 const when = (t: number, tz: string) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(',', '') } catch { return new Date(t * 1000).toISOString() } }
 const hms = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -32,7 +32,7 @@ export default function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }:
         <div className="text-muted-foreground" title={`how the time was worked out: ${p.time_source}`}>{p.track ? `${hms(p.track.elapsed_s)} into the race · km ${p.track.km}` : 'not on the run'} · {p.time_source}</div>
         <div className="text-muted-foreground">{p.loc ? `${p.loc.lat.toFixed(4)}, ${p.loc.lon.toFixed(4)} (${p.loc.source})` : 'no position'}{p.apart_m != null ? ` · ${p.apart_m} m from the run` : ''}</div>
         {p.analysis && <Analysis folder={folder} id={p.id} a={p.analysis} />}
-        <label className="flex items-center gap-1.5" title="An option for the film: the script writer may show this photo, and it is in the film list on the left (open it there to make it a must)"><input type="checkbox" aria-label={`Use ${p.name} in the film`} checked={!!p.use} onChange={e => api.setPhotoUse(folder, p.id, e.target.checked).then(() => onMotion?.())} /> Use in the film</label>
+        <Checkbox label={`Use ${p.name} in the film`} checked={!!p.use} onCheckedChange={(checked: boolean) => api.setPhotoUse(folder, p.id, checked).then(() => onMotion?.())} title="An option for the film: the script writer may show this photo, and it is in the film list on the left (open it there to make it a must)" />
         <PhotoMotion folder={folder} p={p} onChanged={() => onMotion?.()} />
         {p.flag && <div role="alert" className="text-warning">⚠ {p.flag}</div>}
         <div className="flex gap-3">

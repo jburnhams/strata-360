@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api, type DetectedObject, type ObjectsInfo, type Region } from '../api'
-import { Button, Tooltip } from 'strata-react'
+import { Button, Checkbox, Tooltip } from 'strata-react'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const LIMIT = 12
@@ -55,8 +55,8 @@ export default function ObjectsCard({ folder, clip, info, marked, onMarked, onLo
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 type-caption text-muted-foreground">
         <span>{list.length - (showHidden ? nHidden : 0)} thing{list.length - (showHidden ? nHidden : 0) === 1 ? '' : 's'}{areas.length ? `, ${areas.length} area${areas.length === 1 ? '' : 's'} of snow or water` : ''}, from {info.moments} moments{info.model ? ` · named by ${info.model}` : ''}</span>
         <span className="flex flex-wrap items-center gap-3">
-          {nHidden > 0 && <label className="flex items-center gap-1"><input type="checkbox" checked={showHidden} onChange={e => setShowHidden(e.target.checked)} />Show {nHidden} hidden</label>}
-          <label className="flex items-center gap-1"><input type="checkbox" checked={marked} onChange={e => onMarked(e.target.checked)} />Show on the video</label>
+          {nHidden > 0 && <Checkbox label={`Show ${nHidden} hidden`} checked={showHidden} onCheckedChange={(checked: boolean) => setShowHidden(checked)} />}
+          <Checkbox label="Show on the video" checked={marked} onCheckedChange={(checked: boolean) => onMarked(checked)} />
         </span>
       </div>
       {list.length === 0 && areas.length === 0 && <p className="type-body-sm text-muted-foreground">Nothing found.</p>}

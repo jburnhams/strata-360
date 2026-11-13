@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { PanelSkeleton } from './Skeleton'
-import { Textarea } from 'strata-react'
+import { Checkbox, Textarea } from 'strata-react'
 
 // A note saved as you type: for the whole folder (clip undefined) or one clip. Used, with the transcript and the track data, to write the voice-over script.
 export default function NoteBox({ folder, clip, title, placeholder }: { folder: string; clip?: string; title: string; placeholder: string }) {
@@ -38,7 +38,7 @@ export default function NoteBox({ folder, clip, title, placeholder }: { folder: 
       <label className="mt-3 block type-body-sm"><b>Voice-over MUST INCLUDE</b> <span className="type-caption text-muted-foreground">{clip ? 'one piece of narration per line; each is spoken word for word inside this clip' : 'one piece of narration per line; each is spoken word for word somewhere in the film'}</span>
         <Textarea value={vo} onChange={e => { setVo(e.target.value); saveVo(e.target.value, ordered) }} rows={3} placeholder="Narration you want in the film, written as it should be spoken"
           className="mt-1 w-full" /></label>
-      {!clip && <label className="flex items-center gap-1.5 type-caption text-muted-foreground"><input type="checkbox" checked={ordered} onChange={e => { setOrdered(e.target.checked); saveVo(vo, e.target.checked, true) }} /> keep them in the order written (otherwise they can come in any order)</label>}
+      {!clip && <Checkbox label="keep them in the order written (otherwise they can come in any order)" checked={ordered} onCheckedChange={(checked: boolean) => { setOrdered(checked); saveVo(vo, checked, true) }} />}
     </section>
   )
 }

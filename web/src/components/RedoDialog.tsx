@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type ItemStatus, type StateMatrix } from '../api'
-import { Button, Tooltip } from 'strata-react'
+import { Button, Checkbox, Tooltip } from 'strata-react'
 
 const DOT: Record<string, string> = { ok: 'bg-primary', failed: 'bg-danger', active: 'bg-warning', stale: 'bg-warning', none: 'bg-neutral-4' }
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
@@ -31,7 +31,7 @@ export default function RedoDialog({ folder, stage, clip, onClose }: { folder: s
         <p className="mb-3 type-body-sm text-muted-foreground">Ticked results are forgotten and processed again by the next worker. Files stay until they are replaced.</p>
         <div className="mb-3 flex flex-wrap items-center gap-3 type-body-sm">
           <Button variant="link" onClick={all}>select all</Button><Button variant="link" onClick={() => setSel(new Set())}>select none</Button>
-          <label className="flex items-center gap-1"><input type="checkbox" checked={cascade} onChange={e => setCascade(e.target.checked)} />also the stages that depend on the one I tick</label>
+          <Checkbox label="also the stages that depend on the one I tick" checked={cascade} onCheckedChange={(checked: boolean) => setCascade(checked)} />
           <span className="ml-auto text-muted-foreground">{sel.size} selected</span>
         </div>
         <div className="overflow-auto rounded-surface border border-border">

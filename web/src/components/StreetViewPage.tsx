@@ -9,7 +9,7 @@ import { api } from '../api'
 import { AimVideoOverlay, useAimPath } from './PointCams'
 import type { EndMarkers, PointCam, Poi, StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
-import { Button, NativeSelect, Tooltip } from 'strata-react'
+import { Button, Checkbox, NativeSelect, Tooltip } from 'strata-react'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
 const NAME: Record<SvProvider, string> = { mapillary: 'Mapillary', panoramax: 'Panoramax', google: 'Google' }
@@ -196,7 +196,7 @@ function Filters({ shown, setShown, data, filters, setFilters, total, showing }:
         <div role="group" aria-label="Filters" className="absolute left-0 top-full z-[1000] mt-1 w-96 max-w-full space-y-2 rounded-surface border border-border bg-card p-3 type-body-sm shadow-overlay">
           {FILTERS.map(g => (
             <fieldset key={g.title}><legend className="type-caption font-semibold uppercase tracking-wide text-muted-foreground">{g.title}</legend>
-              {g.items.map(([k, label]) => <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={!!filters[k]} onChange={e => setFilters({ ...filters, [k]: e.target.checked })} />{label}</label>)}</fieldset>
+              {g.items.map(([k, label]) => <Checkbox key={k} label={`${label}`} checked={!!filters[k]} onCheckedChange={(checked: boolean) => setFilters({ ...filters, [k]: checked })} />)}</fieldset>
           ))}
           <div className="flex gap-3"><Button variant="link" size="sm" type="button" onClick={() => setFilters(DEFAULT_FILTERS)}>Usable only</Button><Button variant="link" size="sm" type="button" onClick={() => setFilters(SHOW_ALL)}>Show everything</Button></div>
         </div>
@@ -261,9 +261,7 @@ export function ChoiceRadios({ section, onChoose }: { section: SvSectionInfo; on
 /** The higher resolution of a Google section: the look-around video, the preview and the clip in the final film are made from views twice as close (about four times the requests to Google, asked for when they are made, and kept). */
 export function HiresTick({ section, onHires }: { section: SvSectionInfo; onHires: (key: string, on: boolean) => void }) {
   return (
-    <label className="mt-1 flex items-center gap-1 type-caption" title="Google gives flat views only, so a 360 picture is stitched from zoomed-in ones: closer views mean more detail, and more requests (60 a panorama instead of 16)">
-      <input type="checkbox" aria-label="Higher resolution" checked={!!section.hires} onChange={e => onHires(section.key, e.target.checked)} /> Higher resolution, everywhere this section is used (the videos here and the clip in the final film): about 4 times the requests to Google, asked for when the video or the film is made
-    </label>
+    <Checkbox label="Higher resolution" checked={!!section.hires} onCheckedChange={(checked: boolean) => onHires(section.key, checked)} detail="Higher resolution, everywhere this section is used (the videos here and the clip in the final film): about 4 times the requests to Google, asked for when the video or the film is made" title="Google gives flat views only, so a 360 picture is stitched from zoomed-in ones: closer views mean more detail, and more requests (60 a panorama instead of 16)" />
   )
 }
 

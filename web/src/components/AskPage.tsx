@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type AgentImage, type AgentPending, type AgentStatus, type AgentStep, type AgentTurn, type AgentUndoState } from '../api'
 import { PanelSkeleton } from './Skeleton'
-import { Button, Textarea, Tooltip } from 'strata-react'
+import { Button, Checkbox, Textarea, Tooltip } from 'strata-react'
 
 // Ask questions about the project in plain words: a hosted model answers by looking things up with read-only tools (the clips, the transcript, the edit plan, the script ...). It cannot change anything.
 // What the tools return while answering goes to the model service (never pictures); the key stays on the server.
@@ -117,8 +117,8 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
           className="min-w-0 flex-1" />
         <Button variant="default" type="submit" disabled={!ready || busy || !text.trim()} className="self-end">Ask</Button>
       </form>
-      <label className="mt-2 flex items-center gap-2 type-caption text-muted-foreground" title="Off: the model never sees a picture, it is only shown to you. On: each picture is sent to a vision model that describes it in words."><input type="checkbox" checked={vision} disabled={!ready} onChange={e => setVision(e.target.checked)} /> Let the model see the pictures it fetches (sent to {status?.vision_model ?? 'a vision model'})</label>
-      <label className="mt-1 flex items-center gap-2 type-caption text-muted-foreground" title="Off: the assistant can only look. On: it can change the plan, transcript, notes and script like you can; every change is backed up and journalled, and costly or heavy actions wait for your approval here."><input type="checkbox" checked={write} disabled={!ready} onChange={e => setWrite(e.target.checked)} /> Allow edits (backed up and journalled; costly or heavy actions still wait for your approval)</label>
+      <Checkbox label={`Let the model see the pictures it fetches (sent to ${status?.vision_model ?? 'a vision model'})`} checked={vision} onCheckedChange={(checked: boolean) => setVision(checked)} disabled={!ready} title="Off: the model never sees a picture, it is only shown to you. On: each picture is sent to a vision model that describes it in words." />
+      <Checkbox label="Allow edits (backed up and journalled; costly or heavy actions still wait for your approval)" checked={write} onCheckedChange={(checked: boolean) => setWrite(checked)} disabled={!ready} title="Off: the assistant can only look. On: it can change the plan, transcript, notes and script like you can; every change is backed up and journalled, and costly or heavy actions wait for your approval here." />
       <p className="mt-2 type-caption text-muted-foreground">Your question and what the tools find (clip ids, transcript phrases, plan and script text) go to the model service. Pictures only do when the box above is ticked.</p>
     </section>
   )

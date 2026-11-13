@@ -3,7 +3,7 @@ import { api, type ReviewItem } from '../api'
 import { usePoll } from '../usePoll'
 import { diffPhrase } from '../phraseDiff'
 import { PanelSkeleton } from './Skeleton'
-import { Button, NativeSelect, Tooltip } from 'strata-react'
+import { Button, Checkbox, NativeSelect, Tooltip } from 'strata-react'
 
 const PAGE = 20
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
@@ -62,7 +62,7 @@ export default function ReviewPage({ folder, onOpen }: { folder: string; onOpen?
         <span className="flex flex-wrap items-center gap-3 type-caption text-muted-foreground">
           <span>{data.todo} to look at of {data.total} phrases</span>
           <label className="flex items-center gap-1">sound <NativeSelect size="sm" value={kind} onChange={e => setKind(e.target.value as 'original' | 'clean')}><option value="clean">cleaned</option><option value="original">original</option></NativeSelect></label>
-          <label className="flex items-center gap-1"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> show ones I have looked at</label>
+          <Checkbox label="show ones I have looked at" checked={showDone} onCheckedChange={(checked: boolean) => setShowDone(checked)} />
         </span>
       </div>
       <p className="mb-3 type-caption text-muted-foreground">Worst first: unsure words, speech faster than {data.fast_wps} words a second, and phrases the recogniser itself doubted. Press play (the slowed one plays fast speech at the normal {data.normal_wps} words a second), retype what you hear, press Enter.
