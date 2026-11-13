@@ -4,6 +4,7 @@ import { usePoll } from '../usePoll'
 import RenderProgress from './RenderProgress'
 import StillGallery from './StillGallery'
 import { ENLARGE, SIZES, clock, enlargeShort, sizeLabel } from './stillModes'
+import { Button, Tooltip } from 'strata-react'
 
 // Final-quality stills of the film. They go through the final render's own pipeline (the original two-lens video, camera path, exposure match, map overlay, transitions), so they are slow (seconds, and a long first time for a clip it has not seen) and
 // run at the lowest priority, one after the other; the same frame at the same size and enlarging is only made once. "Auto" picks a series of differing moments through the film. Everything made is kept: the gallery below shows all of it.
@@ -23,8 +24,8 @@ export default function FilmStill({ folder, video, planKey }: { folder: string; 
         <h4 className="type-body-sm font-semibold">Final stills</h4>
         <label className="type-body-sm">Size <select className={sel} value={size} onChange={e => setSize(e.target.value)}>{SIZES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
         <label className="type-body-sm" title="Runs the local upscaling model on a shot that holds too few pixels (not at night). The lower modes work to 1080p or 1440p and then resample to the size: much quicker than the model all the way.">Enlarge <select className={sel} value={up} onChange={e => setUp(e.target.value as EnlargeMode)}>{ENLARGE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-        <button className="rounded-surface bg-primary px-3 py-1.5 type-body-sm text-primary-foreground" onClick={here}>Render still at the player position</button>
-        <button className="rounded-surface border border-primary px-3 py-1.5 type-body-sm text-primary disabled:opacity-50" disabled={!n} onClick={auto} title="A series of differing moments spread over the film: 4 for a film of 2 minutes, up to 10 at 30 minutes and more. Each moment is the middle of a shot that differs from the others in clip, how tight it is and its kind.">Auto: {n || '…'} differing moments</button>
+        <Button variant="default" onClick={here}>Render still at the player position</Button>
+        <Tooltip label="A series of differing moments spread over the film: 4 for a film of 2 minutes, up to 10 at 30 minutes and more. Each moment is the middle of a shot that differs from the others in clip, how tight it is and its kind."><Button disabled={!n} onClick={auto}>Auto: {n || '…'} differing moments</Button></Tooltip>
         {busy && <span className="type-body-sm text-muted-foreground" role="status">{queued} {queued === 1 ? 'still' : 'stills'} to go{running?.t !== undefined ? ` · now the frame at ${clock(running.t)}` : ''}{running?.upscale ? ` (${enlargeShort(running.upscale)})` : ''}{running?.size ? ` · ${sizeLabel(running.size)}` : ''}</span>}
         {err && <span className="type-body-sm text-danger" role="alert">{err}</span>}
       </div>

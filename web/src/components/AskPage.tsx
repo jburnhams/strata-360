@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type AgentImage, type AgentPending, type AgentStatus, type AgentStep, type AgentTurn, type AgentUndoState } from '../api'
 import { PanelSkeleton } from './Skeleton'
+import { Button, Textarea, Tooltip } from 'strata-react'
 
 // Ask questions about the project in plain words: a hosted model answers by looking things up with read-only tools (the clips, the transcript, the edit plan, the script ...). It cannot change anything.
 // What the tools return while answering goes to the model service (never pictures); the key stays on the server.
@@ -16,7 +17,7 @@ export function inline(text: string, ids: string[], open: (clip: string) => void
     if (!part) return null
     if (part.startsWith('**') && part.endsWith('**') && part.length > 4) return <b key={i}>{inline(part.slice(2, -2), ids, open)}</b>
     const bare = part.startsWith('`') && part.endsWith('`') && part.length > 2 ? part.slice(1, -1) : part
-    if (ids.includes(bare)) return <button key={i} onClick={() => open(bare)} title="open this clip" className="font-mono text-primary underline">{bare}</button>
+    if (ids.includes(bare)) return <Tooltip label="open this clip"><Button variant="link" key={i} onClick={() => open(bare)} className="font-mono">{bare}</Button></Tooltip>
     if (bare !== part) return <code key={i} className="rounded-control bg-muted px-1 text-[0.9em]">{bare}</code>
     return part
   })
@@ -88,7 +89,7 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
         {status === null ? 'The server did not say whether the assistant is set up.' : !status.available ? 'The assistant needs the mcp package on the server: pip install mcp.' : 'The assistant needs an NVIDIA_API_KEY: put NVIDIA_API_KEY=… in secrets.env next to the project and restart the server.'}</p>}
       <div role="log" aria-live="polite" aria-label="Conversation" className="min-h-0 flex-1 space-y-3 overflow-auto">
         {msgs.length === 0 && ready && <div className="type-body-sm text-muted-foreground"><p>It looks things up for each question, so ask about the footage, the transcript, the plan or the script. For example:</p>
-          <ul className="mt-2 flex flex-wrap gap-2">{EXAMPLES.map(e => <li key={e}><button onClick={() => void send(e)} className="rounded-pill border border-border px-3 py-1 type-caption hover:bg-muted">{e}</button></li>)}</ul></div>}
+          <ul className="mt-2 flex flex-wrap gap-2">{EXAMPLES.map(e => <li key={e}><Button size="sm" onClick={() => void send(e)}>{e}</Button></li>)}</ul></div>}
         {msgs.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : ''}>
             <div className={`max-w-[85%] rounded-overlay px-3 py-2 type-body-sm ${m.role === 'user' ? 'bg-primary text-primary-foreground' : m.error ? 'bg-danger-subtle text-danger' : 'bg-muted'}`}>
@@ -102,19 +103,19 @@ export default function AskPage({ folder, clipIds, onOpenClip }: { folder: strin
       </div>
       {undo?.available && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-surface bg-muted p-2 type-body-sm">
         <span>The assistant made {undo.changes} change{undo.changes === 1 ? '' : 's'}{undo.since ? ` since ${new Date(undo.since * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}.</span>
-        <button disabled={undoing} onClick={() => void doUndo()} title="Put the project back to how it was before the assistant's last changes. The current state is backed up first, and anything you changed since is undone too." className="rounded-surface border border-border px-3 py-1 disabled:opacity-40">Undo them</button></div>}
+        <Tooltip label="Put the project back to how it was before the assistant's last changes. The current state is backed up first, and anything you changed since is undone too."><Button disabled={undoing} onClick={() => void doUndo()}>Undo them</Button></Tooltip></div>}
       {pending.length > 0 && <ul aria-label="Waiting for your approval" className="mt-3 space-y-2">
         {pending.map(p => <li key={p.id} className="rounded-surface border-2 border-warning bg-warning-subtle p-3 type-body-sm">
           <div><b>Needs your approval:</b> {p.summary}</div><div className="type-caption text-muted-foreground">Why: {p.why}.</div>
-          <div className="mt-2 flex gap-2"><button disabled={deciding !== null} onClick={() => void decide(p, true)} className="rounded-surface bg-primary px-3 py-1 text-primary-foreground disabled:opacity-40">Approve</button>
-            <button disabled={deciding !== null} onClick={() => void decide(p, false)} className="rounded-surface border border-border px-3 py-1 disabled:opacity-40">Deny</button></div>
+          <div className="mt-2 flex gap-2"><Button variant="default" disabled={deciding !== null} onClick={() => void decide(p, true)}>Approve</Button>
+            <Button disabled={deciding !== null} onClick={() => void decide(p, false)}>Deny</Button></div>
         </li>)}
       </ul>}
       <form className="mt-3 flex gap-2" onSubmit={e => { e.preventDefault(); void send(text) }}>
-        <textarea aria-label="Your question" value={text} rows={2} disabled={!ready} onChange={e => setText(e.target.value)} placeholder={ready ? 'Ask a question…' : 'Not set up'}
+        <Textarea aria-label="Your question" value={text} rows={2} disabled={!ready} onChange={e => setText(e.target.value)} placeholder={ready ? 'Ask a question…' : 'Not set up'}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(text) } }}
-          className="min-w-0 flex-1 rounded-surface border border-border bg-card p-2 type-body-sm disabled:opacity-50" />
-        <button type="submit" disabled={!ready || busy || !text.trim()} className="self-end rounded-surface bg-primary px-4 py-2 type-body-sm font-medium text-primary-foreground disabled:opacity-40">Ask</button>
+          className="min-w-0 flex-1" />
+        <Button variant="default" type="submit" disabled={!ready || busy || !text.trim()} className="self-end">Ask</Button>
       </form>
       <label className="mt-2 flex items-center gap-2 type-caption text-muted-foreground" title="Off: the model never sees a picture, it is only shown to you. On: each picture is sent to a vision model that describes it in words."><input type="checkbox" checked={vision} disabled={!ready} onChange={e => setVision(e.target.checked)} /> Let the model see the pictures it fetches (sent to {status?.vision_model ?? 'a vision model'})</label>
       <label className="mt-1 flex items-center gap-2 type-caption text-muted-foreground" title="Off: the assistant can only look. On: it can change the plan, transcript, notes and script like you can; every change is backed up and journalled, and costly or heavy actions wait for your approval here."><input type="checkbox" checked={write} disabled={!ready} onChange={e => setWrite(e.target.checked)} /> Allow edits (backed up and journalled; costly or heavy actions still wait for your approval)</label>

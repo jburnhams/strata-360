@@ -26,6 +26,7 @@ import PhotoPage from './PhotoPage'
 import SvItemPage from './SvItemPage'
 import PointCamPage from './PointCamPage'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
+import { Button } from 'strata-react'
 
 // The app is organised around clips: a list of clips (with thumbnails) on the left; with none selected the main area is the overview (progress, race track, notes for the whole
 // folder); with one selected it is that clip's details and its own notes.
@@ -64,7 +65,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         </ul>
       </aside>
       <div className="min-w-0">
-        <div className="mb-3 flex items-center gap-3 type-body-sm"><span className="break-all font-mono text-muted-foreground">{folder}</span><button className="text-primary underline" onClick={onChange}>open another / new project</button></div>
+        <div className="mb-3 flex items-center gap-3 type-body-sm"><span className="break-all font-mono text-muted-foreground">{folder}</span><Button variant="link" onClick={onChange}>open another / new project</Button></div>
         {sel === null ? (
           <div className="space-y-4">
             <FilmDetails folder={folder} />

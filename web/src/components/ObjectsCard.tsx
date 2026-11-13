@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api, type DetectedObject, type ObjectsInfo, type Region } from '../api'
+import { Button, Tooltip } from 'strata-react'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const LIMIT = 12
@@ -24,11 +25,11 @@ const Row = ({ o, folder, clip, onLook, onHide }: { o: DetectedObject; folder: s
         <div className="type-caption text-muted-foreground">{where(o.lon, o.lat)} · {o.deg.toFixed(1)}° wide · in view {fmt(o.seen[0] ?? o.best_t)}{o.seen.length > 1 ? ` and ${o.seen.length - 1} more time${o.seen.length > 2 ? 's' : ''}` : ''}{differs ? ` · detector said “${o.yoloe}”` : ''}</div>
         {o.hidden && <div className="type-caption italic text-muted-foreground">{WHY[o.hidden]}</div>}
       </div>
-      <button className="flex-none rounded-control border border-border px-2 py-0.5 type-caption hover:bg-muted" aria-label={`Look at ${name}`} onClick={() => onLook({ lon: o.lon, lat: o.lat, fov: framing(o.deg), t: o.best_t })}>Look</button>
+      <Button size="sm" className="flex-none" aria-label={`Look at ${name}`} onClick={() => onLook({ lon: o.lon, lat: o.lat, fov: framing(o.deg), t: o.best_t })}>Look</Button>
       {onHide && <div className="flex flex-none flex-col items-stretch gap-0.5 type-caption">
-        {!o.hidden && <><button className="rounded-control border border-border px-1.5 hover:bg-muted" aria-label={`Hide ${name}`} title="Hide this one (the data is kept)" onClick={() => onHide(o, 'object', true)}>Hide</button>
-          <button className="rounded-control border border-border px-1.5 hover:bg-muted" aria-label={`Hide every ${name}`} title="Hide every thing with this name, in every clip" onClick={() => onHide(o, 'label', true)}>Hide all</button></>}
-        {(o.hidden === 'object' || o.hidden === 'label') && <button className="rounded-control border border-border px-1.5 hover:bg-muted" aria-label={`Show ${name} again`} onClick={() => onHide(o, o.hidden === 'label' ? 'label' : 'object', false)}>Show again</button>}
+        {!o.hidden && <><Tooltip label="Hide this one (the data is kept)"><Button size="sm" aria-label={`Hide ${name}`} onClick={() => onHide(o, 'object', true)}>Hide</Button></Tooltip>
+          <Tooltip label="Hide every thing with this name, in every clip"><Button size="sm" aria-label={`Hide every ${name}`} onClick={() => onHide(o, 'label', true)}>Hide all</Button></Tooltip></>}
+        {(o.hidden === 'object' || o.hidden === 'label') && <Button size="sm" aria-label={`Show ${name} again`} onClick={() => onHide(o, o.hidden === 'label' ? 'label' : 'object', false)}>Show again</Button>}
       </div>}
     </li>
   )
@@ -38,7 +39,7 @@ const AreaRow = ({ r, onLook }: { r: Region; onLook: (l: Look) => void }) => (
   <li className="flex items-center gap-3 py-1 type-body-sm">
     <span className={`h-3 w-3 flex-none rounded-control ${r.kind === 'snow' ? 'border border-border bg-card' : 'bg-info'}`} aria-hidden="true" />
     <span className="flex-1">{r.kind === 'snow' ? 'Snow' : 'Water'} <span className="type-caption text-muted-foreground">{where(r.lon, r.lat)} · {Math.round(r.w_deg)}° × {Math.round(r.h_deg)}° · in view {fmt(r.seen[0] ?? 0)}{r.seen.length > 1 ? ` and ${r.seen.length - 1} more` : ''}</span></span>
-    <button className="rounded-control border border-border px-2 py-0.5 type-caption hover:bg-muted" aria-label={`Look at ${r.kind} at ${where(r.lon, r.lat)}`} onClick={() => onLook({ lon: r.lon, lat: r.lat, fov: framingArea(r.w_deg, r.h_deg), t: r.seen[0] ?? 0 })}>Look</button>
+    <Button size="sm" aria-label={`Look at ${r.kind} at ${where(r.lon, r.lat)}`} onClick={() => onLook({ lon: r.lon, lat: r.lat, fov: framingArea(r.w_deg, r.h_deg), t: r.seen[0] ?? 0 })}>Look</Button>
   </li>
 )
 
@@ -60,7 +61,7 @@ export default function ObjectsCard({ folder, clip, info, marked, onMarked, onLo
       </div>
       {list.length === 0 && areas.length === 0 && <p className="type-body-sm text-muted-foreground">Nothing found.</p>}
       <ul className="divide-y divide-border">{shown.map(o => <Row key={o.id} o={o} folder={folder} clip={clip} onLook={onLook} onHide={onHide} />)}</ul>
-      {list.length > LIMIT && <button className="mt-1 type-caption underline" onClick={() => setAll(a => !a)}>{all ? 'show fewer' : `show all ${list.length}`}</button>}
+      {list.length > LIMIT && <Button variant="link" size="sm" className="mt-1" onClick={() => setAll(a => !a)}>{all ? 'show fewer' : `show all ${list.length}`}</Button>}
       {areas.length > 0 && <><h4 className="mb-1 mt-3 type-caption font-semibold uppercase tracking-wide text-muted-foreground">Snow and water</h4><ul>{areas.map((r, i) => <AreaRow key={i} r={r} onLook={onLook} />)}</ul></>}
       {Object.keys(info.scenery_labels).length > 0 && <p className="mt-2 type-caption text-muted-foreground">Scenery not listed: {Object.entries(info.scenery_labels).map(([k, n]) => `${k} (${n})`).join(', ')}</p>}
     </div>

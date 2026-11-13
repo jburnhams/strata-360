@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { api, type LineKey, VoiceLine } from '../api'
 import { usePoll } from '../usePoll'
 import { PanelSkeleton } from './Skeleton'
+import { Button, Tooltip } from 'strata-react'
 
 const fitTxt = { ok: 'fits', sped: 'sped up a little to fit', over: 'too long: cut at the next line' } as const
 
@@ -35,16 +36,16 @@ export default function VoiceoverPanel({ folder }: { folder: string }) {
           <label>Voice<select value={voiceName} onChange={e => { setVoice(e.target.value); void api.buildVoiceover(folder, { engine: engine?.id, voice: e.target.value, rate: rate ?? st.state.rate }) }} className={`${input} ml-2`}>
             {[...new Set(engine?.voices.map(v => (v as { group?: string }).group ?? ''))].map(g => <optgroup key={g} label={g || 'voices'}>{engine?.voices.filter(v => ((v as { group?: string }).group ?? '') === g).map(v => <option key={v.name} value={v.name}>{st.cached?.some(c => c.voice === v.name && c.rate === st.state.rate) ? '✓ ' : ''}{(v as { label?: string }).label ?? v.name}</option>)}</optgroup>)}</select></label>
           <label>Speed<input type="number" min={100} max={260} value={rate ?? st.state.rate} onChange={e => setRate(Number(e.target.value))} className={`${input} ml-2 w-20`} /></label>
-          <button disabled={st.building || !st.lines} onClick={build} className="rounded-surface bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50">{st.building ? `Speaking ${st.progress?.done ?? 0}/${st.progress?.total || '…'}` : t ? 'Speak again' : 'Speak the script'}</button>
-          {t && <button className="rounded-surface border border-border px-3 py-2" onClick={() => play(api.voiceoverAudio(folder))}>▶ Whole track</button>}
+          <Button variant="default" disabled={st.building || !st.lines} onClick={build}>{st.building ? `Speaking ${st.progress?.done ?? 0}/${st.progress?.total || '…'}` : t ? 'Speak again' : 'Speak the script'}</Button>
+          {t && <Button onClick={() => play(api.voiceoverAudio(folder))}>▶ Whole track</Button>}
           <audio ref={player} controls className="h-9" />
         </div>
       )}
       {!!st.cached?.length && <div className="mb-2 flex flex-wrap items-center gap-2 type-caption"><span className="text-muted-foreground">Compare (made for this script, ✓ in the list):</span>
         {st.cached.map(c => { const label = (engine?.voices.find(v => v.name === c.voice) as { label?: string } | undefined)?.label ?? c.voice
           return <span key={c.key} className={`inline-flex items-center overflow-hidden rounded-control border ${c.active ? 'border-primary' : 'border-border'}`}>
-            <button className="px-1.5 py-0.5 hover:bg-muted" title="play this voice's whole track without switching to it" onClick={() => play(api.voiceoverAudio(folder, undefined, undefined, c.key))}>▶ {label}</button>
-            {c.active ? <span className="bg-primary px-1.5 py-0.5 text-primary-foreground">in use</span> : <button className="border-l border-border px-1.5 py-0.5 hover:bg-muted" onClick={() => { setVoice(c.voice); void api.buildVoiceover(folder, { engine: c.engine, voice: c.voice, rate: c.rate }) }}>use</button>}</span> })}</div>}
+            <Tooltip label="play this voice's whole track without switching to it"><Button variant="ghost" size="sm" onClick={() => play(api.voiceoverAudio(folder, undefined, undefined, c.key))}>▶ {label}</Button></Tooltip>
+            {c.active ? <span className="bg-primary px-1.5 py-0.5 text-primary-foreground">in use</span> : <Button variant="ghost" size="sm" onClick={() => { setVoice(c.voice); void api.buildVoiceover(folder, { engine: c.engine, voice: c.voice, rate: c.rate }) }}>use</Button>}</span> })}</div>}
       {!st.lines && <p className="type-body-sm text-muted-foreground">Write the script first.</p>}
       {!!st.lines && <p className="mb-2 type-caption text-muted-foreground">The script is spoken automatically whenever it is written or an edit is saved; unchanged lines are reused.</p>}
       {(err || st.error) && <p className="mb-2 type-body-sm text-danger">{err || st.error}</p>}
@@ -60,8 +61,8 @@ export default function VoiceoverPanel({ folder }: { folder: string }) {
                 <span className="flex shrink-0 gap-1 type-caption">
                   <button className={`rounded-control border px-2 py-0.5 ${l.source === 'synth' ? 'border-primary' : 'border-border'}`} onClick={() => play(api.voiceoverAudio(folder, l.seg, 'synth'))} onDoubleClick={() => use(l, 'synth')} title="Play the synthetic line; double-click to use it">▶ voice{l.source === 'synth' ? ' ✓' : ''}</button>
                   {l.has_recording && <button className={`rounded-control border px-2 py-0.5 ${l.source === 'recorded' ? 'border-primary' : 'border-border'}`} onClick={() => play(api.voiceoverAudio(folder, l.seg, 'recorded'))} onDoubleClick={() => use(l, 'recorded')} title="Play your recording; double-click to use it">▶ you{l.source === 'recorded' ? ' ✓' : ''}</button>}
-                  {rec?.seg === l.seg ? <button className="rounded-control bg-danger px-2 py-0.5 text-primary-foreground" onClick={() => rec.mr.stop()}>■ stop</button> : <button disabled={!!rec} className="rounded-control border border-border px-2 py-0.5 disabled:opacity-40" onClick={() => startRec(l.seg)}>● record</button>}
-                  {l.has_recording && <button className="rounded-control border border-border px-2 py-0.5" onClick={async () => { await api.deleteRecording(folder, l.seg); await api.buildVoiceover(folder) }} title="Remove your recording">✕</button>}
+                  {rec?.seg === l.seg ? <Button variant="ghost" size="sm" onClick={() => rec.mr.stop()}>■ stop</Button> : <Button size="sm" disabled={!!rec} onClick={() => startRec(l.seg)}>● record</Button>}
+                  {l.has_recording && <Tooltip label="Remove your recording"><Button size="sm" aria-label="Remove your recording" onClick={async () => { await api.deleteRecording(folder, l.seg); await api.buildVoiceover(folder) }}>✕</Button></Tooltip>}
                 </span>
               </li>
             ))}

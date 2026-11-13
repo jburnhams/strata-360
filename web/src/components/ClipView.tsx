@@ -15,6 +15,7 @@ import { usedSet } from '../marks'
 import { usePoll } from '../usePoll'
 import TrackMap from './TrackMap'
 import { CamAimPicker, PointCamTool, useAimPath, usePointCams } from './PointCams'
+import { Button, NativeSelect } from 'strata-react'
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const Card = ({ title, children }: { title: string; children: React.ReactNode }) => (
@@ -42,7 +43,7 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
     <div className="space-y-4">
       <ClipPlayer folder={folder} clip={clip} thumbKind={c.thumb?.kind} heading={c.heading} focus={c.focus} person={c.person} clarity={c.clarity} scenic={c.scenic} sounds={c.audio_files} hasPreview={!!c.preview} duration={c.video.source_frames / c.video.nominal_fps} aimPath={aim.path} seekTo={seek} marks={marked ? marks : undefined} look={look} />
       <CamAimPicker pc={pc} picked={aimId} onPick={setAimId} onGo={cam => { setAimId(cam.id); setSeek({ t: Math.max((cam.window?.[0] ?? 0) - Date.parse(utc) / 1000, 0), n: Date.now() }) }} note={aim.err} />
-      <div className="-mt-2 flex items-center justify-between px-1 type-caption text-muted-foreground"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : 'no thumbnail yet'}</span><span className="font-mono">{c.id} · <button className="underline" onClick={() => setRedo(true)}>reprocess…</button></span></div>
+      <div className="-mt-2 flex items-center justify-between px-1 type-caption text-muted-foreground"><span>{c.thumb ? `${c.thumb.kind} thumbnail at ${fmt(c.thumb.t_s)}: ${c.thumb.why}` : 'no thumbnail yet'}</span><span className="font-mono">{c.id} · <Button variant="link" onClick={() => setRedo(true)}>reprocess…</Button></span></div>
       {Number.isFinite(Date.parse(utc)) && <Card title="Where on the route"><PointCamTool folder={folder} source={{ kind: 'clip', clip }} pc={pc} map={h => <TrackMap folder={folder} tz={tz} span={[Date.parse(utc) / 1000, Date.parse(utc) / 1000 + c.video.source_frames / c.video.nominal_fps]} label={`Clip ${clip.replace(/^CAM_/, '').replace(/_D$/, '')}`} {...h} />} /></Card>}
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="When and where">
@@ -92,7 +93,7 @@ export default function ClipView({ folder, clip, focus, tz }: { folder: string; 
       </Card>}
       <Card title="Transcript">
         <div className="mb-2 flex items-center gap-2 type-caption text-muted-foreground">other languages shown as
-          <select value={mode} onChange={e => setMode(e.target.value as Mode)} className="rounded-control border border-border bg-transparent px-1 py-0.5"><option value="translated">translated</option><option value="original">original</option><option value="both">both</option></select></div>
+          <NativeSelect size="sm" value={mode} onChange={e => setMode(e.target.value as Mode)}><option value="translated">translated</option><option value="original">original</option><option value="both">both</option></NativeSelect></div>
         {c.transcript.length === 0 && <p className="type-body-sm text-muted-foreground">No speech recognised.</p>}
         <WordMarker folder={folder} onSaved={reload}>
         {c.transcript.map((l, i) => (

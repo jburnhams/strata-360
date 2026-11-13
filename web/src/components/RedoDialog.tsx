@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type ItemStatus, type StateMatrix } from '../api'
+import { Button, Tooltip } from 'strata-react'
 
 const DOT: Record<string, string> = { ok: 'bg-primary', failed: 'bg-danger', active: 'bg-warning', stale: 'bg-warning', none: 'bg-neutral-4' }
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
@@ -29,17 +30,17 @@ export default function RedoDialog({ folder, stage, clip, onClose }: { folder: s
         <h3 className="type-heading font-semibold">Reprocess{stage ? `: ${stage}` : ''}{clip ? ` · ${short(clip)}` : ''}</h3>
         <p className="mb-3 type-body-sm text-muted-foreground">Ticked results are forgotten and processed again by the next worker. Files stay until they are replaced.</p>
         <div className="mb-3 flex flex-wrap items-center gap-3 type-body-sm">
-          <button className="underline" onClick={all}>select all</button><button className="underline" onClick={() => setSel(new Set())}>select none</button>
+          <Button variant="link" onClick={all}>select all</Button><Button variant="link" onClick={() => setSel(new Set())}>select none</Button>
           <label className="flex items-center gap-1"><input type="checkbox" checked={cascade} onChange={e => setCascade(e.target.checked)} />also the stages that depend on the one I tick</label>
           <span className="ml-auto text-muted-foreground">{sel.size} selected</span>
         </div>
         <div className="overflow-auto rounded-surface border border-border">
           <table className="w-full type-caption">
             <thead><tr><th className="sticky left-0 bg-card p-1 text-left">clip</th>{m.stages.map(s => (
-              <th key={s} className="p-1 font-normal"><button className="underline" title="tick or untick this stage for every clip" onClick={() => toggle(rows.map(c => key(c, s)), !rows.every(c => sel.has(key(c, s))))}>{s}</button></th>))}</tr></thead>
+              <th key={s} className="p-1 font-normal"><Tooltip label="tick or untick this stage for every clip"><Button variant="link" onClick={() => toggle(rows.map(c => key(c, s)), !rows.every(c => sel.has(key(c, s))))}>{s}</Button></Tooltip></th>))}</tr></thead>
             <tbody>{rows.map(c => (
               <tr key={c} className="border-t border-border">
-                <td className="sticky left-0 whitespace-nowrap bg-card p-1"><button className="underline" onClick={() => toggle(m.stages.map(s => key(c, s)), !m.stages.every(s => sel.has(key(c, s))))}>{short(c)}</button></td>
+                <td className="sticky left-0 whitespace-nowrap bg-card p-1"><Button variant="link" onClick={() => toggle(m.stages.map(s => key(c, s)), !m.stages.every(s => sel.has(key(c, s))))}>{short(c)}</Button></td>
                 {m.stages.map(s => { const st = (m.clips[c][s] ?? 'none') as ItemStatus | 'none'; return (
                   <td key={s} className="p-1 text-center"><label className="inline-flex cursor-pointer items-center gap-1" title={`${s}: ${st ?? 'not done'}`}>
                     <input type="checkbox" checked={sel.has(key(c, s))} onChange={() => click(c, s)} /><span className={`h-2 w-2 rounded-pill ${DOT[st ?? 'none']}`} /></label></td>) })}
@@ -48,8 +49,8 @@ export default function RedoDialog({ folder, stage, clip, onClose }: { folder: s
         </div>
         <p className="mt-2 type-caption text-muted-foreground"><span className="mr-1 inline-block h-2 w-2 rounded-pill bg-primary" />done <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-warning" />running <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-warning" />out of date <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-danger" />failed <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-neutral-4" />not done</p>
         <div className="mt-4 flex justify-end gap-2">
-          <button className="rounded-surface border border-border px-4 py-2" onClick={onClose}>Cancel</button>
-          <button disabled={!sel.size || busy} className="rounded-surface bg-primary px-4 py-2 text-primary-foreground disabled:opacity-40" onClick={go}>Clear {sel.size} item{sel.size === 1 ? '' : 's'} and reprocess</button>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="default" disabled={!sel.size || busy} onClick={go}>Clear {sel.size} item{sel.size === 1 ? '' : 's'} and reprocess</Button>
         </div>
       </div>
     </div>

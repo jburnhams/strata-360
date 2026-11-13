@@ -111,7 +111,7 @@ describe('Workspace', () => {
     await user.click(await screen.findByRole('button', { name: 'Review transcript' }))
     expect(await screen.findByText('Review the transcript')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Film details' })).not.toBeInTheDocument()
-    await user.click(await screen.findByTitle('open the clip at this moment'))
+    await user.click(await screen.findByRole('button', { name: /01\/01 12:00 · 0001 · 0:0/ }))
     expect(screen.queryByText('Review the transcript')).not.toBeInTheDocument()
   })
 

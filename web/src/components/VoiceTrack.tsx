@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api, type EditState, type RefitReport, type VoiceTimeline, type VoiceTimelineLine } from '../api'
+import { Button } from 'strata-react'
 
 type Plan = NonNullable<EditState['plan']>
 const roleName = { vo: 'narration', clip: 'you', broll: 'b-roll' } as const
@@ -93,8 +94,8 @@ export default function VoiceTrack({ folder, plan, onChanged, children }: { fold
           <p className="mb-1 text-muted-foreground">{line.speak_s.toFixed(1)} s of speech{line.estimated ? ' (estimated from the words: not spoken yet)' : ''} in {line.room_s.toFixed(1)} s of picture · {line.source === 'recorded' ? 'your recording' : 'the voice'}{line.fit === 'over' ? <span className="text-danger"> · too long by {line.overrun_s.toFixed(1)} s</span> : ''}</p>
           <div className="flex flex-wrap items-center gap-2">
             {!line.estimated && <audio controls className="h-8" src={api.voiceoverAudio(folder, line.seg, line.source)} aria-label="This line's take" />}
-            {rec ? <button className="rounded-control bg-danger px-2 py-1 text-primary-foreground" onClick={() => rec.stop()}>■ stop</button>
-              : <button disabled={busy} className="rounded-control border border-border px-2 py-1 disabled:opacity-40" onClick={() => record(line)}>● {line.has_recording ? 'record again' : 'record'}</button>}
+            {rec ? <Button variant="ghost" size="sm" onClick={() => rec.stop()}>■ stop</Button>
+              : <Button size="sm" disabled={busy} onClick={() => record(line)}>● {line.has_recording ? 'record again' : 'record'}</Button>}
             {busy && <span className="text-muted-foreground">fitting the film to the new take…</span>}
           </div>
         </div>

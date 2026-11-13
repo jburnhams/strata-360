@@ -3,6 +3,7 @@ import { api, type MotionStyle, type Photo } from '../api'
 import ItemPage, { LengthField } from './ItemPage'
 import PhotoMotion from './PhotoMotion'
 import TrackMap from './TrackMap'
+import { NativeSelect } from 'strata-react'
 
 // A photo used in the film as a page of its own, with the same sections as a gap (ItemPage). "Use in the film" on the overview only makes a photo an option (it is then in the film list); "Must be used" here makes the plan add it if
 // the script leaves it out.
@@ -24,9 +25,9 @@ export default function PhotoPage({ folder, photo, tz, onChanged }: { folder: st
       </>}
       settings={<>
         <label className="flex items-center gap-2"><span className="w-24 text-muted-foreground">Drawn as</span>
-          <select aria-label="Drawn as" value={m.style === 'auto' ? '' : m.style} onChange={e => run(() => api.saveMotion(folder, p.id, { ...m, style: (e.target.value || 'auto') as MotionStyle | 'auto' }))} className="rounded-control border border-border bg-transparent px-1 py-0.5">
+          <NativeSelect size="sm" aria-label="Drawn as" value={m.style === 'auto' ? '' : m.style} onChange={e => run(() => api.saveMotion(folder, p.id, { ...m, style: (e.target.value || 'auto') as MotionStyle | 'auto' }))}>
             <option value="">the planner chooses</option>{(Object.keys(STYLES) as MotionStyle[]).map(k => <option key={k} value={k}>{STYLES[k]}</option>)}
-          </select></label>
+          </NativeSelect></label>
         <LengthField id={p.id} mode={m.seconds == null ? '' : 'set'} seconds={m.seconds} modes={['set']} min={2} max={8} fallback={2.5} onChange={(_, seconds) => run(() => api.saveMotion(folder, p.id, { ...m, seconds }))} />
         <label className="flex items-center gap-2 sm:col-span-2"><input type="checkbox" aria-label="Must be used in the film" checked={!!p.must} onChange={e => run(() => api.setPhotoMust(folder, p.id, e.target.checked))} /> <span>Must be used in the film <span className="type-caption text-muted-foreground">(added where it falls in the race if the script leaves it out; otherwise it is only an option)</span></span></label>
       </>}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Browse } from '../api'
 import { PanelSkeleton } from './Skeleton'
+import { Button } from 'strata-react'
 
 // Pick a project: browse the server's allowed folders. A folder that already is a project opens straight away (its sub-folders are never offered);
 // a folder with camera files can become a new project; anything else is just a place to look further.
@@ -17,13 +18,13 @@ export default function FolderBrowser({ onChoose, onCancel }: { onChoose: (folde
   if (!b) return <PanelSkeleton title="Folders" rows={6} />
   return (
     <div className="rounded-overlay border border-border bg-card p-4">
-      <div className="mb-2 flex items-center justify-between"><span className="break-all font-mono type-caption text-muted-foreground">{b.path}</span>{onCancel && <button className="type-body-sm text-primary underline" onClick={onCancel}>cancel</button>}</div>
+      <div className="mb-2 flex items-center justify-between"><span className="break-all font-mono type-caption text-muted-foreground">{b.path}</span>{onCancel && <Button variant="link" onClick={onCancel}>cancel</Button>}</div>
       <ul className="divide-y divide-border">
         {b.parent && <Row name=".." onClick={() => go(b.parent!)} />}
         {b.entries.map(e => <Row key={e.path} name={e.name} project={e.is_project} onClick={() => go(e.path)} />)}
       </ul>
       <div className="mt-3 flex items-center gap-3">
-        <button disabled={!b.can_create} className="rounded-surface bg-primary px-4 py-2 text-primary-foreground hover:bg-primary disabled:opacity-40" onClick={() => onChoose(b.path)}>Create project here</button>
+        <Button variant="default" disabled={!b.can_create} onClick={() => onChoose(b.path)}>Create project here</Button>
         <span className="type-body-sm text-muted-foreground">
           {b.can_create ? (b.footage_here ? `${b.footage_here} camera file(s) here` : 'camera files found in the sub-folders') : 'open a folder that holds camera files (or an existing project)'}
         </span>

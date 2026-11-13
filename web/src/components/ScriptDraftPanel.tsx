@@ -8,6 +8,7 @@ import { PanelSkeleton } from './Skeleton'
 import Phrase from './Phrase'
 import WordMarker from './WordMarker'
 import RoughMixPlayer from './RoughMixPlayer'
+import { Button, Input, NativeSelect, Textarea, Tooltip } from 'strata-react'
 
 const KIND: Record<ScriptItem['type'], { label: string; cls: string }> = {
   vo: { label: 'narration', cls: 'bg-info-subtle text-info' },
@@ -84,10 +85,10 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
     <section className="rounded-overlay border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="type-body-sm font-semibold">Film script</h3>
-        <label className="type-caption text-muted-foreground">length (s) <input type="number" min={30} value={target} onChange={e => setTarget(e.target.value)} placeholder="music / automatic" className="ml-1 w-28 rounded-control border border-border bg-transparent px-1.5 py-1 type-body-sm" /></label>
+        <label className="type-caption text-muted-foreground">length (s) <Input type="number" min={30} value={target} onChange={e => setTarget(e.target.value)} placeholder="music / automatic" className="ml-1" /></label>
         <label className="flex items-center gap-1 type-caption text-muted-foreground"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> ignore the music</label>
-        <button disabled={busy || st.running || !st.key_configured} className="rounded-surface bg-primary px-3 py-1.5 type-body-sm text-primary-foreground disabled:opacity-50" onClick={() => go(!!draft)}>{st.running ? 'writing…' : draft ? 'Revise this draft' : 'Write a draft'}</button>
-        {draft && <button disabled={busy || st.running || !st.key_configured} className="rounded-surface border border-border px-3 py-1.5 type-body-sm disabled:opacity-50" title="start again without the current draft" onClick={() => go(false)}>New draft</button>}
+        <Button variant="default" disabled={busy || st.running || !st.key_configured} onClick={() => go(!!draft)}>{st.running ? 'writing…' : draft ? 'Revise this draft' : 'Write a draft'}</Button>
+        {draft && <Tooltip label="start again without the current draft"><Button disabled={busy || st.running || !st.key_configured} onClick={() => go(false)}>New draft</Button></Tooltip>}
       </div>
       {!st.key_configured && <p className="mt-2 type-body-sm text-warning">No Gemini API key is set: add it (secrets.env or the Script panel) to write a draft.</p>}
       {st.running && st.log.length > 0 && <p className="mt-2 font-mono type-caption text-muted-foreground">{st.log[st.log.length - 1]}</p>}
@@ -95,7 +96,7 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
       {err && <p className="mt-2 type-body-sm text-danger">{err}</p>}
       {draft && (
         <div className="mt-2 flex flex-wrap items-center gap-3 type-body-sm">
-          <button disabled={busy || st.plan_running} className="rounded-surface border border-primary px-3 py-1.5 text-primary disabled:opacity-50" title="turn this draft into the film's plan: your lines, the narration (spoken and timed) and b-roll, cut on the beat" onClick={() => void planIt()}>{st.plan_running ? 'planning…' : 'Make the film from this draft'}</button>
+          <Tooltip label="turn this draft into the film's plan: your lines, the narration (spoken and timed) and b-roll, cut on the beat"><Button disabled={busy || st.plan_running} onClick={() => void planIt()}>{st.plan_running ? 'planning…' : 'Make the film from this draft'}</Button></Tooltip>
           <span className="type-caption text-muted-foreground">{st.plan_running ? (st.plan_log?.[st.plan_log.length - 1] ?? 'speaking the narration and planning the windows…')
             : st.plan?.source === 'script' ? `Film plan: ${st.plan.windows} windows, ${st.plan.length_s} s, from ${st.plan.script === latest ? 'this draft' : 'an older draft (make the film again to use this one)'}`
             : 'The film plan is still the beat planner’s, not this script.'}</span>
@@ -129,12 +130,12 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
                     <span className="min-w-0 flex-1 leading-relaxed">
                       {it.type === 'vo' && (editing === i ? (
                         <span className="flex flex-col gap-1">
-                          <textarea aria-label={`Narration ${i + 1}`} value={text} onChange={e => setText(e.target.value)} rows={2} className="w-full rounded-control border border-border bg-transparent p-1.5 type-body-sm" />
-                          <span className="flex gap-1"><button className="rounded-control bg-primary px-2 py-0.5 type-caption text-primary-foreground" onClick={() => void saveEdit(i, it)}>save (pins this wording)</button><button className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => setEditing(null)}>cancel</button></span>
+                          <Textarea aria-label={`Narration ${i + 1}`} value={text} onChange={e => setText(e.target.value)} rows={2} className="w-full" />
+                          <span className="flex gap-1"><Button variant="default" size="sm" onClick={() => void saveEdit(i, it)}>save (pins this wording)</Button><Button size="sm" onClick={() => setEditing(null)}>cancel</Button></span>
                         </span>
                       ) : (<>
                         <span data-vo={i} title={basisOf(it).length ? 'based on: ' + basisOf(it).join(' · ') : undefined}>{highlight(edited[i] ?? it.text ?? '', pinTexts(it.clip), pins.vo_never ?? []).map((p, k) => <span key={k} className={p.kind === 'must' ? 'rounded-control bg-primary-3' : p.kind === 'never' ? 'rounded-control bg-danger-subtle' : ''}>{p.t}</span>)}</span>
-                        <button className="ml-1 type-caption text-muted-foreground hover:text-foreground" aria-label={`Edit narration ${i + 1}`} title="edit the wording: your version is kept word for word in later drafts" onClick={() => { setText(edited[i] ?? it.text ?? ''); setEditing(i) }}>✎</button>
+                        <Tooltip label="edit the wording: your version is kept word for word in later drafts"><Button variant="ghost" size="sm" className="ml-1" aria-label={`Edit narration ${i + 1}`} onClick={() => { setText(edited[i] ?? it.text ?? ''); setEditing(i) }}>✎</Button></Tooltip>
                       </>))}
                       {it.type === 'clip' && (words(it).some(Boolean) ? words(it) : <span>{it.text}</span>)}
                       {it.type === 'broll' && <span className="text-muted-foreground">{it.why}</span>}
@@ -152,8 +153,8 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
         </WordMarker>
         {vsel && (
           <div role="toolbar" aria-label="Mark the selected narration" className="fixed z-50 flex items-center gap-1 rounded-surface border border-border bg-card p-1 shadow-overlay" style={{ left: Math.max(vsel.x - 120, 8), top: Math.max(vsel.y - 44, 8) }} onMouseDown={e => e.preventDefault()}>
-            <button className="rounded-control bg-primary-3 px-2 py-1 type-caption font-medium text-primary" title="keep exactly these words, in this clip, in every later draft" onClick={() => void pinVo(false)}>Say exactly this</button>
-            <button className="rounded-control bg-danger-subtle px-2 py-1 type-caption font-medium text-danger" title="never say these words" onClick={() => void pinVo(true)}>Never say</button>
+            <Tooltip label="keep exactly these words, in this clip, in every later draft"><Button variant="ghost" size="sm" onClick={() => void pinVo(false)}>Say exactly this</Button></Tooltip>
+            <Tooltip label="never say these words"><Button variant="ghost" size="sm" onClick={() => void pinVo(true)}>Never say</Button></Tooltip>
           </div>)}
         </div>
         {((pins.vo ?? []).length > 0 || (pins.vo_never ?? []).length > 0) && (
@@ -161,10 +162,10 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
             <ul className="mt-1 space-y-1">
               {(pins.vo ?? []).map((p: VoPin) => (
                 <li key={p.id} className="flex flex-wrap items-center gap-2"><span className="rounded-control bg-primary-3 px-1 type-caption">say</span><span className="min-w-0 flex-1">{p.text}</span>
-                  <select aria-label={`Where to say ${p.id}`} value={p.mode} onChange={e => void savePins(setMode(pins, p.id, e.target.value as VoPin['mode'], p.clip ?? draft.items.find(x => x.type === 'vo' && x.text?.includes(p.text))?.clip))} className="rounded-control border border-border bg-transparent px-1 py-0.5 type-caption">
-                    <option value="clip">in clip {p.clip ?? '…'}</option><option value="ordered">in order, anywhere</option><option value="anywhere">anywhere</option></select>
-                  <button className="type-caption underline" aria-label={`Remove pin ${p.id}`} onClick={() => void savePins(removePin(pins, p.id))}>remove</button></li>))}
-              {(pins.vo_never ?? []).map(ph => <li key={ph} className="flex items-center gap-2"><span className="rounded-control bg-danger-subtle px-1 type-caption">never</span><span className="min-w-0 flex-1">{ph}</span><button className="type-caption underline" aria-label={`Remove never-say ${ph}`} onClick={() => void savePins(removeNever(pins, ph))}>remove</button></li>)}
+                  <NativeSelect size="sm" aria-label={`Where to say ${p.id}`} value={p.mode} onChange={e => void savePins(setMode(pins, p.id, e.target.value as VoPin['mode'], p.clip ?? draft.items.find(x => x.type === 'vo' && x.text?.includes(p.text))?.clip))}>
+                    <option value="clip">in clip {p.clip ?? '…'}</option><option value="ordered">in order, anywhere</option><option value="anywhere">anywhere</option></NativeSelect>
+                  <Button variant="link" size="sm" aria-label={`Remove pin ${p.id}`} onClick={() => void savePins(removePin(pins, p.id))}>remove</Button></li>))}
+              {(pins.vo_never ?? []).map(ph => <li key={ph} className="flex items-center gap-2"><span className="rounded-control bg-danger-subtle px-1 type-caption">never</span><span className="min-w-0 flex-1">{ph}</span><Button variant="link" size="sm" aria-label={`Remove never-say ${ph}`} onClick={() => void savePins(removeNever(pins, ph))}>remove</Button></li>)}
             </ul></details>)}
         {diff.removed.length > 0 && <details className="mt-2 type-caption text-muted-foreground"><summary>{diff.removed.length} item(s) removed since the previous draft</summary><ul className="mt-1 list-disc pl-5">{diff.removed.map((it, i) => <li key={i}>{KIND[it.type].label} · clip {it.clip}: {it.text ?? it.why ?? `${it.from}–${it.to}`}</li>)}</ul></details>}
         {draft.skipped.length > 0 && <details className="mt-2 type-caption text-muted-foreground"><summary>{draft.skipped.length} clip(s) left out</summary><ul className="mt-1 list-disc pl-5">{draft.skipped.map(s => <li key={s.clip}>clip {s.clip}: {s.why}</li>)}</ul></details>}

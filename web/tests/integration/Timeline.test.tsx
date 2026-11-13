@@ -183,7 +183,7 @@ describe('Timeline', () => {
     const { findByTitle, findByText, findByRole, queryByRole, user } = setup(<Timeline folder="/data" clips={[makeClipInfo()]} onOpenClip={vi.fn()} />)
     await findByText('Plan')
 
-    const playBtn = await findByTitle('play this window')
+    const playBtn = await findByRole('button', { name: /^▶ / })
     await user.click(playBtn)
 
     await user.click(await findByRole('button', { name: 'close' }))                                    // the window's player opens over the plan, and closes again
@@ -288,7 +288,7 @@ describe('Timeline', () => {
 
     const { findByRole, findByTitle, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
     await findByText('Plan')
-    const btn = await findByTitle('more of this clip')
+    const btn = await findByRole('button', { name: 'more of this clip' })
     await user.click(btn)
 
     expect(seenOverride).toHaveLength(1)
@@ -308,9 +308,9 @@ describe('Timeline', () => {
 
     const seenOverride = recordRequests('/api/edit/override')
 
-    const { findByTitle, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
+    const { findByRole, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
     await findByText('Plan')
-    const btn = await findByTitle('less of this clip')
+    const btn = await findByRole('button', { name: 'less of this clip' })
     await user.click(btn)
 
     expect(seenOverride).toHaveLength(1)
@@ -330,9 +330,9 @@ describe('Timeline', () => {
 
     const seenOverride = recordRequests('/api/edit/override')
 
-    const { findByTitle, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
+    const { findByRole, findByText, user } = setup(<Timeline folder="/data" clips={[makeClipInfo({ id: 'CAM_1' })]} onOpenClip={vi.fn()} />)
     await findByText('Plan')
-    await user.click(await findByTitle('never use this footage (whichever way of seeing it)'))
+    await user.click(await findByRole('button', { name: 'skip moment' }))
 
     expect(seenOverride[0].body).toEqual({ folder: '/data', action: 'ban', kind: 'moment', key: 'win:CAM_1@0@5', on: true })
   })

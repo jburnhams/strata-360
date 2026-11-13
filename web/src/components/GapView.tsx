@@ -5,6 +5,7 @@ import ItemPage, { Card, LengthField } from './ItemPage'
 import TrackMap from './TrackMap'
 import { PanelSkeleton } from './Skeleton'
 import StepVideo from './FrameStep'
+import { Button, NativeSelect } from 'strata-react'
 
 // A gap in the footage as a page of its own, like a clip: the preview of its generated clip, how it is drawn (2D map or 3D flyover, or left to the planner) and how long it is (set exactly, or at least),
 // whether the film must use it, what the script says over it, and your notes with the voice-over you want inside it (they go to the script writer like a clip's).
@@ -39,16 +40,16 @@ export default function GapView({ folder, gap, tz }: { folder: string; gap: stri
           : <div className="flex aspect-video w-full max-w-3xl items-center justify-center rounded-control bg-muted type-body-sm text-muted-foreground">{c?.rendering ? (c.progress || 'rendering…') : 'No clip rendered yet'}</div>}
         <div className="mt-2 flex flex-wrap items-center gap-3 type-body-sm">
           <span className={c?.error && !c.rendering ? 'text-danger' : 'text-muted-foreground'} aria-label="State">{state}</span>
-          <button disabled={!!c?.rendering} className="rounded-control bg-primary px-3 py-1 text-primary-foreground disabled:opacity-50" onClick={generate}>{c?.exists ? 'Regenerate' : kind === 'flyover' ? 'Generate 3D flyover' : 'Generate map clip'}</button>
-          {c && !c.rendering && <button aria-label={`Remove the ${g.id} clip`} className="text-muted-foreground underline" onClick={() => run(() => api.deleteGapClip(folder, c.id))}>Remove clip</button>}
+          <Button variant="default" disabled={!!c?.rendering} onClick={generate}>{c?.exists ? 'Regenerate' : kind === 'flyover' ? 'Generate 3D flyover' : 'Generate map clip'}</Button>
+          {c && !c.rendering && <Button variant="link" aria-label={`Remove the ${g.id} clip`} onClick={() => run(() => api.deleteGapClip(folder, c.id))}>Remove clip</Button>}
         </div>
 </>}
       settings={<>
           <label className="flex items-center gap-2"><span className="w-24 text-muted-foreground">Drawn as</span>
-            <select aria-label="Drawn as" value={s.kind ?? ''} disabled={!!c?.rendering} onChange={e => save({ kind: (e.target.value || null) as GapKind | null })} className="rounded-control border border-border bg-transparent px-1 py-0.5">
+            <NativeSelect size="sm" aria-label="Drawn as" value={s.kind ?? ''} disabled={!!c?.rendering} onChange={e => save({ kind: (e.target.value || null) as GapKind | null })}>
               <option value="">the planner chooses</option><option value="map">{KIND.map}</option>
               <option value="flyover" disabled={!flyover.available} title={flyover.note || undefined}>{KIND.flyover}{flyover.available ? '' : ' (not installed)'}</option>
-            </select></label>
+            </NativeSelect></label>
           <LengthField id={g.id} mode={s.mode ?? ''} seconds={s.seconds} modes={['set', 'min']} min={2} max={45} fallback={c?.seconds ?? g.default_seconds} onChange={(mode, seconds) => save(mode ? { mode, seconds } : { mode: null, seconds: null })} />
           <label className="flex items-center gap-2 sm:col-span-2"><input type="checkbox" aria-label="Must be used in the film" checked={s.must} onChange={e => save({ must: e.target.checked })} /> <span>Must be used in the film <span className="type-caption text-muted-foreground">(added where it falls in the race if the script leaves it out)</span></span></label>
       </>}
@@ -70,7 +71,7 @@ function StopCard({ folder, stop, tz, onChanged }: { folder: string; stop: NonNu
         <dt className="text-muted-foreground">The clip</dt><dd>starts {mins(stop.pad_s)} before the stop and ends {mins(stop.pad_s)} after it, to show arriving and leaving</dd>
         {(stop.covered_before || stop.covered_after) && <><dt className="text-muted-foreground">Footage</dt><dd>already covers the {stop.covered_before && stop.covered_after ? 'start and the end' : stop.covered_before ? 'start' : 'end'} of this stop, so this clip is only the time outside it</dd></>}
       </dl>
-      <button type="button" className="mt-2 type-caption text-muted-foreground underline" onClick={async () => { await api.setStop(folder, stop.key, false).catch(() => {}); onChanged() }}>Take this stop out of the video</button>
+      <Button variant="link" size="sm" type="button" className="mt-2" onClick={async () => { await api.setStop(folder, stop.key, false).catch(() => {}); onChanged() }}>Take this stop out of the video</Button>
     </Card>
   )
 }

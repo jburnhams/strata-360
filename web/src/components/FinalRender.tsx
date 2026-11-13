@@ -4,6 +4,7 @@ import { ENLARGE } from './stillModes'
 import { usePoll } from '../usePoll'
 import RenderProgress from './RenderProgress'
 import OverlaySettings from './OverlaySettings'
+import { Button } from 'strata-react'
 
 const eta = (st: { frames_done?: number; frames_total?: number; started?: number }) => {
   if (!st.frames_done || !st.frames_total || !st.started) return ''
@@ -28,9 +29,9 @@ export default function FinalRender({ folder }: { folder: string }) {
           <label className="type-body-sm">Frames/s <select className={sel} value={fps ?? st.settings.fps} onChange={e => setFps(Number(e.target.value))}><option value={0}>the footage's own</option><option value={25}>25</option><option value={30}>30</option><option value={50}>50</option></select></label>
           <label className="type-body-sm"><input type="checkbox" checked={half ?? st.settings.half_rate} onChange={e => setHalf(e.target.checked)} /> Half frame rate (faster)</label>
           <label className="type-body-sm" title="Runs the local upscaling model on shots that hold too few pixels for the size (tight zooms; not night footage). Slow: at 4K nearly every shot qualifies, so 1080p or 1440p then a resample is much cheaper.">Enlarge <select className={sel} value={up ?? st.settings.upscale} onChange={e => setUp(e.target.value as EnlargeMode)}>{ENLARGE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-          <button className="rounded-surface bg-primary px-3 py-1.5 type-body-sm text-primary-foreground" onClick={() => api.startFinal(folder, { size: size ?? st.settings.size, fps: fps ?? st.settings.fps, half_rate: half ?? st.settings.half_rate, upscale: up ?? st.settings.upscale })}>{st.state === 'done' ? 'Render again' : st.state === 'stopped' || (st.pieces_done ?? 0) > 0 ? 'Continue' : 'Render final film'}</button></>}
+          <Button variant="default" onClick={() => api.startFinal(folder, { size: size ?? st.settings.size, fps: fps ?? st.settings.fps, half_rate: half ?? st.settings.half_rate, upscale: up ?? st.settings.upscale })}>{st.state === 'done' ? 'Render again' : st.state === 'stopped' || (st.pieces_done ?? 0) > 0 ? 'Continue' : 'Render final film'}</Button></>}
         {busy && <><span className="type-body-sm text-muted-foreground">{st.state === 'assembling' ? 'putting it together…' : `rendering ${pct}% · piece ${st.pieces_done}/${st.pieces_total}${eta(st)}`}</span>
-          <button className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => api.stopFinal(folder)}>stop (keeps finished pieces)</button></>}
+          <Button size="sm" onClick={() => api.stopFinal(folder)}>stop (keeps finished pieces)</Button></>}
         {st.state === 'done' && st.has_file && <a className="type-body-sm text-primary underline" href={api.finalUrl(folder)} download="film.mp4">download film.mp4</a>}
         {st.state === 'error' && <span className="type-body-sm text-danger">{st.error || 'failed'}</span>}
       </div>

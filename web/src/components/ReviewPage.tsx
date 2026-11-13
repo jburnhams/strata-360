@@ -3,6 +3,7 @@ import { api, type ReviewItem } from '../api'
 import { usePoll } from '../usePoll'
 import { diffPhrase } from '../phraseDiff'
 import { PanelSkeleton } from './Skeleton'
+import { Button, NativeSelect, Tooltip } from 'strata-react'
 
 const PAGE = 20
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
@@ -60,7 +61,7 @@ export default function ReviewPage({ folder, onOpen }: { folder: string; onOpen?
         <b>Review the transcript</b>
         <span className="flex flex-wrap items-center gap-3 type-caption text-muted-foreground">
           <span>{data.todo} to look at of {data.total} phrases</span>
-          <label className="flex items-center gap-1">sound <select value={kind} onChange={e => setKind(e.target.value as 'original' | 'clean')} className="rounded-control border border-border bg-transparent px-1 py-0.5"><option value="clean">cleaned</option><option value="original">original</option></select></label>
+          <label className="flex items-center gap-1">sound <NativeSelect size="sm" value={kind} onChange={e => setKind(e.target.value as 'original' | 'clean')}><option value="clean">cleaned</option><option value="original">original</option></NativeSelect></label>
           <label className="flex items-center gap-1"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> show ones I have looked at</label>
         </span>
       </div>
@@ -71,7 +72,7 @@ export default function ReviewPage({ folder, onOpen }: { folder: string; onOpen?
       <ol className="space-y-3">
         {list.slice(0, limit).map((it, k) => <Card key={`${it.clip}:${it.si}:${it.t0}:${it.reviewed}:${it.hidden}`} folder={folder} it={it} kind={kind} first={k === 0} onOpen={onOpen} onChanged={refresh} onError={fail} />)}
       </ol>
-      {list.length > limit && <button className="mt-3 rounded-control border border-border px-3 py-1 type-body-sm" onClick={() => setLimit(l => l + PAGE)}>show {Math.min(PAGE, list.length - limit)} more</button>}
+      {list.length > limit && <Button className="mt-3" onClick={() => setLimit(l => l + PAGE)}>show {Math.min(PAGE, list.length - limit)} more</Button>}
     </section>
   )
 }
@@ -112,7 +113,7 @@ function Card({ folder, it, kind, first, onOpen, onChanged, onError }: { folder:
   return (
     <li className={`rounded-surface border p-3 type-body-sm ${it.hidden ? 'border-dashed border-border opacity-50' : it.reviewed ? 'border-border opacity-60' : 'border-border'}`}>
       <div className="mb-1 flex flex-wrap items-center gap-1.5 type-caption text-muted-foreground">
-        <button type="button" className="font-mono hover:underline" onClick={() => onOpen?.(it.clip, it.t0)} title="open the clip at this moment">{short(it.clip)} · {mmss(it.t0)}</button>
+        <Tooltip label="open the clip at this moment"><Button variant="ghost" type="button" className="font-mono" onClick={() => onOpen?.(it.clip, it.t0)}>{short(it.clip)} · {mmss(it.t0)}</Button></Tooltip>
         <span className={`${badge} ${it.wps != null && it.wps > 4.5 ? 'border-warning text-warning' : 'border-border'}`} title="words a second">{it.wps == null ? 'pace n/a' : `${it.wps.toFixed(1)} w/s · ${Math.round(it.wps * 60)} wpm`}</span>
         <span className={`${badge} ${conf != null && conf < 60 ? 'border-danger text-danger' : 'border-border'}`} title="how sure the recogniser was of the whole phrase">{conf == null ? 'confidence n/a' : `${conf}% sure`}</span>
         {it.low_words > 0 && <span className={`${badge} border-danger text-danger`} title="words the recogniser was under half sure of">{it.low_words} of {it.n_words} words unsure</span>}
@@ -137,7 +138,7 @@ function Card({ folder, it, kind, first, onOpen, onChanged, onError }: { folder:
         {slowed ? btn(it.play_rate, `slowed to normal pace (×${it.play_rate})`, now === keyOf(it.play_rate)) : <span className="type-caption text-muted-foreground">not fast: no slowed version</span>}
         <button type="button" onClick={() => setLoop(!loop)} aria-pressed={loop} title="repeat the phrase until you stop it, save a correction or hide it (the same for every player on the page)" className={`ml-auto rounded-control border px-2 py-0.5 type-caption ${loop ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:border-primary'}`}>⟳ loop</button>
       </div>
-      {it.hidden ? <button type="button" disabled={busy} className="rounded-control border border-border px-2 py-0.5 type-caption" title="put the phrase back in the transcript" onClick={() => void hide(false)}>show again</button> : <>
+      {it.hidden ? <Tooltip label="put the phrase back in the transcript"><Button size="sm" type="button" disabled={busy} onClick={() => void hide(false)}>show again</Button></Tooltip> : <>
       <textarea ref={input} rows={2} value={text} onChange={e => setText(e.target.value)} aria-label="what was said" disabled={busy}
         onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save(changed) }
@@ -148,14 +149,14 @@ function Card({ folder, it, kind, first, onOpen, onChanged, onError }: { folder:
         className="w-full rounded-control border border-border bg-transparent px-2 py-1" />
       <div className="mt-1 flex flex-wrap items-center gap-2">
         {it.reviewed
-          ? <button type="button" disabled={busy} className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => void save(false)}>put back in the list</button>
+          ? <Button size="sm" type="button" disabled={busy} onClick={() => void save(false)}>put back in the list</Button>
           : <>
-            <button type="button" disabled={busy || !changed} className="rounded-control bg-primary px-2 py-0.5 type-caption text-primary-foreground disabled:opacity-40" onClick={() => void save(true)}>save correction</button>
-            <button type="button" disabled={busy} className="rounded-control border border-border px-2 py-0.5 type-caption" title="the text is right as it is: take it off the list" onClick={() => void save(false)}>looks right</button>
+            <Button variant="default" size="sm" type="button" disabled={busy || !changed} onClick={() => void save(true)}>save correction</Button>
+            <Tooltip label="the text is right as it is: take it off the list"><Button size="sm" type="button" disabled={busy} onClick={() => void save(false)}>looks right</Button></Tooltip>
           </>}
-        {changed && <button type="button" className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => setText(shownText(it))}>undo my typing</button>}
+        {changed && <Button size="sm" type="button" onClick={() => setText(shownText(it))}>undo my typing</Button>}
         <span className="type-caption text-muted-foreground">{changed ? 'Enter saves' : 'Enter: looks right'}</span>
-        <button type="button" disabled={busy} className="ml-auto rounded-control border border-danger px-2 py-0.5 type-caption text-danger" title="take this phrase out of the transcript for everything after it (it stays at the bottom of this page)" onClick={() => void hide(true)}>hide</button>
+        <Tooltip label="take this phrase out of the transcript for everything after it (it stays at the bottom of this page)"><Button size="sm" type="button" disabled={busy} className="ml-auto" onClick={() => void hide(true)}>hide</Button></Tooltip>
       </div></>}
     </li>
   )

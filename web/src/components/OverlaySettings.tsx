@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type OverlaySettings as Settings, type OverlayState } from '../api'
+import { Button } from 'strata-react'
 
 const STYLE_LABEL: Record<string, string> = { 'tf-outdoors': 'Outdoors (contours, paths)', 'tf-landscape': 'Landscape (towns, relief)', 'tf-cycle': 'Cycle', 'tf-transport': 'Transport', 'tf-atlas': 'Atlas', osm: 'OpenStreetMap (no key)' }
 const styleLabel = (s: { name: string; needs_key: boolean }) => STYLE_LABEL[s.name] ?? s.name
@@ -43,15 +44,15 @@ export default function OverlaySettings({ folder, disabled = false }: { folder: 
           <label className="type-body-sm">by up to <input type="number" className={sel + ' w-20'} min={0} max={4} step={0.5} value={draft.zoom_range} disabled={!draft.auto_zoom} onChange={e => set({ zoom_range: Number(e.target.value) })} /> levels</label>
         </div>
         <div className="flex items-center gap-3">
-          <button className="rounded-surface bg-neutral-11 px-3 py-1.5 type-body-sm text-white disabled:opacity-50" disabled={!changed} onClick={() => run(() => api.saveOverlay(folder, draft))}>Save overlay settings</button>
-          {changed && <button className="type-body-sm underline" onClick={() => setDraft(st.settings)}>undo changes</button>}
+          <Button variant="ghost" disabled={!changed} onClick={() => run(() => api.saveOverlay(folder, draft))}>Save overlay settings</Button>
+          {changed && <Button variant="link" onClick={() => setDraft(st.settings)}>undo changes</Button>}
           {saved && !changed && <span className="type-body-sm text-primary">saved; the overlay thumbnails are being made again</span>}
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
           <span className="type-body-sm">Map key (Thunderforest): {st.key_set ? <span className="text-primary">set</span> : <span className={keyNeeded ? 'text-danger' : 'text-muted-foreground'}>not set{keyNeeded ? ', the maps need it' : ''}</span>}</span>
           <label className="type-body-sm"><span className="sr-only">Map key</span><input type="password" autoComplete="off" placeholder={st.key_set ? 'replace the key' : 'paste the key'} className={sel} value={key} onChange={e => setKey(e.target.value)} /></label>
-          <button className="rounded-surface border border-border px-2 py-1 type-body-sm disabled:opacity-50" disabled={!key.trim()} onClick={() => saveKey(key)}>Save key</button>
-          {st.key_set && <button className="type-body-sm underline" onClick={() => saveKey('')}>remove key</button>}
+          <Button size="sm" disabled={!key.trim()} onClick={() => saveKey(key)}>Save key</Button>
+          {st.key_set && <Button variant="link" onClick={() => saveKey('')}>remove key</Button>}
           <span className="type-caption text-muted-foreground">{st.tiles_cached} map tiles cached. The key is kept in secrets.env on this computer and never shown again.</span>
         </div>
         {err && <p className="type-body-sm text-danger">{err}</p>}

@@ -1,5 +1,6 @@
 import { api, type Photo } from '../api'
 import PhotoMotion from './PhotoMotion'
+import { Button } from 'strata-react'
 
 const when = (t: number, tz: string) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(',', '') } catch { return new Date(t * 1000).toISOString() } }
 const hms = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -35,8 +36,8 @@ export default function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }:
         <PhotoMotion folder={folder} p={p} onChanged={() => onMotion?.()} />
         {p.flag && <div role="alert" className="text-warning">⚠ {p.flag}</div>}
         <div className="flex gap-3">
-          {onOpen && p.use && <button className="text-primary underline" onClick={onOpen}>Open in the film list</button>}
-          {onRemove && <button aria-label={`Remove ${p.name}`} className="text-muted-foreground underline" onClick={onRemove}>Remove</button>}
+          {onOpen && p.use && <Button variant="link" onClick={onOpen}>Open in the film list</Button>}
+          {onRemove && <Button variant="link" aria-label={`Remove ${p.name}`} onClick={onRemove}>Remove</Button>}
         </div>
       </figcaption>
     </figure>

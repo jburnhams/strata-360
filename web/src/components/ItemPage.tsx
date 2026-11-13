@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { GapScriptItem } from '../api'
 import NoteBox from './NoteBox'
+import { Input, NativeSelect } from 'strata-react'
 
 // The page of one thing the film can show that is not a camera clip: a gap, a photo or a street view section. They all have the same sections, so this is shared: the preview, how it is drawn and how long it is, what the script says over it,
 // and your notes with the voice-over you want inside it. Each kind brings its own preview and its own settings.
@@ -26,11 +27,11 @@ export function LengthField({ id, mode, seconds, modes, min, max, fallback, disa
   const commit = () => { if (draft?.id !== id) return; const v = Number(draft.seconds); setDraft(undefined); if (Number.isFinite(v) && draft.seconds.trim() !== '' && v !== seconds) onChange(mode, v) }
   return (
     <div className="flex items-center gap-2"><span className="w-24 text-muted-foreground">Length</span>
-      <select aria-label="Length" value={mode} disabled={disabled} onChange={e => { const m = e.target.value as '' | 'set' | 'min'; onChange(m, m ? seconds ?? fallback : null) }} className="rounded-control border border-border bg-transparent px-1 py-0.5">
+      <NativeSelect size="sm" aria-label="Length" value={mode} disabled={disabled} onChange={e => { const m = e.target.value as '' | 'set' | 'min'; onChange(m, m ? seconds ?? fallback : null) }}>
         <option value="">the plan decides</option>{modes.includes('set') && <option value="set">exactly</option>}{modes.includes('min') && <option value="min">at least</option>}
-      </select>
-      <input aria-label="Length in seconds" type="number" min={min} max={max} step={1} disabled={!mode} value={text} onChange={e => setDraft({ id, seconds: e.target.value })} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-        className="w-16 rounded-control border border-border bg-transparent px-1 py-0.5 disabled:opacity-40" /> <span className="type-caption text-muted-foreground">s</span></div>
+      </NativeSelect>
+      <Input size="sm" aria-label="Length in seconds" type="number" min={min} max={max} step={1} disabled={!mode} value={text} onChange={e => setDraft({ id, seconds: e.target.value })} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+        /> <span className="type-caption text-muted-foreground">s</span></div>
   )
 }
 

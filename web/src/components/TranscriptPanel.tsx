@@ -8,6 +8,7 @@ import Health from './Health'
 import WordMarker from './WordMarker'
 import { usedSet } from '../marks'
 import { thumbVersion, useThumbOverlay } from '../thumbOverlay'
+import { Button, NativeSelect, Tooltip } from 'strata-react'
 
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -42,15 +43,15 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
       <div className="mb-3 flex items-center justify-between type-body-sm">
         <b>Transcript of everything</b>
         <span className="flex items-center gap-2 type-caption text-muted-foreground">
-          <button disabled={running} title="sends the words (and your notes) to Gemini, which suggests substitutions for obvious recognition errors; they show highlighted and you can change any of them" className="rounded-control border border-border px-2 py-0.5 text-foreground disabled:opacity-50"
-            onClick={async () => { setFixErr(undefined); try { await api.suggestTranscript(folder) } catch (e) { setFixErr((e as Error).message) } setVer(v => v + 1) }}>{running ? `asking Gemini… ${fix?.done ?? 0}/${fix?.total ?? '…'}` : 'suggest corrections (Gemini)'}</button>
+          <Tooltip label="sends the words (and your notes) to Gemini, which suggests substitutions for obvious recognition errors; they show highlighted and you can change any of them"><Button size="sm" disabled={running}
+            onClick={async () => { setFixErr(undefined); try { await api.suggestTranscript(folder) } catch (e) { setFixErr((e as Error).message) } setVer(v => v + 1) }}>{running ? `asking Gemini… ${fix?.done ?? 0}/${fix?.total ?? '…'}` : 'suggest corrections (Gemini)'}</Button></Tooltip>
           {fix?.state === 'done' && <span>{fix.fixes} suggested</span>}{!!fix?.calls_made && fix.state !== 'running' && <span title="new Gemini calls made, and tokens used by them">{fix.calls_made} calls ({Math.round(((fix.tokens?.input ?? 0) + (fix.tokens?.output ?? 0)) / 1000)}k tokens){fix.calls_reused ? `, ${fix.calls_reused} reused` : ''}</span>}{!!fix?.usage?.paid_calls && <span title="all Gemini calls made on the paid key for this project, at list price (an estimate; the free key costs nothing)">paid: {fix.usage.paid_calls} calls, about ${fix.usage.cost_usd.toFixed(2)}</span>}{fix?.state === 'error' && <span className="text-danger">{fix.error}</span>}{fixErr && <span className="text-danger">{fixErr}</span>}
           <span title="select words to mark them: G = must use, R = never use, W = clear. Yellow words are not marked but the current draft plays them. A dotted underline is a correction (amber Gemini, blue you); hover for the original, click a word to edit"><span className="rounded-control bg-primary-3 px-1">must</span> <span className="rounded-control bg-danger-subtle px-1">never</span> <span className="rounded-control bg-warning-subtle px-1">in draft</span> select words to mark them</span></span>
         <span className="flex items-center gap-3 text-muted-foreground">{data.segments.length} phrases
-          <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown" className="rounded-control border border-border bg-transparent px-1 py-0.5">
-            <option value="translated">translated</option><option value="original">original language</option><option value="both">both</option></select>
-          <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'you')} className="rounded-control border border-border bg-transparent px-1 py-0.5">
-            <option value="all">everyone</option><option value="you">only you</option></select></span>
+          <NativeSelect size="sm" value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown">
+            <option value="translated">translated</option><option value="original">original language</option><option value="both">both</option></NativeSelect>
+          <NativeSelect size="sm" value={filter} onChange={e => setFilter(e.target.value as 'all' | 'you')}>
+            <option value="all">everyone</option><option value="you">only you</option></NativeSelect></span>
       </div>
       <div className="mb-2"><Health h={fix?.health} /></div>
       {groups.length === 0 && <p className="type-body-sm text-muted-foreground">{filter === 'you' ? 'No phrases labelled as you yet (voices are labelled by the speakers stage).' : 'No speech recognised yet.'}</p>}
@@ -58,7 +59,7 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
       <div className="space-y-3 type-body-sm leading-relaxed">
         {groups.map((g, gi) => (
           <div key={gi}>
-            <button className="mb-0.5 font-mono type-caption text-muted-foreground hover:underline" onClick={() => onOpen(g.clip, g.segs[0].t0)}>{short(g.clip)}{info[g.clip] ? ` · ${Math.round(info[g.clip].duration_s)} s` : ''}</button>
+            <Button variant="ghost" size="sm" className="mb-0.5 font-mono" onClick={() => onOpen(g.clip, g.segs[0].t0)}>{short(g.clip)}{info[g.clip] ? ` · ${Math.round(info[g.clip].duration_s)} s` : ''}</Button>
             <p>
               {g.segs.map((s, i) => (
                 <span key={i} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}

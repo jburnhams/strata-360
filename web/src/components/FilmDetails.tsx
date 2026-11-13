@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Meta, type Results } from '../api'
 import { PanelSkeleton } from './Skeleton'
+import { Button, Input } from 'strata-react'
 
 // Title, date and race results. The date defaults to the earliest capture in the footage; results feed the voice-over script (a DNF has no finishing position).
 export default function FilmDetails({ folder }: { folder: string }) {
@@ -14,9 +15,9 @@ export default function FilmDetails({ folder }: { folder: string }) {
   const r = m.results
   const num = (k: 'starters' | 'finishers' | 'position', label: string, disabled = false) => (
     <label className="type-body-sm"><span className="mb-1 block text-muted-foreground">{label}</span>
-      <input type="number" min={1} disabled={disabled} defaultValue={r[k] ?? ''} key={`${k}-${r[k]}-${disabled}`}
+      <Input type="number" min={1} disabled={disabled} defaultValue={r[k] ?? ''} key={`${k}-${r[k]}-${disabled}`}
         onBlur={e => { const v = e.target.value; if (String(r[k] ?? '') !== v) save({ results: { [k]: v === '' ? null : Number(v) } as Partial<Results> }) }}
-        className="w-full rounded-surface border border-border bg-card px-2 py-1.5 disabled:opacity-40" /></label>
+        className="w-full" /></label>
   )
   const inp = 'w-full rounded-surface border border-border bg-card px-2 py-1.5'
   return (
@@ -25,7 +26,7 @@ export default function FilmDetails({ folder }: { folder: string }) {
       <div className="grid gap-3 md:grid-cols-2">
         <label className="type-body-sm"><span className="mb-1 block text-muted-foreground">Title</span>
           <input className={inp} defaultValue={m.title ?? ''} placeholder={m.defaults.title ?? 'Race or film title'} onBlur={e => e.target.value !== (m.title ?? '') && save({ title: e.target.value })} /></label>
-        <label className="type-body-sm"><span className="mb-1 block text-muted-foreground">Date {m.date == null && m.defaults.date ? <span className="type-caption">(earliest capture)</span> : <button className="type-caption underline" onClick={() => save({ date: '' })}>use earliest capture</button>}</span>
+        <label className="type-body-sm"><span className="mb-1 block text-muted-foreground">Date {m.date == null && m.defaults.date ? <span className="type-caption">(earliest capture)</span> : <Button variant="link" size="sm" onClick={() => save({ date: '' })}>use earliest capture</Button>}</span>
           <input type="date" className={inp} value={m.effective.date ?? ''} onChange={e => save({ date: e.target.value })} /></label>
       </div>
       <label className="mt-3 block max-w-xs type-body-sm"><span className="mb-1 block text-muted-foreground">Official race distance (km) <span className="type-caption">(the script writer uses it for "km to go")</span></span>

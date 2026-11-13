@@ -9,6 +9,7 @@ import { api } from '../api'
 import { AimVideoOverlay, useAimPath } from './PointCams'
 import type { EndMarkers, PointCam, Poi, StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
+import { Button, NativeSelect, Tooltip } from 'strata-react'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
 const NAME: Record<SvProvider, string> = { mapillary: 'Mapillary', panoramax: 'Panoramax', google: 'Google' }
@@ -164,14 +165,14 @@ function Stages({ data, onRun, err }: { data: StreetView; onRun: (stages?: strin
               <div className="font-medium">{k === 'roads' ? 'Road parts of the run' : k === 'quality' ? 'Quality check' : NAME[k]}</div>
               <div className="type-caption text-muted-foreground">{line(k)}</div>
               {why && <div className="type-caption text-warning">{why}</div>}
-              <button disabled={blocked} onClick={() => onRun([k], s.done)} aria-label={`${s.done && !s.stale ? 'Redo' : 'Run'} ${k === 'roads' ? 'road parts' : k === 'quality' ? 'quality check' : NAME[k]}`}
-                className="mt-1 rounded-control bg-primary px-2 py-0.5 type-caption text-primary-foreground disabled:opacity-40">{s.done && !s.stale ? 'Redo' : 'Run'}</button>
+              <Button variant="default" size="sm" disabled={blocked} onClick={() => onRun([k], s.done)} aria-label={`${s.done && !s.stale ? 'Redo' : 'Run'} ${k === 'roads' ? 'road parts' : k === 'quality' ? 'quality check' : NAME[k]}`}
+                className="mt-1">{s.done && !s.stale ? 'Redo' : 'Run'}</Button>
             </li>
           )
         })}
       </ul>
       <div className="mt-2 flex flex-wrap items-center gap-3 type-body-sm">
-        <button disabled={busy} onClick={() => onRun()} className="rounded-control bg-primary px-3 py-1 text-primary-foreground disabled:opacity-40">Run all that is missing</button>
+        <Button variant="default" disabled={busy} onClick={() => onRun()}>Run all that is missing</Button>
         {busy && <span role="status" className="text-muted-foreground">working… {data.job.log.slice(-1)[0] ?? ''}</span>}
         {!busy && data.job.error && <span role="alert" className="text-danger">{data.job.error}</span>}
         {err && <span role="alert" className="text-danger">{err}</span>}
@@ -189,7 +190,7 @@ function Filters({ shown, setShown, data, filters, setFilters, total, showing }:
   return (
     <div className="relative mb-2 flex flex-wrap items-center gap-4">
       {PROVIDERS.map(p => box(p, `${NAME[p]}${data.providers[p] ? ` (${data.sections.filter(s => s.provider === p).length})` : ''}`, COLOUR[p]))}{box('360', '360° cameras')}{box('2d', '2D cameras')}{box('clips', 'Camera clips')}
-      <button type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(o => !o)} className="rounded-control border border-border px-2 py-0.5 type-body-sm">Filters{off ? ` (${off})` : ''} ▾</button>
+      <Button size="sm" type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(o => !o)}>Filters{off ? ` (${off})` : ''} ▾</Button>
       <span className="type-caption text-muted-foreground" aria-live="polite">{showing} of {total} sections shown</span>
       {open && (
         <div role="group" aria-label="Filters" className="absolute left-0 top-full z-[1000] mt-1 w-96 max-w-full space-y-2 rounded-surface border border-border bg-card p-3 type-body-sm shadow-overlay">
@@ -197,7 +198,7 @@ function Filters({ shown, setShown, data, filters, setFilters, total, showing }:
             <fieldset key={g.title}><legend className="type-caption font-semibold uppercase tracking-wide text-muted-foreground">{g.title}</legend>
               {g.items.map(([k, label]) => <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={!!filters[k]} onChange={e => setFilters({ ...filters, [k]: e.target.checked })} />{label}</label>)}</fieldset>
           ))}
-          <div className="flex gap-3"><button type="button" className="type-caption underline" onClick={() => setFilters(DEFAULT_FILTERS)}>Usable only</button><button type="button" className="type-caption underline" onClick={() => setFilters(SHOW_ALL)}>Show everything</button></div>
+          <div className="flex gap-3"><Button variant="link" size="sm" type="button" onClick={() => setFilters(DEFAULT_FILTERS)}>Usable only</Button><Button variant="link" size="sm" type="button" onClick={() => setFilters(SHOW_ALL)}>Show everything</Button></div>
         </div>
       )}
     </div>
@@ -282,11 +283,11 @@ export function SectionContent({ folder, tz, section, onChoose, onHires, showCho
           {section.kind === '360' && <SectionVideo folder={folder} section={section} pano aimCam={aimCam} />}
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
-              <li key={it.id}><button onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>
-                <img loading="lazy" src={api.streetviewImage(folder, section.provider, it.id, 256)} alt={`${NAME[section.provider]} ${label}`} className="aspect-[3/2] w-full rounded-control object-cover" /><span className="type-caption text-muted-foreground">{label}</span></button></li>
+              <li key={it.id}><Button variant="ghost" onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>
+                <img loading="lazy" src={api.streetviewImage(folder, section.provider, it.id, 256)} alt={`${NAME[section.provider]} ${label}`} className="aspect-[3/2] w-full rounded-control object-cover" /><span className="type-caption text-muted-foreground">{label}</span></Button></li>
             ))}
           </ul>
-          {big && <div className="mt-2"><img src={api.streetviewImage(folder, big.provider, big.id, 1024)} alt="Larger picture" className="max-h-[480px] rounded-control" /><button className="block type-caption underline" onClick={() => setBig(undefined)}>Close the larger picture</button></div>}
+          {big && <div className="mt-2"><img src={api.streetviewImage(folder, big.provider, big.id, 1024)} alt="Larger picture" className="max-h-[480px] rounded-control" /><Button variant="link" size="sm" className="block" onClick={() => setBig(undefined)}>Close the larger picture</Button></div>}
         </div>
   )
 }
@@ -296,7 +297,7 @@ function Detail({ folder, tz, section, stretch, sections, onSel, onChoose, onHir
     <div className="rounded-surface bg-card p-4">
       {stretch && <div className="type-body-sm"><span className="font-medium">{stretch.names.join(', ') || 'Unnamed road'}</span> · {stretch.highways.join(', ')} · {span(stretch)} · {metres(stretch.length_m)} of the run on this road
         {!section && <span className="text-muted-foreground"> · {sections.length ? `${sections.length} section${sections.length === 1 ? '' : 's'} of street view` : 'no street view found'}</span>}</div>}
-      {!section && sections.length > 0 && <ul className="mt-2 flex flex-wrap gap-2">{sections.map(s => <li key={s.id}><button onClick={() => onSel({ kind: 'section', id: s.id })} className="rounded-control border border-border px-2 py-0.5 type-caption">{NAME[s.provider]} {kindLabel(s)} · {metres(s.length_m)}</button></li>)}</ul>}
+      {!section && sections.length > 0 && <ul className="mt-2 flex flex-wrap gap-2">{sections.map(s => <li key={s.id}><Button size="sm" onClick={() => onSel({ kind: 'section', id: s.id })}>{NAME[s.provider]} {kindLabel(s)} · {metres(s.length_m)}</Button></li>)}</ul>}
       {section && <SectionContent folder={folder} tz={tz} section={section} onChoose={onChoose} onHires={onHires} />}
     </div>
   )
@@ -312,7 +313,7 @@ function List({ title, tz, sections, sel, onSel, none }: { title: string; tz: st
         <tbody>
           {sections.map(s => (
             <tr key={s.id} onClick={() => onSel({ kind: 'section', id: s.id })} className={`cursor-pointer border-t border-border ${sel?.kind === 'section' && sel.id === s.id ? 'bg-primary-3' : 'hover:bg-muted'}`}>
-              <td className="pr-3"><button className="underline" onClick={e => { e.stopPropagation(); onSel({ kind: 'section', id: s.id }) }}>{NAME[s.provider]} {s.id}</button></td><td className="pr-3">{kindLabel(s)}</td><td className="pr-3">{span(s)} <span className="text-muted-foreground">({s.stretch})</span></td>
+              <td className="pr-3"><Button variant="link" onClick={e => { e.stopPropagation(); onSel({ kind: 'section', id: s.id }) }}>{NAME[s.provider]} {s.id}</Button></td><td className="pr-3">{kindLabel(s)}</td><td className="pr-3">{span(s)} <span className="text-muted-foreground">({s.stretch})</span></td>
               <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td className="pr-3">{s.near ? `${s.near.in_gap ? s.near.in_gap + ': ' : ''}${nearText(s.near)}` : '–'}</td><td className="pr-3">{when(s.filmed?.[0], tz)}</td><td className="pr-3">{when(s.passed?.[0], tz)}</td><td>{s.overlaps.length ? <span className="text-warning">{s.overlaps.join(', ')}</span> : '–'}</td>
             </tr>
           ))}
@@ -333,7 +334,7 @@ function Candidates({ folder, tz, sections, all, sel, onSel, onChoose }: { folde
   return (
     <div className="rounded-surface bg-card p-4" aria-label="Sections that could be used">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="type-body-sm font-semibold">Sections that could be used in the film</h3>
-        <label className="flex items-center gap-1 type-caption">Order <select value={order} onChange={e => setOrder(e.target.value as 'quality' | 'route')} className="rounded-control border border-border bg-card px-1 py-0.5"><option value="quality">best quality first</option><option value="route">along the route</option></select></label></div>
+        <label className="flex items-center gap-1 type-caption">Order <NativeSelect size="sm" value={order} onChange={e => setOrder(e.target.value as 'quality' | 'route')}><option value="quality">best quality first</option><option value="route">along the route</option></NativeSelect></label></div>
       <p className="mb-2 type-caption text-muted-foreground">{all.filter(s => s.plausible).length} of {all.length} sections have enough pictures, close enough together, to make a clip. Mark the ones the film may use: only those are shown to the script writer, and the plan makes a clip of any it picks.
         {chosen.length > 0 && ` Chosen: ${chosen.length} (${chosen.filter(s => s.choice === 'must').length} must include).`} Pictures are credited CC BY-SA to Mapillary and Panoramax contributors.</p>
       {ok.length === 0 && <p className="type-body-sm text-muted-foreground">{all.some(s => s.plausible) ? 'No candidate matches the filters.' : 'None of the sections found has enough pictures yet.'}</p>}
@@ -341,7 +342,7 @@ function Candidates({ folder, tz, sections, all, sel, onSel, onChoose }: { folde
         {ok.map(s => (
           <li key={s.key} data-section={s.id} className={`rounded-surface border p-2 ${sel?.id === s.id ? 'border-primary' : 'border-border'}`}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 type-body-sm">
-              <button className="font-medium underline" onClick={() => onSel({ kind: 'section', id: s.id })}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: COLOUR[s.provider] }} />{NAME[s.provider]} {s.id} · {kindLabel(s)}</button>
+              <Button variant="link" onClick={() => onSel({ kind: 'section', id: s.id })}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: COLOUR[s.provider] }} />{NAME[s.provider]} {s.id} · {kindLabel(s)}</Button>
               <span>{span(s)} · {metres(s.length_m)} of road that matches the run · {s.frames} pictures, one every {s.spacing_m} m{s.years.length ? ` · ${s.years.join(', ')}` : ''}{s.size ? ` · ${s.size[0]}×${s.size[1]}` : ''}</span>
               <span className="text-muted-foreground">clip of {s.min_s} to {s.max_s} s (the longest is {SLOWEST} pictures a second blended up to 30 frames a second; a shorter one is the same road played faster){s.kind === '2d' ? ` · faces ${facing(s)}` : ''}</span>
               <span className={s.steadied === 'by matching only' ? 'text-warning' : 'text-muted-foreground'}>steadied: {s.steadied}{s.steadied === 'by matching only' ? ' (may still wobble)' : ''}</span>
@@ -400,7 +401,7 @@ function SectionVideo({ folder, section, pano = false, aimCam }: { folder: strin
       {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true, hi)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={google ? 24 : undefined} fps={st.fps} aimPath={aim.path} />
         : <div className="relative inline-block"><StepVideo videoRef={flat} preload="metadata" src={api.svVideoUrl(folder, section.key, false, hi)} className="max-h-[360px] rounded-control" aria-label="Preview video of this section" /><AimVideoOverlay video={flat} path={aim.path} /></div>)}
       {st?.exists && aimCam && aim.err && <p role="note" className="type-caption text-warning">{aimCam.label} cannot be drawn on this video: {aim.err}</p>}
-      {st && !st.exists && !running && <button onClick={make} className="rounded-control bg-primary px-3 py-1 type-body-sm text-primary-foreground">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
+      {st && !st.exists && !running && <Button variant="default" onClick={make}>{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</Button>}
       {st && !st.exists && !running && <span className="ml-2 type-caption text-muted-foreground">about {st.seconds} s long, made in the background and kept{pano && google ? `. Google gives flat views only, so this asks it for ${section.frames * (hi ? 60 : 16)} zoomed-in views (${hi ? 60 : 16} for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
       {running && (
         <div role="status" aria-label="Making the video" className="max-w-xl space-y-1 type-body-sm text-muted-foreground">
@@ -424,16 +425,16 @@ function NearPanel({ folder, tz, probe, result, busy, log, error, onSearch, onPr
   const promote = async (it: SvNearItem) => { setPromoErr(undefined); try { const r = await api.promoteSv(folder, it, probe.lat, probe.lon); setMade(m => ({ ...m, [it.id]: r.id })); onPromoted() } catch (e) { setPromoErr((e as Error).message) } }
   return (
     <div className="rounded-surface bg-card p-4" aria-label="Nearest street view to the clicked point">
-      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="type-body-sm font-semibold">Nearest street view to {probe.lat.toFixed(5)}, {probe.lon.toFixed(5)}</h3><button onClick={onClose} className="type-caption underline">Close</button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="type-body-sm font-semibold">Nearest street view to {probe.lat.toFixed(5)}, {probe.lon.toFixed(5)}</h3><Button variant="link" size="sm" onClick={onClose}>Close</Button></div>
       <p className="mb-2 type-caption text-muted-foreground">As the crow flies, whatever the run did there. Each shows what would rule it out of the film: how far it is from the run, whether the run was on a road, which way it faces, how many pictures, the light and the footage.</p>
-      {!result && !busy && <div className="flex flex-wrap items-center gap-3 type-body-sm"><button type="button" onClick={onSearch} className="rounded-control bg-primary px-3 py-1 text-primary-foreground">Search for street view here</button><span className="type-caption text-muted-foreground">Nothing has been searched within 100 m of this point yet: asking Mapillary, Panoramax and Google takes a little while.</span></div>}
+      {!result && !busy && <div className="flex flex-wrap items-center gap-3 type-body-sm"><Button variant="default" type="button" onClick={onSearch}>Search for street view here</Button><span className="type-caption text-muted-foreground">Nothing has been searched within 100 m of this point yet: asking Mapillary, Panoramax and Google takes a little while.</span></div>}
       {busy && <div role="status" className="type-body-sm text-muted-foreground"><div className="flex items-center gap-2"><span aria-hidden="true" className="inline-block h-3 w-3 animate-spin rounded-pill border-2 border-primary border-t-transparent" />Searching…</div><ul className="mt-1 space-y-0.5 font-mono type-caption text-muted-foreground" aria-label="Search log">{log.map((l, i) => <li key={i}>{l}</li>)}</ul></div>}
       {result && (Math.abs(result.lat - probe.lat) > 1e-6 || Math.abs(result.lon - probe.lon) > 1e-6) && <p className="mb-1 type-caption text-muted-foreground">From the search made at {result.lat.toFixed(5)}, {result.lon.toFixed(5)}, less than 100 m from here; distances are from there.</p>}
       {error && <p role="alert" className="type-body-sm text-danger">{error}</p>}
       {big && (
         <div role="dialog" aria-label="Larger picture" onClick={() => setBig(undefined)} className="fixed inset-0 z-[2000] flex cursor-zoom-out items-center justify-center bg-black/80 p-4">
           <img src={api.svNearImage(folder, big.provider, big.id, 1024)} alt={`${NAME[big.provider]} ${big.id}, larger`} className="max-h-full max-w-full rounded-control" />
-          <button type="button" aria-label="Close the larger picture" className="absolute right-4 top-4 rounded-control bg-white/90 px-2 py-1 type-body-sm text-foreground" onClick={() => setBig(undefined)}>Close</button>
+          <Button variant="ghost" size="sm" type="button" aria-label="Close the larger picture" className="absolute right-4 top-4" onClick={() => setBig(undefined)}>Close</Button>
         </div>
       )}
       {promoErr && <p role="alert" className="type-body-sm text-danger">{promoErr}</p>}
@@ -450,8 +451,8 @@ function NearPanel({ folder, tz, probe, result, busy, log, error, onSearch, onPr
                   {b.items.map(it => (
                     <li key={it.id} data-near-item={it.id} className="rounded-control border border-border p-2 type-caption">
                       <div className="flex gap-2">
-                        <button type="button" aria-label={`Show ${NAME[p]} ${it.id} larger`} title="Click to show larger" onClick={() => setBig({ provider: p, id: it.id })} className="shrink-0 cursor-zoom-in">
-                          <img loading="lazy" src={api.svNearImage(folder, p, it.id, 256)} alt={`${NAME[p]} ${it.id}`} className="h-16 w-24 rounded-control object-cover" /></button>
+                        <Tooltip label="Click to show larger"><Button variant="ghost" type="button" aria-label={`Show ${NAME[p]} ${it.id} larger`} onClick={() => setBig({ provider: p, id: it.id })} className="shrink-0">
+                          <img loading="lazy" src={api.svNearImage(folder, p, it.id, 256)} alt={`${NAME[p]} ${it.id}`} className="h-16 w-24 rounded-control object-cover" /></Button></Tooltip>
                         <div className="min-w-0"><div className="font-medium">{it.distance_m} m away · {kindLabel2(it)}{it.section ? ` · section ${it.section}` : ''}</div>
                           <div className="text-muted-foreground">{[it.camera, it.size && `${it.size[0]}×${it.size[1]}`].filter(Boolean).join(' · ') || 'camera not known'}</div>
                           <div className="text-muted-foreground">Filmed {when(it.captured, tz)}{it.passed ? ` · you passed ${when(it.passed, tz)}` : ''}</div></div>
@@ -459,7 +460,7 @@ function NearPanel({ folder, tz, probe, result, busy, log, error, onSearch, onPr
                       <div className={`mt-1 font-medium ${it.usable ? 'text-primary' : 'text-danger'}`}>{it.usable ? 'Nothing rules it out' : `Ruled out: ${it.ruled_out.length} reason${it.ruled_out.length === 1 ? '' : 's'}`}</div>
                       {it.section || made[it.id]
                         ? <div className="mt-1 text-muted-foreground">Already a candidate: section {it.section ?? made[it.id]}</div>
-                        : <button type="button" onClick={() => promote(it)} className="mt-1 rounded-control border border-border px-2 py-0.5">Make this a candidate</button>}
+                        : <Button size="sm" type="button" onClick={() => promote(it)} className="mt-1">Make this a candidate</Button>}
                       <ul className="mt-0.5 space-y-0.5">{it.rules.map(r => <li key={r.key} data-rule={r.key} className={r.ok === false ? 'text-danger' : r.ok === null ? 'text-muted-foreground' : ''}><span aria-label={r.ok === false ? 'rules it out' : r.ok === null ? 'not known' : 'fine'} className="mr-1 inline-block w-3">{RULE_ICON[String(r.ok) as 'true' | 'false' | 'null']}</span>{r.text}</li>)}</ul>
                     </li>
                   ))}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type GeneratedPiece, type MusicScore, type ScorePlan, type ScoreSource, type StudioPreset, type StudioPreview, type StudioSettings } from '../api'
 import { usePoll } from '../usePoll'
+import { Button, Input, NativeSelect, Tooltip } from 'strata-react'
 
 const LEVEL_NAMES = ['sparse', 'steady', 'driving', 'full'], LEVELS = [0.15, 0.4, 0.65, 0.9], PHRASE = 4
 const STEMS = ['drums', 'bass', 'other', 'vocals'] as const
@@ -44,7 +45,7 @@ export default function MusicStudio({ folder }: { folder: string }) {
         <div className="flex flex-wrap items-center gap-3">
           <h2 className="type-body font-semibold">Music studio</h2>
           {grid ? <span className="type-body-sm text-muted-foreground">{grid.bpm} bpm · {grid.key.name} · {grid.bars} bars of {grid.bar_s.toFixed(2)} s · {mmss(grid.duration_s)} long</span> : <span className="type-body-sm text-muted-foreground">The track has not been analysed for building yet.</span>}
-          <button className="rounded-surface border border-border px-3 py-1 type-body-sm disabled:opacity-50" disabled={busy} onClick={() => run(() => api.analyseMusic(folder))}>{busy ? 'analysing…' : grid ? 'Analyse again' : 'Analyse the track'}</button>
+          <Button disabled={busy} onClick={() => run(() => api.analyseMusic(folder))}>{busy ? 'analysing…' : grid ? 'Analyse again' : 'Analyse the track'}</Button>
         </div>
         {grid && grid.key.confidence < 0.3 && <p className="mt-1 type-caption text-warning">The key is a guess (low confidence).</p>}
         {msg && <p role="alert" className="mt-2 type-body-sm text-warning">{msg}</p>}
@@ -54,17 +55,17 @@ export default function MusicStudio({ folder }: { folder: string }) {
       {grid && <section className="rounded-overlay border border-border bg-card p-4">
         <h3 className="mb-2 type-body-sm font-semibold">What to build</h3>
         <div className="flex flex-wrap items-end gap-4 type-body-sm">
-          <label className="flex flex-col gap-1">Length (seconds)<input type="number" min={4} max={3600} value={length ?? ''} onChange={e => setLength(e.target.value === '' ? undefined : Number(e.target.value))} className="w-28 rounded-control border border-border px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">Length (seconds)<Input type="number" min={4} max={3600} value={length ?? ''} onChange={e => setLength(e.target.value === '' ? undefined : Number(e.target.value))} /></label>
           <label className="flex flex-col gap-1">Intensity over the film
-            <select value={preset} onChange={e => setPreset(e.target.value as StudioPreset)} className="rounded-control border border-border px-2 py-1">
-              {(footage ? ['footage', 'arc', 'flat', 'build', 'quiet'] as StudioPreset[] : ['arc', 'flat', 'build', 'quiet'] as StudioPreset[]).map(p => <option key={p} value={p}>{p === 'footage' ? 'follow the footage' : p}</option>)}{preset === 'manual' && <option value="manual">manual</option>}</select></label>
+            <NativeSelect value={preset} onChange={e => setPreset(e.target.value as StudioPreset)}>
+              {(footage ? ['footage', 'arc', 'flat', 'build', 'quiet'] as StudioPreset[] : ['arc', 'flat', 'build', 'quiet'] as StudioPreset[]).map(p => <option key={p} value={p}>{p === 'footage' ? 'follow the footage' : p}</option>)}{preset === 'manual' && <option value="manual">manual</option>}</NativeSelect></label>
           <span className="pb-1 type-caption text-muted-foreground">{PRESET_NOTES[preset]}</span>
         </div>
         <Fidelity fidelity={fidelity} setFidelity={setFidelity} style={style} setStyle={setStyle} generator={!!st.generator} />
         <Windows windows={windows} setWindows={setWindows} max={length ?? 0} />
         <div className="mt-3 flex items-center gap-3">
-          <button className="rounded-surface bg-primary px-4 py-1.5 type-body-sm font-medium text-primary-foreground disabled:opacity-50" disabled={st.building || busy || !!pvErr || !settings}
-            onClick={() => run(async () => { if (!settings) return; const r = await api.buildMusic(folder, { ...settings, style, takes }); if (!r.started) throw new Error(r.reason || 'could not start') })}>{st.building ? 'Building…' : 'Build this music'}</button>
+          <Button variant="default" disabled={st.building || busy || !!pvErr || !settings}
+            onClick={() => run(async () => { if (!settings) return; const r = await api.buildMusic(folder, { ...settings, style, takes }); if (!r.started) throw new Error(r.reason || 'could not start') })}>{st.building ? 'Building…' : 'Build this music'}</Button>
           {st.building && <span className="type-caption text-muted-foreground">{st.log || 'starting (the first build separates the stems, which takes a few minutes)'}</span>}
           {!st.building && st.error && <span role="alert" className="type-caption text-danger">The build failed: {st.error}</span>}
         </div>
@@ -98,12 +99,12 @@ function Windows({ windows, setWindows, max }: { windows: [number, number][]; se
   return (
     <div className="mt-3 type-body-sm">
       <div className="flex flex-wrap items-center gap-2"><span>Moments where the original's singing is let through</span>
-        <button className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => setWindows([...windows, [Math.round(max / 2), Math.min(max, Math.round(max / 2) + 12)]])}>add a moment</button></div>
+        <Button size="sm" onClick={() => setWindows([...windows, [Math.round(max / 2), Math.min(max, Math.round(max / 2) + 12)]])}>add a moment</Button></div>
       {windows.length === 0 && <p className="type-caption text-muted-foreground">None: the music is instrumental throughout.</p>}
       <ul className="mt-1 space-y-1">{windows.map((w, i) => <li key={i} className="flex items-center gap-2 type-caption">
-        <label>from <input aria-label={`Moment ${i + 1} from (seconds)`} type="number" min={0} max={max} value={w[0]} onChange={e => set(i, 0, Number(e.target.value))} className="w-20 rounded-control border border-border px-1 py-0.5" /></label>
-        <label>to <input aria-label={`Moment ${i + 1} to (seconds)`} type="number" min={0} max={max} value={w[1]} onChange={e => set(i, 1, Number(e.target.value))} className="w-20 rounded-control border border-border px-1 py-0.5" /></label> seconds
-        <button className="underline" onClick={() => setWindows(windows.filter((_, j) => j !== i))}>remove</button></li>)}</ul>
+        <label>from <Input size="sm" aria-label={`Moment ${i + 1} from (seconds)`} type="number" min={0} max={max} value={w[0]} onChange={e => set(i, 0, Number(e.target.value))} /></label>
+        <label>to <Input size="sm" aria-label={`Moment ${i + 1} to (seconds)`} type="number" min={0} max={max} value={w[1]} onChange={e => set(i, 1, Number(e.target.value))} /></label> seconds
+        <Button variant="link" onClick={() => setWindows(windows.filter((_, j) => j !== i))}>remove</Button></li>)}</ul>
     </div>
   )
 }
@@ -119,7 +120,7 @@ function Fidelity({ fidelity, setFidelity, style, setStyle, generator }: { fidel
       <div className="flex max-w-md justify-between type-caption text-muted-foreground">{[...FIDELITY_STOPS].reverse().map(([v, n]) => <button key={v} type="button" className={`underline-offset-2 hover:underline ${Math.abs(v - fidelity) < 0.01 ? 'font-semibold text-foreground' : ''}`} onClick={() => setFidelity(v)}>{n}</button>)}</div>
       {stop && <p className="type-caption text-muted-foreground">{stop[2]}</p>}
       {fidelity < 1 && <label className="flex max-w-xl flex-col gap-1">The track's style, for the new bars (genre and instruments)
-        <input value={style} onChange={e => setStyle(e.target.value)} placeholder="e.g. rap rock, heavy distorted guitar riff, punchy live drums" className="rounded-control border border-border px-2 py-1" /></label>}
+        <Input value={style} onChange={e => setStyle(e.target.value)} placeholder="e.g. rap rock, heavy distorted guitar riff, punchy live drums" /></label>}
       {fidelity < 1 && !generator && <p className="type-caption text-warning">ACE-Step is not installed, so sections marked to generate will play the track's own bars.</p>}
       {fidelity < 1 && generator && !style.trim() && <p className="type-caption text-warning">Name the style: without it the new bars stay the track's own.</p>}
     </div>
@@ -158,8 +159,8 @@ function Preview({ pv, setLevel, pins, setPin, generator, style }: { pv: StudioP
         <div className="flex items-end gap-2"><span className="w-20 shrink-0 type-caption text-muted-foreground">level</span>
         <div className="flex h-20 flex-1 items-end gap-0.5">
           {Array.from({ length: phrases }, (_, p) => { const idx = levelIndex(pv.levels[p * PHRASE] ?? 0.4)
-            return <button key={p} aria-label={`Phrase ${p + 1} (from ${mmss(p * PHRASE * pv.bar_s)}): ${LEVEL_NAMES[idx]}. Click for the next level`} title={`${mmss(p * PHRASE * pv.bar_s)}: ${LEVEL_NAMES[idx]}`} onClick={() => setLevel(p, (idx + 1) % LEVELS.length)}
-              className="flex h-full min-w-0 flex-1 items-end rounded-control bg-muted hover:bg-muted"><span className="block w-full rounded-control bg-primary" style={{ height: `${20 + 26.7 * idx}%` }} /></button> })}
+            return <Tooltip label={`${mmss(p * PHRASE * pv.bar_s)}: ${LEVEL_NAMES[idx]}`}><Button variant="ghost" key={p} aria-label={`Phrase ${p + 1} (from ${mmss(p * PHRASE * pv.bar_s)}): ${LEVEL_NAMES[idx]}. Click for the next level`} onClick={() => setLevel(p, (idx + 1) % LEVELS.length)}
+              className="flex h-full min-w-0 flex-1 items-end"><span className="block w-full rounded-control bg-primary" style={{ height: `${20 + 26.7 * idx}%` }} /></Button></Tooltip> })}
         </div></div>
         <div className="mt-1 flex justify-between pl-[5.5rem] type-caption text-muted-foreground"><span>0:00</span><span>{LEVEL_NAMES.join(' · ')}</span><span>{mmss(pv.length_s)}</span></div>
         {pv.why && <Why why={pv.why} />}
@@ -271,8 +272,8 @@ function Piece({ p, chosen, choose }: { p: GeneratedPiece; chosen?: number; choo
       {p.key && <div className="mt-1 flex flex-wrap items-center gap-2">
         {all.map(t => { const ok = t.action === 'as is' || t.action === 'stretched'
           return <label key={t.seed} className={`flex items-center gap-1 ${ok ? '' : 'text-muted-foreground'}`} title={t.why ?? ''}><input type="radio" name={`take-${p.key}`} disabled={!ok} checked={chosen === undefined ? t.seed === p.seed : chosen === t.seed} onChange={() => choose(t.seed === p.seed && chosen === undefined ? undefined : t.seed)} />take {t.seed}: {VERDICT[t.action] ?? t.action}</label> })}
-        <button type="button" className="rounded-control border border-border px-2 py-0.5" onClick={() => choose(next)}>{chosen !== undefined && !all.some(t => t.seed === chosen) ? `take ${chosen} at the next build` : 'another take'}</button>
-        {chosen !== undefined && <button type="button" className="underline" onClick={() => choose(undefined)}>back to the first good take</button>}
+        <Button size="sm" type="button" onClick={() => choose(next)}>{chosen !== undefined && !all.some(t => t.seed === chosen) ? `take ${chosen} at the next build` : 'another take'}</Button>
+        {chosen !== undefined && <Button variant="link" type="button" onClick={() => choose(undefined)}>back to the first good take</Button>}
         {good.length === 0 && all.length > 0 && <span className="text-warning">no take kept time yet</span>}
       </div>}
     </li>
