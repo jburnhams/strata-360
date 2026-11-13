@@ -18,7 +18,7 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, t
   const [listing, setListing] = useState<TracksListing>(), [ver, setVer] = useState(0)
   const [hot, setHot] = useState<string | null>(null), [pinned, setPinned] = useState<string[]>([])                  // the track pointed at, and the tracks picked (click again to let go): shown in bold yellow on the map and in the list
   const toggle = (id: string) => setPinned(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
-  useEffect(() => { api.track(folder).then(setT).catch(e => setErr(e.message)); api.tracks(folder).then(setListing).catch(() => {}) }, [folder])
+  useEffect(() => { let live = true; api.track(folder).then(x => live && setT(x)).catch(e => live && setErr(e.message)); api.tracks(folder).then(x => live && setListing(x)).catch(() => {}); return () => { live = false } }, [folder])   // (an answer that arrives after the panel is gone sets nothing)
   const changed = async () => { try { const [o, l] = await Promise.all([api.track(folder), api.tracks(folder)]); setT(o); setListing(l); setVer(v => v + 1) } catch (e) { setErr((e as Error).message) } }   // the race track follows the runs
 
   const upload = async (f?: File) => {
