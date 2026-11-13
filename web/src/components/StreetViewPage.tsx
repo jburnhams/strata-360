@@ -118,23 +118,23 @@ export default function StreetViewPage({ folder, tz = 'Europe/Brussels', initial
   const chosenStretch = sel?.kind === 'stretch' ? stretch(sel.id) : section ? stretch(section.stretch) : undefined
   return (
     <section className="space-y-4" aria-label="Street view">
-      <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
-        <h2 className="text-lg font-semibold">Street view</h2>
-        <p className="mb-3 text-sm text-stone-600 dark:text-stone-400">Where the run was on a road, and the street-level pictures there are of those roads: a gap in the film could be shown as the view along the road.</p>
-        {!data ? <p className="text-sm text-stone-500">Loading…</p> : <Stages data={data} onRun={run} err={err} />}
+      <div className="rounded-surface bg-card p-4">
+        <h2 className="type-heading font-semibold">Street view</h2>
+        <p className="mb-3 type-body-sm text-muted-foreground">Where the run was on a road, and the street-level pictures there are of those roads: a gap in the film could be shown as the view along the road.</p>
+        {!data ? <p className="type-body-sm text-muted-foreground">Loading…</p> : <Stages data={data} onRun={run} err={err} />}
       </div>
       {data && roads && sections.length > 0 && <Candidates folder={folder} tz={tz} sections={visible} all={sections} sel={sel} onSel={setSel} onChoose={choose} />}
       {data && roads && (
-        <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
+        <div className="rounded-surface bg-card p-4">
           <Filters shown={shown} setShown={setShown} data={data} filters={filters} setFilters={setFilters} total={sections.length} showing={visible.length} />
           <SvMap pois={pois} ends={ends} tz={tz} routes={routes} probe={probe && { ...probe, items: near ? PROVIDERS.flatMap(p => near.providers[p].items) : [] }} onPick={pick} roads={roads.stretches} run={roads.run} sections={visible} clips={shown.clips ? clips : []} scale={scale} sel={sel} onSel={setSel} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} />
           <Legend scale={scale} hasClips={clips.length > 0} />
-          <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-stone-600 dark:text-stone-400">
+          <p className="mt-1 flex flex-wrap gap-x-4 type-caption text-muted-foreground">
             <span>click anywhere on the map to see the nearest street view there</span>
             <span><span className="mr-1 inline-block h-1 w-4 align-middle" style={{ background: '#dc2626' }} />the run</span>
             {routes.length > 0 && <span><span className="mr-1 inline-block h-1 w-4 align-middle" style={{ background: '#2563eb' }} />route tracks</span>}
             <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f59e0b' }} />road part of the run (click one)</span>
-            {PROVIDERS.map(p => <span key={p}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}</span>)}
+            {PROVIDERS.map(p => <span key={p}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}</span>)}
             <span>360° = sees every way · 2D = faces one way</span>{tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}
           </p>
         </div>
@@ -160,21 +160,21 @@ function Stages({ data, onRun, err }: { data: StreetView; onRun: (stages?: strin
         {(['roads', ...PROVIDERS, 'quality'] as ('roads' | SvProvider | 'quality')[]).map(k => {
           const s = st[k], why = k === 'roads' || k === 'quality' ? '' : need(k), blocked = busy || !!why || (k !== 'roads' && !st.roads.done)
           return (
-            <li key={k} className="rounded-lg border border-stone-200 p-2 text-sm dark:border-stone-700">
+            <li key={k} className="rounded-surface border border-border p-2 type-body-sm">
               <div className="font-medium">{k === 'roads' ? 'Road parts of the run' : k === 'quality' ? 'Quality check' : NAME[k]}</div>
-              <div className="text-xs text-stone-600 dark:text-stone-400">{line(k)}</div>
-              {why && <div className="text-xs text-amber-700 dark:text-amber-400">{why}</div>}
+              <div className="type-caption text-muted-foreground">{line(k)}</div>
+              {why && <div className="type-caption text-warning">{why}</div>}
               <button disabled={blocked} onClick={() => onRun([k], s.done)} aria-label={`${s.done && !s.stale ? 'Redo' : 'Run'} ${k === 'roads' ? 'road parts' : k === 'quality' ? 'quality check' : NAME[k]}`}
-                className="mt-1 rounded bg-emerald-700 px-2 py-0.5 text-xs text-white disabled:opacity-40">{s.done && !s.stale ? 'Redo' : 'Run'}</button>
+                className="mt-1 rounded-control bg-primary px-2 py-0.5 type-caption text-primary-foreground disabled:opacity-40">{s.done && !s.stale ? 'Redo' : 'Run'}</button>
             </li>
           )
         })}
       </ul>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-        <button disabled={busy} onClick={() => onRun()} className="rounded bg-emerald-700 px-3 py-1 text-white disabled:opacity-40">Run all that is missing</button>
-        {busy && <span role="status" className="text-stone-600 dark:text-stone-400">working… {data.job.log.slice(-1)[0] ?? ''}</span>}
-        {!busy && data.job.error && <span role="alert" className="text-red-700 dark:text-red-400">{data.job.error}</span>}
-        {err && <span role="alert" className="text-red-700 dark:text-red-400">{err}</span>}
+      <div className="mt-2 flex flex-wrap items-center gap-3 type-body-sm">
+        <button disabled={busy} onClick={() => onRun()} className="rounded-control bg-primary px-3 py-1 text-primary-foreground disabled:opacity-40">Run all that is missing</button>
+        {busy && <span role="status" className="text-muted-foreground">working… {data.job.log.slice(-1)[0] ?? ''}</span>}
+        {!busy && data.job.error && <span role="alert" className="text-danger">{data.job.error}</span>}
+        {err && <span role="alert" className="text-danger">{err}</span>}
       </div>
     </div>
   )
@@ -183,21 +183,21 @@ function Stages({ data, onRun, err }: { data: StreetView; onRun: (stages?: strin
 function Filters({ shown, setShown, data, filters, setFilters, total, showing }: { shown: Record<string, boolean>; setShown: (f: Record<string, boolean>) => void; data: StreetView; filters: Record<string, boolean>; setFilters: (f: Record<string, boolean>) => void; total: number; showing: number }) {
   const [open, setOpen] = useState(false)
   const box = (k: string, label: string, colour?: string) => (
-    <label key={k} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={shown[k]} onChange={e => setShown({ ...shown, [k]: e.target.checked })} />{colour && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: colour }} />}{label}</label>
+    <label key={k} className="flex items-center gap-1 type-body-sm"><input type="checkbox" checked={shown[k]} onChange={e => setShown({ ...shown, [k]: e.target.checked })} />{colour && <span className="inline-block h-2.5 w-2.5 rounded-pill" style={{ background: colour }} />}{label}</label>
   )
   const off = Object.entries(filters).filter(([k, v]) => (k === 'plausible' ? v : !v)).length
   return (
     <div className="relative mb-2 flex flex-wrap items-center gap-4">
       {PROVIDERS.map(p => box(p, `${NAME[p]}${data.providers[p] ? ` (${data.sections.filter(s => s.provider === p).length})` : ''}`, COLOUR[p]))}{box('360', '360° cameras')}{box('2d', '2D cameras')}{box('clips', 'Camera clips')}
-      <button type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(o => !o)} className="rounded border border-stone-300 px-2 py-0.5 text-sm dark:border-stone-600">Filters{off ? ` (${off})` : ''} ▾</button>
-      <span className="text-xs text-stone-500" aria-live="polite">{showing} of {total} sections shown</span>
+      <button type="button" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(o => !o)} className="rounded-control border border-border px-2 py-0.5 type-body-sm">Filters{off ? ` (${off})` : ''} ▾</button>
+      <span className="type-caption text-muted-foreground" aria-live="polite">{showing} of {total} sections shown</span>
       {open && (
-        <div role="group" aria-label="Filters" className="absolute left-0 top-full z-[1000] mt-1 w-96 max-w-full space-y-2 rounded-lg border border-stone-300 bg-white p-3 text-sm shadow-lg dark:border-stone-600 dark:bg-stone-900">
+        <div role="group" aria-label="Filters" className="absolute left-0 top-full z-[1000] mt-1 w-96 max-w-full space-y-2 rounded-surface border border-border bg-card p-3 type-body-sm shadow-overlay">
           {FILTERS.map(g => (
-            <fieldset key={g.title}><legend className="text-xs font-semibold uppercase tracking-wide text-stone-500">{g.title}</legend>
+            <fieldset key={g.title}><legend className="type-caption font-semibold uppercase tracking-wide text-muted-foreground">{g.title}</legend>
               {g.items.map(([k, label]) => <label key={k} className="flex items-center gap-1"><input type="checkbox" checked={!!filters[k]} onChange={e => setFilters({ ...filters, [k]: e.target.checked })} />{label}</label>)}</fieldset>
           ))}
-          <div className="flex gap-3"><button type="button" className="text-xs underline" onClick={() => setFilters(DEFAULT_FILTERS)}>Usable only</button><button type="button" className="text-xs underline" onClick={() => setFilters(SHOW_ALL)}>Show everything</button></div>
+          <div className="flex gap-3"><button type="button" className="type-caption underline" onClick={() => setFilters(DEFAULT_FILTERS)}>Usable only</button><button type="button" className="type-caption underline" onClick={() => setFilters(SHOW_ALL)}>Show everything</button></div>
         </div>
       )}
     </div>
@@ -239,10 +239,10 @@ function SvMap({ pois = [], ends = null, tz = 'Europe/Brussels', routes, probe, 
 export function SectionFacts({ s, tz, by }: { s: SvSectionInfo; tz: string; by: Map<string, SvSectionInfo> }) {
   return (
     <>
-      {s.light?.warning && <p className="text-xs font-medium text-red-700 dark:text-red-400" role="note" data-light>⚠ {s.light.warning}</p>}
-      <p className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(s.filmed?.[0], tz)} · you pass it {when(s.passed?.[0], tz)}{s.has_video && <span className="ml-2 rounded bg-sky-700 px-1.5 text-white">preview video ready</span>}</p>
-      {s.near && <p className={`text-xs ${s.near.overlaps.length ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}`} data-near>{s.near.in_gap ? `Fills gap ${s.near.in_gap}. ` : ''}Nearest footage: {nearText(s.near)}</p>}
-      {s.overlaps.length > 0 && <p className="text-xs text-amber-700 dark:text-amber-400" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}
+      {s.light?.warning && <p className="type-caption font-medium text-danger" role="note" data-light>⚠ {s.light.warning}</p>}
+      <p className="type-caption text-muted-foreground" data-times>Filmed {when(s.filmed?.[0], tz)} · you pass it {when(s.passed?.[0], tz)}{s.has_video && <span className="ml-2 rounded-control bg-info px-1.5 text-white">preview video ready</span>}</p>
+      {s.near && <p className={`type-caption ${s.near.overlaps.length ? 'text-warning' : 'text-muted-foreground'}`} data-near>{s.near.in_gap ? `Fills gap ${s.near.in_gap}. ` : ''}Nearest footage: {nearText(s.near)}</p>}
+      {s.overlaps.length > 0 && <p className="type-caption text-warning" role="note">Overlaps the same road as {s.overlaps.map(id => { const o = by.get(id); return o ? `${NAME[o.provider]} ${o.id} (${span(o)})` : id }).join(', ')}: choose the one you prefer, or both and let the writer pick.</p>}
     </>
   )
 }
@@ -250,9 +250,9 @@ export function SectionFacts({ s, tz, by }: { s: SvSectionInfo; tz: string; by: 
 /** Not used / Possible / Must include for a section (any section: one that is not a candidate can still be used). */
 export function ChoiceRadios({ section, onChoose }: { section: SvSectionInfo; onChoose: (key: string, c: SvChoice | 'none') => void }) {
   return (
-    <fieldset className="mt-1 flex flex-wrap items-center gap-3 text-sm" aria-label={`Use ${NAME[section.provider]} ${section.id} in the film (details)`}>
+    <fieldset className="mt-1 flex flex-wrap items-center gap-3 type-body-sm" aria-label={`Use ${NAME[section.provider]} ${section.id} in the film (details)`}>
       {CHOICES.map(c => <label key={c.v} className="flex items-center gap-1"><input type="radio" name={`use-detail-${section.key}`} checked={(section.choice ?? 'none') === c.v} onChange={() => onChoose(section.key, c.v)} />{c.label}</label>)}
-      {!section.plausible && <span className="text-xs text-amber-700 dark:text-amber-400">Not a candidate ({section.why_not}), but you can still use it.</span>}
+      {!section.plausible && <span className="type-caption text-warning">Not a candidate ({section.why_not}), but you can still use it.</span>}
     </fieldset>
   )
 }
@@ -260,7 +260,7 @@ export function ChoiceRadios({ section, onChoose }: { section: SvSectionInfo; on
 /** The higher resolution of a Google section: the look-around video, the preview and the clip in the final film are made from views twice as close (about four times the requests to Google, asked for when they are made, and kept). */
 export function HiresTick({ section, onHires }: { section: SvSectionInfo; onHires: (key: string, on: boolean) => void }) {
   return (
-    <label className="mt-1 flex items-center gap-1 text-xs" title="Google gives flat views only, so a 360 picture is stitched from zoomed-in ones: closer views mean more detail, and more requests (60 a panorama instead of 16)">
+    <label className="mt-1 flex items-center gap-1 type-caption" title="Google gives flat views only, so a 360 picture is stitched from zoomed-in ones: closer views mean more detail, and more requests (60 a panorama instead of 16)">
       <input type="checkbox" aria-label="Higher resolution" checked={!!section.hires} onChange={e => onHires(section.key, e.target.checked)} /> Higher resolution, everywhere this section is used (the videos here and the clip in the final film): about 4 times the requests to Google, asked for when the video or the film is made
     </label>
   )
@@ -272,10 +272,10 @@ export function SectionContent({ folder, tz, section, onChoose, onHires, showCho
   useEffect(() => { setBig(undefined) }, [section.id])
   return (
         <div className="mt-2">
-          <div className="text-sm"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[section.provider] }} /><span className="font-medium">{NAME[section.provider]} · {kindLabel(section)}</span> · {span(section)} · {metres(section.length_m)} · {section.frames} pictures{section.spacing_m != null ? `, one every ${section.spacing_m} m` : ''}
+          <div className="type-body-sm"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: COLOUR[section.provider] }} /><span className="font-medium">{NAME[section.provider]} · {kindLabel(section)}</span> · {span(section)} · {metres(section.length_m)} · {section.frames} pictures{section.spacing_m != null ? `, one every ${section.spacing_m} m` : ''}
             {section.years.length > 0 && ` · ${section.years.join(', ')}`}{section.camera && ` · ${section.camera}`}{section.size && ` · ${section.size[0]}×${section.size[1]}`}</div>
-          <div className="text-xs text-stone-600 dark:text-stone-400" data-times>Filmed {when(section.filmed?.[0], tz)}{section.filmed && section.filmed[1] - section.filmed[0] > 60 ? ` to ${when(section.filmed[1], tz)}` : ''} · you pass it {when(section.passed?.[0], tz)}{section.passed ? ` to ${when(section.passed[1], tz).split(' ').slice(-1)[0]}` : ''}</div>
-          <div className="text-xs text-stone-600 dark:text-stone-400">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
+          <div className="type-caption text-muted-foreground" data-times>Filmed {when(section.filmed?.[0], tz)}{section.filmed && section.filmed[1] - section.filmed[0] > 60 ? ` to ${when(section.filmed[1], tz)}` : ''} · you pass it {when(section.passed?.[0], tz)}{section.passed ? ` to ${when(section.passed[1], tz).split(' ').slice(-1)[0]}` : ''}</div>
+          <div className="type-caption text-muted-foreground">{section.kind === '360' ? 'A 360° camera: the view can be turned to face along the road.' : `A flat camera, facing: ${facing(section)} (relative to the way the runner went).`}</div>
           {showChoice && <ChoiceRadios section={section} onChoose={onChoose} />}
           {onHires && section.provider === 'google' && section.kind === '360' && <HiresTick section={section} onHires={onHires} />}
           <SectionVideo folder={folder} section={section} aimCam={aimCam} />
@@ -283,37 +283,37 @@ export function SectionContent({ folder, tz, section, onChoose, onHires, showCho
           <ul className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4">
             {previews(section).map(({ it, label }) => (
               <li key={it.id}><button onClick={() => setBig({ provider: section.provider, id: it.id })} className="block w-full text-left" aria-label={`Picture at ${label}`}>
-                <img loading="lazy" src={api.streetviewImage(folder, section.provider, it.id, 256)} alt={`${NAME[section.provider]} ${label}`} className="aspect-[3/2] w-full rounded object-cover" /><span className="text-xs text-stone-600 dark:text-stone-400">{label}</span></button></li>
+                <img loading="lazy" src={api.streetviewImage(folder, section.provider, it.id, 256)} alt={`${NAME[section.provider]} ${label}`} className="aspect-[3/2] w-full rounded-control object-cover" /><span className="type-caption text-muted-foreground">{label}</span></button></li>
             ))}
           </ul>
-          {big && <div className="mt-2"><img src={api.streetviewImage(folder, big.provider, big.id, 1024)} alt="Larger picture" className="max-h-[480px] rounded" /><button className="block text-xs underline" onClick={() => setBig(undefined)}>Close the larger picture</button></div>}
+          {big && <div className="mt-2"><img src={api.streetviewImage(folder, big.provider, big.id, 1024)} alt="Larger picture" className="max-h-[480px] rounded-control" /><button className="block type-caption underline" onClick={() => setBig(undefined)}>Close the larger picture</button></div>}
         </div>
   )
 }
 
 function Detail({ folder, tz, section, stretch, sections, onSel, onChoose, onHires }: { folder: string; tz: string; section?: SvSectionInfo; stretch?: SvStretch; sections: SvSectionInfo[]; onChoose: (key: string, c: SvChoice | 'none') => void; onHires: (key: string, on: boolean) => void; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void }) {
   return (
-    <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
-      {stretch && <div className="text-sm"><span className="font-medium">{stretch.names.join(', ') || 'Unnamed road'}</span> · {stretch.highways.join(', ')} · {span(stretch)} · {metres(stretch.length_m)} of the run on this road
-        {!section && <span className="text-stone-600 dark:text-stone-400"> · {sections.length ? `${sections.length} section${sections.length === 1 ? '' : 's'} of street view` : 'no street view found'}</span>}</div>}
-      {!section && sections.length > 0 && <ul className="mt-2 flex flex-wrap gap-2">{sections.map(s => <li key={s.id}><button onClick={() => onSel({ kind: 'section', id: s.id })} className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-600">{NAME[s.provider]} {kindLabel(s)} · {metres(s.length_m)}</button></li>)}</ul>}
+    <div className="rounded-surface bg-card p-4">
+      {stretch && <div className="type-body-sm"><span className="font-medium">{stretch.names.join(', ') || 'Unnamed road'}</span> · {stretch.highways.join(', ')} · {span(stretch)} · {metres(stretch.length_m)} of the run on this road
+        {!section && <span className="text-muted-foreground"> · {sections.length ? `${sections.length} section${sections.length === 1 ? '' : 's'} of street view` : 'no street view found'}</span>}</div>}
+      {!section && sections.length > 0 && <ul className="mt-2 flex flex-wrap gap-2">{sections.map(s => <li key={s.id}><button onClick={() => onSel({ kind: 'section', id: s.id })} className="rounded-control border border-border px-2 py-0.5 type-caption">{NAME[s.provider]} {kindLabel(s)} · {metres(s.length_m)}</button></li>)}</ul>}
       {section && <SectionContent folder={folder} tz={tz} section={section} onChoose={onChoose} onHires={onHires} />}
     </div>
   )
 }
 
 function List({ title, tz, sections, sel, onSel, none }: { title: string; tz: string; sections: SvSectionInfo[]; sel?: { kind: string; id: string }; onSel: (s: { kind: 'section' | 'stretch'; id: string }) => void; none: boolean }) {
-  if (!sections.length) return <p className="rounded-lg bg-white p-4 text-sm text-stone-600 shadow-sm dark:bg-stone-900 dark:text-stone-400">{none ? 'No street view sections yet: run a provider above.' : 'Nothing matches the filters.'}</p>
+  if (!sections.length) return <p className="rounded-surface bg-card p-4 type-body-sm text-muted-foreground">{none ? 'No street view sections yet: run a provider above.' : 'Nothing matches the filters.'}</p>
   return (
-    <div className="overflow-x-auto rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900">
-      <h3 className="mb-1 text-sm font-semibold">{title}</h3>
-      <table className="w-full text-left text-sm">
-        <thead className="text-xs text-stone-500"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th className="pr-3">Quality</th><th className="pr-3">Nearest footage</th><th className="pr-3">Filmed</th><th className="pr-3">You passed</th><th>Overlaps</th></tr></thead>
+    <div className="overflow-x-auto rounded-surface bg-card p-4">
+      <h3 className="mb-1 type-body-sm font-semibold">{title}</h3>
+      <table className="w-full text-left type-body-sm">
+        <thead className="type-caption text-muted-foreground"><tr><th className="pr-3">Source</th><th className="pr-3">Camera</th><th className="pr-3">Where</th><th className="pr-3">Length</th><th className="pr-3">Pictures</th><th className="pr-3">Spacing</th><th className="pr-3">Year</th><th className="pr-3">Facing</th><th className="pr-3">Size</th><th className="pr-3">Quality</th><th className="pr-3">Nearest footage</th><th className="pr-3">Filmed</th><th className="pr-3">You passed</th><th>Overlaps</th></tr></thead>
         <tbody>
           {sections.map(s => (
-            <tr key={s.id} onClick={() => onSel({ kind: 'section', id: s.id })} className={`cursor-pointer border-t border-stone-200 dark:border-stone-700 ${sel?.kind === 'section' && sel.id === s.id ? 'bg-emerald-100 dark:bg-emerald-950' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
-              <td className="pr-3"><button className="underline" onClick={e => { e.stopPropagation(); onSel({ kind: 'section', id: s.id }) }}>{NAME[s.provider]} {s.id}</button></td><td className="pr-3">{kindLabel(s)}</td><td className="pr-3">{span(s)} <span className="text-stone-500">({s.stretch})</span></td>
-              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td className="pr-3">{s.near ? `${s.near.in_gap ? s.near.in_gap + ': ' : ''}${nearText(s.near)}` : '–'}</td><td className="pr-3">{when(s.filmed?.[0], tz)}</td><td className="pr-3">{when(s.passed?.[0], tz)}</td><td>{s.overlaps.length ? <span className="text-amber-700 dark:text-amber-400">{s.overlaps.join(', ')}</span> : '–'}</td>
+            <tr key={s.id} onClick={() => onSel({ kind: 'section', id: s.id })} className={`cursor-pointer border-t border-border ${sel?.kind === 'section' && sel.id === s.id ? 'bg-primary-3' : 'hover:bg-muted'}`}>
+              <td className="pr-3"><button className="underline" onClick={e => { e.stopPropagation(); onSel({ kind: 'section', id: s.id }) }}>{NAME[s.provider]} {s.id}</button></td><td className="pr-3">{kindLabel(s)}</td><td className="pr-3">{span(s)} <span className="text-muted-foreground">({s.stretch})</span></td>
+              <td className="pr-3">{metres(s.length_m)}</td><td className="pr-3">{s.frames}</td><td className="pr-3">{s.spacing_m != null ? `${s.spacing_m} m` : '–'}</td><td className="pr-3">{s.years.join(', ') || '–'}</td><td className="pr-3">{facing(s)}</td><td className="pr-3">{s.size ? `${s.size[0]}×${s.size[1]}` : '–'}</td><td className="pr-3">{s.quality?.score != null ? `${s.quality.grade} (${s.quality.score})` : '–'}</td><td className="pr-3">{s.near ? `${s.near.in_gap ? s.near.in_gap + ': ' : ''}${nearText(s.near)}` : '–'}</td><td className="pr-3">{when(s.filmed?.[0], tz)}</td><td className="pr-3">{when(s.passed?.[0], tz)}</td><td>{s.overlaps.length ? <span className="text-warning">{s.overlaps.join(', ')}</span> : '–'}</td>
             </tr>
           ))}
         </tbody>
@@ -331,53 +331,53 @@ function Candidates({ folder, tz, sections, all, sel, onSel, onChoose }: { folde
   const by = new Map(all.map(s => [s.id, s])), chosen = all.filter(s => s.choice)
   const ok = sections.filter(s => s.plausible).sort((a, b) => order === 'route' ? a.km0 - b.km0 : (b.quality?.score ?? -1) - (a.quality?.score ?? -1) || a.km0 - b.km0)                 // best first; the ones not scored yet last
   return (
-    <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Sections that could be used">
-      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Sections that could be used in the film</h3>
-        <label className="flex items-center gap-1 text-xs">Order <select value={order} onChange={e => setOrder(e.target.value as 'quality' | 'route')} className="rounded border border-stone-300 bg-white px-1 py-0.5 dark:border-stone-600 dark:bg-stone-900"><option value="quality">best quality first</option><option value="route">along the route</option></select></label></div>
-      <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">{all.filter(s => s.plausible).length} of {all.length} sections have enough pictures, close enough together, to make a clip. Mark the ones the film may use: only those are shown to the script writer, and the plan makes a clip of any it picks.
+    <div className="rounded-surface bg-card p-4" aria-label="Sections that could be used">
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="type-body-sm font-semibold">Sections that could be used in the film</h3>
+        <label className="flex items-center gap-1 type-caption">Order <select value={order} onChange={e => setOrder(e.target.value as 'quality' | 'route')} className="rounded-control border border-border bg-card px-1 py-0.5"><option value="quality">best quality first</option><option value="route">along the route</option></select></label></div>
+      <p className="mb-2 type-caption text-muted-foreground">{all.filter(s => s.plausible).length} of {all.length} sections have enough pictures, close enough together, to make a clip. Mark the ones the film may use: only those are shown to the script writer, and the plan makes a clip of any it picks.
         {chosen.length > 0 && ` Chosen: ${chosen.length} (${chosen.filter(s => s.choice === 'must').length} must include).`} Pictures are credited CC BY-SA to Mapillary and Panoramax contributors.</p>
-      {ok.length === 0 && <p className="text-sm text-stone-600 dark:text-stone-400">{all.some(s => s.plausible) ? 'No candidate matches the filters.' : 'None of the sections found has enough pictures yet.'}</p>}
+      {ok.length === 0 && <p className="type-body-sm text-muted-foreground">{all.some(s => s.plausible) ? 'No candidate matches the filters.' : 'None of the sections found has enough pictures yet.'}</p>}
       <ul className="space-y-2">
         {ok.map(s => (
-          <li key={s.key} data-section={s.id} className={`rounded-lg border p-2 ${sel?.id === s.id ? 'border-emerald-600' : 'border-stone-200 dark:border-stone-700'}`}>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-              <button className="font-medium underline" onClick={() => onSel({ kind: 'section', id: s.id })}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[s.provider] }} />{NAME[s.provider]} {s.id} · {kindLabel(s)}</button>
+          <li key={s.key} data-section={s.id} className={`rounded-surface border p-2 ${sel?.id === s.id ? 'border-primary' : 'border-border'}`}>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 type-body-sm">
+              <button className="font-medium underline" onClick={() => onSel({ kind: 'section', id: s.id })}><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: COLOUR[s.provider] }} />{NAME[s.provider]} {s.id} · {kindLabel(s)}</button>
               <span>{span(s)} · {metres(s.length_m)} of road that matches the run · {s.frames} pictures, one every {s.spacing_m} m{s.years.length ? ` · ${s.years.join(', ')}` : ''}{s.size ? ` · ${s.size[0]}×${s.size[1]}` : ''}</span>
-              <span className="text-stone-600 dark:text-stone-400">clip of {s.min_s} to {s.max_s} s (the longest is {SLOWEST} pictures a second blended up to 30 frames a second; a shorter one is the same road played faster){s.kind === '2d' ? ` · faces ${facing(s)}` : ''}</span>
-              <span className={s.steadied === 'by matching only' ? 'text-amber-700 dark:text-amber-400' : 'text-stone-600 dark:text-stone-400'}>steadied: {s.steadied}{s.steadied === 'by matching only' ? ' (may still wobble)' : ''}</span>
+              <span className="text-muted-foreground">clip of {s.min_s} to {s.max_s} s (the longest is {SLOWEST} pictures a second blended up to 30 frames a second; a shorter one is the same road played faster){s.kind === '2d' ? ` · faces ${facing(s)}` : ''}</span>
+              <span className={s.steadied === 'by matching only' ? 'text-warning' : 'text-muted-foreground'}>steadied: {s.steadied}{s.steadied === 'by matching only' ? ' (may still wobble)' : ''}</span>
               <Quality q={s.quality} />
-              {s.label && <span className="rounded bg-emerald-700 px-1.5 text-xs text-white">called {s.label} in the script</span>}
+              {s.label && <span className="rounded-control bg-primary px-1.5 type-caption text-primary-foreground">called {s.label} in the script</span>}
             </div>
             <SectionFacts s={s} tz={tz} by={by} />
             <div className="mt-1 flex flex-wrap items-center gap-3">
-              <ul className="flex gap-1">{previews(s).filter((_, i, a) => a.length <= 3 || i % Math.ceil(a.length / 3) === 0).slice(0, 3).map(({ it, label }) => <li key={it.id}><img loading="lazy" src={api.streetviewImage(folder, s.provider, it.id, 256)} alt={`${NAME[s.provider]} ${s.id} ${label}`} className="h-16 w-24 rounded object-cover" /></li>)}</ul>
-              <fieldset className="flex gap-3 text-sm" aria-label={`Use ${NAME[s.provider]} ${s.id} in the film`}>
+              <ul className="flex gap-1">{previews(s).filter((_, i, a) => a.length <= 3 || i % Math.ceil(a.length / 3) === 0).slice(0, 3).map(({ it, label }) => <li key={it.id}><img loading="lazy" src={api.streetviewImage(folder, s.provider, it.id, 256)} alt={`${NAME[s.provider]} ${s.id} ${label}`} className="h-16 w-24 rounded-control object-cover" /></li>)}</ul>
+              <fieldset className="flex gap-3 type-body-sm" aria-label={`Use ${NAME[s.provider]} ${s.id} in the film`}>
                 {CHOICES.map(c => <label key={c.v} className="flex items-center gap-1"><input type="radio" name={`use-${s.key}`} checked={(s.choice ?? 'none') === c.v} onChange={() => onChoose(s.key, c.v)} />{c.label}</label>)}
               </fieldset>
             </div>
           </li>
         ))}
       </ul>
-      {all.length > all.filter(s => s.plausible).length && <p className="mt-2 text-xs text-stone-500">{all.length - all.filter(s => s.plausible).length} more sections are too short or too sparse to use; they are in the list below.</p>}
+      {all.length > all.filter(s => s.plausible).length && <p className="mt-2 type-caption text-muted-foreground">{all.length - all.filter(s => s.plausible).length} more sections are too short or too sparse to use; they are in the list below.</p>}
     </div>
   )
 }
 
-const GRADE = { good: 'bg-emerald-700 text-white', fair: 'bg-amber-500 text-black', poor: 'bg-red-700 text-white' }
+const GRADE = { good: 'bg-primary text-primary-foreground', fair: 'bg-warning text-black', poor: 'bg-danger text-primary-foreground' }
 
 /** How good a clip of the section will look (0 to 100, from the quality check): good, fair or poor, with the measurements on hover. */
 function Quality({ q }: { q: SvSectionInfo['quality'] }) {
-  if (!q) return <span className="text-xs text-stone-500">quality not checked yet</span>
-  if (q.score == null || !q.grade) return <span className="text-xs text-stone-500" title={q.error}>quality could not be measured</span>
-  return <span className={`rounded px-1.5 text-xs ${GRADE[q.grade]}`} title={`in-between pictures ${q.psnr} dB · unsteadiness ${q.jerk}° · turning ${q.roll}°`}>quality: {q.grade} ({q.score})</span>
+  if (!q) return <span className="type-caption text-muted-foreground">quality not checked yet</span>
+  if (q.score == null || !q.grade) return <span className="type-caption text-muted-foreground" title={q.error}>quality could not be measured</span>
+  return <span className={`rounded-control px-1.5 type-caption ${GRADE[q.grade]}`} title={`in-between pictures ${q.psnr} dB · unsteadiness ${q.jerk}° · turning ${q.roll}°`}>quality: {q.grade} ({q.score})</span>
 }
 
 
 /** The key to the colours: the clips' stretches and the street view sections are coloured by duration, on one scale. */
 function Legend({ scale, hasClips }: { scale: { lo: number; hi: number }; hasClips: boolean }) {
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-stone-600 dark:text-stone-400" aria-label="Duration colours">
-      <span>Colour = duration:</span><span>{dur(scale.lo)}</span><span className="h-2.5 w-40 rounded" style={{ background: `linear-gradient(to right, ${RAMP.join(',')})` }} /><span>{dur(scale.hi)}</span>
+    <div className="mt-2 flex flex-wrap items-center gap-2 type-caption text-muted-foreground" aria-label="Duration colours">
+      <span>Colour = duration:</span><span>{dur(scale.lo)}</span><span className="h-2.5 w-40 rounded-control" style={{ background: `linear-gradient(to right, ${RAMP.join(',')})` }} /><span>{dur(scale.hi)}</span>
       <span>· {hasClips ? 'numbered stretches are the camera clips (their length); ' : ''}the coloured lines with a letter badge are street view sections (the longest clip each can make)</span>
     </div>
   )
@@ -396,21 +396,21 @@ function SectionVideo({ folder, section, pano = false, aimCam }: { folder: strin
   const pr = st?.progress, google = section.provider === 'google', hi = section.hires && google
   return (
     <div className="mt-2" aria-label={pano ? 'Look around' : 'Preview video'}>
-      {pano && <div className="text-xs font-medium text-stone-600 dark:text-stone-400">Look around: the original 360° pictures, one at a time, with the camera held level along the road, which you can pan</div>}
+      {pano && <div className="type-caption font-medium text-muted-foreground">Look around: the original 360° pictures, one at a time, with the camera held level along the road, which you can pan</div>}
       {st?.exists && (pano ? <PanoPlayer src={api.svVideoUrl(folder, section.key, true, hi)} label={`${NAME[section.provider]} ${section.id}`} maxPitch={google ? 24 : undefined} fps={st.fps} aimPath={aim.path} />
-        : <div className="relative inline-block"><StepVideo videoRef={flat} preload="metadata" src={api.svVideoUrl(folder, section.key, false, hi)} className="max-h-[360px] rounded" aria-label="Preview video of this section" /><AimVideoOverlay video={flat} path={aim.path} /></div>)}
-      {st?.exists && aimCam && aim.err && <p role="note" className="text-xs text-amber-700 dark:text-amber-400">{aimCam.label} cannot be drawn on this video: {aim.err}</p>}
-      {st && !st.exists && !running && <button onClick={make} className="rounded bg-emerald-700 px-3 py-1 text-sm text-white">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
-      {st && !st.exists && !running && <span className="ml-2 text-xs text-stone-500">about {st.seconds} s long, made in the background and kept{pano && google ? `. Google gives flat views only, so this asks it for ${section.frames * (hi ? 60 : 16)} zoomed-in views (${hi ? 60 : 16} for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
+        : <div className="relative inline-block"><StepVideo videoRef={flat} preload="metadata" src={api.svVideoUrl(folder, section.key, false, hi)} className="max-h-[360px] rounded-control" aria-label="Preview video of this section" /><AimVideoOverlay video={flat} path={aim.path} /></div>)}
+      {st?.exists && aimCam && aim.err && <p role="note" className="type-caption text-warning">{aimCam.label} cannot be drawn on this video: {aim.err}</p>}
+      {st && !st.exists && !running && <button onClick={make} className="rounded-control bg-primary px-3 py-1 type-body-sm text-primary-foreground">{pano ? 'Make a 360° video to look around in' : 'Make a preview video'}</button>}
+      {st && !st.exists && !running && <span className="ml-2 type-caption text-muted-foreground">about {st.seconds} s long, made in the background and kept{pano && google ? `. Google gives flat views only, so this asks it for ${section.frames * (hi ? 60 : 16)} zoomed-in views (${hi ? 60 : 16} for each of the ${section.frames} panoramas, the ones nearest your track first) and stitches them; each is kept, nothing is asked twice` : ''}</span>}
       {running && (
-        <div role="status" aria-label="Making the video" className="max-w-xl space-y-1 text-sm text-stone-600 dark:text-stone-400">
-          <div className="flex items-center justify-between text-xs"><span>{pr ? `${pr.phase}: ${pr.done} of ${pr.total}` : 'starting…'}</span><span>{pr ? `${pr.pct}%` : ''}</span></div>
-          <div role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pr?.pct} className="h-2 w-full overflow-hidden rounded bg-stone-200 dark:bg-stone-700">
-            <div className={`h-full rounded bg-emerald-600 transition-[width] duration-500 ${pr ? '' : 'w-1/4 animate-pulse'}`} style={pr ? { width: `${pr.pct}%` } : undefined} /></div>
-          <ul aria-label="What it is doing" className="max-h-32 overflow-auto rounded bg-stone-100 p-1.5 font-mono text-[11px] leading-snug text-stone-600 dark:bg-stone-800 dark:text-stone-300">{(st?.log ?? []).map((l, i) => <li key={i}>{l}</li>)}{!st?.log?.length && <li>waiting for the job to report…</li>}</ul>
+        <div role="status" aria-label="Making the video" className="max-w-xl space-y-1 type-body-sm text-muted-foreground">
+          <div className="flex items-center justify-between type-caption"><span>{pr ? `${pr.phase}: ${pr.done} of ${pr.total}` : 'starting…'}</span><span>{pr ? `${pr.pct}%` : ''}</span></div>
+          <div role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pr?.pct} className="h-2 w-full overflow-hidden rounded-control bg-muted">
+            <div className={`h-full rounded-control bg-primary transition-[width] duration-500 ${pr ? '' : 'w-1/4 animate-pulse'}`} style={pr ? { width: `${pr.pct}%` } : undefined} /></div>
+          <ul aria-label="What it is doing" className="max-h-32 overflow-auto rounded-control bg-muted p-1.5 font-mono text-[11px] leading-snug text-muted-foreground">{(st?.log ?? []).map((l, i) => <li key={i}>{l}</li>)}{!st?.log?.length && <li>waiting for the job to report…</li>}</ul>
         </div>
       )}
-      {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}
+      {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="type-body-sm text-danger">{err || st?.error}</p>}
     </div>
   )
 }
@@ -423,44 +423,44 @@ function NearPanel({ folder, tz, probe, result, busy, log, error, onSearch, onPr
   useEffect(() => { if (!big) return; const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setBig(undefined) }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k) }, [big])
   const promote = async (it: SvNearItem) => { setPromoErr(undefined); try { const r = await api.promoteSv(folder, it, probe.lat, probe.lon); setMade(m => ({ ...m, [it.id]: r.id })); onPromoted() } catch (e) { setPromoErr((e as Error).message) } }
   return (
-    <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-stone-900" aria-label="Nearest street view to the clicked point">
-      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Nearest street view to {probe.lat.toFixed(5)}, {probe.lon.toFixed(5)}</h3><button onClick={onClose} className="text-xs underline">Close</button></div>
-      <p className="mb-2 text-xs text-stone-600 dark:text-stone-400">As the crow flies, whatever the run did there. Each shows what would rule it out of the film: how far it is from the run, whether the run was on a road, which way it faces, how many pictures, the light and the footage.</p>
-      {!result && !busy && <div className="flex flex-wrap items-center gap-3 text-sm"><button type="button" onClick={onSearch} className="rounded bg-emerald-700 px-3 py-1 text-white">Search for street view here</button><span className="text-xs text-stone-500">Nothing has been searched within 100 m of this point yet: asking Mapillary, Panoramax and Google takes a little while.</span></div>}
-      {busy && <div role="status" className="text-sm text-stone-600 dark:text-stone-400"><div className="flex items-center gap-2"><span aria-hidden="true" className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-emerald-700 border-t-transparent" />Searching…</div><ul className="mt-1 space-y-0.5 font-mono text-xs text-stone-500" aria-label="Search log">{log.map((l, i) => <li key={i}>{l}</li>)}</ul></div>}
-      {result && (Math.abs(result.lat - probe.lat) > 1e-6 || Math.abs(result.lon - probe.lon) > 1e-6) && <p className="mb-1 text-xs text-stone-500">From the search made at {result.lat.toFixed(5)}, {result.lon.toFixed(5)}, less than 100 m from here; distances are from there.</p>}
-      {error && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{error}</p>}
+    <div className="rounded-surface bg-card p-4" aria-label="Nearest street view to the clicked point">
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="type-body-sm font-semibold">Nearest street view to {probe.lat.toFixed(5)}, {probe.lon.toFixed(5)}</h3><button onClick={onClose} className="type-caption underline">Close</button></div>
+      <p className="mb-2 type-caption text-muted-foreground">As the crow flies, whatever the run did there. Each shows what would rule it out of the film: how far it is from the run, whether the run was on a road, which way it faces, how many pictures, the light and the footage.</p>
+      {!result && !busy && <div className="flex flex-wrap items-center gap-3 type-body-sm"><button type="button" onClick={onSearch} className="rounded-control bg-primary px-3 py-1 text-primary-foreground">Search for street view here</button><span className="type-caption text-muted-foreground">Nothing has been searched within 100 m of this point yet: asking Mapillary, Panoramax and Google takes a little while.</span></div>}
+      {busy && <div role="status" className="type-body-sm text-muted-foreground"><div className="flex items-center gap-2"><span aria-hidden="true" className="inline-block h-3 w-3 animate-spin rounded-pill border-2 border-primary border-t-transparent" />Searching…</div><ul className="mt-1 space-y-0.5 font-mono type-caption text-muted-foreground" aria-label="Search log">{log.map((l, i) => <li key={i}>{l}</li>)}</ul></div>}
+      {result && (Math.abs(result.lat - probe.lat) > 1e-6 || Math.abs(result.lon - probe.lon) > 1e-6) && <p className="mb-1 type-caption text-muted-foreground">From the search made at {result.lat.toFixed(5)}, {result.lon.toFixed(5)}, less than 100 m from here; distances are from there.</p>}
+      {error && <p role="alert" className="type-body-sm text-danger">{error}</p>}
       {big && (
         <div role="dialog" aria-label="Larger picture" onClick={() => setBig(undefined)} className="fixed inset-0 z-[2000] flex cursor-zoom-out items-center justify-center bg-black/80 p-4">
-          <img src={api.svNearImage(folder, big.provider, big.id, 1024)} alt={`${NAME[big.provider]} ${big.id}, larger`} className="max-h-full max-w-full rounded" />
-          <button type="button" aria-label="Close the larger picture" className="absolute right-4 top-4 rounded bg-white/90 px-2 py-1 text-sm text-stone-900" onClick={() => setBig(undefined)}>Close</button>
+          <img src={api.svNearImage(folder, big.provider, big.id, 1024)} alt={`${NAME[big.provider]} ${big.id}, larger`} className="max-h-full max-w-full rounded-control" />
+          <button type="button" aria-label="Close the larger picture" className="absolute right-4 top-4 rounded-control bg-white/90 px-2 py-1 type-body-sm text-foreground" onClick={() => setBig(undefined)}>Close</button>
         </div>
       )}
-      {promoErr && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{promoErr}</p>}
+      {promoErr && <p role="alert" className="type-body-sm text-danger">{promoErr}</p>}
       {result && (
         <div className="grid gap-3 lg:grid-cols-3">
           {PROVIDERS.map(p => {
             const b = result.providers[p]
             return (
               <section key={p} aria-label={`${NAME[p]} near the point`} className="min-w-0">
-                <h4 className="text-sm font-medium"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}{b.radius_m ? <span className="font-normal text-stone-500"> · searched {b.radius_m} m round</span> : ''}</h4>
-                {b.error && <p className="text-xs text-amber-700 dark:text-amber-400">{b.error}</p>}
-                {!b.error && b.items.length === 0 && <p className="text-xs text-stone-500">Nothing within {b.radius_m} m.</p>}
+                <h4 className="type-body-sm font-medium"><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: COLOUR[p] }} />{NAME[p]}{b.radius_m ? <span className="font-normal text-muted-foreground"> · searched {b.radius_m} m round</span> : ''}</h4>
+                {b.error && <p className="type-caption text-warning">{b.error}</p>}
+                {!b.error && b.items.length === 0 && <p className="type-caption text-muted-foreground">Nothing within {b.radius_m} m.</p>}
                 <ul className="space-y-2">
                   {b.items.map(it => (
-                    <li key={it.id} data-near-item={it.id} className="rounded border border-stone-200 p-2 text-xs dark:border-stone-700">
+                    <li key={it.id} data-near-item={it.id} className="rounded-control border border-border p-2 type-caption">
                       <div className="flex gap-2">
                         <button type="button" aria-label={`Show ${NAME[p]} ${it.id} larger`} title="Click to show larger" onClick={() => setBig({ provider: p, id: it.id })} className="shrink-0 cursor-zoom-in">
-                          <img loading="lazy" src={api.svNearImage(folder, p, it.id, 256)} alt={`${NAME[p]} ${it.id}`} className="h-16 w-24 rounded object-cover" /></button>
+                          <img loading="lazy" src={api.svNearImage(folder, p, it.id, 256)} alt={`${NAME[p]} ${it.id}`} className="h-16 w-24 rounded-control object-cover" /></button>
                         <div className="min-w-0"><div className="font-medium">{it.distance_m} m away · {kindLabel2(it)}{it.section ? ` · section ${it.section}` : ''}</div>
-                          <div className="text-stone-600 dark:text-stone-400">{[it.camera, it.size && `${it.size[0]}×${it.size[1]}`].filter(Boolean).join(' · ') || 'camera not known'}</div>
-                          <div className="text-stone-600 dark:text-stone-400">Filmed {when(it.captured, tz)}{it.passed ? ` · you passed ${when(it.passed, tz)}` : ''}</div></div>
+                          <div className="text-muted-foreground">{[it.camera, it.size && `${it.size[0]}×${it.size[1]}`].filter(Boolean).join(' · ') || 'camera not known'}</div>
+                          <div className="text-muted-foreground">Filmed {when(it.captured, tz)}{it.passed ? ` · you passed ${when(it.passed, tz)}` : ''}</div></div>
                       </div>
-                      <div className={`mt-1 font-medium ${it.usable ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}>{it.usable ? 'Nothing rules it out' : `Ruled out: ${it.ruled_out.length} reason${it.ruled_out.length === 1 ? '' : 's'}`}</div>
+                      <div className={`mt-1 font-medium ${it.usable ? 'text-primary' : 'text-danger'}`}>{it.usable ? 'Nothing rules it out' : `Ruled out: ${it.ruled_out.length} reason${it.ruled_out.length === 1 ? '' : 's'}`}</div>
                       {it.section || made[it.id]
-                        ? <div className="mt-1 text-stone-600 dark:text-stone-400">Already a candidate: section {it.section ?? made[it.id]}</div>
-                        : <button type="button" onClick={() => promote(it)} className="mt-1 rounded border border-stone-300 px-2 py-0.5 dark:border-stone-600">Make this a candidate</button>}
-                      <ul className="mt-0.5 space-y-0.5">{it.rules.map(r => <li key={r.key} data-rule={r.key} className={r.ok === false ? 'text-red-700 dark:text-red-400' : r.ok === null ? 'text-stone-500' : ''}><span aria-label={r.ok === false ? 'rules it out' : r.ok === null ? 'not known' : 'fine'} className="mr-1 inline-block w-3">{RULE_ICON[String(r.ok) as 'true' | 'false' | 'null']}</span>{r.text}</li>)}</ul>
+                        ? <div className="mt-1 text-muted-foreground">Already a candidate: section {it.section ?? made[it.id]}</div>
+                        : <button type="button" onClick={() => promote(it)} className="mt-1 rounded-control border border-border px-2 py-0.5">Make this a candidate</button>}
+                      <ul className="mt-0.5 space-y-0.5">{it.rules.map(r => <li key={r.key} data-rule={r.key} className={r.ok === false ? 'text-danger' : r.ok === null ? 'text-muted-foreground' : ''}><span aria-label={r.ok === false ? 'rules it out' : r.ok === null ? 'not known' : 'fine'} className="mr-1 inline-block w-3">{RULE_ICON[String(r.ok) as 'true' | 'false' | 'null']}</span>{r.text}</li>)}</ul>
                     </li>
                   ))}
                 </ul>

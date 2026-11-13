@@ -41,13 +41,13 @@ export function PointCamTool({ folder, source, pc, map, unavailable }: { folder:
   return (
     <div aria-label="Point cameras" className="space-y-3">
       {map(pc.hooks)}
-      {unavailable && <p className="text-xs text-stone-500">{unavailable}</p>}
-      {!unavailable && <div className="flex flex-wrap items-center gap-3 text-sm">
-        <button type="button" aria-pressed={pc.armed} disabled={pc.busy} onClick={() => pc.setArmed(a => !a)} className={`rounded px-3 py-1 ${pc.armed ? 'bg-teal-700 text-white' : 'border border-teal-700 text-teal-800 dark:text-teal-300'}`}>{pc.busy ? 'Making the camera…' : pc.armed ? 'Now click the map near the path' : 'Add a point camera'}</button>
-        <span className="text-xs text-stone-500">A virtual camera that keeps one place in frame, panning and zooming, while {SOURCE_NAME(source)} goes past it. Arm the button and click the map within 400 m of the path.</span>
+      {unavailable && <p className="type-caption text-muted-foreground">{unavailable}</p>}
+      {!unavailable && <div className="flex flex-wrap items-center gap-3 type-body-sm">
+        <button type="button" aria-pressed={pc.armed} disabled={pc.busy} onClick={() => pc.setArmed(a => !a)} className={`rounded-control px-3 py-1 ${pc.armed ? 'bg-success text-white' : 'border border-success text-success'}`}>{pc.busy ? 'Making the camera…' : pc.armed ? 'Now click the map near the path' : 'Add a point camera'}</button>
+        <span className="type-caption text-muted-foreground">A virtual camera that keeps one place in frame, panning and zooming, while {SOURCE_NAME(source)} goes past it. Arm the button and click the map within 400 m of the path.</span>
       </div>}
-      {pc.err && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{pc.err}</p>}
-      {pc.loaded && pc.cams.length === 0 && <p className="text-xs text-stone-500">No point cameras here yet.</p>}
+      {pc.err && <p role="alert" className="type-body-sm text-danger">{pc.err}</p>}
+      {pc.loaded && pc.cams.length === 0 && <p className="type-caption text-muted-foreground">No point cameras here yet.</p>}
       {pc.cams.map(c => <PointCamCard key={c.id} folder={folder} cam={c} pc={pc} />)}
     </div>
   )
@@ -57,8 +57,8 @@ function NumField({ label, value, min, max, step = 1, unit, onCommit }: { label:
   const [draft, setDraft] = useState<string>(), text = draft ?? String(value)
   const commit = () => { if (draft === undefined) return; const v = Number(draft); const ok = draft.trim() !== '' && Number.isFinite(v); setDraft(undefined); if (ok && v !== value) onCommit(v) }
   return (
-    <label className="flex items-center gap-2"><span className="w-44 shrink-0 text-stone-500">{label}</span>
-      <input aria-label={label} type="number" min={min} max={max} step={step} value={text} onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-20 rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700" /> <span className="text-xs text-stone-500">{unit}</span></label>
+    <label className="flex items-center gap-2"><span className="w-44 shrink-0 text-muted-foreground">{label}</span>
+      <input aria-label={label} type="number" min={min} max={max} step={step} value={text} onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-20 rounded-control border border-border bg-transparent px-1 py-0.5" /> <span className="type-caption text-muted-foreground">{unit}</span></label>
   )
 }
 
@@ -66,8 +66,8 @@ function NumField({ label, value, min, max, step = 1, unit, onCommit }: { label:
 export function NameField({ cam, onChange }: { cam: PointCam; onChange: (name: string | null) => void }) {
   const [name, setName] = useState<string>()
   return (
-    <label className="flex items-center gap-2 sm:col-span-2"><span className="w-44 shrink-0 text-stone-500">What it looks at</span>
-      <input aria-label="What it looks at" value={name ?? cam.name ?? ''} placeholder="e.g. the old mill" onChange={e => setName(e.target.value)} onBlur={() => { if (name !== undefined && name !== (cam.name ?? '')) onChange(name || null); setName(undefined) }} className="min-w-0 flex-1 rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700" /></label>
+    <label className="flex items-center gap-2 sm:col-span-2"><span className="w-44 shrink-0 text-muted-foreground">What it looks at</span>
+      <input aria-label="What it looks at" value={name ?? cam.name ?? ''} placeholder="e.g. the old mill" onChange={e => setName(e.target.value)} onBlur={() => { if (name !== undefined && name !== (cam.name ?? '')) onChange(name || null); setName(undefined) }} className="min-w-0 flex-1 rounded-control border border-border bg-transparent px-1 py-0.5" /></label>
   )
 }
 
@@ -89,19 +89,19 @@ const USES: { v: PointCamUse; label: string }[] = [{ v: '', label: 'Not used' },
 /** Whether the planner may use the shot: not at all, as an option the script writer may take, or as a must. */
 export function UseRadios({ cam, onChange }: { cam: PointCam; onChange: (u: PointCamUse) => void }) {
   return (
-    <fieldset role="group" aria-label={`${cam.label} in the film`} className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm"><legend className="sr-only">{cam.label} in the film</legend>
-      <span className="text-stone-500" title="Possible: the planner may cut to the camera inside this clip, and the script writer may give it a shot of its own. Must include: it is always a shot of its own.">In the film</span>
+    <fieldset role="group" aria-label={`${cam.label} in the film`} className="flex flex-wrap items-center gap-x-4 gap-y-1 type-body-sm"><legend className="sr-only">{cam.label} in the film</legend>
+      <span className="text-muted-foreground" title="Possible: the planner may cut to the camera inside this clip, and the script writer may give it a shot of its own. Must include: it is always a shot of its own.">In the film</span>
       {USES.map(u => <label key={u.label} className="flex items-center gap-1"><input type="radio" name={`use-${cam.id}`} aria-label={u.label} checked={cam.use === u.v} onChange={() => onChange(u.v)} /> {u.label}</label>)}
     </fieldset>
   )
 }
 
 export function PointCamFacts({ cam }: { cam: PointCam }) {
-  if (!cam.ok || !cam.facts) return <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">This camera cannot give its shot: {cam.error ?? 'unknown'}</p>
+  if (!cam.ok || !cam.facts) return <p role="alert" className="type-body-sm text-warning">This camera cannot give its shot: {cam.error ?? 'unknown'}</p>
   const f = cam.facts
   return (<>
-    <p className="text-sm text-stone-600 dark:text-stone-400">{f.seconds} s of {cam.source.kind === 'clip' ? 'footage' : 'road'} · the point is {f.min_dist_m} m from the path at the closest, {f.max_dist_m} m at the furthest · the view turns {f.swing_deg}° (up to {f.max_pan_deg_s}° a second) · zoom {f.fov_min}° to {f.fov_max}°{cam.range ? ` · plays ${cam.range[0]} to ${cam.range[1]} s in the film` : ''}</p>
-    {f.warnings.map(w => <p key={w} role="note" className="text-xs text-amber-700 dark:text-amber-400">⚠ {w}</p>)}
+    <p className="type-body-sm text-muted-foreground">{f.seconds} s of {cam.source.kind === 'clip' ? 'footage' : 'road'} · the point is {f.min_dist_m} m from the path at the closest, {f.max_dist_m} m at the furthest · the view turns {f.swing_deg}° (up to {f.max_pan_deg_s}° a second) · zoom {f.fov_min}° to {f.fov_max}°{cam.range ? ` · plays ${cam.range[0]} to ${cam.range[1]} s in the film` : ''}</p>
+    {f.warnings.map(w => <p key={w} role="note" className="type-caption text-warning">⚠ {w}</p>)}
   </>)
 }
 
@@ -117,16 +117,16 @@ export function PointCamPreview({ folder, cam }: { folder: string; cam: PointCam
   const pr = st?.progress
   return (
     <div aria-label={`Preview of ${cam.label}`} className="space-y-1">
-      {st?.exists && <StepVideo preload="metadata" src={api.pointCamVideoUrl(folder, cam.id, s)} className="max-h-[360px] rounded" aria-label={`Preview video of ${cam.label}`} />}
-      {st && !st.exists && !running && cam.ok && <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={make} className="rounded bg-teal-700 px-3 py-1 text-sm text-white">Render a preview</button><span className="text-xs text-stone-500">made in the background and kept; {cam.source.kind === 'clip' ? 'from the clip’s preview video' : 'from the section’s pictures (360 sections only)'}</span></div>}
+      {st?.exists && <StepVideo preload="metadata" src={api.pointCamVideoUrl(folder, cam.id, s)} className="max-h-[360px] rounded-control" aria-label={`Preview video of ${cam.label}`} />}
+      {st && !st.exists && !running && cam.ok && <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={make} className="rounded-control bg-success px-3 py-1 type-body-sm text-white">Render a preview</button><span className="type-caption text-muted-foreground">made in the background and kept; {cam.source.kind === 'clip' ? 'from the clip’s preview video' : 'from the section’s pictures (360 sections only)'}</span></div>}
       {running && (
-        <div role="status" aria-label="Making the video" className="max-w-xl space-y-1 text-sm text-stone-600 dark:text-stone-400">
-          <div className="flex items-center justify-between text-xs"><span>{pr ? `${pr.phase}: ${pr.done} of ${pr.total}` : 'starting…'}</span><span>{pr ? `${pr.pct}%` : ''}</span></div>
-          <div role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pr?.pct} className="h-2 w-full overflow-hidden rounded bg-stone-200 dark:bg-stone-700">
-            <div className={`h-full rounded bg-teal-600 transition-[width] duration-500 ${pr ? '' : 'w-1/4 animate-pulse'}`} style={pr ? { width: `${pr.pct}%` } : undefined} /></div>
-          <ul aria-label="What it is doing" className="max-h-32 overflow-auto rounded bg-stone-100 p-1.5 font-mono text-[11px] leading-snug text-stone-600 dark:bg-stone-800 dark:text-stone-300">{(st?.log ?? []).map((l, i) => <li key={i}>{l}</li>)}{!st?.log?.length && <li>waiting for the job to report…</li>}</ul>
+        <div role="status" aria-label="Making the video" className="max-w-xl space-y-1 type-body-sm text-muted-foreground">
+          <div className="flex items-center justify-between type-caption"><span>{pr ? `${pr.phase}: ${pr.done} of ${pr.total}` : 'starting…'}</span><span>{pr ? `${pr.pct}%` : ''}</span></div>
+          <div role="progressbar" aria-label="Progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pr?.pct} className="h-2 w-full overflow-hidden rounded-control bg-muted">
+            <div className={`h-full rounded-control bg-success transition-[width] duration-500 ${pr ? '' : 'w-1/4 animate-pulse'}`} style={pr ? { width: `${pr.pct}%` } : undefined} /></div>
+          <ul aria-label="What it is doing" className="max-h-32 overflow-auto rounded-control bg-muted p-1.5 font-mono text-[11px] leading-snug text-muted-foreground">{(st?.log ?? []).map((l, i) => <li key={i}>{l}</li>)}{!st?.log?.length && <li>waiting for the job to report…</li>}</ul>
         </div>)}
-      {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{err || st?.error}</p>}
+      {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="type-body-sm text-danger">{err || st?.error}</p>}
     </div>
   )
 }
@@ -135,13 +135,13 @@ export function PointCamPreview({ folder, cam }: { folder: string; cam: PointCam
 function PointCamCard({ folder, cam, pc }: { folder: string; cam: PointCam; pc: PointCamState }) {
   const on = pc.picked === cam.id
   return (
-    <section aria-label={`Point camera ${cam.label}`} data-picked={on ? '' : undefined} className={`space-y-2 rounded-lg border-2 p-3 ${on ? 'border-teal-600' : 'border-stone-200 dark:border-stone-700'}`}>
+    <section aria-label={`Point camera ${cam.label}`} data-picked={on ? '' : undefined} className={`space-y-2 rounded-surface border-2 p-3 ${on ? 'border-success' : 'border-border'}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <button type="button" onClick={() => pc.setPicked(cam.id)} className="text-left text-sm font-semibold">Point camera {cam.label}{cam.name ? ` · ${cam.name}` : ''} <span className="text-xs font-normal text-stone-500">at {cam.lat.toFixed(5)}, {cam.lon.toFixed(5)}</span></button>
-        <button type="button" onClick={() => { if (window.confirm(`Remove point camera ${cam.label}?`)) pc.remove(cam.id) }} className="text-xs text-red-700 underline dark:text-red-400">Remove</button>
+        <button type="button" onClick={() => pc.setPicked(cam.id)} className="text-left type-body-sm font-semibold">Point camera {cam.label}{cam.name ? ` · ${cam.name}` : ''} <span className="type-caption font-normal text-muted-foreground">at {cam.lat.toFixed(5)}, {cam.lon.toFixed(5)}</span></button>
+        <button type="button" onClick={() => { if (window.confirm(`Remove point camera ${cam.label}?`)) pc.remove(cam.id) }} className="type-caption text-danger underline">Remove</button>
       </div>
       <PointCamFacts cam={cam} />
-      <div className="grid gap-2 text-sm sm:grid-cols-2">
+      <div className="grid gap-2 type-body-sm sm:grid-cols-2">
         <NameField cam={cam} onChange={name => pc.update(cam.id, { name })} />
         <PointCamSettingsFields cam={cam} limits={pc.limits} onChange={f => pc.update(cam.id, f)} />
       </div>
@@ -173,13 +173,13 @@ export function CamAimPicker({ pc, picked, onPick, onGo, note }: { pc: PointCamS
   if (cams.length === 0) return null
   const cur = cams.find(c => c.id === picked)
   return (
-    <div role="group" aria-label="Show a point camera on the video" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-      <span className="text-stone-500">Show on the video</span>
+    <div role="group" aria-label="Show a point camera on the video" className="flex flex-wrap items-center gap-x-4 gap-y-1 type-body-sm">
+      <span className="text-muted-foreground">Show on the video</span>
       <label className="flex items-center gap-1"><input type="radio" name="aim-cam" aria-label="No camera" checked={!cur} onChange={() => onPick(undefined)} /> none</label>
-      {cams.map(c => <label key={c.id} className="flex items-center gap-1"><input type="radio" name="aim-cam" aria-label={`Show ${c.label}`} checked={picked === c.id} onChange={() => onPick(c.id)} /> {c.label}{c.name ? ` · ${c.name}` : ''} <span className="text-xs text-stone-500">{c.facts?.seconds} s</span></label>)}
-      {cur && onGo && <button type="button" onClick={() => onGo(cur)} className="rounded border border-teal-700 px-2 py-0.5 text-xs text-teal-800 dark:text-teal-300">Go to {cur.label}</button>}
-      {cur && <span className="text-xs text-stone-500">● where it aims · the outline is the edge of its frame, while the video is inside its stretch</span>}
-      {note && <span role="note" className="text-xs text-amber-700 dark:text-amber-400">{note}</span>}
+      {cams.map(c => <label key={c.id} className="flex items-center gap-1"><input type="radio" name="aim-cam" aria-label={`Show ${c.label}`} checked={picked === c.id} onChange={() => onPick(c.id)} /> {c.label}{c.name ? ` · ${c.name}` : ''} <span className="type-caption text-muted-foreground">{c.facts?.seconds} s</span></label>)}
+      {cur && onGo && <button type="button" onClick={() => onGo(cur)} className="rounded-control border border-success px-2 py-0.5 type-caption text-success">Go to {cur.label}</button>}
+      {cur && <span className="type-caption text-muted-foreground">● where it aims · the outline is the edge of its frame, while the video is inside its stretch</span>}
+      {note && <span role="note" className="type-caption text-warning">{note}</span>}
     </div>
   )
 }

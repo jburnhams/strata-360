@@ -45,13 +45,13 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   return (
     <div className="grid gap-4 md:grid-cols-[260px_1fr]">
       <aside className="flex flex-col md:sticky md:top-4 md:h-[calc(100vh-2rem)]">
-        <button onClick={() => setSel(null)} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === null ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Overview</button>
-        <button onClick={() => setSel('@streetview')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@streetview' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Street view</button>
-        <button onClick={() => setSel('@timeline')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@timeline' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Timeline</button>
-        <button onClick={() => setSel('@music')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@music' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Music studio</button>
-        <button onClick={() => setSel('@review')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@review' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Review transcript</button>
-        <button onClick={() => setSel('@ask')} className={`mb-2 w-full shrink-0 rounded-lg px-3 py-2 text-left text-sm font-medium ${sel === '@ask' ? 'bg-emerald-700 text-white' : 'bg-white hover:bg-stone-100 dark:bg-stone-900 dark:hover:bg-stone-800'}`}>Ask about the project</button>
-        <label className="mb-1 flex shrink-0 items-center gap-2 px-1 text-xs text-stone-600 dark:text-stone-400" title="Show the thumbnails with the race overlay (clock, numbers, maps) as the film will have it, where the thumb_overlay stage has made one">
+        <button onClick={() => setSel(null)} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === null ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Overview</button>
+        <button onClick={() => setSel('@streetview')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@streetview' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Street view</button>
+        <button onClick={() => setSel('@timeline')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@timeline' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Timeline</button>
+        <button onClick={() => setSel('@music')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@music' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Music studio</button>
+        <button onClick={() => setSel('@review')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@review' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Review transcript</button>
+        <button onClick={() => setSel('@ask')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@ask' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Ask about the project</button>
+        <label className="mb-1 flex shrink-0 items-center gap-2 px-1 type-caption text-muted-foreground" title="Show the thumbnails with the race overlay (clock, numbers, maps) as the film will have it, where the thumb_overlay stage has made one">
           <input type="checkbox" checked={overlay} onChange={e => setOverlay(e.target.checked)} /> Overlay on thumbnails
         </label>
         <ul className="min-h-0 flex-1 space-y-1 overflow-auto md:pr-1">
@@ -64,7 +64,7 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
         </ul>
       </aside>
       <div className="min-w-0">
-        <div className="mb-3 flex items-center gap-3 text-sm"><span className="break-all font-mono text-stone-500">{folder}</span><button className="text-emerald-700 underline dark:text-emerald-400" onClick={onChange}>open another / new project</button></div>
+        <div className="mb-3 flex items-center gap-3 type-body-sm"><span className="break-all font-mono text-muted-foreground">{folder}</span><button className="text-primary underline" onClick={onChange}>open another / new project</button></div>
         {sel === null ? (
           <div className="space-y-4">
             <FilmDetails folder={folder} />
@@ -107,18 +107,18 @@ export function timeline(clips: ClipInfo[], gaps: Gap[], photos: Photo[], sv: Sv
 
 function PhotoRow({ folder, p, active, onClick }: { folder: string; p: Photo; active: boolean; onClick: () => void }) {
   return (
-    <li onClick={onClick} data-in-film="" data-photo-row={p.id} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-lg border-2 border-emerald-600 p-1.5 ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
-      <img loading="lazy" src={api.photoThumb(folder, p.id, 160)} alt="" className="h-11 w-20 shrink-0 rounded object-cover" />
-      <div className="min-w-0 flex-1 text-xs"><div className="truncate">Photo {p.id.toUpperCase()}</div><div className="truncate text-stone-500">{p.name}</div></div>
+    <li onClick={onClick} data-in-film="" data-photo-row={p.id} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-surface border-2 border-primary p-1.5 ${active ? 'bg-warning-subtle ring-2 ring-warning' : 'hover:bg-muted'}`}>
+      <img loading="lazy" src={api.photoThumb(folder, p.id, 160)} alt="" className="h-11 w-20 shrink-0 rounded-control object-cover" />
+      <div className="min-w-0 flex-1 type-caption"><div className="truncate">Photo {p.id.toUpperCase()}</div><div className="truncate text-muted-foreground">{p.name}</div></div>
     </li>
   )
 }
 
 function SvRow({ folder, s, active, onClick }: { folder: string; s: SvChosen; active: boolean; onClick: () => void }) {
   return (
-    <li onClick={onClick} data-in-film="" data-sv-row={s.label} className={`flex cursor-pointer gap-2 rounded-lg border-2 border-emerald-600 p-1.5 ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
-      <div className="relative h-11 w-20 shrink-0"><img loading="lazy" src={api.svThumbUrl(folder, s.key, String(s.seconds ?? '') + (s.hires ? 'h' : ''))} alt="" className="h-11 w-20 rounded bg-sky-200 object-cover dark:bg-sky-900" /><span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-semibold text-white">{s.label}</span></div>
-      <div className="min-w-0 flex-1 text-xs"><div className="truncate">Street view · {s.provider}</div><div className="text-stone-500">{s.kind === '360' ? '360°' : '2D'} · {Math.round(s.length_m)} m · {s.choice === 'must' ? 'must use' : 'may use'}{s.quality ? ` · ${s.quality}` : ''}</div></div>
+    <li onClick={onClick} data-in-film="" data-sv-row={s.label} className={`flex cursor-pointer gap-2 rounded-surface border-2 border-primary p-1.5 ${active ? 'bg-warning-subtle ring-2 ring-warning' : 'hover:bg-muted'}`}>
+      <div className="relative h-11 w-20 shrink-0"><img loading="lazy" src={api.svThumbUrl(folder, s.key, String(s.seconds ?? '') + (s.hires ? 'h' : ''))} alt="" className="h-11 w-20 rounded-control bg-info-subtle object-cover" /><span className="absolute bottom-0 left-0 rounded-tr-control bg-black/60 px-1 text-[10px] font-semibold text-white">{s.label}</span></div>
+      <div className="min-w-0 flex-1 type-caption"><div className="truncate">Street view · {s.provider}</div><div className="text-muted-foreground">{s.kind === '360' ? '360°' : '2D'} · {Math.round(s.length_m)} m · {s.choice === 'must' ? 'must use' : 'may use'}{s.quality ? ` · ${s.quality}` : ''}</div></div>
     </li>
   )
 }
@@ -126,9 +126,9 @@ function SvRow({ folder, s, active, onClick }: { folder: string; s: SvChosen; ac
 function CamRow({ folder, c, active, onClick }: { folder: string; c: PointCam; active: boolean; onClick: () => void }) {
   const [noPic, setNoPic] = useState(false)
   return (
-    <li onClick={onClick} data-in-film="" data-cam-row={c.label} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-lg border-2 border-emerald-600 p-1.5 ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-100 dark:hover:bg-stone-800'}`}>
-      <div className="relative h-11 w-20 shrink-0">{noPic ? <div className="h-11 w-20 rounded bg-teal-200 dark:bg-teal-900" /> : <img loading="lazy" src={api.pointCamThumbUrl(folder, c.id, [c.before_m, c.after_m, c.fov_near, c.fov_far, c.height_m, c.smooth_s].join('-'))} onError={() => setNoPic(true)} alt="" className="h-11 w-20 rounded bg-teal-200 object-cover dark:bg-teal-900" />}<span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-semibold text-white">{c.label}</span></div>
-      <div className="min-w-0 flex-1 text-xs"><div className="truncate">Point camera{c.name ? ` · ${c.name}` : ''}</div><div className="text-stone-500">{c.facts?.seconds ?? '?'} s · {c.source.kind === 'clip' ? 'clip' : 'street view'} · {c.use === 'must' ? 'must use' : 'may use'}</div></div>
+    <li onClick={onClick} data-in-film="" data-cam-row={c.label} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-surface border-2 border-primary p-1.5 ${active ? 'bg-warning-subtle ring-2 ring-warning' : 'hover:bg-muted'}`}>
+      <div className="relative h-11 w-20 shrink-0">{noPic ? <div className="h-11 w-20 rounded-control bg-success-subtle" /> : <img loading="lazy" src={api.pointCamThumbUrl(folder, c.id, [c.before_m, c.after_m, c.fov_near, c.fov_far, c.height_m, c.smooth_s].join('-'))} onError={() => setNoPic(true)} alt="" className="h-11 w-20 rounded-control bg-success-subtle object-cover" />}<span className="absolute bottom-0 left-0 rounded-tr-control bg-black/60 px-1 text-[10px] font-semibold text-white">{c.label}</span></div>
+      <div className="min-w-0 flex-1 type-caption"><div className="truncate">Point camera{c.name ? ` · ${c.name}` : ''}</div><div className="text-muted-foreground">{c.facts?.seconds ?? '?'} s · {c.source.kind === 'clip' ? 'clip' : 'street view'} · {c.use === 'must' ? 'must use' : 'may use'}</div></div>
     </li>
   )
 }
@@ -137,10 +137,10 @@ function GapRow({ folder, g, active, onClick }: { folder: string; g: Gap; active
   const c = g.clips.find(x => x.id === g.id), s = g.settings
   const state = c?.rendering ? 'rendering…' : c?.exists ? (c.kind === 'flyover' ? '3D' : '2D') + ` · ${c.seconds} s` : c ? 'planned' : 'no clip'
   return (
-    <li onClick={onClick} data-in-film={g.in_film ? '' : undefined} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-lg border-2 p-1.5 ${g.in_film ? 'border-emerald-600' : 'border-transparent'} ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-200/60 dark:hover:bg-stone-800'}`}>
-      {c?.exists ? <div className="relative h-11 w-20 shrink-0"><img loading="lazy" src={api.gapThumbUrl(folder, g.id, String(c.seconds ?? ''))} alt="" className="h-11 w-20 rounded object-cover" /><span className="absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-semibold text-white">{g.id}</span></div>
-        : <div className={`flex h-11 w-20 shrink-0 items-center justify-center rounded text-sm font-semibold ${c?.exists ? 'bg-emerald-200 text-emerald-900 dark:bg-emerald-900 dark:text-emerald-100' : 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'}`}>{g.id}</div>}
-      <div className="min-w-0 flex-1 text-xs"><div className="truncate">{g.local_start}</div><div className="text-stone-500">{(g.duration_s / 3600).toFixed(1)} h · {g.final ? 'to the finish · ' : ''}{g.stop ? `stop ${Math.round(g.stop.stopped_s / 60)} min · ` : ''}{state}{s?.must ? ' · must use' : ''}</div></div>
+    <li onClick={onClick} data-in-film={g.in_film ? '' : undefined} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-surface border-2 p-1.5 ${g.in_film ? 'border-primary' : 'border-transparent'} ${active ? 'bg-warning-subtle ring-2 ring-warning' : 'hover:bg-muted/60'}`}>
+      {c?.exists ? <div className="relative h-11 w-20 shrink-0"><img loading="lazy" src={api.gapThumbUrl(folder, g.id, String(c.seconds ?? ''))} alt="" className="h-11 w-20 rounded-control object-cover" /><span className="absolute bottom-0 left-0 rounded-tr-control bg-black/60 px-1 text-[10px] font-semibold text-white">{g.id}</span></div>
+        : <div className={`flex h-11 w-20 shrink-0 items-center justify-center rounded-control type-body-sm font-semibold ${c?.exists ? 'bg-primary-3 text-primary' : 'bg-muted text-muted-foreground'}`}>{g.id}</div>}
+      <div className="min-w-0 flex-1 type-caption"><div className="truncate">{g.local_start}</div><div className="text-muted-foreground">{(g.duration_s / 3600).toFixed(1)} h · {g.final ? 'to the finish · ' : ''}{g.stop ? `stop ${Math.round(g.stop.stopped_s / 60)} min · ` : ''}{state}{s?.must ? ' · must use' : ''}</div></div>
     </li>
   )
 }
@@ -148,10 +148,10 @@ function GapRow({ folder, g, active, onClick }: { folder: string; g: Gap; active
 function Row({ folder, c, overlay, active, onClick }: { folder: string; c: ClipInfo; overlay: boolean; active: boolean; onClick: () => void }) {
   const name = c.id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
   return (
-    <li onClick={onClick} data-in-film={c.in_film ? '' : undefined} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-lg border-2 p-1.5 ${c.in_film ? 'border-emerald-600' : 'border-transparent'} ${active ? 'bg-yellow-100 ring-2 ring-yellow-400 dark:bg-yellow-950 dark:ring-yellow-500' : 'hover:bg-stone-200/60 dark:hover:bg-stone-800'}`}>
-      {c.thumb ? <img loading="lazy" src={api.thumbUrl(folder, c.id, thumbVersion(c, overlay), overlay)} alt="" className="h-11 w-20 shrink-0 rounded object-cover" /> : <div className="h-11 w-20 shrink-0 rounded bg-stone-200 dark:bg-stone-800" />}
-      <div className="min-w-0 flex-1 text-xs"><div className="truncate">{name}</div><div className="text-stone-500">{Math.round(c.duration_s)} s{c.candidates != null ? ` · ${c.candidates} moments` : ''}</div></div>
-      {c.has_note && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-600" />}
+    <li onClick={onClick} data-in-film={c.in_film ? '' : undefined} data-selected={active ? '' : undefined} className={`flex cursor-pointer gap-2 rounded-surface border-2 p-1.5 ${c.in_film ? 'border-primary' : 'border-transparent'} ${active ? 'bg-warning-subtle ring-2 ring-warning' : 'hover:bg-muted/60'}`}>
+      {c.thumb ? <img loading="lazy" src={api.thumbUrl(folder, c.id, thumbVersion(c, overlay), overlay)} alt="" className="h-11 w-20 shrink-0 rounded-control object-cover" /> : <div className="h-11 w-20 shrink-0 rounded-control bg-muted" />}
+      <div className="min-w-0 flex-1 type-caption"><div className="truncate">{name}</div><div className="text-muted-foreground">{Math.round(c.duration_s)} s{c.candidates != null ? ` · ${c.candidates} moments` : ''}</div></div>
+      {c.has_note && <span className="mt-1 h-2 w-2 shrink-0 rounded-pill bg-primary" />}
     </li>
   )
 }

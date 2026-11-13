@@ -161,7 +161,7 @@ function MapView({ base, clips = [], cursor = null, onCursor = () => {}, onHover
     const ctl = new Zoom({ position: 'topleft' }).addTo(m); fitFocus.current = go; go(); return () => { g.remove(); ctl.remove(); fitFocus.current = () => {} }
   }, [focus?.line, focus?.point?.lat, focus?.point?.lon, focus?.points, focus?.label, base])         // eslint-disable-line react-hooks/exhaustive-deps
 
-  return <div ref={el} className={`${height} w-full rounded-lg bg-stone-100 dark:bg-stone-950`} role="application" aria-label={label} data-focus={focus ? '' : undefined} />
+  return <div ref={el} className={`${height} w-full rounded-surface bg-muted`} role="application" aria-label={label} data-focus={focus ? '' : undefined} />
 }
 
 type ViewProps = Parameters<typeof MapView>[0]
@@ -196,22 +196,22 @@ function FolderMap({ folder, span, point, at, frames, label, tz = 'Europe/Brusse
   const line = useMemo(() => (part && part.lat.length > 1 ? part.lat.map((la, i) => [la, part.lon[i]] as [number, number]) : undefined), [part])         // (the same array until the part of the run changes: a new one every render would send the map back to it each time the page around it changed)
   const [t0, t1] = span ?? (at != null ? [at, at] : [NaN, NaN])
   const here = Number.isFinite(t0) ? pois.filter(p => p.sym === 'stop' && p.stop?.arrived != null && p.stop.left != null && p.stop.arrived <= t1 && p.stop.left >= t0) : []              // the stops this overlaps in time
-  if (err) return <p className="text-sm text-amber-700">The map needs the race track: {err}</p>
-  if (!run) return <div className={`${height} animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800`} aria-label="Loading the map" />
+  if (err) return <p className="type-body-sm text-warning">The map needs the race track: {err}</p>
+  if (!run) return <div className={`${height} animate-pulse rounded-surface bg-muted`} aria-label="Loading the map" />
   return (
     <div aria-label="Where on the route">
       <MapView {...rest} svg base={run} height={height} label={label ? 'Map of the route with this picked out' : 'Map of the route'} tz={tz} background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} extras={routes} pois={pois} ends={ends}
         focus={line || point || frames?.length ? { line, point: line || frames?.length ? undefined : point, points: frames, label } : undefined} />
-      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-600 dark:text-stone-400">
+      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 type-caption text-muted-foreground">
         <span><span className="mr-1 inline-block h-1.5 w-4 align-middle" style={{ background: '#f97316' }} />{frames?.length ? `each picture where it was taken (${frames.length}), joined in order` : span ? 'the part of the run this covers' : point ? 'where it was taken' : 'this'}</span>
         <span><span className="mr-1 inline-block h-1 w-4 align-middle" style={{ background: '#15803d' }} />the run</span>
         {routes.length > 0 && <span><span className="mr-1 inline-block h-0 w-4 border-t-2 border-dashed align-middle" style={{ borderColor: '#2563eb' }} />route tracks</span>}
         <span>⤢ the whole race · ◎ back to this</span>
-        {tiles && !tiles.ok && <span className="text-amber-700">map background off</span>}
+        {tiles && !tiles.ok && <span className="text-warning">map background off</span>}
       </div>
       {here.length > 0 && (
-        <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200" aria-label="Stops here">
-          <div className="text-xs font-semibold uppercase tracking-wide">{here.length === 1 ? 'The runner stopped here' : 'The runner stopped here, twice or more'}</div>
+        <div className="mt-2 rounded-control border border-warning bg-warning-subtle p-2 type-body-sm text-warning" aria-label="Stops here">
+          <div className="type-caption font-semibold uppercase tracking-wide">{here.length === 1 ? 'The runner stopped here' : 'The runner stopped here, twice or more'}</div>
           <ul className="space-y-0.5">{here.map(p => { const f = stopFacts(p, tz); return <li key={p.name} data-stop-here={p.name}><b>{f.name}</b> · stopped {f.duration} (within {f.area_m} m) · {f.arrived} to {f.left} · km {f.km ?? '?'} of the run{p.added && p.gap ? ` · in the video as ${p.gap}` : ''}</li> })}</ul>
         </div>
       )}

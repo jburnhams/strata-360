@@ -29,7 +29,7 @@ describe('Phrase word colours', () => {
 
   it('marks a correction with a dotted underline instead of a background, and still shows the mark', () => {
     setup(<Phrase text="x" en={null} lang="en" mode="translated" word={ctx([w(0, 'fixed', { m: 'must', e: { orig: 'fixt', src: 'user', user_text: 'fixed' } })])} />)
-    const el = screen.getByText('fixed'); expect(el).toHaveAttribute('data-state', 'must'); expect(el.className).toContain('decoration-dotted'); expect(el.className).toContain('decoration-sky-500')
+    const el = screen.getByText('fixed'); expect(el).toHaveAttribute('data-state', 'must'); expect(el.className).toContain('decoration-dotted'); expect(el.className).toContain('decoration-info')
   })
 
   it('opens the word editor on a plain click', async () => {

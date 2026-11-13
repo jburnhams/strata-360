@@ -13,10 +13,10 @@ export default function App() {
   if (!ready) return null
   return (
     <main className="mx-auto max-w-6xl px-4 pb-16 pt-6">
-      <h1 className="text-xl font-semibold">Strata 360</h1>
+      <h1 className="type-heading font-semibold">Strata 360</h1>
       {picking || !folder ? (
         <>
-          <p className="mb-4 text-sm text-stone-500">Open an existing project or create one: choose the folder with your camera files. Results go in a <code>strata360</code> subfolder next to them.</p>
+          <p className="mb-4 type-body-sm text-muted-foreground">Open an existing project or create one: choose the folder with your camera files. Results go in a <code>strata360</code> subfolder next to them.</p>
           <div className="max-w-3xl"><FolderBrowser onChoose={choose} onCancel={folder ? () => setPicking(false) : undefined} /></div>
         </>
       ) : <Workspace folder={folder} onChange={() => setPicking(true)} />}

@@ -28,36 +28,36 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, t
   }
   const pick = <input ref={input} type="file" accept=".fit,.gpx" hidden onChange={e => upload(e.target.files?.[0])} />
 
-  if (!t) return err ? <p className="mt-4 text-sm text-red-600">{err}</p> : <PanelSkeleton title="Race track" rows={4} />
+  if (!t) return err ? <p className="mt-4 type-body-sm text-danger">{err}</p> : <PanelSkeleton title="Race track" rows={4} />
   if (!t.present || t.error) {
     return (
-      <div className="mt-4 rounded-xl border border-dashed border-stone-300 p-6 text-center dark:border-stone-700"
+      <div className="mt-4 rounded-overlay border border-dashed border-border p-6 text-center"
         onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); upload(e.dataTransfer.files[0]) }}>
         {pick}
         <p className="mb-2">{t.error ? `Could not read the track: ${t.error}` : 'No race track yet.'}</p>
-        <p className="mb-3 text-sm text-stone-500">Add the Garmin .fit or a .gpx file. It gives the map, pace and climb for every clip, and checks the camera clock.</p>
-        <button disabled={busy} className="rounded-lg bg-emerald-700 px-4 py-2 text-white disabled:opacity-50" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Choose a file'}</button>
-        {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+        <p className="mb-3 type-body-sm text-muted-foreground">Add the Garmin .fit or a .gpx file. It gives the map, pace and climb for every clip, and checks the camera clock.</p>
+        <button disabled={busy} className="rounded-surface bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Choose a file'}</button>
+        {err && <p className="mt-2 type-body-sm text-danger">{err}</p>}
       </div>
     )
   }
   const stat = (label: string, v: string | number | null | undefined, unit = '') => v == null ? null : (
-    <div><div className="text-xs text-stone-500">{label}</div><div className="text-lg font-medium">{v}<span className="text-sm text-stone-500"> {unit}</span></div></div>
+    <div><div className="type-caption text-muted-foreground">{label}</div><div className="type-heading font-medium">{v}<span className="type-body-sm text-muted-foreground"> {unit}</span></div></div>
   )
   const pace = t.avg_pace_min_km ? `${Math.floor(t.avg_pace_min_km)}:${String(Math.round((t.avg_pace_min_km % 1) * 60)).padStart(2, '0')}` : null
   return (
-    <div className="mt-4 rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+    <div className="mt-4 rounded-overlay border border-border bg-card p-4">
       {pick}
       <div className="mb-3 flex items-center justify-between">
-        <div><b>Race track</b> <span className="text-sm text-stone-500">{t.file} · {t.start_utc?.slice(0, 10)} → {t.end_utc?.slice(0, 10)} UTC</span></div>
-        <button disabled={busy} className="text-sm text-emerald-700 underline dark:text-emerald-400" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Replace'}</button>
+        <div><b>Race track</b> <span className="type-body-sm text-muted-foreground">{t.file} · {t.start_utc?.slice(0, 10)} → {t.end_utc?.slice(0, 10)} UTC</span></div>
+        <button disabled={busy} className="type-body-sm text-primary underline" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Replace'}</button>
       </div>
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-9">
         {stat('Distance', t.distance_km, 'km')}{stat('Duration', t.duration_h, 'h')}{stat('Moving', t.moving_h, 'h')}
         {stat('Climb', t.ascent_m?.toLocaleString(), 'm')}{stat('Descent', t.descent_m?.toLocaleString(), 'm')}{stat('Avg pace', pace, 'min/km')}
         {stat('Altitude', t.min_altitude_m != null ? `${t.min_altitude_m}–${t.max_altitude_m}` : null, 'm')}{stat('Heart rate', t.avg_hr != null ? `${t.avg_hr} (max ${t.max_hr})` : null)}{stat('Points', t.samples?.toLocaleString())}
       </div>
-      {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      {err && <p className="mt-2 type-body-sm text-danger">{err}</p>}
       <TracksList folder={folder} listing={listing} onChange={changed} tz={tz} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} />
       <RaceView key={ver} folder={folder} listing={listing} onOpenClip={onOpenClip} tz={tz} photos={photos} onOpenPhoto={onOpenPhoto} hot={hot} setHot={setHot} pinned={pinned} toggle={toggle} onOpenGap={onOpenGap} onStop={async (key, add) => { try { setListing(await api.setStop(folder, key, add)); onGapsChanged?.() } catch (e) { setErr((e as Error).message) } }} />
       <GapsPanel folder={folder} onOpen={onOpenGap} />
@@ -99,26 +99,26 @@ function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, s
   const cps = useMemo(() => ids.filter(id => id.startsWith('cp:')).map(id => Number(id.slice(3))), [ids])                    // checkpoints pointed at or picked in the list: ringed in yellow on the map
   const hoverClip = (c: TrackClip | null, x = 0, y = 0) => setHover(c ? { clip: c, x, y } : undefined)
   const off = useMemo(() => clips.filter(c => !c.covered), [clips])
-  if (err) return <p className="mt-3 text-sm text-amber-700">The map and charts need the track and its clips: {err}</p>
-  if (!base || !series) return <div className="mt-3 h-[420px] animate-pulse rounded-lg bg-stone-100 dark:bg-stone-800" aria-label="Loading the race map" />
+  if (err) return <p className="mt-3 type-body-sm text-warning">The map and charts need the track and its clips: {err}</p>
+  if (!base || !series) return <div className="mt-3 h-[420px] animate-pulse rounded-surface bg-muted" aria-label="Loading the race map" />
   return (
     <div className="mt-3 space-y-2">
-      {tiles && !tiles.ok && <p role="alert" className="text-sm text-amber-700">The map background is off: {tiles.error}</p>}
+      {tiles && !tiles.ok && <p role="alert" className="type-body-sm text-warning">The map background is off: {tiles.error}</p>}
       <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} highlight={highlight} onHoverTrack={setHot} onToggleTrack={toggle} tz={tz} ends={listing?.markers} highlightCheckpoints={cps} ringEnds={ids.includes('finish')} photos={photos} photoThumb={id => api.photoThumb(folder, id, 240)} onOpenPhoto={onOpenPhoto} />
-      <div className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
-        <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
-        {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: '#78716c' }} />not in the film</span>}
+      <div className="flex flex-wrap items-center gap-3 type-caption text-muted-foreground">
+        <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
+        {hasDraft && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: '#78716c' }} />not in the film</span>}
         {extras.some(e => e.kind === 'route') && <span><span className="mr-1 inline-block h-0 w-4 border-t-2 border-dashed align-middle" style={{ borderColor: '#2563eb' }} />route (planning only)</span>}
         {(listing?.runs ?? 0) > 1 && <span><span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: '#a3a3a3' }} />each run · <span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: '#15803d' }} />merged race track</span>}
-        {(listing?.divergences?.length ?? 0) > 0 && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-full bg-red-600 text-center align-middle text-[10px] font-bold leading-[14px] text-white">!</span>run leaves the route by over 50 m (the {listing?.divergences?.length} farthest)</span>}
-        {(listing?.pois.some(p => p.sym === 'checkpoint')) && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-full bg-blue-700 text-center align-middle text-[9px] font-bold leading-[14px] text-white">1</span>checkpoint where one route ends and the next starts</span>}
+        {(listing?.divergences?.length ?? 0) > 0 && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-pill bg-danger text-center align-middle text-[10px] font-bold leading-[14px] text-primary-foreground">!</span>run leaves the route by over 50 m (the {listing?.divergences?.length} farthest)</span>}
+        {(listing?.pois.some(p => p.sym === 'checkpoint')) && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-pill bg-info text-center align-middle text-[9px] font-bold leading-[14px] text-white">1</span>checkpoint where one route ends and the next starts</span>}
         {(listing?.pois.some(p => p.sym !== 'checkpoint' && p.sym !== 'stop')) && <span><span className="mr-1 inline-block h-2.5 w-2.5 rotate-45 align-middle" style={{ background: '#f59e0b' }} />point of interest</span>}
-        {(listing?.pois.some(p => p.sym === 'stop')) && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-full bg-amber-700 text-center align-middle text-[9px] leading-[14px] text-white">⏸</span>other stop (10 min or more)</span>}
+        {(listing?.pois.some(p => p.sym === 'stop')) && <span><span className="mr-1 inline-block h-3.5 w-3.5 rounded-pill bg-warning text-center align-middle text-[9px] leading-[14px] text-primary-foreground">⏸</span>other stop (10 min or more)</span>}
         <span>click the map, then scroll to zoom</span>
         {tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}
         <span>{clips.filter(c => c.covered).length} clips on the track{off.length ? ` · not on the track: ${off.map(c => c.label).join(', ')}` : ''}</span>
         <span className="ml-auto flex items-center gap-1">horizontal axis
-          <select aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="time">time</option><option value="km">distance</option></select></span>
+          <select aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)} className="rounded-control border border-border bg-transparent px-1 py-0.5"><option value="time">time</option><option value="km">distance</option></select></span>
       </div>
       <TrackCharts series={series} clips={clips} xMode={xMode} tz={tz} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} />
       <StopsTable pois={listing?.pois ?? []} tz={tz} onOpenGap={onOpenGap} onToggle={onStop} />
@@ -142,15 +142,15 @@ function CutoffBox({ label, cutoff, save }: { label: string; cutoff?: Cutoff; sa
   }
   const m = cutoff?.margin_s
   return (
-    <span className="flex flex-wrap items-center gap-x-2 text-xs">
+    <span className="flex flex-wrap items-center gap-x-2 type-caption">
       <input aria-label={`Cut-off for ${label}`} value={draft} disabled={busy} placeholder="cut-off" title="Cut-off time: 27h (total), 5:30 from last, Sat 14:00, 21/02 08:30" size={9}
         onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setDraft(cutoff?.text ?? ''); setErr(undefined) } }}
-        className="rounded border border-stone-300 bg-transparent px-1 py-0.5 text-black dark:border-stone-700 dark:text-white" />
-      {err && <span role="alert" className="text-red-600">{err}</span>}
-      {!err && cutoff?.error && <span role="alert" className="text-red-600">{cutoff.error}</span>}
+        className="rounded-control border border-border bg-transparent px-1 py-0.5 text-black" />
+      {err && <span role="alert" className="text-danger">{err}</span>}
+      {!err && cutoff?.error && <span role="alert" className="text-danger">{cutoff.error}</span>}
       {!err && cutoff?.kind && cutoff.elapsed_s != null && (
-        <span className="text-stone-500" data-cutoff-read="">read as {KIND_TEXT[cutoff.kind]}: {hms(cutoff.elapsed_s)} since the start
-          {m != null && <b className={`ml-2 ${m >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600'}`}>{hms(Math.abs(m))} {m >= 0 ? 'to spare' : 'late'}</b>}</span>
+        <span className="text-muted-foreground" data-cutoff-read="">read as {KIND_TEXT[cutoff.kind]}: {hms(cutoff.elapsed_s)} since the start
+          {m != null && <b className={`ml-2 ${m >= 0 ? 'text-primary' : 'text-danger'}`}>{hms(Math.abs(m))} {m >= 0 ? 'to spare' : 'late'}</b>}</span>
       )}
     </span>
   )
@@ -164,61 +164,61 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
   const rows = listing?.tracks ?? [], tm = listing?.timing, lastRun = rows.reduce((a, r, i) => (r.kind === 'run' ? i : a), -1)
   const cpTime = tm ? Object.values(tm.checkpoints).reduce((a, b) => a + b, 0) : 0, runTime = tm ? tm.total_s - cpTime : 0, ranKm = tm?.ran_m ? Object.values(tm.ran_m).reduce((a, b) => a + b, 0) / 1000 : 0
   return (
-    <div className="mt-3 rounded-lg border border-stone-200 p-3 text-sm dark:border-stone-800" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); add(e.dataTransfer.files) }}>
+    <div className="mt-3 rounded-surface border border-border p-3 type-body-sm" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); add(e.dataTransfer.files) }}>
       <input ref={input} type="file" accept=".fit,.gpx" multiple hidden aria-label="Add track files" onChange={e => { add(e.target.files); e.target.value = '' }} />
       <div className="flex items-center justify-between">
         <b>Tracks</b>
-        <button disabled={busy} className="text-emerald-700 underline disabled:opacity-50 dark:text-emerald-400" onClick={() => input.current?.click()}>{busy ? 'Working…' : 'Add tracks'}</button>
+        <button disabled={busy} className="text-primary underline disabled:opacity-50" onClick={() => input.current?.click()}>{busy ? 'Working…' : 'Add tracks'}</button>
       </div>
-      <p className="mb-2 text-xs text-stone-500">Mark each file a run (the recording; several runs are merged into the race track) or a route (a planned or official course, shown on the map for planning only).</p>
-      {rows.length === 0 && <p className="text-stone-500">No tracks listed.</p>}
+      <p className="mb-2 type-caption text-muted-foreground">Mark each file a run (the recording; several runs are merged into the race track) or a route (a planned or official course, shown on the map for planning only).</p>
+      {rows.length === 0 && <p className="text-muted-foreground">No tracks listed.</p>}
       <ul className="space-y-1">
         {rows.map((x, ix) => (<Fragment key={x.id}>
           <li data-highlighted={hot === x.id || pinned.includes(x.id) ? '' : undefined} onMouseEnter={() => setHot(x.id)} onMouseLeave={() => setHot(null)}
-            className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded px-1 ${hot === x.id || pinned.includes(x.id) ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : ''}`}>
-            {x.kind === 'route' && <span className="w-6 text-center text-xs font-semibold text-blue-700 dark:text-blue-400" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
+            className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-control px-1 ${hot === x.id || pinned.includes(x.id) ? 'bg-warning-subtle font-semibold text-black ring-1 ring-black' : ''}`}>
+            {x.kind === 'route' && <span className="w-6 text-center type-caption font-semibold text-info" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
             <button type="button" aria-pressed={pinned.includes(x.id)} aria-label={`Highlight ${x.name} on the map`} className="min-w-0 flex-1 cursor-pointer truncate text-left" title={`${x.name} (click to keep it highlighted on the map)`} onClick={() => toggle(x.id)}>{x.name}</button>
-            {x.error ? <span className="text-red-600">{x.error}</span> : <span className="text-xs text-stone-500">{x.distance_km} km{x.start_utc ? ` · ${x.start_utc.slice(0, 10)}` : ''}{x.pois ? ` · ${x.pois} POI` : ''}</span>}
-            {x.time_s != null && <span className="text-sm tabular-nums" title="time on this route, from leaving the previous checkpoint to arriving at the next (the checkpoints' own time is not in it)">{hms(x.time_s)}{x.ran_km != null ? <span className="text-xs text-stone-500"> · {x.ran_km} km run{x.pace_s_km ? ` · ${pace(x.pace_s_km)} /km` : ''}{x.ascent_m != null ? ` · ↑${x.ascent_m} m ↓${x.descent_m} m` : ''}</span> : null}</span>}
-            <select aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
+            {x.error ? <span className="text-danger">{x.error}</span> : <span className="type-caption text-muted-foreground">{x.distance_km} km{x.start_utc ? ` · ${x.start_utc.slice(0, 10)}` : ''}{x.pois ? ` · ${x.pois} POI` : ''}</span>}
+            {x.time_s != null && <span className="type-body-sm tabular-nums" title="time on this route, from leaving the previous checkpoint to arriving at the next (the checkpoints' own time is not in it)">{hms(x.time_s)}{x.ran_km != null ? <span className="type-caption text-muted-foreground"> · {x.ran_km} km run{x.pace_s_km ? ` · ${pace(x.pace_s_km)} /km` : ''}{x.ascent_m != null ? ` · ↑${x.ascent_m} m ↓${x.descent_m} m` : ''}</span> : null}</span>}
+            <select aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))} className="rounded-control border border-border bg-transparent px-1 py-0.5">
               <option value="run">run</option><option value="route">route</option>
             </select>
-            <button disabled={busy} aria-label={`Remove ${x.name}`} className="text-stone-500 hover:text-red-600 disabled:opacity-50" onClick={() => act(() => api.removeTrack(folder, x.id))}>Remove</button>
+            <button disabled={busy} aria-label={`Remove ${x.name}`} className="text-muted-foreground hover:text-danger disabled:opacity-50" onClick={() => act(() => api.removeTrack(folder, x.id))}>Remove</button>
           </li>
           {x.order != null && listing?.timing?.checkpoints[String(x.order)] != null && (
             <li data-checkpoint-row="" data-highlighted={hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? '' : undefined} onMouseEnter={() => setHot(`cp:${x.order}`)} onMouseLeave={() => setHot(null)}
-              className={`flex items-center gap-x-3 rounded px-1 text-xs ${hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : 'text-blue-800 dark:text-blue-300'}`}>
-              <span className="w-6 text-center"><span className="inline-block h-4 min-w-4 rounded-full bg-blue-700 px-1 text-center text-[10px] font-bold leading-4 text-white">{x.order}</span></span>
-              <button type="button" aria-pressed={pinned.includes(`cp:${x.order}`)} aria-label={`Highlight checkpoint ${x.order} on the map`} className="flex-1 cursor-pointer text-left" onClick={() => toggle(`cp:${x.order}`)}>Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-stone-500" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</button><CutoffBox label={`checkpoint ${x.order}`} cutoff={listing.cutoffs?.[`cp:${x.order}`]} save={setCut(`cp:${x.order}`)} /><span className="text-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
+              className={`flex items-center gap-x-3 rounded-control px-1 type-caption ${hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? 'bg-warning-subtle font-semibold text-black ring-1 ring-black' : 'text-info'}`}>
+              <span className="w-6 text-center"><span className="inline-block h-4 min-w-4 rounded-pill bg-info px-1 text-center text-[10px] font-bold leading-4 text-white">{x.order}</span></span>
+              <button type="button" aria-pressed={pinned.includes(`cp:${x.order}`)} aria-label={`Highlight checkpoint ${x.order} on the map`} className="flex-1 cursor-pointer text-left" onClick={() => toggle(`cp:${x.order}`)}>Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-muted-foreground" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</button><CutoffBox label={`checkpoint ${x.order}`} cutoff={listing.cutoffs?.[`cp:${x.order}`]} save={setCut(`cp:${x.order}`)} /><span className="type-body-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
             </li>
           )}
           {tm && x.kind === 'run' && ix === lastRun && (
-            <li data-timing="" className="rounded bg-stone-100 px-2 py-1 text-sm dark:bg-stone-800">
+            <li data-timing="" className="rounded-control bg-muted px-2 py-1 type-body-sm">
               <div className="flex flex-wrap gap-x-5 gap-y-1 tabular-nums">
                 <span title="first to last point of the run">Total time <b>{hms(tm.total_s)}</b></span>
                 <span title="time at the checkpoints, from the first slow arrival to the last slow leaving">Checkpoints <b>{hms(cpTime)}</b></span>
                 <span title="total time without the checkpoints">Running time <b>{hms(runTime)}</b></span>
-                {ranKm > 0 && <span title="the distance actually run over the running time">Running pace <b>{pace(runTime / ranKm)}</b> /km <span className="text-xs text-stone-500">({ranKm.toFixed(1)} km)</span></span>}
+                {ranKm > 0 && <span title="the distance actually run over the running time">Running pace <b>{pace(runTime / ranKm)}</b> /km <span className="type-caption text-muted-foreground">({ranKm.toFixed(1)} km)</span></span>}
                 {tm.ascent_m != null && <span>Ascent <b>{tm.ascent_m.toLocaleString()} m</b></span>}{tm.descent_m != null && <span>Descent <b>{tm.descent_m.toLocaleString()} m</b></span>}
               </div>
-              {!tm.consistent && <div className="text-xs text-red-600">The checkpoints do not come in order along the run: check them.</div>}
+              {!tm.consistent && <div className="type-caption text-danger">The checkpoints do not come in order along the run: check them.</div>}
             </li>
           )}
         </Fragment>))}
         {listing?.finish && rows.some(r => r.order != null) && (
           <li data-finish-row="" data-highlighted={hot === 'finish' || pinned.includes('finish') ? '' : undefined} onMouseEnter={() => setHot('finish')} onMouseLeave={() => setHot(null)}
-            className={`flex items-center gap-x-3 rounded px-1 text-xs ${hot === 'finish' || pinned.includes('finish') ? 'bg-yellow-200 font-semibold text-black ring-1 ring-black dark:bg-yellow-300' : 'text-stone-700 dark:text-stone-300'}`}>
-            <span className="w-6 text-center"><span className="inline-block h-4 w-4 rounded-full align-middle" style={{ background: 'conic-gradient(#000 25%, #fff 0 50%, #000 0 75%, #fff 0)', border: '1.5px solid #78716c' }} /></span>
+            className={`flex items-center gap-x-3 rounded-control px-1 type-caption ${hot === 'finish' || pinned.includes('finish') ? 'bg-warning-subtle font-semibold text-black ring-1 ring-black' : 'text-foreground'}`}>
+            <span className="w-6 text-center"><span className="inline-block h-4 w-4 rounded-pill align-middle" style={{ background: 'conic-gradient(#000 25%, #fff 0 50%, #000 0 75%, #fff 0)', border: '1.5px solid #78716c' }} /></span>
             <button type="button" aria-pressed={pinned.includes('finish')} aria-label="Highlight the finish on the map" className="flex-1 cursor-pointer text-left" onClick={() => toggle('finish')}>
               Finish{listing.finish.reached ? '' : ' (not reached)'}
               <span className="ml-3 opacity-80" title="the finish line of the routes">{listing.finish.reached && listing.finish.km != null ? `km ${listing.finish.km} · ${hms(listing.finish.elapsed_s ?? 0)} since start · arrived ${stamp(listing.finish.t ?? 0, tz)} · ` : ''}routes {(listing.finish.route_m / 1000).toFixed(1)} km{listing.finish.reached ? '' : `, covered ${(listing.finish.covered_m / 1000).toFixed(1)} km`}</span></button>
             <CutoffBox label="the finish" cutoff={listing.cutoffs?.finish} save={setCut('finish')} />
-            {listing.finish.time_s != null && <span className="text-sm tabular-nums" title="time at the finish, to the end of the run">{hms(listing.finish.time_s)}</span>}
+            {listing.finish.time_s != null && <span className="type-body-sm tabular-nums" title="time at the finish, to the end of the run">{hms(listing.finish.time_s)}</span>}
           </li>
         )}
       </ul>
-      {listing?.merged && <p className="mt-2 text-xs text-stone-500">Race track = {listing.merged.runs.length} runs merged · {listing.merged.distance_km} km · {listing.merged.samples.toLocaleString()} points</p>}
-      {err && <p role="alert" className="mt-2 text-red-600">{err}</p>}
+      {listing?.merged && <p className="mt-2 type-caption text-muted-foreground">Race track = {listing.merged.runs.length} runs merged · {listing.merged.distance_km} km · {listing.merged.samples.toLocaleString()} points</p>}
+      {err && <p role="alert" className="mt-2 text-danger">{err}</p>}
     </div>
   )
 }

@@ -120,7 +120,7 @@ describe('ScriptDraftPanel narration pins', () => {
   it('shows pinned wording in green and never-say wording in red', async () => {
     withDraft({ vo: [{ id: 'v1', text: 'Sunday afternoon', mode: 'clip', clip: '0023' }], vo_never: ['It is'] })
     setup(<ScriptDraftPanel folder="/data" />)
-    await screen.findByText('A Film'); const green = screen.getAllByText('Sunday afternoon')[0]; expect(green.className).toContain('emerald'); expect(screen.getAllByText('It is')[0].className).toContain('red')
+    await screen.findByText('A Film'); const green = screen.getAllByText('Sunday afternoon')[0]; expect(green.className).toContain('primary'); expect(screen.getAllByText('It is')[0].className).toContain('danger')
   })
 
   it('pins selected narration as "say exactly this" in its clip', async () => {

@@ -34,7 +34,7 @@ export default function PanoPlayer({ src, label, maxPitch = 83, fps, aimPath }: 
       <Transport playing={m.playing} onPlayPause={m.toggle} onStepBack={() => stepFrame(video.current, -1, frameS())} onStepForward={() => stepFrame(video.current, 1, frameS())} className="mt-1">
         <SeekBar time={m.time} duration={m.duration} onSeek={m.seek} buffered={m.buffered} />
         <TimeReadout time={m.time} duration={m.duration} />
-        <button type="button" onClick={() => setView(HOME)} className="text-xs underline">Look along the road</button>
+        <button type="button" onClick={() => setView(HOME)} className="type-caption underline">Look along the road</button>
       </Transport>
     </div>
   )

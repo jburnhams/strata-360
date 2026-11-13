@@ -64,7 +64,7 @@ export default function VoiceTrack({ folder, plan, onChanged, children }: { fold
             <button key={String(l.seg)} aria-label={`Line ${i + 1}: ${l.text}`} onClick={() => { setSel(l); setMsg(undefined) }}
               title={`${l.text}\n${l.speak_s.toFixed(1)} s of speech${l.estimated ? ' (estimated from the words)' : ''} in ${l.room_s.toFixed(1)} s of picture · ${l.source === 'recorded' ? 'your recording' : 'the voice'}${l.fit === 'over' ? ` · too long by ${l.overrun_s.toFixed(1)} s` : ''}`}
               style={{ left: pct(l.start_s, total), width: pct(Math.max(l.speak_s, 0.2), total) }}
-              className={`absolute top-1 h-4 truncate rounded-sm px-0.5 text-left text-[9px] leading-4 text-white ${l.fit === 'over' ? 'bg-red-600' : l.source === 'recorded' ? 'bg-violet-600' : l.estimated ? 'bg-sky-300' : 'bg-sky-600'} ${line?.seg === l.seg ? 'ring-2 ring-stone-900 dark:ring-white' : ''}`}>{l.text}</button>
+              className={`absolute top-1 h-4 truncate rounded-control px-0.5 text-left text-[9px] leading-4 text-white ${l.fit === 'over' ? 'bg-danger' : l.source === 'recorded' ? 'bg-info' : l.estimated ? 'bg-info' : 'bg-info'} ${line?.seg === l.seg ? 'ring-2 ring-input' : ''}`}>{l.text}</button>
           ))}
         </div>
       )}
@@ -73,34 +73,34 @@ export default function VoiceTrack({ folder, plan, onChanged, children }: { fold
           {blocks.map((b, i) => (
             <span key={`${b.item}-${i}`} role="listitem" aria-label={`Item ${b.item + 1}: ${b.role ? roleName[b.role] : 'picture'}, ${b.dur.toFixed(1)} s`} title={`item ${b.item + 1} · ${b.role ? roleName[b.role] : 'picture'} · ${b.windows} window${b.windows === 1 ? '' : 's'} · ${b.dur.toFixed(1)} s`}
               style={{ left: pct(b.start, total), width: pct(b.dur, total) }}
-              className={`absolute top-0 h-4 truncate border-x border-white px-0.5 text-[9px] leading-4 dark:border-stone-900 ${b.role === 'vo' ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300' : b.role === 'clip' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300'}`}>{b.item + 1}</span>
+              className={`absolute top-0 h-4 truncate border-x border-white px-0.5 text-[9px] leading-4 ${b.role === 'vo' ? 'bg-info-subtle text-info' : b.role === 'clip' ? 'bg-primary-3 text-primary' : 'bg-muted text-foreground'}`}>{b.item + 1}</span>
           ))}
         </div>
       )}
       {children}
       {v && <div className="relative h-3 w-full">
         {v.beats.length > 0 && (
-          <svg className="absolute inset-0 h-full w-full text-stone-400 dark:text-stone-600" viewBox={`0 0 ${total} 10`} preserveAspectRatio="none" role="img" aria-label={`${v.beats.length} beats and ${v.bars.length} bar lines${v.synced ? ' of the music' : ' of the plan\'s tempo'}`}>
+          <svg className="absolute inset-0 h-full w-full text-muted-foreground" viewBox={`0 0 ${total} 10`} preserveAspectRatio="none" role="img" aria-label={`${v.beats.length} beats and ${v.bars.length} bar lines${v.synced ? ' of the music' : ' of the plan\'s tempo'}`}>
             {v.beats.map(t => <line key={t} x1={t} x2={t} y1={0} y2={bars.has(t) ? 10 : 5} stroke="currentColor" strokeWidth={bars.has(t) ? 1.5 : 1} vectorEffect="non-scaling-stroke" />)}
           </svg>
         )}
         {off.map(o => <span key={o.cut} role="img" aria-label={`Cut ${o.cut} is ${Math.round(o.off_ms)} ms off the beat: ${o.why}`} title={`cut ${o.cut} (${o.film_s.toFixed(1)} s) is ${Math.round(o.off_ms)} ms off the beat: ${o.why}`}
-          style={{ left: pct(o.film_s, total) }} className="absolute top-0 -translate-x-1/2 text-[10px] leading-3 text-red-600">▲</span>)}
+          style={{ left: pct(o.film_s, total) }} className="absolute top-0 -translate-x-1/2 text-[10px] leading-3 text-danger">▲</span>)}
       </div>}
       {line && (
-        <div className="rounded-lg border border-stone-200 p-2 text-xs dark:border-stone-800">
-          <p className="mb-1 text-sm">{line.text}</p>
-          <p className="mb-1 text-stone-500">{line.speak_s.toFixed(1)} s of speech{line.estimated ? ' (estimated from the words: not spoken yet)' : ''} in {line.room_s.toFixed(1)} s of picture · {line.source === 'recorded' ? 'your recording' : 'the voice'}{line.fit === 'over' ? <span className="text-red-600"> · too long by {line.overrun_s.toFixed(1)} s</span> : ''}</p>
+        <div className="rounded-surface border border-border p-2 type-caption">
+          <p className="mb-1 type-body-sm">{line.text}</p>
+          <p className="mb-1 text-muted-foreground">{line.speak_s.toFixed(1)} s of speech{line.estimated ? ' (estimated from the words: not spoken yet)' : ''} in {line.room_s.toFixed(1)} s of picture · {line.source === 'recorded' ? 'your recording' : 'the voice'}{line.fit === 'over' ? <span className="text-danger"> · too long by {line.overrun_s.toFixed(1)} s</span> : ''}</p>
           <div className="flex flex-wrap items-center gap-2">
             {!line.estimated && <audio controls className="h-8" src={api.voiceoverAudio(folder, line.seg, line.source)} aria-label="This line's take" />}
-            {rec ? <button className="rounded bg-red-600 px-2 py-1 text-white" onClick={() => rec.stop()}>■ stop</button>
-              : <button disabled={busy} className="rounded border border-stone-300 px-2 py-1 disabled:opacity-40 dark:border-stone-700" onClick={() => record(line)}>● {line.has_recording ? 'record again' : 'record'}</button>}
-            {busy && <span className="text-stone-500">fitting the film to the new take…</span>}
+            {rec ? <button className="rounded-control bg-danger px-2 py-1 text-primary-foreground" onClick={() => rec.stop()}>■ stop</button>
+              : <button disabled={busy} className="rounded-control border border-border px-2 py-1 disabled:opacity-40" onClick={() => record(line)}>● {line.has_recording ? 'record again' : 'record'}</button>}
+            {busy && <span className="text-muted-foreground">fitting the film to the new take…</span>}
           </div>
         </div>
       )}
-      {msg?.map(m => <p key={m} className="text-xs text-stone-600 dark:text-stone-400">{m}</p>)}
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {msg?.map(m => <p key={m} className="type-caption text-muted-foreground">{m}</p>)}
+      {err && <p className="type-body-sm text-danger">{err}</p>}
     </div>
   )
 }

@@ -9,13 +9,13 @@ import { NameField, PointCamFacts, PointCamLength, PointCamPreview, PointCamSett
 export default function PointCamPage({ folder, cam, limits, tz, onChanged }: { folder: string; cam?: PointCam; limits?: PointCams['limits']; tz: string; onChanged: () => void }) {
   const [err, setErr] = useState<string>()
   const decorate = useCallback((_m: unknown, g: import('leaflet').LayerGroup) => { if (cam) addPointCams(g, [cam], cam.id, () => {}) }, [cam])
-  if (!cam) return <p className="text-sm text-stone-500">That point camera is not offered to the film any more.</p>
+  if (!cam) return <p className="type-body-sm text-muted-foreground">That point camera is not offered to the film any more.</p>
   const run = async (fn: () => Promise<unknown>) => { setErr(undefined); try { await fn() } catch (e) { setErr((e as Error).message) } onChanged() }
   const set = (f: Parameters<typeof api.updatePointCam>[2]) => run(() => api.updatePointCam(folder, cam.id, f))
   const src = cam.source.kind === 'clip' ? `clip ${cam.source.clip}` : 'a street view section'
   return (
     <ItemPage folder={folder} noun="point camera" must={cam.use === 'must'} script={cam.script} err={err} noteClip={cam.label} noteTitle="Notes for this point camera" notePlaceholder="What is this place? Why does it matter, what to mention or avoid…"
-      heading={<>Point camera {cam.label} <span className="text-sm font-normal text-stone-500">{cam.name ? `${cam.name} · ` : ''}from {src}</span></>}
+      heading={<>Point camera {cam.label} <span className="type-body-sm font-normal text-muted-foreground">{cam.name ? `${cam.name} · ` : ''}from {src}</span></>}
       sub={cam.ok && cam.facts ? `${cam.facts.seconds} s of the run · the point is ${cam.facts.min_dist_m} m from the path at the closest` : undefined}
       where={cam.ok && cam.window ? <TrackMap folder={folder} tz={tz} span={cam.window} label={`Point camera ${cam.label}`} decorate={decorate} /> : undefined}
       preview={<div className="space-y-2"><PointCamFacts cam={cam} />{cam.ok && <PointCamPreview folder={folder} cam={cam} />}</div>}

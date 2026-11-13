@@ -194,7 +194,7 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
   const noPreview = !hasPreview
 
   return (
-    <div className="overflow-hidden rounded-xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900">
+    <div className="overflow-hidden rounded-overlay border border-border bg-card">
       <div className="relative aspect-video w-full bg-black">
         {thumbKind && !started && <img src={api.thumbUrl(folder, clip, thumbKind + (overlay ? '+overlay' : ''), overlay)} alt="" className="absolute inset-0 h-full w-full object-cover" />}
         <video ref={video} src={started ? api.previewUrl(folder, clip) : undefined} muted={muted || sound !== 'original'} playsInline preload="auto" crossOrigin="anonymous" className="hidden"
@@ -205,34 +205,34 @@ export default function ClipPlayer({ folder, clip, thumbKind, heading, focus, pe
         <canvas ref={ov} aria-hidden="true" data-aim-overlay="" className={`pointer-events-none absolute inset-0 h-full w-full ${started ? '' : 'hidden'}`} />
         {!started && (
           <button disabled={noPreview} onClick={play} className="absolute inset-0 grid place-items-center disabled:cursor-not-allowed" aria-label="Play">
-            <span className={`grid h-16 w-16 place-items-center rounded-full bg-black/60 text-3xl text-white ${noPreview ? 'opacity-40' : 'hover:bg-emerald-700'}`}>▶</span>
+            <span className={`grid h-16 w-16 place-items-center rounded-pill bg-black/60 type-title text-white ${noPreview ? 'opacity-40' : 'hover:bg-primary'}`}>▶</span>
           </button>
         )}
-        {noPreview && <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-xs text-white">the preview video has not been made for this clip yet (the preview stage)</div>}
-        {err && <div className="absolute bottom-2 left-2 rounded bg-red-700/90 px-2 py-1 text-xs text-white">{err}</div>}
+        {noPreview && <div className="absolute bottom-2 left-2 rounded-control bg-black/70 px-2 py-1 type-caption text-white">the preview video has not been made for this clip yet (the preview stage)</div>}
+        {err && <div className="absolute bottom-2 left-2 rounded-control bg-danger/90 px-2 py-1 type-caption text-primary-foreground">{err}</div>}
       </div>
-      <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
-        <button disabled={noPreview} onClick={play} className="w-9 rounded bg-emerald-700 py-1 text-white disabled:opacity-40" aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
+      <div className="flex flex-wrap items-center gap-3 px-3 py-2 type-body-sm">
+        <button disabled={noPreview} onClick={play} className="w-9 rounded-control bg-primary py-1 text-primary-foreground disabled:opacity-40" aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
         {started && <FrameStepButtons video={video} frameS={frameS} />}
-        <span className="w-24 font-mono text-xs text-stone-500">{mmss(t)} / {mmss(duration)}</span>
+        <span className="w-24 font-mono type-caption text-muted-foreground">{mmss(t)} / {mmss(duration)}</span>
         <input type="range" min={0} max={duration} step={0.04} value={t} disabled={!started} className="min-w-32 flex-1"
           onChange={e => { const v = video.current; if (v) { v.currentTime = Number(e.target.value); setT(v.currentTime) } }} aria-label="Seek" />
-        <button className="text-xs" disabled={!started} onClick={() => setMuted(m => !m)} title="sound">{muted ? '🔇' : '🔊'}</button>
+        <button className="type-caption" disabled={!started} onClick={() => setMuted(m => !m)} title="sound">{muted ? '🔇' : '🔊'}</button>
         {(sounds?.clean || sounds?.background) && (
-          <select value={sound} disabled={!started} onChange={e => setSound(e.target.value as 'original' | 'clean' | 'background')} aria-label="Which sound" title="Which sound to hear while it plays" className="rounded border border-stone-300 bg-transparent px-1 text-xs dark:border-stone-700">
+          <select value={sound} disabled={!started} onChange={e => setSound(e.target.value as 'original' | 'clean' | 'background')} aria-label="Which sound" title="Which sound to hear while it plays" className="rounded-control border border-border bg-transparent px-1 type-caption">
             <option value="original">Original sound</option>
             <option value="clean" disabled={!sounds?.clean}>Clean (speech made clearer)</option>
             <option value="background" disabled={!sounds?.background}>Background (without speech)</option>
           </select>)}
         {started && sound !== 'original' && <audio ref={audio} src={api.clipAudioUrl(folder, clip, sound)} muted={muted} preload="auto" className="hidden" />}
-        <select value={rate} disabled={!started} onChange={e => { const r = Number(e.target.value); setRate(r); if (video.current) video.current.playbackRate = r }} className="rounded border border-stone-300 bg-transparent px-1 text-xs dark:border-stone-700">
+        <select value={rate} disabled={!started} onChange={e => { const r = Number(e.target.value); setRate(r); if (video.current) video.current.playbackRate = r }} className="rounded-control border border-border bg-transparent px-1 type-caption">
           {[0.5, 1, 1.5, 2].map(r => <option key={r} value={r}>{r}×</option>)}</select>
-<select value={aim} onChange={e => changeAim(e.target.value as Aim)} aria-label="Where the view points" title={AIMS.find(x => x[0] === aim)?.[2]} className="rounded border border-stone-300 bg-transparent px-1 text-xs dark:border-stone-700">
+<select value={aim} onChange={e => changeAim(e.target.value as Aim)} aria-label="Where the view points" title={AIMS.find(x => x[0] === aim)?.[2]} className="rounded-control border border-border bg-transparent px-1 type-caption">
           {AIMS.map(([k, label, tip]) => <option key={k} value={k} title={tip} disabled={(YOU_AIMS.includes(k) && !focus?.length) || (k === 'person' && !person?.length) || (k === 'clarity' && !clarity?.length) || (k === 'scenic' && !scenic?.length)}>{label}</option>)}
         </select>
-        {shown && <span className="text-xs text-stone-500">showing {shown}</span>}
-        <label className="flex items-center gap-1 text-xs" title="Field of view (or use the mouse wheel)">view<input type="range" min={40} max={140} value={fov} onChange={e => setFov(Number(e.target.value))} className="w-20" />{Math.round(fov)}°</label>
-        <button className="text-xs underline" onClick={reset} title="Reset the view (or double-click the picture)">reset view</button>
+        {shown && <span className="type-caption text-muted-foreground">showing {shown}</span>}
+        <label className="flex items-center gap-1 type-caption" title="Field of view (or use the mouse wheel)">view<input type="range" min={40} max={140} value={fov} onChange={e => setFov(Number(e.target.value))} className="w-20" />{Math.round(fov)}°</label>
+        <button className="type-caption underline" onClick={reset} title="Reset the view (or double-click the picture)">reset view</button>
       </div>
     </div>
   )

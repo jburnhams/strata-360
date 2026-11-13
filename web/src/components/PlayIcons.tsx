@@ -23,7 +23,7 @@ export default function PlayIcons({ folder, clip, t0, t1, original, clean }: { f
     const key = `${clip}|${kind}|${t0}`, on = now === key
     return (
       <button type="button" disabled={!ok} title={ok ? `play ${label} sound of this phrase` : kind === 'clean' ? 'the cleaned sound is not made yet' : 'the sound is not extracted yet'} onClick={e => { e.stopPropagation(); play(api.clipAudioUrl(folder, clip, kind), key, t0, t1) }}
-        className={`mr-0.5 rounded border px-1 align-baseline text-[10px] leading-4 disabled:opacity-30 ${on ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-stone-300 text-stone-600 hover:border-emerald-600 dark:border-stone-600 dark:text-stone-300'}`}>{on ? '■' : '▶'} {label}</button>)
+        className={`mr-0.5 rounded-control border px-1 align-baseline text-[10px] leading-4 disabled:opacity-30 ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-border text-muted-foreground hover:border-primary'}`}>{on ? '■' : '▶'} {label}</button>)
   }
   return <span className="mr-1 whitespace-nowrap">{btn('original', original, 'orig')}{btn('clean', clean, 'clean')}</span>
 }

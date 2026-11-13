@@ -24,17 +24,17 @@ function Words({ ctx }: { ctx: WordCtx }) {
     <Fragment key={i}>
       <span className="relative inline-block">
         <span title={tip(w, st === 'free' ? '' : STATE_NAME[st])} data-wclip={ctx.clip} data-wseg={ctx.si} data-wi={i} data-state={st} onClick={e => { e.stopPropagation(); if (window.getSelection()?.isCollapsed === false) return; setOpen(i) }}
-          className={`cursor-text rounded px-0.5 ${STATE_CLASS[st]} ${w.e ? `underline decoration-dotted decoration-2 underline-offset-2 ${w.e.src === 'user' ? 'decoration-sky-500' : 'decoration-amber-500'}` : ''} ${w.w.trim() === '' ? 'line-through opacity-60' : ''}`}>{w.w.trim() === '' ? (w.e?.orig ?? '') : w.w}</span>
+          className={`cursor-text rounded-control px-0.5 ${STATE_CLASS[st]} ${w.e ? `underline decoration-dotted decoration-2 underline-offset-2 ${w.e.src === 'user' ? 'decoration-info' : 'decoration-warning'}` : ''} ${w.w.trim() === '' ? 'line-through opacity-60' : ''}`}>{w.w.trim() === '' ? (w.e?.orig ?? '') : w.w}</span>
         {open === i && (
-          <span className="absolute left-0 top-full z-30 mt-1 flex w-64 flex-col gap-1 rounded-lg border border-stone-300 bg-white p-2 text-xs shadow-lg dark:border-stone-700 dark:bg-stone-900" onClick={e => e.stopPropagation()}>
-            <input ref={input} defaultValue={w.w} autoFocus onKeyDown={e => { if (e.key === 'Enter') void save(i, e.currentTarget.value); if (e.key === 'Escape') setOpen(undefined) }} className="rounded border border-stone-300 bg-transparent px-1.5 py-1 text-sm dark:border-stone-700" />
-            <span className="text-stone-500">{w.e ? `original: “${w.e.orig}”` : 'empty removes the word'} · Enter saves, Esc cancels</span>
+          <span className="absolute left-0 top-full z-30 mt-1 flex w-64 flex-col gap-1 rounded-surface border border-border bg-card p-2 type-caption shadow-overlay" onClick={e => e.stopPropagation()}>
+            <input ref={input} defaultValue={w.w} autoFocus onKeyDown={e => { if (e.key === 'Enter') void save(i, e.currentTarget.value); if (e.key === 'Escape') setOpen(undefined) }} className="rounded-control border border-border bg-transparent px-1.5 py-1 type-body-sm" />
+            <span className="text-muted-foreground">{w.e ? `original: “${w.e.orig}”` : 'empty removes the word'} · Enter saves, Esc cancels</span>
             <span className="flex flex-wrap gap-1">
-              <button className="rounded bg-emerald-700 px-2 py-0.5 text-white" onClick={() => void save(i, input.current?.value ?? w.w)}>save</button>
-              {w.e && <button className="rounded border border-stone-300 px-2 py-0.5 dark:border-stone-700" onClick={() => void save(i, w.e!.orig)}>use the original</button>}
-              {w.e?.src === 'user' && w.e.gemini_text != null && <button className="rounded border border-stone-300 px-2 py-0.5 dark:border-stone-700" onClick={() => void save(i, null)}>use Gemini’s “{w.e.gemini_text || '∅'}”</button>}
-              {w.e?.src === 'user' && w.e.gemini_text == null && <button className="rounded border border-stone-300 px-2 py-0.5 dark:border-stone-700" onClick={() => void save(i, null)}>forget my edit</button>}
-              <button className="rounded border border-stone-300 px-2 py-0.5 dark:border-stone-700" onClick={() => setOpen(undefined)}>cancel</button>
+              <button className="rounded-control bg-primary px-2 py-0.5 text-primary-foreground" onClick={() => void save(i, input.current?.value ?? w.w)}>save</button>
+              {w.e && <button className="rounded-control border border-border px-2 py-0.5" onClick={() => void save(i, w.e!.orig)}>use the original</button>}
+              {w.e?.src === 'user' && w.e.gemini_text != null && <button className="rounded-control border border-border px-2 py-0.5" onClick={() => void save(i, null)}>use Gemini’s “{w.e.gemini_text || '∅'}”</button>}
+              {w.e?.src === 'user' && w.e.gemini_text == null && <button className="rounded-control border border-border px-2 py-0.5" onClick={() => void save(i, null)}>forget my edit</button>}
+              <button className="rounded-control border border-border px-2 py-0.5" onClick={() => setOpen(undefined)}>cancel</button>
             </span>
           </span>)}
       </span>{' '}
@@ -48,12 +48,12 @@ export default function Phrase({ text, en, lang, mode, className = '', onText, w
   const chip = (translated: boolean) => (
     <button type="button" title={translated ? `Translated from ${name}: click to see the original` : `Original ${name}: click to see the translation`}
       onClick={e => { e.stopPropagation(); setFlip(f => !f) }}
-      className={`mr-1 rounded-full border px-1.5 align-baseline text-[10px] font-medium leading-4 ${translated ? 'border-sky-400 text-sky-700 dark:text-sky-300' : 'border-amber-500 text-amber-700 dark:text-amber-300'}`}>
+      className={`mr-1 rounded-pill border px-1.5 align-baseline text-[10px] font-medium leading-4 ${translated ? 'border-info text-info' : 'border-warning text-warning'}`}>
       {translated ? `${L} → EN` : L}
     </button>
   )
-  const orig = <span className="text-amber-700 dark:text-amber-300" onClick={onText}>{word ? <Words ctx={word} /> : text}</span>
-  const tr = <span className="text-sky-700 dark:text-sky-300" onClick={onText}>{en}</span>
+  const orig = <span className="text-warning" onClick={onText}>{word ? <Words ctx={word} /> : text}</span>
+  const tr = <span className="text-info" onClick={onText}>{en}</span>
   if (mode === 'both') return <span className={className}>{chip(false)}{orig} {chip(true)}{tr}</span>
   const showTranslated = (mode === 'translated') !== flip
   return <span className={className}>{chip(showTranslated)}{showTranslated ? tr : orig}</span>

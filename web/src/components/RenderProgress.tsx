@@ -16,38 +16,38 @@ export default function RenderProgress({ progress, busy }: { progress?: Progress
   const live = (s: Progress['stages'][number]) => s.state === 'running' && busy ? Math.max(s.seconds, now - s.started) : s.seconds
   const spent = Object.values(progress.timings).reduce((a, b) => a + b.seconds, 0), rows = Object.entries(progress.timings).sort((a, b) => b[1].seconds - a[1].seconds)
   return (
-    <div className="mt-2 space-y-2 text-sm" aria-label="Render progress">
+    <div className="mt-2 space-y-2 type-body-sm" aria-label="Render progress">
       <ol className="space-y-0.5">
         {progress.stages.map((s, i) => (
           <li key={i} className="flex flex-wrap items-baseline gap-2">
-            <span aria-hidden className={s.state === 'error' ? 'text-red-600' : s.state === 'running' ? 'text-amber-600' : 'text-emerald-700'}>{MARK[s.state]}</span>
+            <span aria-hidden className={s.state === 'error' ? 'text-danger' : s.state === 'running' ? 'text-warning' : 'text-primary'}>{MARK[s.state]}</span>
             <span className="font-medium">{s.name}</span>
-            {s.detail && <span className="text-xs text-stone-500">{s.detail}</span>}
-            <span className="ml-auto tabular-nums text-xs text-stone-500">{dur(live(s))}</span>
+            {s.detail && <span className="type-caption text-muted-foreground">{s.detail}</span>}
+            <span className="ml-auto tabular-nums type-caption text-muted-foreground">{dur(live(s))}</span>
           </li>
         ))}
       </ol>
       {rows.length > 0 && (
-        <table className="w-full text-xs">
-          <caption className="mb-0.5 text-left font-medium text-stone-600 dark:text-stone-400">Where the time goes inside the render</caption>
+        <table className="w-full type-caption">
+          <caption className="mb-0.5 text-left font-medium text-muted-foreground">Where the time goes inside the render</caption>
           <tbody>
             {rows.map(([k, v]) => (
               <tr key={k}>
                 <th scope="row" className="w-44 pr-2 text-left font-normal">{BUCKETS[k] ?? k}</th>
                 <td className="w-16 pr-2 text-right tabular-nums">{dur(v.seconds)}</td>
-                <td className="w-12 pr-2 text-right tabular-nums text-stone-500">{spent ? Math.round(100 * v.seconds / spent) : 0}%</td>
-                <td><div className="h-1.5 rounded bg-emerald-600/70" style={{ width: `${spent ? Math.max(2, 100 * v.seconds / spent) : 0}%` }} /></td>
-                <td className="w-24 pl-2 text-right tabular-nums text-stone-500">{v.calls} {v.calls === 1 ? 'call' : 'calls'}</td>
+                <td className="w-12 pr-2 text-right tabular-nums text-muted-foreground">{spent ? Math.round(100 * v.seconds / spent) : 0}%</td>
+                <td><div className="h-1.5 rounded-control bg-primary/70" style={{ width: `${spent ? Math.max(2, 100 * v.seconds / spent) : 0}%` }} /></td>
+                <td className="w-24 pl-2 text-right tabular-nums text-muted-foreground">{v.calls} {v.calls === 1 ? 'call' : 'calls'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {progress.error && <p className="text-xs text-red-600">{progress.error}</p>}
+      {progress.error && <p className="type-caption text-danger">{progress.error}</p>}
       {progress.log.length > 0 && (
         <details open={busy}>
-          <summary className="cursor-pointer text-xs text-stone-500">Log ({progress.log.length} lines)</summary>
-          <pre className="mt-1 max-h-40 overflow-auto rounded bg-stone-100 p-2 text-xs dark:bg-stone-950" tabIndex={0}>{progress.log.slice(-60).map(([t, m]) => `+${dur(t)}  ${m}`).join('\n')}</pre>
+          <summary className="cursor-pointer type-caption text-muted-foreground">Log ({progress.log.length} lines)</summary>
+          <pre className="mt-1 max-h-40 overflow-auto rounded-control bg-muted p-2 type-caption" tabIndex={0}>{progress.log.slice(-60).map(([t, m]) => `+${dur(t)}  ${m}`).join('\n')}</pre>
         </details>
       )}
     </div>

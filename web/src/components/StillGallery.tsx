@@ -18,34 +18,34 @@ export default function StillGallery({ folder, stills, active, loading }: { fold
   const toggle = (name: string) => setPicked(p => p.includes(name) ? p.filter(x => x !== name) : [...p, name].slice(-4))
   useEffect(() => { setPicked(p => p.filter(n => stills.some(s => s.name === n))) }, [stills])
   if (loading) return null
-  if (!stills.length && !active.length) return <p className="mt-3 text-sm text-stone-500">No stills yet. Render one at the player position, or let Auto pick differing moments.</p>
-  const chip = 'rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700'
+  if (!stills.length && !active.length) return <p className="mt-3 type-body-sm text-muted-foreground">No stills yet. Render one at the player position, or let Auto pick differing moments.</p>
+  const chip = 'rounded-control border border-border px-2 py-0.5 type-caption'
   return (
     <section className="mt-3" aria-label="Still gallery">
-      <div className="mb-2 flex flex-wrap items-center gap-3 text-sm">
+      <div className="mb-2 flex flex-wrap items-center gap-3 type-body-sm">
         <h5 className="font-semibold">All stills ({stills.length})</h5>
-        <label>Order <select className="rounded border border-stone-300 bg-stone-50 px-1 py-0.5 dark:border-stone-700 dark:bg-stone-950" value={order} onChange={e => setOrder(e.target.value as 'newest' | 'film')}><option value="newest">newest first</option><option value="film">by film time</option></select></label>
+        <label>Order <select className="rounded-control border border-border bg-card px-1 py-0.5" value={order} onChange={e => setOrder(e.target.value as 'newest' | 'film')}><option value="newest">newest first</option><option value="film">by film time</option></select></label>
         {stills.some(s => !s.current) && <label><input type="checkbox" checked={onlyCurrent} onChange={e => setOnlyCurrent(e.target.checked)} /> Only the current plan</label>}
         {picked.length > 0 && <button className={chip} onClick={() => setPicked([])}>clear comparison ({picked.length})</button>}
       </div>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {active.filter(a => a.state !== 'done').map(a => (
-          <li key={a.name} className="rounded-lg border border-dashed border-stone-300 p-2 text-xs dark:border-stone-700" aria-label={`Still ${a.state}`}>
-            <div className="flex aspect-video items-center justify-center rounded bg-stone-100 text-stone-500 dark:bg-stone-950">{a.state === 'error' ? 'failed' : a.state === 'rendering' ? 'rendering…' : 'waiting'}</div>
+          <li key={a.name} className="rounded-surface border border-dashed border-border p-2 type-caption" aria-label={`Still ${a.state}`}>
+            <div className="flex aspect-video items-center justify-center rounded-control bg-muted text-muted-foreground">{a.state === 'error' ? 'failed' : a.state === 'rendering' ? 'rendering…' : 'waiting'}</div>
             <p className="mt-1 font-medium">{a.t !== undefined ? clock(a.t) : '…'}{a.size ? ` · ${sizeLabel(a.size)}` : ''}</p>
-            <p className="text-stone-500">{a.upscale ? enlargeShort(a.upscale) : ''}{a.label ? ` · ${a.label}` : ''}</p>
+            <p className="text-muted-foreground">{a.upscale ? enlargeShort(a.upscale) : ''}{a.label ? ` · ${a.label}` : ''}</p>
           </li>
         ))}
         {shown.map(s => (
-          <li key={s.name} className="rounded-lg border border-stone-200 p-2 text-xs dark:border-stone-800">
+          <li key={s.name} className="rounded-surface border border-border p-2 type-caption">
             <button className="block w-full" onClick={() => setOpen(s.name)} aria-label={`Open the still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`}, ${sizeLabel(s.size)}, ${enlargeShort(s.upscale) || 'made before details were kept'}`}>
-              <img className="aspect-video w-full rounded bg-black object-cover" loading="lazy" src={api.filmStillThumbUrl(folder, s.name)} alt="" />
+              <img className="aspect-video w-full rounded-control bg-black object-cover" loading="lazy" src={api.filmStillThumbUrl(folder, s.name)} alt="" />
             </button>
             <p className="mt-1 font-medium">{s.t != null ? clock(s.t) : `frame ${s.frame}`}{s.size ? ` · ${sizeLabel(s.size)}` : ''}</p>
-            <p className="text-stone-500">{s.legacy ? 'made before details were kept' : enlargeShort(s.upscale)}</p>
+            <p className="text-muted-foreground">{s.legacy ? 'made before details were kept' : enlargeShort(s.upscale)}</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <label className="text-stone-600 dark:text-stone-400"><input type="checkbox" checked={picked.includes(s.name)} onChange={() => toggle(s.name)} aria-label={`Compare the still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`} (${enlargeShort(s.upscale) || 'unknown'})`} /> compare</label>
-              {!s.current && <span className="rounded bg-amber-100 px-1 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200" title="Made from a plan, voice-over or overlay that has since changed">older plan</span>}
+              <label className="text-muted-foreground"><input type="checkbox" checked={picked.includes(s.name)} onChange={() => toggle(s.name)} aria-label={`Compare the still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`} (${enlargeShort(s.upscale) || 'unknown'})`} /> compare</label>
+              {!s.current && <span className="rounded-control bg-warning-subtle px-1 text-warning" title="Made from a plan, voice-over or overlay that has since changed">older plan</span>}
             </div>
           </li>
         ))}
@@ -64,13 +64,13 @@ function Compare({ folder, names, stills }: { folder: string; names: string[]; s
   }
   const list = names.map(n => stills.find(s => s.name === n)).filter((s): s is StillMeta => !!s)
   return (
-    <div className="mt-3 rounded-lg border border-stone-200 p-3 dark:border-stone-800" role="region" aria-label="Comparison">
-      <h5 className="mb-2 text-sm font-semibold">Comparison at full size (scrolling is shared)</h5>
+    <div className="mt-3 rounded-surface border border-border p-3" role="region" aria-label="Comparison">
+      <h5 className="mb-2 type-body-sm font-semibold">Comparison at full size (scrolling is shared)</h5>
       <div className={`grid gap-3 ${list.length > 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-2'}`}>
         {list.map((s, i) => (
           <figure key={s.name}>
-            <figcaption className="mb-1 text-xs"><strong>{s.t != null ? clock(s.t) : `frame ${s.frame}`}</strong> · {sizeLabel(s.size)} · {enlargeShort(s.upscale) || 'unknown'}{s.seconds != null ? ` · took ${dur(s.seconds)}` : ''}</figcaption>
-            <div ref={el => { panes.current[i] = el }} onScroll={sync(i)} className="h-80 overflow-auto rounded border border-stone-300 bg-black dark:border-stone-700" tabIndex={0} aria-label={`Full size picture ${i + 1}`}>
+            <figcaption className="mb-1 type-caption"><strong>{s.t != null ? clock(s.t) : `frame ${s.frame}`}</strong> · {sizeLabel(s.size)} · {enlargeShort(s.upscale) || 'unknown'}{s.seconds != null ? ` · took ${dur(s.seconds)}` : ''}</figcaption>
+            <div ref={el => { panes.current[i] = el }} onScroll={sync(i)} className="h-80 overflow-auto rounded-control border border-border bg-black" tabIndex={0} aria-label={`Full size picture ${i + 1}`}>
               <img className="max-w-none" src={api.filmStillUrl(folder, s.name)} alt={`Still ${i + 1}: ${enlargeShort(s.upscale) || 'unknown enlarging'}`} />
             </div>
           </figure>
@@ -89,20 +89,20 @@ function Viewer({ folder, s, onClose, onStep, many }: { folder: string; s: Still
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const timings = Object.entries(s.timings ?? {}).sort((a, b) => b[1] - a[1])
-  const row = (k: string, v: React.ReactNode) => <div className="flex gap-2"><dt className="w-28 shrink-0 text-stone-500">{k}</dt><dd>{v}</dd></div>
+  const row = (k: string, v: React.ReactNode) => <div className="flex gap-2"><dt className="w-28 shrink-0 text-muted-foreground">{k}</dt><dd>{v}</dd></div>
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/90 p-3 text-stone-100" role="dialog" aria-modal="true" aria-label="Still viewer">
-      <div className="mb-2 flex items-center gap-2 text-sm">
+    <div className="fixed inset-0 z-50 flex flex-col bg-black/90 p-3 text-white" role="dialog" aria-modal="true" aria-label="Still viewer">
+      <div className="mb-2 flex items-center gap-2 type-body-sm">
         <span className="font-semibold">{s.t != null ? clock(s.t) : `frame ${s.frame}`} · {sizeLabel(s.size)} · {enlargeShort(s.upscale) || 'made before details were kept'}</span>
         <span className="ml-auto flex gap-2">
-          {many && <><button className="rounded border border-stone-500 px-2 py-0.5" onClick={() => onStep(-1)} aria-label="Previous still">◂</button><button className="rounded border border-stone-500 px-2 py-0.5" onClick={() => onStep(1)} aria-label="Next still">▸</button></>}
-          <a className="rounded border border-stone-500 px-2 py-0.5" href={api.filmStillUrl(folder, s.name)} download={s.name}>download PNG</a>
-          <button ref={close} className="rounded border border-stone-500 px-2 py-0.5" onClick={onClose}>close</button>
+          {many && <><button className="rounded-control border border-input px-2 py-0.5" onClick={() => onStep(-1)} aria-label="Previous still">◂</button><button className="rounded-control border border-input px-2 py-0.5" onClick={() => onStep(1)} aria-label="Next still">▸</button></>}
+          <a className="rounded-control border border-input px-2 py-0.5" href={api.filmStillUrl(folder, s.name)} download={s.name}>download PNG</a>
+          <button ref={close} className="rounded-control border border-input px-2 py-0.5" onClick={onClose}>close</button>
         </span>
       </div>
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[1fr_20rem]">
-        <div className="min-h-0 overflow-auto rounded bg-black"><img className="mx-auto max-h-full max-w-full object-contain" src={api.filmStillUrl(folder, s.name)} alt={`Still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`}`} /></div>
-        <div className="min-h-0 overflow-auto rounded bg-stone-900 p-3 text-xs">
+        <div className="min-h-0 overflow-auto rounded-control bg-black"><img className="mx-auto max-h-full max-w-full object-contain" src={api.filmStillUrl(folder, s.name)} alt={`Still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`}`} /></div>
+        <div className="min-h-0 overflow-auto rounded-control bg-neutral-12 p-3 type-caption">
         <dl className="space-y-1" aria-label="Details of the still">
           {row('Film time', s.t != null ? clock(s.t) : 'not kept')}
           {row('Frame', `${s.frame}${s.fps ? ` at ${s.fps} a second` : ''}`)}
@@ -118,8 +118,8 @@ function Viewer({ folder, s, onClose, onStep, many }: { folder: string; s: Still
           {row('File', mb(s.bytes))}
           {row('Plan', s.current ? 'the current plan' : 'an older plan, voice-over or overlay')}
         </dl>
-        <p className="pt-2 text-stone-500">{s.name}</p>
-        {s.legacy && <p className="pt-1 text-stone-400">Made before the details were kept; only what the file name says is known.</p>}
+        <p className="pt-2 text-muted-foreground">{s.name}</p>
+        {s.legacy && <p className="pt-1 text-muted-foreground">Made before the details were kept; only what the file name says is known.</p>}
         </div>
       </div>
     </div>

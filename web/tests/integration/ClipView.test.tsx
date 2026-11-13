@@ -61,11 +61,11 @@ describe('ClipView', () => {
       }
     }))
     const { findByTitle } = setup(<ClipView folder="f" clip="c1" tz="UTC" />)
-    expect(await findByTitle('0:00–0:01: wind 1.00')).toHaveClass('bg-red-400')
-    expect(await findByTitle('0:01–0:02: music 1.00')).toHaveClass('bg-emerald-500')
-    expect(await findByTitle('0:02–0:03: traffic 1.00')).toHaveClass('bg-emerald-500')
-    expect(await findByTitle('0:03–0:04: unknown 1.00')).toHaveClass('bg-sky-400')
-    expect(await findByTitle('0:04: nothing but speech')).toHaveClass('bg-stone-300')
+    expect(await findByTitle('0:00–0:01: wind 1.00')).toHaveClass('bg-danger')
+    expect(await findByTitle('0:01–0:02: music 1.00')).toHaveClass('bg-primary')
+    expect(await findByTitle('0:02–0:03: traffic 1.00')).toHaveClass('bg-primary')
+    expect(await findByTitle('0:03–0:04: unknown 1.00')).toHaveClass('bg-info')
+    expect(await findByTitle('0:04: nothing but speech')).toHaveClass('bg-neutral-4')
   })
 
   it('renders "other" when who is other in transcript', async () => {
