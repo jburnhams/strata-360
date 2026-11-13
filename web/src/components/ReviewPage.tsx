@@ -55,23 +55,23 @@ export default function ReviewPage({ folder, onOpen }: { folder: string; onOpen?
   const refresh = () => setVer(v => v + 1)
   const fail = (e: unknown) => setErr((e as Error).message)
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-sm">
+    <section className="rounded-overlay border border-border bg-card p-4">
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2 type-body-sm">
         <b>Review the transcript</b>
-        <span className="flex flex-wrap items-center gap-3 text-xs text-stone-500">
+        <span className="flex flex-wrap items-center gap-3 type-caption text-muted-foreground">
           <span>{data.todo} to look at of {data.total} phrases</span>
-          <label className="flex items-center gap-1">sound <select value={kind} onChange={e => setKind(e.target.value as 'original' | 'clean')} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700"><option value="clean">cleaned</option><option value="original">original</option></select></label>
+          <label className="flex items-center gap-1">sound <select value={kind} onChange={e => setKind(e.target.value as 'original' | 'clean')} className="rounded-control border border-border bg-transparent px-1 py-0.5"><option value="clean">cleaned</option><option value="original">original</option></select></label>
           <label className="flex items-center gap-1"><input type="checkbox" checked={showDone} onChange={e => setShowDone(e.target.checked)} /> show ones I have looked at</label>
         </span>
       </div>
-      <p className="mb-3 text-xs text-stone-500">Worst first: unsure words, speech faster than {data.fast_wps} words a second, and phrases the recogniser itself doubted. Press play (the slowed one plays fast speech at the normal {data.normal_wps} words a second), retype what you hear, press Enter.
+      <p className="mb-3 type-caption text-muted-foreground">Worst first: unsure words, speech faster than {data.fast_wps} words a second, and phrases the recogniser itself doubted. Press play (the slowed one plays fast speech at the normal {data.normal_wps} words a second), retype what you hear, press Enter.
         Keys in the box: Enter saves and moves on, Alt+1 plays at the original speed, Alt+2 slowed, Esc stops.</p>
-      {err && <p className="mb-2 text-sm text-red-600" role="alert">{err}</p>}
-      {list.length === 0 && <p className="text-sm text-stone-500">{data.total === 0 ? 'No speech recognised yet.' : 'Nothing left to look at.'}</p>}
+      {err && <p className="mb-2 type-body-sm text-danger" role="alert">{err}</p>}
+      {list.length === 0 && <p className="type-body-sm text-muted-foreground">{data.total === 0 ? 'No speech recognised yet.' : 'Nothing left to look at.'}</p>}
       <ol className="space-y-3">
         {list.slice(0, limit).map((it, k) => <Card key={`${it.clip}:${it.si}:${it.t0}:${it.reviewed}:${it.hidden}`} folder={folder} it={it} kind={kind} first={k === 0} onOpen={onOpen} onChanged={refresh} onError={fail} />)}
       </ol>
-      {list.length > limit && <button className="mt-3 rounded border border-stone-300 px-3 py-1 text-sm dark:border-stone-700" onClick={() => setLimit(l => l + PAGE)}>show {Math.min(PAGE, list.length - limit)} more</button>}
+      {list.length > limit && <button className="mt-3 rounded-control border border-border px-3 py-1 type-body-sm" onClick={() => setLimit(l => l + PAGE)}>show {Math.min(PAGE, list.length - limit)} more</button>}
     </section>
   )
 }
@@ -106,38 +106,38 @@ function Card({ folder, it, kind, first, onOpen, onChanged, onError }: { folder:
     try { await api.hideTranscriptPhrase(folder, it.clip, it.si, state); onChanged() } catch (e) { onError(e) } finally { setBusy(false) }
   }
   const conf = it.logprob == null ? null : Math.round(Math.exp(it.logprob) * 100)
-  const badge = 'rounded-full border px-1.5 text-[11px] leading-5'
+  const badge = 'rounded-pill border px-1.5 text-[11px] leading-5'
   const btn = (r: number, label: string, on: boolean) => (
-    <button type="button" onClick={() => go(r)} aria-pressed={on} className={`rounded border px-2 py-0.5 text-xs ${on ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-stone-300 hover:border-emerald-600 dark:border-stone-600'}`}>{on ? '■' : '▶'} {label}</button>)
+    <button type="button" onClick={() => go(r)} aria-pressed={on} className={`rounded-control border px-2 py-0.5 type-caption ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:border-primary'}`}>{on ? '■' : '▶'} {label}</button>)
   return (
-    <li className={`rounded-lg border p-3 text-sm ${it.hidden ? 'border-dashed border-stone-300 opacity-50 dark:border-stone-700' : it.reviewed ? 'border-stone-200 opacity-60 dark:border-stone-800' : 'border-stone-300 dark:border-stone-700'}`}>
-      <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-stone-500">
+    <li className={`rounded-surface border p-3 type-body-sm ${it.hidden ? 'border-dashed border-border opacity-50' : it.reviewed ? 'border-border opacity-60' : 'border-border'}`}>
+      <div className="mb-1 flex flex-wrap items-center gap-1.5 type-caption text-muted-foreground">
         <button type="button" className="font-mono hover:underline" onClick={() => onOpen?.(it.clip, it.t0)} title="open the clip at this moment">{short(it.clip)} · {mmss(it.t0)}</button>
-        <span className={`${badge} ${it.wps != null && it.wps > 4.5 ? 'border-amber-500 text-amber-700 dark:text-amber-300' : 'border-stone-300'}`} title="words a second">{it.wps == null ? 'pace n/a' : `${it.wps.toFixed(1)} w/s · ${Math.round(it.wps * 60)} wpm`}</span>
-        <span className={`${badge} ${conf != null && conf < 60 ? 'border-red-400 text-red-700 dark:text-red-300' : 'border-stone-300'}`} title="how sure the recogniser was of the whole phrase">{conf == null ? 'confidence n/a' : `${conf}% sure`}</span>
-        {it.low_words > 0 && <span className={`${badge} border-red-400 text-red-700 dark:text-red-300`} title="words the recogniser was under half sure of">{it.low_words} of {it.n_words} words unsure</span>}
-        {it.flags.map(f => <span key={f} className={`${badge} border-stone-400`}>{f.replace(/_/g, ' ')}</span>)}
-        {it.lang !== 'en' && <span className={`${badge} border-sky-400 text-sky-700 dark:text-sky-300`}>{it.lang.toUpperCase()}</span>}
-        {it.hidden && <span className={`${badge} border-stone-500 text-stone-700 dark:text-stone-300`} title="the rest of the pipeline does not see this phrase">hidden</span>}
+        <span className={`${badge} ${it.wps != null && it.wps > 4.5 ? 'border-warning text-warning' : 'border-border'}`} title="words a second">{it.wps == null ? 'pace n/a' : `${it.wps.toFixed(1)} w/s · ${Math.round(it.wps * 60)} wpm`}</span>
+        <span className={`${badge} ${conf != null && conf < 60 ? 'border-danger text-danger' : 'border-border'}`} title="how sure the recogniser was of the whole phrase">{conf == null ? 'confidence n/a' : `${conf}% sure`}</span>
+        {it.low_words > 0 && <span className={`${badge} border-danger text-danger`} title="words the recogniser was under half sure of">{it.low_words} of {it.n_words} words unsure</span>}
+        {it.flags.map(f => <span key={f} className={`${badge} border-border`}>{f.replace(/_/g, ' ')}</span>)}
+        {it.lang !== 'en' && <span className={`${badge} border-info text-info`}>{it.lang.toUpperCase()}</span>}
+        {it.hidden && <span className={`${badge} border-input text-foreground`} title="the rest of the pipeline does not see this phrase">hidden</span>}
         <span className="ml-auto">priority {it.priority.toFixed(1)}</span>
       </div>
       <p className="mb-2 leading-relaxed" aria-label="what the recogniser heard">
-        {it.words.map((w, i) => w.w.trim() ? <span key={i} title={w.p == null ? '' : `${Math.round(w.p * 100)}% sure`} className={`mr-1 rounded px-0.5 ${w.p != null && w.p < 0.4 ? 'bg-red-200 dark:bg-red-500/40' : w.p != null && w.p < 0.6 ? 'bg-amber-200 dark:bg-amber-500/30' : ''} ${w.e ? 'underline decoration-dotted decoration-sky-500 decoration-2' : ''} ${i === heard ? 'outline outline-2 outline-emerald-600 dark:outline-emerald-400' : ''}`} aria-current={i === heard ? 'true' : undefined}>{w.w}</span> : null)}
+        {it.words.map((w, i) => w.w.trim() ? <span key={i} title={w.p == null ? '' : `${Math.round(w.p * 100)}% sure`} className={`mr-1 rounded-control px-0.5 ${w.p != null && w.p < 0.4 ? 'bg-danger-subtle' : w.p != null && w.p < 0.6 ? 'bg-warning-subtle' : ''} ${w.e ? 'underline decoration-dotted decoration-info decoration-2' : ''} ${i === heard ? 'outline outline-2 outline-primary' : ''}`} aria-current={i === heard ? 'true' : undefined}>{w.w}</span> : null)}
       </p>
       <div className="mb-2" data-testid="phrase-timeline">
-        <div role="img" aria-label={`the phrase runs from ${mmss(first0)} to ${mmss(last1)} of the clip; the player plays from ${mmss(it.play0)} to ${mmss(it.play1)}`} className="relative h-3 overflow-hidden rounded bg-stone-200 dark:bg-stone-700">
-          <div className="absolute inset-y-0 bg-emerald-300 dark:bg-emerald-700" style={{ left: at(first0), width: `calc(${at(last1)} - ${at(first0)})` }} />
-          {it.words.map((w, i) => w.w.trim() ? <div key={i} className={`absolute inset-y-0 w-px ${i === heard ? 'bg-emerald-950 dark:bg-white' : 'bg-emerald-600/40'}`} style={{ left: at(w.t0) }} /> : null)}
-          {active && <div className="absolute inset-y-0 w-0.5 bg-red-600" style={{ left: at(pos) }} data-testid="playhead" />}
+        <div role="img" aria-label={`the phrase runs from ${mmss(first0)} to ${mmss(last1)} of the clip; the player plays from ${mmss(it.play0)} to ${mmss(it.play1)}`} className="relative h-3 overflow-hidden rounded-control bg-muted">
+          <div className="absolute inset-y-0 bg-primary" style={{ left: at(first0), width: `calc(${at(last1)} - ${at(first0)})` }} />
+          {it.words.map((w, i) => w.w.trim() ? <div key={i} className={`absolute inset-y-0 w-px ${i === heard ? 'bg-primary' : 'bg-primary/40'}`} style={{ left: at(w.t0) }} /> : null)}
+          {active && <div className="absolute inset-y-0 w-0.5 bg-danger" style={{ left: at(pos) }} data-testid="playhead" />}
         </div>
-        <div className="mt-0.5 flex justify-between font-mono text-[10px] text-stone-500"><span>{mmss(it.play0)}</span><span>phrase {mmss(first0)}–{mmss(last1)}</span><span>{mmss(it.play1)}</span></div>
+        <div className="mt-0.5 flex justify-between font-mono text-[10px] text-muted-foreground"><span>{mmss(it.play0)}</span><span>phrase {mmss(first0)}–{mmss(last1)}</span><span>{mmss(it.play1)}</span></div>
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         {btn(1, 'original speed', now === keyOf(1))}
-        {slowed ? btn(it.play_rate, `slowed to normal pace (×${it.play_rate})`, now === keyOf(it.play_rate)) : <span className="text-xs text-stone-500">not fast: no slowed version</span>}
-        <button type="button" onClick={() => setLoop(!loop)} aria-pressed={loop} title="repeat the phrase until you stop it, save a correction or hide it (the same for every player on the page)" className={`ml-auto rounded border px-2 py-0.5 text-xs ${loop ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-stone-300 hover:border-emerald-600 dark:border-stone-600'}`}>⟳ loop</button>
+        {slowed ? btn(it.play_rate, `slowed to normal pace (×${it.play_rate})`, now === keyOf(it.play_rate)) : <span className="type-caption text-muted-foreground">not fast: no slowed version</span>}
+        <button type="button" onClick={() => setLoop(!loop)} aria-pressed={loop} title="repeat the phrase until you stop it, save a correction or hide it (the same for every player on the page)" className={`ml-auto rounded-control border px-2 py-0.5 type-caption ${loop ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:border-primary'}`}>⟳ loop</button>
       </div>
-      {it.hidden ? <button type="button" disabled={busy} className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" title="put the phrase back in the transcript" onClick={() => void hide(false)}>show again</button> : <>
+      {it.hidden ? <button type="button" disabled={busy} className="rounded-control border border-border px-2 py-0.5 type-caption" title="put the phrase back in the transcript" onClick={() => void hide(false)}>show again</button> : <>
       <textarea ref={input} rows={2} value={text} onChange={e => setText(e.target.value)} aria-label="what was said" disabled={busy}
         onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void save(changed) }
@@ -145,17 +145,17 @@ function Card({ folder, it, kind, first, onOpen, onChanged, onError }: { folder:
           else if (e.altKey && e.key === '1') { e.preventDefault(); go(1) }
           else if (e.altKey && e.key === '2' && slowed) { e.preventDefault(); go(it.play_rate) }
         }}
-        className="w-full rounded border border-stone-300 bg-transparent px-2 py-1 dark:border-stone-700" />
+        className="w-full rounded-control border border-border bg-transparent px-2 py-1" />
       <div className="mt-1 flex flex-wrap items-center gap-2">
         {it.reviewed
-          ? <button type="button" disabled={busy} className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" onClick={() => void save(false)}>put back in the list</button>
+          ? <button type="button" disabled={busy} className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => void save(false)}>put back in the list</button>
           : <>
-            <button type="button" disabled={busy || !changed} className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white disabled:opacity-40" onClick={() => void save(true)}>save correction</button>
-            <button type="button" disabled={busy} className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" title="the text is right as it is: take it off the list" onClick={() => void save(false)}>looks right</button>
+            <button type="button" disabled={busy || !changed} className="rounded-control bg-primary px-2 py-0.5 type-caption text-primary-foreground disabled:opacity-40" onClick={() => void save(true)}>save correction</button>
+            <button type="button" disabled={busy} className="rounded-control border border-border px-2 py-0.5 type-caption" title="the text is right as it is: take it off the list" onClick={() => void save(false)}>looks right</button>
           </>}
-        {changed && <button type="button" className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" onClick={() => setText(shownText(it))}>undo my typing</button>}
-        <span className="text-xs text-stone-500">{changed ? 'Enter saves' : 'Enter: looks right'}</span>
-        <button type="button" disabled={busy} className="ml-auto rounded border border-red-300 px-2 py-0.5 text-xs text-red-700 dark:border-red-800 dark:text-red-300" title="take this phrase out of the transcript for everything after it (it stays at the bottom of this page)" onClick={() => void hide(true)}>hide</button>
+        {changed && <button type="button" className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => setText(shownText(it))}>undo my typing</button>}
+        <span className="type-caption text-muted-foreground">{changed ? 'Enter saves' : 'Enter: looks right'}</span>
+        <button type="button" disabled={busy} className="ml-auto rounded-control border border-danger px-2 py-0.5 type-caption text-danger" title="take this phrase out of the transcript for everything after it (it stays at the bottom of this page)" onClick={() => void hide(true)}>hide</button>
       </div></>}
     </li>
   )

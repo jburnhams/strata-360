@@ -29,15 +29,15 @@ export default function NoteBox({ folder, clip, title, placeholder }: { folder: 
     if (now) void run(); else voTimer.current = window.setTimeout(run, 600)
   }
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-1 flex items-center justify-between text-sm"><b>{title}</b><span className="text-stone-500">{saved ? 'saved' : 'saving…'}</span></div>
+    <section className="rounded-overlay border border-border bg-card p-4">
+      <div className="mb-1 flex items-center justify-between type-body-sm"><b>{title}</b><span className="text-muted-foreground">{saved ? 'saved' : 'saving…'}</span></div>
       <textarea value={text} onChange={e => change(e.target.value)} rows={clip ? 6 : 10} placeholder={placeholder}
-        className="w-full rounded-lg border border-stone-300 bg-stone-50 p-3 text-sm dark:border-stone-700 dark:bg-stone-950" />
-      <p className="mt-1 text-xs text-stone-500">Used with the transcript, the track data and what the camera sees to write the voice-over script.</p>
-      <label className="mt-3 block text-sm"><b>Voice-over MUST INCLUDE</b> <span className="text-xs text-stone-500">{clip ? 'one piece of narration per line; each is spoken word for word inside this clip' : 'one piece of narration per line; each is spoken word for word somewhere in the film'}</span>
+        className="w-full rounded-surface border border-border bg-card p-3 type-body-sm" />
+      <p className="mt-1 type-caption text-muted-foreground">Used with the transcript, the track data and what the camera sees to write the voice-over script.</p>
+      <label className="mt-3 block type-body-sm"><b>Voice-over MUST INCLUDE</b> <span className="type-caption text-muted-foreground">{clip ? 'one piece of narration per line; each is spoken word for word inside this clip' : 'one piece of narration per line; each is spoken word for word somewhere in the film'}</span>
         <textarea value={vo} onChange={e => { setVo(e.target.value); saveVo(e.target.value, ordered) }} rows={3} placeholder="Narration you want in the film, written as it should be spoken"
-          className="mt-1 w-full rounded-lg border border-stone-300 bg-stone-50 p-3 text-sm dark:border-stone-700 dark:bg-stone-950" /></label>
-      {!clip && <label className="flex items-center gap-1.5 text-xs text-stone-500"><input type="checkbox" checked={ordered} onChange={e => { setOrdered(e.target.checked); saveVo(vo, e.target.checked, true) }} /> keep them in the order written (otherwise they can come in any order)</label>}
+          className="mt-1 w-full rounded-surface border border-border bg-card p-3 type-body-sm" /></label>
+      {!clip && <label className="flex items-center gap-1.5 type-caption text-muted-foreground"><input type="checkbox" checked={ordered} onChange={e => { setOrdered(e.target.checked); saveVo(vo, e.target.checked, true) }} /> keep them in the order written (otherwise they can come in any order)</label>}
     </section>
   )
 }

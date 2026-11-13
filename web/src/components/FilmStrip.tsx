@@ -35,13 +35,13 @@ export default function FilmStrip({ segments, total, bpm, editable, busy, range,
   const cuts = segments.slice(0, -1).map(g => { at += g.dur_s; return at })
   return (
     <div ref={box} className="relative h-9 w-full select-none">
-      <div className="flex h-9 w-full overflow-hidden rounded-lg border border-stone-200 dark:border-stone-800" role="img" aria-label="The film, segment by segment">
+      <div className="flex h-9 w-full overflow-hidden rounded-surface border border-border" role="img" aria-label="The film, segment by segment">
         {segments.map((g, k) => {
           const inRange = !!range && k >= range[0] && k <= range[1]
           return (
             <button key={g.id} title={`${mmss(g.film_start_s)} ${short(g.clip)} ${g.technique}`} onClick={e => onSelect(k, e.shiftKey)}
               style={{ width: `${(100 * g.dur_s) / total}%`, background: colour(g), outline: inRange ? '2px solid currentColor' : 'none', outlineOffset: -2 }}
-              className={`border-r border-white/70 text-[9px] leading-none text-white/90 dark:border-stone-900 ${g.locked ? 'ring-1 ring-inset ring-black/50' : ''}`}>{g.locked ? '🔒' : g.ramp ? '⏩' : ''}</button>
+              className={`border-r border-white/70 text-[9px] leading-none text-white/90 ${g.locked ? 'ring-1 ring-inset ring-black/50' : ''}`}>{g.locked ? '🔒' : g.ramp ? '⏩' : ''}</button>
           )
         })}
       </div>
@@ -60,8 +60,8 @@ export default function FilmStrip({ segments, total, bpm, editable, busy, range,
               if (d && (d < 0 ? room[0] < 0 : room[1] > 0)) { e.preventDefault(); onMoveEdge(segments[k].id, d) }
             }}
             style={{ left: `calc(${x}% - 4px)` }}
-            className={`absolute top-0 z-10 h-9 w-2 cursor-ew-resize rounded-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${drag?.k === k ? 'bg-black/60 dark:bg-white/70' : 'hover:bg-black/30 dark:hover:bg-white/40'}`}>
-            {drag?.k === k && <span className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-stone-900 px-1.5 py-0.5 text-[10px] text-white">{live > 0 ? '+' : ''}{live} beat{Math.abs(live) === 1 ? '' : 's'}</span>}
+            className={`absolute top-0 z-10 h-9 w-2 cursor-ew-resize rounded-control focus:outline-none focus:ring-2 focus:ring-primary ${drag?.k === k ? 'bg-black/60' : 'hover:bg-black/30'}`}>
+            {drag?.k === k && <span className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-control bg-neutral-12 px-1.5 py-0.5 text-[10px] text-white">{live > 0 ? '+' : ''}{live} beat{Math.abs(live) === 1 ? '' : 's'}</span>}
           </div>
         )
       })}

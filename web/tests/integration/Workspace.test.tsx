@@ -156,12 +156,12 @@ describe('the clip and gap list highlights', () => {
     const { user } = setup(<Workspace folder="/data/f" onChange={vi.fn()} />)
     const rows = async () => { await screen.findByText('/data/f'); await waitFor(() => expect(document.querySelectorAll('li[data-in-film], li.cursor-pointer').length).toBeGreaterThan(3)); return [...document.querySelectorAll('li.cursor-pointer')] as HTMLElement[] }
     const r = await rows(); const clipA = r[0], clipB = r[1], gapA = r[2], gapB = r[3]
-    expect(clipA).toHaveAttribute('data-in-film'); expect(clipA.className).toContain('border-emerald-600'); expect(clipB).not.toHaveAttribute('data-in-film'); expect(clipB.className).toContain('border-transparent')
-    expect(gapA).toHaveAttribute('data-in-film'); expect(gapA.className).toContain('border-emerald-600'); expect(gapB.className).toContain('border-transparent')
+    expect(clipA).toHaveAttribute('data-in-film'); expect(clipA.className).toContain('border-primary'); expect(clipB).not.toHaveAttribute('data-in-film'); expect(clipB.className).toContain('border-transparent')
+    expect(gapA).toHaveAttribute('data-in-film'); expect(gapA.className).toContain('border-primary'); expect(gapB.className).toContain('border-transparent')
     expect([clipA, clipB, gapA, gapB].some(e => e.hasAttribute('data-selected'))).toBe(false)
-    await user.click(clipB); expect(clipB).toHaveAttribute('data-selected'); expect(clipB.className).toContain('bg-yellow-100'); expect(clipB.className).not.toContain('emerald'); expect(clipA).not.toHaveAttribute('data-selected')
-    await user.click(clipA); expect(clipA.className).toContain('bg-yellow-100'); expect(clipA.className).toContain('border-emerald-600')                       // used in the film and selected: both show
-    await user.click(gapB); expect(gapB).toHaveAttribute('data-selected'); expect(gapB.className).toContain('bg-yellow-100'); expect(gapB.className).not.toContain('bg-emerald-100'); expect(clipA).not.toHaveAttribute('data-selected')
+    await user.click(clipB); expect(clipB).toHaveAttribute('data-selected'); expect(clipB.className).toContain('bg-warning-subtle'); expect(clipB.className).not.toContain('border-primary'); expect(clipA).not.toHaveAttribute('data-selected')
+    await user.click(clipA); expect(clipA.className).toContain('bg-warning-subtle'); expect(clipA.className).toContain('border-primary')                       // used in the film and selected: both show
+    await user.click(gapB); expect(gapB).toHaveAttribute('data-selected'); expect(gapB.className).toContain('bg-warning-subtle'); expect(gapB.className).not.toContain('bg-primary-3'); expect(clipA).not.toHaveAttribute('data-selected')
   })
 })
 

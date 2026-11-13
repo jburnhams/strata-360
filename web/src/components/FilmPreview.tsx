@@ -25,18 +25,18 @@ export default function FilmPreview({ folder }: { folder: string }) {
   const pct = st.frames_total ? Math.round(100 * (st.frames_done ?? 0) / st.frames_total) : 0
   const busy = st.state === 'starting' || st.state === 'audio' || st.state === 'rendering'
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-overlay border border-border bg-card p-4">
       <div className="mb-2 flex flex-wrap items-center gap-3">
-        <h3 className="text-sm font-semibold">Film preview</h3>
-        {st.state === 'noplan' ? <span className="text-sm text-stone-500">Make a plan first.</span> : busy
-          ? <><span className="text-sm text-stone-500">{st.state === 'rendering' ? `rendering ${pct}% (${Math.round((st.frames_done ?? 0) / 25)} of ${Math.round(st.length_s ?? 0)} s)` : 'preparing the sound…'}</span>
-              <button className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" onClick={() => api.stopFilm(folder)}>stop</button></>
-          : <button className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm text-white" onClick={() => api.startFilm(folder, st.state === 'done')}>{st.state === 'done' ? 'Render again' : 'Render preview'}</button>}
-        {st.state === 'error' && <span className="text-sm text-red-600">{st.error || 'failed'}</span>}
-        {err && <span className="text-sm text-red-600">player: {err}</span>}
+        <h3 className="type-body-sm font-semibold">Film preview</h3>
+        {st.state === 'noplan' ? <span className="type-body-sm text-muted-foreground">Make a plan first.</span> : busy
+          ? <><span className="type-body-sm text-muted-foreground">{st.state === 'rendering' ? `rendering ${pct}% (${Math.round((st.frames_done ?? 0) / 25)} of ${Math.round(st.length_s ?? 0)} s)` : 'preparing the sound…'}</span>
+              <button className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => api.stopFilm(folder)}>stop</button></>
+          : <button className="rounded-surface bg-primary px-3 py-1.5 type-body-sm text-primary-foreground" onClick={() => api.startFilm(folder, st.state === 'done')}>{st.state === 'done' ? 'Render again' : 'Render preview'}</button>}
+        {st.state === 'error' && <span className="type-body-sm text-danger">{st.error || 'failed'}</span>}
+        {err && <span className="type-body-sm text-danger">player: {err}</span>}
       </div>
-      {!!st.placeholders?.length && <p className="mb-2 text-xs text-amber-700">{st.placeholders.length} clip(s) have no proxy video yet and show as dark cards: {st.placeholders.map(c => c.slice(-9)).join(', ')}. Run the processing to finish them, then render again.</p>}
-      {live ? <StepVideo videoRef={video} playsInline className="aspect-video w-full max-w-3xl rounded-lg bg-black" /> : <div className="aspect-video w-full max-w-3xl rounded-lg bg-stone-100 dark:bg-stone-950" />}
+      {!!st.placeholders?.length && <p className="mb-2 type-caption text-warning">{st.placeholders.length} clip(s) have no proxy video yet and show as dark cards: {st.placeholders.map(c => c.slice(-9)).join(', ')}. Run the processing to finish them, then render again.</p>}
+      {live ? <StepVideo videoRef={video} playsInline className="aspect-video w-full max-w-3xl rounded-surface bg-black" /> : <div className="aspect-video w-full max-w-3xl rounded-surface bg-muted" />}
       {live && <FilmStill folder={folder} video={video} planKey={key} />}
     </section>
   )

@@ -35,18 +35,18 @@ export default function WordMarker({ folder, onSaved, children }: { folder: stri
     document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key)
   })
   const clips = sel ? new Set(sel.words.map(w => w.clip)).size : 0
-  const btn = 'rounded px-2 py-1 text-xs font-medium disabled:opacity-50'
+  const btn = 'rounded-control px-2 py-1 type-caption font-medium disabled:opacity-50'
   return (
     <div ref={root}>
       {children}
       {(sel || err) && (
-        <div role="toolbar" aria-label="Mark the selected words" className="fixed z-50 flex items-center gap-1 rounded-lg border border-stone-300 bg-white p-1 shadow-lg dark:border-stone-700 dark:bg-stone-900"
+        <div role="toolbar" aria-label="Mark the selected words" className="fixed z-50 flex items-center gap-1 rounded-surface border border-border bg-card p-1 shadow-overlay"
           style={{ left: Math.max((sel?.x ?? 120) - 130, 8), top: Math.max((sel?.y ?? 80) - 44, 8) }} onMouseDown={e => e.preventDefault()}>
-          {sel && <span className="px-1 text-xs text-stone-500">{sel.words.length} word{sel.words.length === 1 ? '' : 's'}{clips > 1 ? ` in ${clips} clips` : ''}</span>}
-          <button disabled={busy} className={`${btn} bg-emerald-200 text-emerald-900 dark:bg-emerald-500/40 dark:text-emerald-100`} title="the film must use these words (G)" onClick={() => void mark('must')}>Must use</button>
-          <button disabled={busy} className={`${btn} bg-red-200 text-red-900 dark:bg-red-500/40 dark:text-red-100`} title="the film must never use these words, and their sound is never heard (R)" onClick={() => void mark('never')}>Never use</button>
-          <button disabled={busy} className={`${btn} border border-stone-300 dark:border-stone-600`} title="no preference: clear the marks (W)" onClick={() => void mark('none')}>Clear</button>
-          {err && <span className="px-1 text-xs text-red-600">{err}</span>}
+          {sel && <span className="px-1 type-caption text-muted-foreground">{sel.words.length} word{sel.words.length === 1 ? '' : 's'}{clips > 1 ? ` in ${clips} clips` : ''}</span>}
+          <button disabled={busy} className={`${btn} bg-primary-3 text-primary`} title="the film must use these words (G)" onClick={() => void mark('must')}>Must use</button>
+          <button disabled={busy} className={`${btn} bg-danger-subtle text-danger`} title="the film must never use these words, and their sound is never heard (R)" onClick={() => void mark('never')}>Never use</button>
+          <button disabled={busy} className={`${btn} border border-border`} title="no preference: clear the marks (W)" onClick={() => void mark('none')}>Clear</button>
+          {err && <span className="px-1 type-caption text-danger">{err}</span>}
         </div>)}
     </div>
   )

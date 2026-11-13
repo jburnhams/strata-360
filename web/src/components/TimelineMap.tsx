@@ -23,7 +23,7 @@ export default function TimelineMap({ folder, segments, range, onSelect }: { fol
   if (!placed || !view) return null
   const path = line ? line.lat.map((la, i) => view.xy(la, line.lon[i]).join(',')).join(' ') : ''
   return (
-    <svg viewBox={view.box} className="h-28 w-full rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950" role="img" aria-label="Where each window of the film was filmed">
+    <svg viewBox={view.box} className="h-28 w-full rounded-surface border border-border bg-card" role="img" aria-label="Where each window of the film was filmed">
       {path && <polyline points={path} fill="none" stroke="currentColor" strokeOpacity={0.35} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
       {segments.map((g, k) => {
         if (!g.pos) return null

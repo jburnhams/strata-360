@@ -38,33 +38,33 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
   const at = (s: Seg) => { const c = info[s.clip]; if (!c) return null; const t = new Date(new Date(c.start_utc).getTime() + s.t0 * 1000); return t }
   const local = (d: Date | null) => d ? d.toLocaleString('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
-      <div className="mb-3 flex items-center justify-between text-sm">
+    <section className="rounded-overlay border border-border bg-card p-4">
+      <div className="mb-3 flex items-center justify-between type-body-sm">
         <b>Transcript of everything</b>
-        <span className="flex items-center gap-2 text-xs text-stone-500">
-          <button disabled={running} title="sends the words (and your notes) to Gemini, which suggests substitutions for obvious recognition errors; they show highlighted and you can change any of them" className="rounded border border-stone-300 px-2 py-0.5 text-stone-700 disabled:opacity-50 dark:border-stone-700 dark:text-stone-300"
+        <span className="flex items-center gap-2 type-caption text-muted-foreground">
+          <button disabled={running} title="sends the words (and your notes) to Gemini, which suggests substitutions for obvious recognition errors; they show highlighted and you can change any of them" className="rounded-control border border-border px-2 py-0.5 text-foreground disabled:opacity-50"
             onClick={async () => { setFixErr(undefined); try { await api.suggestTranscript(folder) } catch (e) { setFixErr((e as Error).message) } setVer(v => v + 1) }}>{running ? `asking Gemini… ${fix?.done ?? 0}/${fix?.total ?? '…'}` : 'suggest corrections (Gemini)'}</button>
-          {fix?.state === 'done' && <span>{fix.fixes} suggested</span>}{!!fix?.calls_made && fix.state !== 'running' && <span title="new Gemini calls made, and tokens used by them">{fix.calls_made} calls ({Math.round(((fix.tokens?.input ?? 0) + (fix.tokens?.output ?? 0)) / 1000)}k tokens){fix.calls_reused ? `, ${fix.calls_reused} reused` : ''}</span>}{!!fix?.usage?.paid_calls && <span title="all Gemini calls made on the paid key for this project, at list price (an estimate; the free key costs nothing)">paid: {fix.usage.paid_calls} calls, about ${fix.usage.cost_usd.toFixed(2)}</span>}{fix?.state === 'error' && <span className="text-red-600">{fix.error}</span>}{fixErr && <span className="text-red-600">{fixErr}</span>}
-          <span title="select words to mark them: G = must use, R = never use, W = clear. Yellow words are not marked but the current draft plays them. A dotted underline is a correction (amber Gemini, blue you); hover for the original, click a word to edit"><span className="rounded bg-emerald-200 px-1 dark:bg-emerald-500/40">must</span> <span className="rounded bg-red-200 px-1 dark:bg-red-500/40">never</span> <span className="rounded bg-yellow-200 px-1 dark:bg-yellow-500/30">in draft</span> select words to mark them</span></span>
-        <span className="flex items-center gap-3 text-stone-500">{data.segments.length} phrases
-          <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown" className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
+          {fix?.state === 'done' && <span>{fix.fixes} suggested</span>}{!!fix?.calls_made && fix.state !== 'running' && <span title="new Gemini calls made, and tokens used by them">{fix.calls_made} calls ({Math.round(((fix.tokens?.input ?? 0) + (fix.tokens?.output ?? 0)) / 1000)}k tokens){fix.calls_reused ? `, ${fix.calls_reused} reused` : ''}</span>}{!!fix?.usage?.paid_calls && <span title="all Gemini calls made on the paid key for this project, at list price (an estimate; the free key costs nothing)">paid: {fix.usage.paid_calls} calls, about ${fix.usage.cost_usd.toFixed(2)}</span>}{fix?.state === 'error' && <span className="text-danger">{fix.error}</span>}{fixErr && <span className="text-danger">{fixErr}</span>}
+          <span title="select words to mark them: G = must use, R = never use, W = clear. Yellow words are not marked but the current draft plays them. A dotted underline is a correction (amber Gemini, blue you); hover for the original, click a word to edit"><span className="rounded-control bg-primary-3 px-1">must</span> <span className="rounded-control bg-danger-subtle px-1">never</span> <span className="rounded-control bg-warning-subtle px-1">in draft</span> select words to mark them</span></span>
+        <span className="flex items-center gap-3 text-muted-foreground">{data.segments.length} phrases
+          <select value={mode} onChange={e => setMode(e.target.value as Mode)} title="how phrases in other languages are shown" className="rounded-control border border-border bg-transparent px-1 py-0.5">
             <option value="translated">translated</option><option value="original">original language</option><option value="both">both</option></select>
-          <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'you')} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 dark:border-stone-700">
+          <select value={filter} onChange={e => setFilter(e.target.value as 'all' | 'you')} className="rounded-control border border-border bg-transparent px-1 py-0.5">
             <option value="all">everyone</option><option value="you">only you</option></select></span>
       </div>
       <div className="mb-2"><Health h={fix?.health} /></div>
-      {groups.length === 0 && <p className="text-sm text-stone-500">{filter === 'you' ? 'No phrases labelled as you yet (voices are labelled by the speakers stage).' : 'No speech recognised yet.'}</p>}
+      {groups.length === 0 && <p className="type-body-sm text-muted-foreground">{filter === 'you' ? 'No phrases labelled as you yet (voices are labelled by the speakers stage).' : 'No speech recognised yet.'}</p>}
       <WordMarker folder={folder} onSaved={() => setVer(v => v + 1)}>
-      <div className="space-y-3 text-sm leading-relaxed">
+      <div className="space-y-3 type-body-sm leading-relaxed">
         {groups.map((g, gi) => (
           <div key={gi}>
-            <button className="mb-0.5 font-mono text-xs text-stone-500 hover:underline" onClick={() => onOpen(g.clip, g.segs[0].t0)}>{short(g.clip)}{info[g.clip] ? ` · ${Math.round(info[g.clip].duration_s)} s` : ''}</button>
+            <button className="mb-0.5 font-mono type-caption text-muted-foreground hover:underline" onClick={() => onOpen(g.clip, g.segs[0].t0)}>{short(g.clip)}{info[g.clip] ? ` · ${Math.round(info[g.clip].duration_s)} s` : ''}</button>
             <p>
               {g.segs.map((s, i) => (
                 <span key={i} onMouseEnter={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseMove={e => setTip({ seg: s, x: e.clientX, y: e.clientY })} onMouseLeave={() => setTip(undefined)}
-                  className={`mr-1 rounded px-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-950 ${s.who === 'wearer' ? 'font-medium' : ''} ${s.flagged ? 'italic opacity-50' : ''}`}>
+                  className={`mr-1 rounded-control px-0.5 hover:bg-primary-3 ${s.who === 'wearer' ? 'font-medium' : ''} ${s.flagged ? 'italic opacity-50' : ''}`}>
                   <PlayIcons folder={folder} clip={s.clip} t0={s.play0 ?? s.t0} t1={s.play1 ?? s.t1} original={!!info[s.clip]?.audio_original} clean={!!info[s.clip]?.audio_clean} />
-                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`${s.lang === 'en' ? (s.who === 'wearer' ? 'text-stone-900 dark:text-stone-100' : 'text-stone-500') : ''}`} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1), used } : undefined} />
+                  <Phrase text={s.text} en={s.text_en} lang={s.lang} mode={mode} className={`${s.lang === 'en' ? (s.who === 'wearer' ? 'text-foreground' : 'text-muted-foreground') : ''}`} word={s.words?.length ? { folder, clip: s.clip, si: s.si, words: s.words, onSaved: () => setVer(v => v + 1), used } : undefined} />
                 </span>
               ))}
             </p>
@@ -73,15 +73,15 @@ export default function TranscriptPanel({ folder, clips, tz, onOpen }: { folder:
       </div>
       </WordMarker>
       {tip && (() => { const c = info[tip.seg.clip], t = at(tip.seg); const left = Math.min(tip.x + 16, window.innerWidth - 300), top = Math.min(tip.y + 16, window.innerHeight - 260); return (
-        <div className="pointer-events-none fixed z-40 w-72 overflow-hidden rounded-lg border border-stone-300 bg-white text-xs shadow-lg dark:border-stone-700 dark:bg-stone-900" style={{ left, top }}>
+        <div className="pointer-events-none fixed z-40 w-72 overflow-hidden rounded-surface border border-border bg-card type-caption shadow-overlay" style={{ left, top }}>
           {c?.thumb && <img src={api.thumbUrl(folder, tip.seg.clip, thumbVersion(c, overlay), overlay)} alt="" className="aspect-video w-full object-cover" />}
           <div className="space-y-0.5 p-2">
-            <div className="font-mono text-stone-500">{tip.seg.clip}</div>
-            <div>{local(t)} <span className="text-stone-500">({t ? t.toISOString().slice(11, 19) : ''} UTC)</span></div>
-            <div className="text-stone-500">at {mmss(tip.seg.t0)} of {c ? mmss(c.duration_s) : '?'} · {tip.seg.who === 'wearer' ? 'you' : tip.seg.who === 'other' ? 'someone else' : 'voice not labelled yet'} · {tip.seg.lang}</div>
-            {c?.steady != null && <div className="text-stone-500">steadiness {Math.round(c.steady * 100)}%{c.candidates != null ? ` · ${c.candidates} usable moments` : ''}</div>}
-            {tip.seg.lang !== 'en' && tip.seg.text_en && tip.seg.text_en !== tip.seg.text && <div><span className="text-amber-700 dark:text-amber-300">{tip.seg.text}</span><br /><span className="text-sky-700 dark:text-sky-300">→ {tip.seg.text_en}</span></div>}
-            <div className="text-emerald-700 dark:text-emerald-400">click to open this clip</div>
+            <div className="font-mono text-muted-foreground">{tip.seg.clip}</div>
+            <div>{local(t)} <span className="text-muted-foreground">({t ? t.toISOString().slice(11, 19) : ''} UTC)</span></div>
+            <div className="text-muted-foreground">at {mmss(tip.seg.t0)} of {c ? mmss(c.duration_s) : '?'} · {tip.seg.who === 'wearer' ? 'you' : tip.seg.who === 'other' ? 'someone else' : 'voice not labelled yet'} · {tip.seg.lang}</div>
+            {c?.steady != null && <div className="text-muted-foreground">steadiness {Math.round(c.steady * 100)}%{c.candidates != null ? ` · ${c.candidates} usable moments` : ''}</div>}
+            {tip.seg.lang !== 'en' && tip.seg.text_en && tip.seg.text_en !== tip.seg.text && <div><span className="text-warning">{tip.seg.text}</span><br /><span className="text-info">→ {tip.seg.text_en}</span></div>}
+            <div className="text-primary">click to open this clip</div>
           </div>
         </div>) })()}
     </section>

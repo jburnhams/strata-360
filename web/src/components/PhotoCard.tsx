@@ -12,10 +12,10 @@ function Analysis({ folder, id, a }: { folder: string; id: string; a: NonNullabl
     a.objects && a.objects.length > 0 && `objects: ${a.objects.map(o => (o.n > 1 ? `${o.n} ` : '') + o.label).join(', ')}`, a.exposure && a.exposure !== 'ok' && `looks ${a.exposure}`, a.quality && a.quality !== 'ok' && `picture ${a.quality}`].filter(Boolean)
   return (
     <div data-analysis="" className="space-y-0.5">
-      {a.description && <div className="italic text-stone-600 dark:text-stone-400">{a.description}</div>}
-      {bits.length > 0 && <div className="text-stone-600 dark:text-stone-400">{bits.join(' · ')}</div>}
-      {a.tags && a.tags.length > 0 && <div className="flex flex-wrap gap-1">{a.tags.map(t => <span key={t} className="rounded-full bg-stone-200 px-1.5 text-[10px] dark:bg-stone-800">{t}</span>)}</div>}
-      {a.overlay && <a className="text-emerald-700 underline dark:text-emerald-400" target="_blank" rel="noreferrer" href={api.photoOverlay(folder, id)}>with the race overlay</a>}
+      {a.description && <div className="italic text-muted-foreground">{a.description}</div>}
+      {bits.length > 0 && <div className="text-muted-foreground">{bits.join(' · ')}</div>}
+      {a.tags && a.tags.length > 0 && <div className="flex flex-wrap gap-1">{a.tags.map(t => <span key={t} className="rounded-pill bg-muted px-1.5 text-[10px]">{t}</span>)}</div>}
+      {a.overlay && <a className="text-primary underline" target="_blank" rel="noreferrer" href={api.photoOverlay(folder, id)}>with the race overlay</a>}
     </div>
   )
 }
@@ -23,20 +23,20 @@ function Analysis({ folder, id, a }: { folder: string; id: string; a: NonNullabl
 /** One photo: its picture (a JPEG copy, click for the larger one), when it was taken and how that was worked out, where, and a warning when its own position and the run's disagree. */
 export default function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }: { folder: string; p: Photo; tz: string; onOpen?: () => void; onRemove?: () => void; onMotion?: () => void }) {
   return (
-    <figure data-photo={p.id} className="w-56 text-xs">
+    <figure data-photo={p.id} className="w-56 type-caption">
       <a href={api.photoFile(folder, p.id)} target="_blank" rel="noreferrer" title={`${p.name} (${p.width} x ${p.height}): click for the larger picture`}>
-        <img loading="lazy" src={api.photoThumb(folder, p.id, 480)} alt={p.name} className="h-40 w-56 rounded object-cover" /></a>
+        <img loading="lazy" src={api.photoThumb(folder, p.id, 480)} alt={p.name} className="h-40 w-56 rounded-control object-cover" /></a>
       <figcaption className="mt-1 space-y-0.5">
         <div className="font-medium">{when(p.taken_utc, tz)}</div>
-        <div className="text-stone-500" title={`how the time was worked out: ${p.time_source}`}>{p.track ? `${hms(p.track.elapsed_s)} into the race · km ${p.track.km}` : 'not on the run'} · {p.time_source}</div>
-        <div className="text-stone-500">{p.loc ? `${p.loc.lat.toFixed(4)}, ${p.loc.lon.toFixed(4)} (${p.loc.source})` : 'no position'}{p.apart_m != null ? ` · ${p.apart_m} m from the run` : ''}</div>
+        <div className="text-muted-foreground" title={`how the time was worked out: ${p.time_source}`}>{p.track ? `${hms(p.track.elapsed_s)} into the race · km ${p.track.km}` : 'not on the run'} · {p.time_source}</div>
+        <div className="text-muted-foreground">{p.loc ? `${p.loc.lat.toFixed(4)}, ${p.loc.lon.toFixed(4)} (${p.loc.source})` : 'no position'}{p.apart_m != null ? ` · ${p.apart_m} m from the run` : ''}</div>
         {p.analysis && <Analysis folder={folder} id={p.id} a={p.analysis} />}
         <label className="flex items-center gap-1.5" title="An option for the film: the script writer may show this photo, and it is in the film list on the left (open it there to make it a must)"><input type="checkbox" aria-label={`Use ${p.name} in the film`} checked={!!p.use} onChange={e => api.setPhotoUse(folder, p.id, e.target.checked).then(() => onMotion?.())} /> Use in the film</label>
         <PhotoMotion folder={folder} p={p} onChanged={() => onMotion?.()} />
-        {p.flag && <div role="alert" className="text-amber-700 dark:text-amber-400">⚠ {p.flag}</div>}
+        {p.flag && <div role="alert" className="text-warning">⚠ {p.flag}</div>}
         <div className="flex gap-3">
-          {onOpen && p.use && <button className="text-emerald-700 underline dark:text-emerald-400" onClick={onOpen}>Open in the film list</button>}
-          {onRemove && <button aria-label={`Remove ${p.name}`} className="text-stone-500 underline" onClick={onRemove}>Remove</button>}
+          {onOpen && p.use && <button className="text-primary underline" onClick={onOpen}>Open in the film list</button>}
+          {onRemove && <button aria-label={`Remove ${p.name}`} className="text-muted-foreground underline" onClick={onRemove}>Remove</button>}
         </div>
       </figcaption>
     </figure>

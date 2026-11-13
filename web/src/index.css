@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "strata-react/strata.css";   /* token contract, namespace reset, type steps, base layer */
+@import "./theme.generated.css";     /* the palette */
+@import "./theme.css";               /* status roles and the two facts of footage */
 
-:root { color-scheme: light dark; }
-body { @apply bg-stone-100 text-stone-900 dark:bg-stone-950 dark:text-stone-100; font-family: system-ui, sans-serif; }
+body { @apply bg-background text-foreground; }

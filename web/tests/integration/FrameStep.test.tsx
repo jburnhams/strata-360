@@ -22,7 +22,7 @@ describe('stepping a video one frame at a time', () => {
 
   it('has the frame buttons on the 360 player too, stepping by the rate of the original pictures', async () => {
     const { user, container } = setup(<PanoPlayer src="/p.mp4" label="M1" fps={4} />); const v = container.querySelector('video') as HTMLVideoElement; v.pause = vi.fn(); Object.defineProperty(v, 'duration', { value: 9, configurable: true })
-    fireEvent.loadedMetadata(v); await user.click(screen.getByRole('button', { name: 'Next frame' })); expect(v.currentTime).toBeCloseTo(0.25 + 0.0625, 3)
+    fireEvent.loadedMetadata(v); await user.click(screen.getByRole('button', { name: 'Forward one frame' })); expect(v.currentTime).toBeCloseTo(0.25 + 0.0625, 3)
   })
 })
 

@@ -10,11 +10,11 @@ import WordMarker from './WordMarker'
 import RoughMixPlayer from './RoughMixPlayer'
 
 const KIND: Record<ScriptItem['type'], { label: string; cls: string }> = {
-  vo: { label: 'narration', cls: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300' },
-  clip: { label: 'you', cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300' },
-  gap: { label: 'gap', cls: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300' },
-  sing: { label: 'sung', cls: 'bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300' },
-  broll: { label: 'b-roll', cls: 'bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300' },
+  vo: { label: 'narration', cls: 'bg-info-subtle text-info' },
+  clip: { label: 'you', cls: 'bg-primary-3 text-primary' },
+  gap: { label: 'gap', cls: 'bg-warning-subtle text-warning' },
+  sing: { label: 'sung', cls: 'bg-info-subtle text-info' },
+  broll: { label: 'b-roll', cls: 'bg-muted text-foreground' },
 }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 const itemOf = (msg: string) => { const m = msg.match(/^item (\d+):/); return m ? Number(m[1]) : null }
@@ -81,69 +81,69 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
   })
   let lastClip = ''
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900">
+    <section className="rounded-overlay border border-border bg-card p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h3 className="text-sm font-semibold">Film script</h3>
-        <label className="text-xs text-stone-500">length (s) <input type="number" min={30} value={target} onChange={e => setTarget(e.target.value)} placeholder="music / automatic" className="ml-1 w-28 rounded border border-stone-300 bg-transparent px-1.5 py-1 text-sm dark:border-stone-700" /></label>
-        <label className="flex items-center gap-1 text-xs text-stone-500"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> ignore the music</label>
-        <button disabled={busy || st.running || !st.key_configured} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm text-white disabled:opacity-50" onClick={() => go(!!draft)}>{st.running ? 'writing…' : draft ? 'Revise this draft' : 'Write a draft'}</button>
-        {draft && <button disabled={busy || st.running || !st.key_configured} className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-stone-700" title="start again without the current draft" onClick={() => go(false)}>New draft</button>}
+        <h3 className="type-body-sm font-semibold">Film script</h3>
+        <label className="type-caption text-muted-foreground">length (s) <input type="number" min={30} value={target} onChange={e => setTarget(e.target.value)} placeholder="music / automatic" className="ml-1 w-28 rounded-control border border-border bg-transparent px-1.5 py-1 type-body-sm" /></label>
+        <label className="flex items-center gap-1 type-caption text-muted-foreground"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> ignore the music</label>
+        <button disabled={busy || st.running || !st.key_configured} className="rounded-surface bg-primary px-3 py-1.5 type-body-sm text-primary-foreground disabled:opacity-50" onClick={() => go(!!draft)}>{st.running ? 'writing…' : draft ? 'Revise this draft' : 'Write a draft'}</button>
+        {draft && <button disabled={busy || st.running || !st.key_configured} className="rounded-surface border border-border px-3 py-1.5 type-body-sm disabled:opacity-50" title="start again without the current draft" onClick={() => go(false)}>New draft</button>}
       </div>
-      {!st.key_configured && <p className="mt-2 text-sm text-amber-700">No Gemini API key is set: add it (secrets.env or the Script panel) to write a draft.</p>}
-      {st.running && st.log.length > 0 && <p className="mt-2 font-mono text-xs text-stone-500">{st.log[st.log.length - 1]}</p>}
-      {!st.running && st.last_exit != null && st.last_exit !== 0 && <p className="mt-2 text-sm text-red-600">The last attempt failed: {st.log[st.log.length - 1] ?? `exit ${st.last_exit}`}</p>}
-      {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      {!st.key_configured && <p className="mt-2 type-body-sm text-warning">No Gemini API key is set: add it (secrets.env or the Script panel) to write a draft.</p>}
+      {st.running && st.log.length > 0 && <p className="mt-2 font-mono type-caption text-muted-foreground">{st.log[st.log.length - 1]}</p>}
+      {!st.running && st.last_exit != null && st.last_exit !== 0 && <p className="mt-2 type-body-sm text-danger">The last attempt failed: {st.log[st.log.length - 1] ?? `exit ${st.last_exit}`}</p>}
+      {err && <p className="mt-2 type-body-sm text-danger">{err}</p>}
       {draft && (
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-          <button disabled={busy || st.plan_running} className="rounded-lg border border-emerald-700 px-3 py-1.5 text-emerald-800 disabled:opacity-50 dark:text-emerald-300" title="turn this draft into the film's plan: your lines, the narration (spoken and timed) and b-roll, cut on the beat" onClick={() => void planIt()}>{st.plan_running ? 'planning…' : 'Make the film from this draft'}</button>
-          <span className="text-xs text-stone-500">{st.plan_running ? (st.plan_log?.[st.plan_log.length - 1] ?? 'speaking the narration and planning the windows…')
+        <div className="mt-2 flex flex-wrap items-center gap-3 type-body-sm">
+          <button disabled={busy || st.plan_running} className="rounded-surface border border-primary px-3 py-1.5 text-primary disabled:opacity-50" title="turn this draft into the film's plan: your lines, the narration (spoken and timed) and b-roll, cut on the beat" onClick={() => void planIt()}>{st.plan_running ? 'planning…' : 'Make the film from this draft'}</button>
+          <span className="type-caption text-muted-foreground">{st.plan_running ? (st.plan_log?.[st.plan_log.length - 1] ?? 'speaking the narration and planning the windows…')
             : st.plan?.source === 'script' ? `Film plan: ${st.plan.windows} windows, ${st.plan.length_s} s, from ${st.plan.script === latest ? 'this draft' : 'an older draft (make the film again to use this one)'}`
             : 'The film plan is still the beat planner’s, not this script.'}</span>
         </div>)}
       {draft && !st.plan_running && <RoughMixPlayer folder={folder} version={ver} />}
-      {!st.plan_running && st.plan_exit != null && st.plan_exit !== 0 && <p className="mt-1 text-sm text-red-600">Planning failed: {st.plan_log?.[st.plan_log.length - 1] ?? `exit ${st.plan_exit}`}</p>}
-      {st.plan?.source === 'script' && st.plan.warnings.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs text-amber-700">{st.plan.warnings.map(w => <li key={w}>{w}</li>)}</ul>}
-      {!draft ? <p className="mt-2 text-sm text-stone-500">No draft yet. The writer reads every clip, your notes and the transcript, and writes a first script you can then mark up and revise.</p> : (<>
+      {!st.plan_running && st.plan_exit != null && st.plan_exit !== 0 && <p className="mt-1 type-body-sm text-danger">Planning failed: {st.plan_log?.[st.plan_log.length - 1] ?? `exit ${st.plan_exit}`}</p>}
+      {st.plan?.source === 'script' && st.plan.warnings.length > 0 && <ul className="mt-1 list-disc pl-5 type-caption text-warning">{st.plan.warnings.map(w => <li key={w}>{w}</li>)}</ul>}
+      {!draft ? <p className="mt-2 type-body-sm text-muted-foreground">No draft yet. The writer reads every clip, your notes and the transcript, and writes a first script you can then mark up and revise.</p> : (<>
         <div className="mt-3">
-          <div className="text-base font-medium">{draft.title ?? '(untitled)'}</div>
-          {draft.story && <p className="text-sm italic text-stone-500">{draft.story}</p>}
+          <div className="type-body font-medium">{draft.title ?? '(untitled)'}</div>
+          {draft.story && <p className="type-body-sm italic text-muted-foreground">{draft.story}</p>}
           {draft.length_note && draft.length_note.verdict !== 'fits' && (
-            <p role="note" data-length-note={draft.length_note.verdict} className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+            <p role="note" data-length-note={draft.length_note.verdict} className="rounded-control border border-warning bg-warning-subtle p-2 type-body-sm text-warning">
               The writer says the {draft.length_note.verdict === 'too_long' ? 'length is too long' : 'length is too short'} for this material and music{draft.length_note.ideal_s ? `: about ${Math.floor(draft.length_note.ideal_s / 60)}:${String(Math.round(draft.length_note.ideal_s % 60)).padStart(2, '0')} would suit it better` : ''}. {draft.length_note.why}
             </p>
           )}
-          {draft.length_note?.verdict === 'fits' && <p data-length-note="fits" className="text-xs text-stone-500">The writer thinks this length suits the material and the music.{draft.length_note.why ? ` ${draft.length_note.why}` : ''}</p>}
-          <p className="mt-1 text-xs text-stone-500">{r?.total_s} s of {draft.target_s} s{draft.target_source ? ` (${draft.target_source})` : ''} · you {r?.clip_s} s · narration {r?.vo_s} s ({r?.vo_words} words at {draft.wpm} wpm) · b-roll {r?.broll_s} s · {r?.clips_used} clips used, {r?.clips_skipped} skipped · {draft.revised ? 'revised' : 'first draft'} {draft.created.replace('T', ' ')}{diff.added.size ? ` · ${diff.added.size} new, ${diff.removed.length} removed` : ''}</p>
+          {draft.length_note?.verdict === 'fits' && <p data-length-note="fits" className="type-caption text-muted-foreground">The writer thinks this length suits the material and the music.{draft.length_note.why ? ` ${draft.length_note.why}` : ''}</p>}
+          <p className="mt-1 type-caption text-muted-foreground">{r?.total_s} s of {draft.target_s} s{draft.target_source ? ` (${draft.target_source})` : ''} · you {r?.clip_s} s · narration {r?.vo_s} s ({r?.vo_words} words at {draft.wpm} wpm) · b-roll {r?.broll_s} s · {r?.clips_used} clips used, {r?.clips_skipped} skipped · {draft.revised ? 'revised' : 'first draft'} {draft.created.replace('T', ' ')}{diff.added.size ? ` · ${diff.added.size} new, ${diff.removed.length} removed` : ''}</p>
         </div>
         <div ref={list}>
         <WordMarker folder={folder} onSaved={() => setVer(v => v + 1)}>
-          <ol className="mt-3 space-y-1 text-sm">
+          <ol className="mt-3 space-y-1 type-body-sm">
             {draft.items.map((it, i) => {
               const head = it.clip !== lastClip; lastClip = it.clip; const w = warn.get(i + 1)
               return (
                 <li key={i}>
-                  {head && <div className="mt-2 font-mono text-xs text-stone-500">clip {it.clip}</div>}
-                  <div className={`flex gap-2 rounded px-1 py-0.5 ${diff.added.has(i) ? 'bg-emerald-50 dark:bg-emerald-950/40' : ''}`}>
-                    <span className={`mt-0.5 h-fit shrink-0 rounded-full px-2 text-xs ${KIND[it.type].cls}`}>{KIND[it.type].label}</span>
-                    <span className="w-10 shrink-0 text-right font-mono text-xs text-stone-500">{it.seconds != null ? mmss(it.seconds) : ''}</span>
+                  {head && <div className="mt-2 font-mono type-caption text-muted-foreground">clip {it.clip}</div>}
+                  <div className={`flex gap-2 rounded-control px-1 py-0.5 ${diff.added.has(i) ? 'bg-primary-3' : ''}`}>
+                    <span className={`mt-0.5 h-fit shrink-0 rounded-pill px-2 type-caption ${KIND[it.type].cls}`}>{KIND[it.type].label}</span>
+                    <span className="w-10 shrink-0 text-right font-mono type-caption text-muted-foreground">{it.seconds != null ? mmss(it.seconds) : ''}</span>
                     <span className="min-w-0 flex-1 leading-relaxed">
                       {it.type === 'vo' && (editing === i ? (
                         <span className="flex flex-col gap-1">
-                          <textarea aria-label={`Narration ${i + 1}`} value={text} onChange={e => setText(e.target.value)} rows={2} className="w-full rounded border border-stone-300 bg-transparent p-1.5 text-sm dark:border-stone-700" />
-                          <span className="flex gap-1"><button className="rounded bg-emerald-700 px-2 py-0.5 text-xs text-white" onClick={() => void saveEdit(i, it)}>save (pins this wording)</button><button className="rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-700" onClick={() => setEditing(null)}>cancel</button></span>
+                          <textarea aria-label={`Narration ${i + 1}`} value={text} onChange={e => setText(e.target.value)} rows={2} className="w-full rounded-control border border-border bg-transparent p-1.5 type-body-sm" />
+                          <span className="flex gap-1"><button className="rounded-control bg-primary px-2 py-0.5 type-caption text-primary-foreground" onClick={() => void saveEdit(i, it)}>save (pins this wording)</button><button className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => setEditing(null)}>cancel</button></span>
                         </span>
                       ) : (<>
-                        <span data-vo={i} title={basisOf(it).length ? 'based on: ' + basisOf(it).join(' · ') : undefined}>{highlight(edited[i] ?? it.text ?? '', pinTexts(it.clip), pins.vo_never ?? []).map((p, k) => <span key={k} className={p.kind === 'must' ? 'rounded bg-emerald-200 dark:bg-emerald-500/40' : p.kind === 'never' ? 'rounded bg-red-200 dark:bg-red-500/40' : ''}>{p.t}</span>)}</span>
-                        <button className="ml-1 text-xs text-stone-400 hover:text-stone-700" aria-label={`Edit narration ${i + 1}`} title="edit the wording: your version is kept word for word in later drafts" onClick={() => { setText(edited[i] ?? it.text ?? ''); setEditing(i) }}>✎</button>
+                        <span data-vo={i} title={basisOf(it).length ? 'based on: ' + basisOf(it).join(' · ') : undefined}>{highlight(edited[i] ?? it.text ?? '', pinTexts(it.clip), pins.vo_never ?? []).map((p, k) => <span key={k} className={p.kind === 'must' ? 'rounded-control bg-primary-3' : p.kind === 'never' ? 'rounded-control bg-danger-subtle' : ''}>{p.t}</span>)}</span>
+                        <button className="ml-1 type-caption text-muted-foreground hover:text-foreground" aria-label={`Edit narration ${i + 1}`} title="edit the wording: your version is kept word for word in later drafts" onClick={() => { setText(edited[i] ?? it.text ?? ''); setEditing(i) }}>✎</button>
                       </>))}
                       {it.type === 'clip' && (words(it).some(Boolean) ? words(it) : <span>{it.text}</span>)}
-                      {it.type === 'broll' && <span className="text-stone-500">{it.why}</span>}
-                      {it.type === 'gap' && <span className="text-stone-500">gap clip, {it.seconds} s: {it.why}</span>}
-                      {it.type === 'sing' && <span className="text-stone-500">the track sings {it.phrase}{it.text ? `: “${it.text}”` : ''} ({it.seconds} s): {it.why}</span>}
-                      {it.view && <span className="ml-2 text-xs text-stone-500">{it.view} view of you</span>}
-                      {it.anchor && <span className="ml-2 text-xs text-stone-500" title={it.anchor.why}>anchored at {it.anchor.film_s} s</span>}
-                      {diff.added.has(i) && <span className="ml-2 rounded bg-emerald-200 px-1 text-xs text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100">new</span>}
-                      {w && <span className="ml-2 cursor-help text-amber-700" title={w.join('\n')} aria-label={`check: ${w.join('; ')}`}>⚠</span>}
+                      {it.type === 'broll' && <span className="text-muted-foreground">{it.why}</span>}
+                      {it.type === 'gap' && <span className="text-muted-foreground">gap clip, {it.seconds} s: {it.why}</span>}
+                      {it.type === 'sing' && <span className="text-muted-foreground">the track sings {it.phrase}{it.text ? `: “${it.text}”` : ''} ({it.seconds} s): {it.why}</span>}
+                      {it.view && <span className="ml-2 type-caption text-muted-foreground">{it.view} view of you</span>}
+                      {it.anchor && <span className="ml-2 type-caption text-muted-foreground" title={it.anchor.why}>anchored at {it.anchor.film_s} s</span>}
+                      {diff.added.has(i) && <span className="ml-2 rounded-control bg-primary-3 px-1 type-caption text-primary">new</span>}
+                      {w && <span className="ml-2 cursor-help text-warning" title={w.join('\n')} aria-label={`check: ${w.join('; ')}`}>⚠</span>}
                     </span>
                   </div>
                 </li>)
@@ -151,24 +151,24 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
           </ol>
         </WordMarker>
         {vsel && (
-          <div role="toolbar" aria-label="Mark the selected narration" className="fixed z-50 flex items-center gap-1 rounded-lg border border-stone-300 bg-white p-1 shadow-lg dark:border-stone-700 dark:bg-stone-900" style={{ left: Math.max(vsel.x - 120, 8), top: Math.max(vsel.y - 44, 8) }} onMouseDown={e => e.preventDefault()}>
-            <button className="rounded bg-emerald-200 px-2 py-1 text-xs font-medium text-emerald-900 dark:bg-emerald-500/40 dark:text-emerald-100" title="keep exactly these words, in this clip, in every later draft" onClick={() => void pinVo(false)}>Say exactly this</button>
-            <button className="rounded bg-red-200 px-2 py-1 text-xs font-medium text-red-900 dark:bg-red-500/40 dark:text-red-100" title="never say these words" onClick={() => void pinVo(true)}>Never say</button>
+          <div role="toolbar" aria-label="Mark the selected narration" className="fixed z-50 flex items-center gap-1 rounded-surface border border-border bg-card p-1 shadow-overlay" style={{ left: Math.max(vsel.x - 120, 8), top: Math.max(vsel.y - 44, 8) }} onMouseDown={e => e.preventDefault()}>
+            <button className="rounded-control bg-primary-3 px-2 py-1 type-caption font-medium text-primary" title="keep exactly these words, in this clip, in every later draft" onClick={() => void pinVo(false)}>Say exactly this</button>
+            <button className="rounded-control bg-danger-subtle px-2 py-1 type-caption font-medium text-danger" title="never say these words" onClick={() => void pinVo(true)}>Never say</button>
           </div>)}
         </div>
         {((pins.vo ?? []).length > 0 || (pins.vo_never ?? []).length > 0) && (
-          <details className="mt-3 text-sm"><summary className="cursor-pointer text-xs text-stone-500">Your narration pins ({(pins.vo ?? []).length + (pins.vo_never ?? []).length})</summary>
+          <details className="mt-3 type-body-sm"><summary className="cursor-pointer type-caption text-muted-foreground">Your narration pins ({(pins.vo ?? []).length + (pins.vo_never ?? []).length})</summary>
             <ul className="mt-1 space-y-1">
               {(pins.vo ?? []).map((p: VoPin) => (
-                <li key={p.id} className="flex flex-wrap items-center gap-2"><span className="rounded bg-emerald-200 px-1 text-xs dark:bg-emerald-500/40">say</span><span className="min-w-0 flex-1">{p.text}</span>
-                  <select aria-label={`Where to say ${p.id}`} value={p.mode} onChange={e => void savePins(setMode(pins, p.id, e.target.value as VoPin['mode'], p.clip ?? draft.items.find(x => x.type === 'vo' && x.text?.includes(p.text))?.clip))} className="rounded border border-stone-300 bg-transparent px-1 py-0.5 text-xs dark:border-stone-700">
+                <li key={p.id} className="flex flex-wrap items-center gap-2"><span className="rounded-control bg-primary-3 px-1 type-caption">say</span><span className="min-w-0 flex-1">{p.text}</span>
+                  <select aria-label={`Where to say ${p.id}`} value={p.mode} onChange={e => void savePins(setMode(pins, p.id, e.target.value as VoPin['mode'], p.clip ?? draft.items.find(x => x.type === 'vo' && x.text?.includes(p.text))?.clip))} className="rounded-control border border-border bg-transparent px-1 py-0.5 type-caption">
                     <option value="clip">in clip {p.clip ?? '…'}</option><option value="ordered">in order, anywhere</option><option value="anywhere">anywhere</option></select>
-                  <button className="text-xs underline" aria-label={`Remove pin ${p.id}`} onClick={() => void savePins(removePin(pins, p.id))}>remove</button></li>))}
-              {(pins.vo_never ?? []).map(ph => <li key={ph} className="flex items-center gap-2"><span className="rounded bg-red-200 px-1 text-xs dark:bg-red-500/40">never</span><span className="min-w-0 flex-1">{ph}</span><button className="text-xs underline" aria-label={`Remove never-say ${ph}`} onClick={() => void savePins(removeNever(pins, ph))}>remove</button></li>)}
+                  <button className="type-caption underline" aria-label={`Remove pin ${p.id}`} onClick={() => void savePins(removePin(pins, p.id))}>remove</button></li>))}
+              {(pins.vo_never ?? []).map(ph => <li key={ph} className="flex items-center gap-2"><span className="rounded-control bg-danger-subtle px-1 type-caption">never</span><span className="min-w-0 flex-1">{ph}</span><button className="type-caption underline" aria-label={`Remove never-say ${ph}`} onClick={() => void savePins(removeNever(pins, ph))}>remove</button></li>)}
             </ul></details>)}
-        {diff.removed.length > 0 && <details className="mt-2 text-xs text-stone-500"><summary>{diff.removed.length} item(s) removed since the previous draft</summary><ul className="mt-1 list-disc pl-5">{diff.removed.map((it, i) => <li key={i}>{KIND[it.type].label} · clip {it.clip}: {it.text ?? it.why ?? `${it.from}–${it.to}`}</li>)}</ul></details>}
-        {draft.skipped.length > 0 && <details className="mt-2 text-xs text-stone-500"><summary>{draft.skipped.length} clip(s) left out</summary><ul className="mt-1 list-disc pl-5">{draft.skipped.map(s => <li key={s.clip}>clip {s.clip}: {s.why}</li>)}</ul></details>}
-        {draft.problems.length > 0 && <p className="mt-2 text-xs text-amber-700">The writer could not satisfy: {draft.problems.filter(p => !itemOf(p)).join('; ') || 'see the ⚠ marks'}</p>}
+        {diff.removed.length > 0 && <details className="mt-2 type-caption text-muted-foreground"><summary>{diff.removed.length} item(s) removed since the previous draft</summary><ul className="mt-1 list-disc pl-5">{diff.removed.map((it, i) => <li key={i}>{KIND[it.type].label} · clip {it.clip}: {it.text ?? it.why ?? `${it.from}–${it.to}`}</li>)}</ul></details>}
+        {draft.skipped.length > 0 && <details className="mt-2 type-caption text-muted-foreground"><summary>{draft.skipped.length} clip(s) left out</summary><ul className="mt-1 list-disc pl-5">{draft.skipped.map(s => <li key={s.clip}>clip {s.clip}: {s.why}</li>)}</ul></details>}
+        {draft.problems.length > 0 && <p className="mt-2 type-caption text-warning">The writer could not satisfy: {draft.problems.filter(p => !itemOf(p)).join('; ') || 'see the ⚠ marks'}</p>}
       </>)}
     </section>
   )

@@ -20,20 +20,20 @@ export default function PhotosPanel({ folder, photos, tz, job, onChanged, onOpen
   const analyse = async (force: boolean) => { setErrs([]); try { const r = await api.analysePhotos(folder, { force }); if (!r.started) setErrs([r.reason || 'could not start']) } catch (e) { setErrs([(e as Error).message]) } onChanged() }
   const flagged = (photos ?? []).filter(p => p.flag).length, analysed = (photos ?? []).filter(p => p.analysis?.stages.length).length
   return (
-    <section className="rounded-xl border border-stone-200 bg-white p-4 dark:border-stone-800 dark:bg-stone-900" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); add(e.dataTransfer.files) }}>
+    <section className="rounded-overlay border border-border bg-card p-4" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); add(e.dataTransfer.files) }}>
       <input ref={input} type="file" multiple hidden aria-label="Add photos" accept="image/*,.heic,.heif,.avif" onChange={e => { add(e.target.files); e.target.value = '' }} />
-      <div className="mb-2 flex items-center justify-between text-sm">
-        <b>Photos <span className="font-normal text-stone-500">({photos?.length ?? 0}{flagged ? `, ${flagged} to check` : ''})</span></b>
+      <div className="mb-2 flex items-center justify-between type-body-sm">
+        <b>Photos <span className="font-normal text-muted-foreground">({photos?.length ?? 0}{flagged ? `, ${flagged} to check` : ''})</span></b>
         <span className="flex items-center gap-3">
-          {(photos?.length ?? 0) > 0 && <button disabled={!!job?.running} className="text-emerald-700 underline disabled:opacity-50 dark:text-emerald-400" title="Run the clip stages that make sense for a photo (exposure, quality, places, people, who is in it, face, scene, overlay); only what is out of date" onClick={() => analyse(false)}>{job?.running ? 'Analysing…' : analysed < (photos?.length ?? 0) ? 'Analyse photos' : 'Analyse again'}</button>}
-          {(photos?.length ?? 0) > 0 && analysed > 0 && !job?.running && <button className="text-stone-500 underline" title="Redo every stage for every photo" onClick={() => analyse(true)}>Redo all</button>}
-          <button disabled={!!busy} className="text-emerald-700 underline disabled:opacity-50 dark:text-emerald-400" onClick={() => input.current?.click()}>{busy ?? 'Add photos'}</button>
+          {(photos?.length ?? 0) > 0 && <button disabled={!!job?.running} className="text-primary underline disabled:opacity-50" title="Run the clip stages that make sense for a photo (exposure, quality, places, people, who is in it, face, scene, overlay); only what is out of date" onClick={() => analyse(false)}>{job?.running ? 'Analysing…' : analysed < (photos?.length ?? 0) ? 'Analyse photos' : 'Analyse again'}</button>}
+          {(photos?.length ?? 0) > 0 && analysed > 0 && !job?.running && <button className="text-muted-foreground underline" title="Redo every stage for every photo" onClick={() => analyse(true)}>Redo all</button>}
+          <button disabled={!!busy} className="text-primary underline disabled:opacity-50" onClick={() => input.current?.click()}>{busy ?? 'Add photos'}</button>
         </span>
       </div>
-      {job?.running && <p data-job="" className="mb-2 text-xs text-stone-500">{job.log.at(-1) ?? 'starting…'}</p>}
-      {!job?.running && job?.error && <p role="alert" className="mb-2 text-sm text-red-600">The analysis stopped: {job.error}</p>}
-      {errs.length > 0 && <ul role="alert" className="mb-2 space-y-0.5 text-sm text-red-600">{errs.map((e, i) => <li key={i}>{e}</li>)}</ul>}
-      {photos && photos.length === 0 && !busy && <p className="text-sm text-stone-500">No photos yet. Add the ones you took during the race (or drop them here): the time in each says where in the race it was taken.</p>}
+      {job?.running && <p data-job="" className="mb-2 type-caption text-muted-foreground">{job.log.at(-1) ?? 'starting…'}</p>}
+      {!job?.running && job?.error && <p role="alert" className="mb-2 type-body-sm text-danger">The analysis stopped: {job.error}</p>}
+      {errs.length > 0 && <ul role="alert" className="mb-2 space-y-0.5 type-body-sm text-danger">{errs.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+      {photos && photos.length === 0 && !busy && <p className="type-body-sm text-muted-foreground">No photos yet. Add the ones you took during the race (or drop them here): the time in each says where in the race it was taken.</p>}
       <div className="flex flex-wrap gap-4">{(photos ?? []).map(p => <PhotoCard key={p.id} folder={folder} p={p} tz={tz} onOpen={() => onOpen(p)} onRemove={() => remove(p)} onMotion={onChanged} />)}</div>
     </section>
   )

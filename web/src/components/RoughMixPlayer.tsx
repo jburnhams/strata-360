@@ -16,15 +16,15 @@ export default function RoughMixPlayer({ folder, version = 0 }: { folder: string
   }
   const reset = async () => { setErr(undefined); try { await api.resetRoughMix(folder) } catch (e) { setErr((e as Error).message) } setTick(t => t + 1) }
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-      <button disabled={mix.building} className="rounded-lg border border-stone-400 px-3 py-1.5 disabled:opacity-50" title="the film's sound alone: music and clip background quiet, voice-over and speech up" onClick={() => void make()}>
+    <div className="mt-2 flex flex-wrap items-center gap-3 type-body-sm">
+      <button disabled={mix.building} className="rounded-surface border border-border px-3 py-1.5 disabled:opacity-50" title="the film's sound alone: music and clip background quiet, voice-over and speech up" onClick={() => void make()}>
         {mix.building ? 'Making the rough mix…' : mix.exists ? (mix.stale ? 'Make the rough mix again' : 'Remake the rough mix') : 'Make a rough mix'}
       </button>
-      {mix.building && <span className="font-mono text-xs text-stone-500">{mix.log}</span>}
+      {mix.building && <span className="font-mono type-caption text-muted-foreground">{mix.log}</span>}
       {mix.exists && <audio aria-label="Rough mix" controls preload="none" src={api.roughMixUrl(folder, mix.made_at ?? '')} className="h-9" />}
-      {mix.exists && mix.stale && !mix.building && <span className="text-xs text-amber-700">out of date: {mix.stale_because.join(', ')} changed since it was made</span>}
-      {mix.exists && !mix.building && <button className="text-xs text-stone-500 underline" title="forget this mix; it is made again from scratch next time" onClick={() => void reset()}>Reset</button>}
-      {(err || (!mix.building && mix.error)) && <span role="alert" className="text-xs text-red-600">{err ?? `The rough mix failed: ${mix.error}`}</span>}
+      {mix.exists && mix.stale && !mix.building && <span className="type-caption text-warning">out of date: {mix.stale_because.join(', ')} changed since it was made</span>}
+      {mix.exists && !mix.building && <button className="type-caption text-muted-foreground underline" title="forget this mix; it is made again from scratch next time" onClick={() => void reset()}>Reset</button>}
+      {(err || (!mix.building && mix.error)) && <span role="alert" className="type-caption text-danger">{err ?? `The rough mix failed: ${mix.error}`}</span>}
     </div>
   )
 }

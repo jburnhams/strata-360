@@ -24,7 +24,7 @@ export function stepFrame(v: HTMLVideoElement | null, dir: -1 | 1, frameS: numbe
 }
 
 export function FrameStepButtons({ video, frameS, className = '' }: { video: RefObject<HTMLVideoElement | null>; frameS: () => number; className?: string }) {
-  const b = 'rounded border border-stone-300 px-2 py-0.5 text-xs dark:border-stone-600'
+  const b = 'rounded-control border border-border px-2 py-0.5 type-caption'
   return (
     <span className={`inline-flex items-center gap-1 ${className}`} role="group" aria-label="Step one frame">
       <button type="button" className={b} title="Pause and go back one frame" aria-label="Previous frame" onClick={() => stepFrame(video.current, -1, frameS())}>◂ frame</button>

@@ -83,7 +83,7 @@ describe('MusicStudio', () => {
     const why = await screen.findByLabelText('What drove the intensity'); expect(seen.at(-1)?.body).toMatchObject({ length_s: 120, preset: 'footage' })
     expect(screen.getByLabelText(/Intensity over the film/)).toHaveValue('footage'); expect(screen.getByRole('option', { name: 'follow the footage' })).toBeInTheDocument()
     expect(within(screen.getByRole('img', { name: 'crowd sound by bar' })).getAllByText((_, el) => el?.getAttribute('data-signal') === 'crowd')).toHaveLength(8); expect(within(why).getByText('shot energy')).toBeInTheDocument()
-    expect(within(screen.getByRole('img', { name: 'speech by bar' })).getAllByText((_, el) => el?.className.includes('bg-sky-500') ?? false)).toHaveLength(2)
+    expect(within(screen.getByRole('img', { name: 'speech by bar' })).getAllByText((_, el) => el?.className.includes('bg-info') ?? false)).toHaveLength(2)
   })
 
   it('does not offer the footage when the film has no signals, nor show a reason for a preset curve', async () => {
@@ -191,7 +191,7 @@ describe('MusicStudio: true to the track, new bars and the checks', () => {
     const check = { ok: false, grid: { ok: false, worst_ms: 55, median_ms: 6, off_bars: [3] }, length: { ok: true, length_s: 40, trimmed_s: 1.2, padded_s: 0, faded: true }, stray_vocal_db: -40, singing_in_generated: [4], failed: [12] }
     mockGet('/api/music/studio', makeStudioState({ built: makeMusicScore({ check, fidelity: 0.75 }) })); setup(<MusicStudio folder="/data" />)
     const ck = within(await screen.findByRole('list', { name: 'Checks' }))
-    expect(ck.getByText(/worst 55 ms, typical 6 ms; bars 4 are more than 40 ms off/)).toHaveClass('text-red-700'); expect(ck.getByText(/1.2 s cut with a fade/)).toHaveClass('text-emerald-700')
+    expect(ck.getByText(/worst 55 ms, typical 6 ms; bars 4 are more than 40 ms off/)).toHaveClass('text-danger'); expect(ck.getByText(/1.2 s cut with a fade/)).toHaveClass('text-primary')
     expect(ck.getByText(/Singing outside the sung moments at -40 dB/)).toBeInTheDocument(); expect(ck.getByText(/Singing heard in the new bars from bar 5/)).toBeInTheDocument(); expect(ck.getByText(/not made from bar 13/)).toBeInTheDocument()
     expect(screen.getByText(/· Extended$/)).toBeInTheDocument()
   })

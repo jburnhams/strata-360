@@ -119,7 +119,7 @@ describe('the sections that could be used in the film', () => {
   it('says when sections over the same road come from different sources, in the cards and in the list', async () => {
     const sv = makeStreetView(); sv.sections[0].overlaps = ['P1']; sv.sections.push(makeSvSection({ id: 'P1', key: 'panoramax:c:1.25', provider: 'panoramax', kind: '360', angles: null, km0: 1.25, km1: 1.45, length_m: 200, overlaps: ['M1'], items: [{ id: 'p1', km: 1.3, lat: 50.001, lon: 5.0025, b: 90 }] })); serve(sv); setup(<StreetViewPage folder="/data" initialFilters={SHOW_ALL} />)
     const note = (await screen.findAllByRole('note'))[0]; expect(note).toHaveTextContent('Overlaps the same road as Panoramax P1 (km 1.25 to 1.45)'); expect(screen.getAllByRole('note')).toHaveLength(2)
-    const rows = screen.getAllByRole('row'); expect(rows[1]).toHaveTextContent('P1'); expect(within(rows[1]).getByText('P1')).toHaveClass('text-amber-700')
+    const rows = screen.getAllByRole('row'); expect(rows[1]).toHaveTextContent('P1'); expect(within(rows[1]).getByText('P1')).toHaveClass('text-warning')
   })
 
   it('warns when a daytime view is for a stretch run in the dark, and still lets you choose it', async () => {
@@ -264,7 +264,7 @@ describe('clicking the map for the nearest street view', () => {
     const u = seen[0].url.searchParams; expect(u.get('folder')).toBe('/data'); expect(Number.isFinite(Number(u.get('lat')))).toBe(true); expect(seen.filter(r => r.method === 'POST')).toHaveLength(0)         // a click fetches nothing
     const m = within(await screen.findByRole('region', { name: 'Mapillary near the point' })); const item = m.getByText(/12.5 m away · 360°/).closest('[data-near-item]') as HTMLElement
     expect(item).toHaveTextContent('GoPro Max · 5760×2880'); expect(item).toHaveTextContent('Ruled out: 1 reason'); expect(item.querySelector('img')!.getAttribute('src')).toBe('/api/streetview/near/image?folder=%2Fdata&provider=mapillary&id=m9&w=256')
-    const rules = [...item.querySelectorAll('[data-rule]')]; expect(rules.map(r => r.getAttribute('data-rule'))).toEqual(['near_run', 'light', 'direction']); expect(rules[1].className).toContain('red'); expect(rules[1]).toHaveTextContent('below the horizon (dark)'); expect(within(rules[1] as HTMLElement).getByLabelText('rules it out')).toBeInTheDocument(); expect(within(rules[0] as HTMLElement).getByLabelText('fine')).toBeInTheDocument(); expect(within(rules[2] as HTMLElement).getByLabelText('not known')).toBeInTheDocument()
+    const rules = [...item.querySelectorAll('[data-rule]')]; expect(rules.map(r => r.getAttribute('data-rule'))).toEqual(['near_run', 'light', 'direction']); expect(rules[1].className).toContain('danger'); expect(rules[1]).toHaveTextContent('below the horizon (dark)'); expect(within(rules[1] as HTMLElement).getByLabelText('rules it out')).toBeInTheDocument(); expect(within(rules[0] as HTMLElement).getByLabelText('fine')).toBeInTheDocument(); expect(within(rules[2] as HTMLElement).getByLabelText('not known')).toBeInTheDocument()
     expect(within(await screen.findByRole('region', { name: 'Panoramax near the point' })).getByText('Nothing within 500 m.')).toBeInTheDocument(); expect(within(screen.getByRole('region', { name: 'Google near the point' })).getByText('no GOOGLE_MAPS_API_KEY in secrets.env')).toBeInTheDocument(); expect(panel).toHaveTextContent('Filmed Thu 7 Mar 2024')
   })
 
@@ -316,7 +316,7 @@ describe('how far a section is from the existing footage', () => {
 
   it('says so, in amber, when a section overlaps footage', async () => {
     const sv = makeStreetView(); sv.sections[0].near = near({ overlaps: ['0022'], in_gap: null }); serve(sv); setup(<StreetViewPage folder="/data" initialFilters={SHOW_ALL} />)
-    const card = (await screen.findByLabelText('Sections that could be used')).querySelector('[data-section="M1"] [data-near]')!; expect(card).toHaveTextContent('Nearest footage: Overlaps clip 0022'); expect(card.className).toContain('amber'); expect(card).not.toHaveTextContent('Fills gap')
+    const card = (await screen.findByLabelText('Sections that could be used')).querySelector('[data-section="M1"] [data-near]')!; expect(card).toHaveTextContent('Nearest footage: Overlaps clip 0022'); expect(card.className).toContain('warning'); expect(card).not.toHaveTextContent('Fills gap')
   })
 
   it('filters the sections that overlap a clip away, so only those filling a gap remain', async () => {
@@ -367,7 +367,7 @@ describe('the preview video of a section', () => {
     server.use(http.get('/api/streetview/video', ({ request }) => HttpResponse.json({ exists: made && new URL(request.url).searchParams.get('pano') === 'true', running: false, log: [], error: '', seconds: 12 })), http.post('/api/streetview/video', () => { made = true; return HttpResponse.json({ started: true }) }))
     const { user } = { user: (await import('@testing-library/user-event')).default.setup() }
     await user.click(await screen.findByRole('button', { name: 'Make a 360° video to look around in' })); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen.filter(r => r.method === 'POST')[0].body).toMatchObject({ pano: true })
-    expect(await screen.findByLabelText(/: look around$/)).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: /: 360° view/ })).toBeInTheDocument()
   })
 
   it('says how many views a higher resolution Google section will ask for, once the setting is on', async () => {

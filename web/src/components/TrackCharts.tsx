@@ -42,14 +42,14 @@ export default function TrackCharts({ series, clips, xMode, tz, cursor, onCursor
   }
   const pane = (k: number, title: string, label: string, body: React.ReactNode, yTicks: { y: number; label: string }[], readout: string | null) => (
     <svg ref={svgs[k]} viewBox={`0 0 ${W} ${H}`} className="w-full" role="group" aria-label={label}>
-      <text x={ML} y={9} className="fill-stone-500 text-[10px]">{title}</text>
-      {readout && <text x={W - MR} y={9} textAnchor="end" className="fill-stone-700 text-[10px] dark:fill-stone-300">{readout}</text>}
-      {stops.map(([a, b], i) => <rect key={i} data-stop="" x={sx(xs[a])} width={Math.max(sx(xs[b]) - sx(xs[a]), 1)} y={MT} height={PH} className="fill-stone-300/40 dark:fill-stone-700/40" />)}
-      {yTicks.map(t => <g key={t.label}><line x1={ML} x2={ML + PW} y1={t.y} y2={t.y} className="stroke-stone-200 dark:stroke-stone-800" /><text x={ML - 4} y={t.y + 3} textAnchor="end" className="fill-stone-500 text-[10px]">{t.label}</text></g>)}
-      {xTicks.map(t => <text key={t.label + t.x} x={t.x} y={H - 6} textAnchor="middle" className="fill-stone-500 text-[10px]">{t.label}</text>)}
+      <text x={ML} y={9} className="fill-muted-foreground text-[10px]">{title}</text>
+      {readout && <text x={W - MR} y={9} textAnchor="end" className="fill-muted-foreground text-[10px]">{readout}</text>}
+      {stops.map(([a, b], i) => <rect key={i} data-stop="" x={sx(xs[a])} width={Math.max(sx(xs[b]) - sx(xs[a]), 1)} y={MT} height={PH} className="fill-muted-foreground/40" />)}
+      {yTicks.map(t => <g key={t.label}><line x1={ML} x2={ML + PW} y1={t.y} y2={t.y} className="stroke-muted-foreground" /><text x={ML - 4} y={t.y + 3} textAnchor="end" className="fill-muted-foreground text-[10px]">{t.label}</text></g>)}
+      {xTicks.map(t => <text key={t.label + t.x} x={t.x} y={H - 6} textAnchor="middle" className="fill-muted-foreground text-[10px]">{t.label}</text>)}
       {body}
       {placed.map(marker)}
-      {ci != null && <line x1={xOfT(series.t[ci])} x2={xOfT(series.t[ci])} y1={MT} y2={MT + PH} className="stroke-amber-500" strokeWidth="1.2" data-cursor="" />}
+      {ci != null && <line x1={xOfT(series.t[ci])} x2={xOfT(series.t[ci])} y1={MT} y2={MT + PH} className="stroke-warning" strokeWidth="1.2" data-cursor="" />}
       <rect x={ML} y={MT} width={PW} height={PH} fill="transparent" onMouseMove={e => move(e, k)} onMouseLeave={() => onCursor(null)} />
     </svg>
   )
@@ -59,9 +59,9 @@ export default function TrackCharts({ series, clips, xMode, tz, cursor, onCursor
   const pacePaths = runs(xs.map(sx), series.pace.map(p => (p == null ? null : sp(Math.min(Math.max(p, plo), phi)))))
   return (
     <div className="space-y-1">
-      {pane(0, 'elevation (m)', 'Elevation chart', <><path d={band} className="fill-emerald-600/15" /><path d={altPath} fill="none" className="stroke-emerald-700 dark:stroke-emerald-400" strokeWidth="1.4" /></>,
+      {pane(0, 'elevation (m)', 'Elevation chart', <><path d={band} className="fill-primary/15" /><path d={altPath} fill="none" className="stroke-primary" strokeWidth="1.4" /></>,
         niceTicks(alt[0], alt[1], 4).map(v => ({ y: sa(v), label: String(Math.round(v)) })), ci != null && series.alt[ci] != null ? `${Math.round(series.alt[ci]!)} m` : null)}
-      {pane(1, 'pace (min/km, log scale, faster is higher)', 'Pace chart', pacePaths.map((r, i) => <path key={i} d={line(r)} fill="none" className="stroke-sky-700 dark:stroke-sky-400" strokeWidth="1.2" />),
+      {pane(1, 'pace (min/km, log scale, faster is higher)', 'Pace chart', pacePaths.map((r, i) => <path key={i} d={line(r)} fill="none" className="stroke-info" strokeWidth="1.2" />),
         paceTicks(plo, phi).map(v => ({ y: sp(v), label: fmtPace(v) })), ci != null ? (series.pace[ci] != null ? `${fmtPace(series.pace[ci])} /km` : 'stopped') : null)}
     </div>
   )
