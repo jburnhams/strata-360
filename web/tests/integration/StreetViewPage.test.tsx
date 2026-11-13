@@ -367,7 +367,7 @@ describe('the preview video of a section', () => {
     server.use(http.get('/api/streetview/video', ({ request }) => HttpResponse.json({ exists: made && new URL(request.url).searchParams.get('pano') === 'true', running: false, log: [], error: '', seconds: 12 })), http.post('/api/streetview/video', () => { made = true; return HttpResponse.json({ started: true }) }))
     const { user } = { user: (await import('@testing-library/user-event')).default.setup() }
     await user.click(await screen.findByRole('button', { name: 'Make a 360° video to look around in' })); await waitFor(() => expect(seen.filter(r => r.method === 'POST')).toHaveLength(1)); expect(seen.filter(r => r.method === 'POST')[0].body).toMatchObject({ pano: true })
-    expect(await screen.findByLabelText(/: look around$/)).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: /: 360° view/ })).toBeInTheDocument()
   })
 
   it('says how many views a higher resolution Google section will ask for, once the setting is on', async () => {
