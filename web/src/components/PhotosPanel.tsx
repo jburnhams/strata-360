@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { api, type Photo, type PhotoJob } from '../api'
 import PhotoCard from './PhotoCard'
-import { Button, Tooltip } from 'strata-react'
+import { Alert, Button, Tooltip } from 'strata-react'
 
 // The photos you took during the race: add them here (any common format; HEIC is converted). Each is placed in the race by the time stamp in the photo and on the map by its own GPS position, else by where the run was at that time;
 // when the two disagree it says so. They are listed under the clip or gap they fall in, and have an icon on the overview map.
@@ -32,7 +32,7 @@ export default function PhotosPanel({ folder, photos, tz, job, onChanged, onOpen
         </span>
       </div>
       {job?.running && <p data-job="" className="mb-2 type-caption text-muted-foreground">{job.log.at(-1) ?? 'starting…'}</p>}
-      {!job?.running && job?.error && <p role="alert" className="mb-2 type-body-sm text-danger">The analysis stopped: {job.error}</p>}
+      {!job?.running && job?.error && <Alert tone="danger" announce className="mb-2">The analysis stopped: {job.error}</Alert>}
       {errs.length > 0 && <ul role="alert" className="mb-2 space-y-0.5 type-body-sm text-danger">{errs.map((e, i) => <li key={i}>{e}</li>)}</ul>}
       {photos && photos.length === 0 && !busy && <p className="type-body-sm text-muted-foreground">No photos yet. Add the ones you took during the race (or drop them here): the time in each says where in the race it was taken.</p>}
       <div className="flex flex-wrap gap-4">{(photos ?? []).map(p => <PhotoCard key={p.id} folder={folder} p={p} tz={tz} onOpen={() => onOpen(p)} onRemove={() => remove(p)} onMotion={onChanged} />)}</div>

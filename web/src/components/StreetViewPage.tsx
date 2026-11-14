@@ -9,7 +9,7 @@ import { api } from '../api'
 import { AimVideoOverlay, useAimPath } from './PointCams'
 import type { EndMarkers, PointCam, Poi, StreetView, SvChoice, SvNearClip, SvNearItem, SvNearResult, SvProvider, SvSection, SvSectionInfo, SvStretch, SvVideo, TileStatus, TrackClip } from '../api'
 import { usePoll } from '../usePoll'
-import { Button, Checkbox, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, Checkbox, NativeSelect, Tooltip } from 'strata-react'
 
 const COLOUR: Record<SvProvider, string> = { mapillary: '#0891b2', panoramax: '#9333ea', google: '#dc2626' }
 const NAME: Record<SvProvider, string> = { mapillary: 'Mapillary', panoramax: 'Panoramax', google: 'Google' }
@@ -174,8 +174,8 @@ function Stages({ data, onRun, err }: { data: StreetView; onRun: (stages?: strin
       <div className="mt-2 flex flex-wrap items-center gap-3 type-body-sm">
         <Button variant="default" disabled={busy} onClick={() => onRun()}>Run all that is missing</Button>
         {busy && <span role="status" className="text-muted-foreground">working… {data.job.log.slice(-1)[0] ?? ''}</span>}
-        {!busy && data.job.error && <span role="alert" className="text-danger">{data.job.error}</span>}
-        {err && <span role="alert" className="text-danger">{err}</span>}
+        {!busy && data.job.error && <Alert tone="danger" announce>{data.job.error}</Alert>}
+        {err && <Alert tone="danger" announce>{err}</Alert>}
       </div>
     </div>
   )
@@ -409,7 +409,7 @@ function SectionVideo({ folder, section, pano = false, aimCam }: { folder: strin
           <ul aria-label="What it is doing" className="max-h-32 overflow-auto rounded-control bg-muted p-1.5 font-mono text-[11px] leading-snug text-muted-foreground">{(st?.log ?? []).map((l, i) => <li key={i}>{l}</li>)}{!st?.log?.length && <li>waiting for the job to report…</li>}</ul>
         </div>
       )}
-      {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="type-body-sm text-danger">{err || st?.error}</p>}
+      {(err || (st && !st.exists && !running && st.error)) && <Alert tone="danger" announce>{err || st?.error}</Alert>}
     </div>
   )
 }
@@ -428,14 +428,14 @@ function NearPanel({ folder, tz, probe, result, busy, log, error, onSearch, onPr
       {!result && !busy && <div className="flex flex-wrap items-center gap-3 type-body-sm"><Button variant="default" type="button" onClick={onSearch}>Search for street view here</Button><span className="type-caption text-muted-foreground">Nothing has been searched within 100 m of this point yet: asking Mapillary, Panoramax and Google takes a little while.</span></div>}
       {busy && <div role="status" className="type-body-sm text-muted-foreground"><div className="flex items-center gap-2"><span aria-hidden="true" className="inline-block h-3 w-3 animate-spin rounded-pill border-2 border-primary border-t-transparent" />Searching…</div><ul className="mt-1 space-y-0.5 font-mono type-caption text-muted-foreground" aria-label="Search log">{log.map((l, i) => <li key={i}>{l}</li>)}</ul></div>}
       {result && (Math.abs(result.lat - probe.lat) > 1e-6 || Math.abs(result.lon - probe.lon) > 1e-6) && <p className="mb-1 type-caption text-muted-foreground">From the search made at {result.lat.toFixed(5)}, {result.lon.toFixed(5)}, less than 100 m from here; distances are from there.</p>}
-      {error && <p role="alert" className="type-body-sm text-danger">{error}</p>}
+      {error && <Alert tone="danger" announce>{error}</Alert>}
       {big && (
         <div role="dialog" aria-label="Larger picture" onClick={() => setBig(undefined)} className="fixed inset-0 z-[2000] flex cursor-zoom-out items-center justify-center bg-black/80 p-4">
           <img src={api.svNearImage(folder, big.provider, big.id, 1024)} alt={`${NAME[big.provider]} ${big.id}, larger`} className="max-h-full max-w-full rounded-control" />
           <Button variant="ghost" size="sm" type="button" aria-label="Close the larger picture" className="absolute right-4 top-4" onClick={() => setBig(undefined)}>Close</Button>
         </div>
       )}
-      {promoErr && <p role="alert" className="type-body-sm text-danger">{promoErr}</p>}
+      {promoErr && <Alert tone="danger" announce>{promoErr}</Alert>}
       {result && (
         <div className="grid gap-3 lg:grid-cols-3">
           {PROVIDERS.map(p => {

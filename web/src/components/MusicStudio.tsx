@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type GeneratedPiece, type MusicScore, type ScorePlan, type ScoreSource, type StudioPreset, type StudioPreview, type StudioSettings } from '../api'
 import { usePoll } from '../usePoll'
-import { Button, Input, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, Input, NativeSelect, Tooltip } from 'strata-react'
 
 const LEVEL_NAMES = ['sparse', 'steady', 'driving', 'full'], LEVELS = [0.15, 0.4, 0.65, 0.9], PHRASE = 4
 const STEMS = ['drums', 'bass', 'other', 'vocals'] as const
@@ -48,7 +48,7 @@ export default function MusicStudio({ folder }: { folder: string }) {
           <Button disabled={busy} onClick={() => run(() => api.analyseMusic(folder))}>{busy ? 'analysing…' : grid ? 'Analyse again' : 'Analyse the track'}</Button>
         </div>
         {grid && grid.key.confidence < 0.3 && <p className="mt-1 type-caption text-warning">The key is a guess (low confidence).</p>}
-        {msg && <p role="alert" className="mt-2 type-body-sm text-warning">{msg}</p>}
+        {msg && <Alert tone="warning" announce className="mt-2">{msg}</Alert>}
         {grid && <BarEnergy energy={grid.energy} used={pv?.plan.bars} />}
       </section>
 
@@ -67,11 +67,11 @@ export default function MusicStudio({ folder }: { folder: string }) {
           <Button variant="default" disabled={st.building || busy || !!pvErr || !settings}
             onClick={() => run(async () => { if (!settings) return; const r = await api.buildMusic(folder, { ...settings, style, takes }); if (!r.started) throw new Error(r.reason || 'could not start') })}>{st.building ? 'Building…' : 'Build this music'}</Button>
           {st.building && <span className="type-caption text-muted-foreground">{st.log || 'starting (the first build separates the stems, which takes a few minutes)'}</span>}
-          {!st.building && st.error && <span role="alert" className="type-caption text-danger">The build failed: {st.error}</span>}
+          {!st.building && st.error && <Alert tone="danger" announce>The build failed: {st.error}</Alert>}
         </div>
       </section>}
 
-      {pvErr && <p role="alert" className="type-body-sm text-warning">{pvErr}</p>}
+      {pvErr && <Alert tone="warning" announce>{pvErr}</Alert>}
       {pv && <Preview pv={pv} setLevel={setLevel} pins={pins} setPin={(first, p) => { const n = { ...pins }; if (p) n[String(first)] = p; else delete n[String(first)]; setPins(n) }} generator={!!st.generator} style={style} />}
 
       {st.built && <Built folder={folder} score={st.built} v={`${st.built.length_s}-${st.built.worst_join}-${st.built.bars.join('').length}-${(st.built.generated ?? []).map(p => p.seed).join('')}`} takes={takes} setTakes={setTakes} />}

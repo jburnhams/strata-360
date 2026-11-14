@@ -1,6 +1,6 @@
 import { api, type Photo } from '../api'
 import PhotoMotion from './PhotoMotion'
-import { Button, Checkbox } from 'strata-react'
+import { Alert, Button, Checkbox } from 'strata-react'
 
 const when = (t: number, tz: string) => { try { return new Intl.DateTimeFormat('en-GB', { timeZone: tz, weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(t * 1000)).replace(',', '') } catch { return new Date(t * 1000).toISOString() } }
 const hms = (s: number) => `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -34,7 +34,7 @@ export default function PhotoCard({ folder, p, tz, onOpen, onRemove, onMotion }:
         {p.analysis && <Analysis folder={folder} id={p.id} a={p.analysis} />}
         <Checkbox label={`Use ${p.name} in the film`} checked={!!p.use} onCheckedChange={(checked: boolean) => api.setPhotoUse(folder, p.id, checked).then(() => onMotion?.())} title="An option for the film: the script writer may show this photo, and it is in the film list on the left (open it there to make it a must)" />
         <PhotoMotion folder={folder} p={p} onChanged={() => onMotion?.()} />
-        {p.flag && <div role="alert" className="text-warning">⚠ {p.flag}</div>}
+        {p.flag && <Alert tone="warning" announce>⚠ {p.flag}</Alert>}
         <div className="flex gap-3">
           {onOpen && p.use && <Button variant="link" onClick={onOpen}>Open in the film list</Button>}
           {onRemove && <Button variant="link" aria-label={`Remove ${p.name}`} onClick={onRemove}>Remove</Button>}
