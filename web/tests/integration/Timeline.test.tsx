@@ -186,8 +186,8 @@ describe('Timeline', () => {
     const playBtn = await findByRole('button', { name: /^▶ / })
     await user.click(playBtn)
 
-    await user.click(await findByRole('button', { name: 'close' }))                                    // the window's player opens over the plan, and closes again
-    expect(queryByRole('button', { name: 'close' })).not.toBeInTheDocument()
+    await user.click(await findByRole('button', { name: /close/i }))                                    // the window's player opens over the plan, and closes again
+    expect(queryByRole('button', { name: /close/i })).not.toBeInTheDocument()
   })
 
   it('handles overrides (changing transition)', async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type ItemStatus, type StateMatrix } from '../api'
-import { Button, Checkbox, Tooltip } from 'strata-react'
+import { Button, Checkbox, Dialog, Tooltip } from 'strata-react'
 
 const DOT: Record<string, string> = { ok: 'bg-primary', failed: 'bg-danger', active: 'bg-warning', stale: 'bg-warning', none: 'bg-neutral-4' }
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
@@ -25,10 +25,8 @@ export default function RedoDialog({ folder, stage, clip, onClose }: { folder: s
   const all = () => setSel(new Set(rows.flatMap(c => m.stages.map(s => key(c, s)))))
   const go = async () => { setBusy(true); await api.clear(folder, [...sel].map(k => { const [c, s] = k.split('|'); return { clip: c, stage: s } })); onClose() }
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-5xl overflow-auto rounded-overlay bg-card p-4 shadow-overlay" onClick={e => e.stopPropagation()}>
-        <h3 className="type-heading font-semibold">Reprocess{stage ? `: ${stage}` : ''}{clip ? ` · ${short(clip)}` : ''}</h3>
-        <p className="mb-3 type-body-sm text-muted-foreground">Ticked results are forgotten and processed again by the next worker. Files stay until they are replaced.</p>
+    <Dialog title={`Reprocess${stage ? `: ${stage}` : ''}${clip ? ` · ${short(clip)}` : ''}`} description="Ticked results are forgotten and processed again by the next worker. Files stay until they are replaced." open onOpenChange={o => { if (!o) onClose() }} size="lg"
+      actions={close => <><Button onClick={close}>Cancel</Button><Button variant="default" disabled={!sel.size || busy} onClick={go}>Clear {sel.size} item{sel.size === 1 ? '' : 's'} and reprocess</Button></>}>
         <div className="mb-3 flex flex-wrap items-center gap-3 type-body-sm">
           <Button variant="link" onClick={all}>select all</Button><Button variant="link" onClick={() => setSel(new Set())}>select none</Button>
           <Checkbox label="also the stages that depend on the one I tick" checked={cascade} onCheckedChange={(checked: boolean) => setCascade(checked)} />
@@ -48,11 +46,6 @@ export default function RedoDialog({ folder, stage, clip, onClose }: { folder: s
           </table>
         </div>
         <p className="mt-2 type-caption text-muted-foreground"><span className="mr-1 inline-block h-2 w-2 rounded-pill bg-primary" />done <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-warning" />running <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-warning" />out of date <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-danger" />failed <span className="mx-1 inline-block h-2 w-2 rounded-pill bg-neutral-4" />not done</p>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="default" disabled={!sel.size || busy} onClick={go}>Clear {sel.size} item{sel.size === 1 ? '' : 's'} and reprocess</Button>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }
