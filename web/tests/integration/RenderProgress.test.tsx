@@ -48,6 +48,11 @@ it('keeps the log open while busy and closed when finished', () => {
   const b = setup(<RenderProgress progress={makeRenderProgress()} busy={false} />); expect(within(b.container).getByRole('button', { name: /Log \(/ })).toHaveAttribute('aria-expanded', 'false')
 })
 
+it('opens the log when a render starts and closes it when the render ends, on the same mounted component', () => {
+  const p = makeRenderProgress(); const { container, rerender } = setup(<RenderProgress progress={p} busy={false} />); const log = () => within(container).getByRole('button', { name: /Log \(/ })
+  expect(log()).toHaveAttribute('aria-expanded', 'false'); rerender(<RenderProgress progress={p} busy />); expect(log()).toHaveAttribute('aria-expanded', 'true'); rerender(<RenderProgress progress={p} busy={false} />); expect(log()).toHaveAttribute('aria-expanded', 'false')
+})
+
 it('has no accessibility violations', async () => {
   const { container } = setup(<RenderProgress progress={makeRenderProgress()} busy={false} />)
   expect(await axe(container)).toHaveNoViolations()
