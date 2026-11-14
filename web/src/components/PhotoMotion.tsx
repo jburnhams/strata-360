@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type MotionPlan, type MotionSettings, type MotionStyle, type Photo } from '../api'
 import StepVideo from './FrameStep'
+import { Button, Input, NativeSelect, Tooltip } from 'strata-react'
 
 // The pan and zoom for a photo, so it can be used in the film like a shot: choose the move (or leave it to "auto", which looks at the shape of the photo and what is in it), how long it lasts and a shuffle for another take;
 // the start (green) and end (red) windows are drawn on the picture, and "Watch" plays the move. "Use this move" keeps the choice for the photo.
@@ -19,15 +20,15 @@ export default function PhotoMotion({ folder, p, onChanged }: { folder: string; 
   const [a, b] = plan?.windows ?? []
   return (
     <div data-motion={p.id} className="type-caption">
-      <button className="text-primary underline" aria-expanded={open} onClick={() => { setOpen(!open); setWatch(false) }}>Pan &amp; zoom{p.motion ? `: ${p.motion.style === 'auto' ? 'auto' : STYLES[p.motion.style]}, ${p.motion.seconds == null ? 'auto length' : `${p.motion.seconds} s`}` : ''}</button>
+      <Button variant="link" aria-expanded={open} onClick={() => { setOpen(!open); setWatch(false) }}>Pan &amp; zoom{p.motion ? `: ${p.motion.style === 'auto' ? 'auto' : STYLES[p.motion.style]}, ${p.motion.seconds == null ? 'auto length' : `${p.motion.seconds} s`}` : ''}</Button>
       {open && (
         <div className="mt-1 space-y-1.5 rounded-control border border-border p-2">
           <div className="flex flex-wrap items-center gap-2">
-            <select aria-label={`Move for ${p.name}`} value={s.style} onChange={e => { setWatch(false); setS({ ...s, style: e.target.value as MotionSettings['style'] }) }} className="rounded-control border border-border bg-transparent px-1 py-0.5">
+            <NativeSelect size="sm" aria-label={`Move for ${p.name}`} value={s.style} onChange={e => { setWatch(false); setS({ ...s, style: e.target.value as MotionSettings['style'] }) }}>
               <option value="auto">auto</option>{(Object.keys(STYLES) as MotionStyle[]).map(k => <option key={k} value={k}>{STYLES[k]}</option>)}
-            </select>
-            <input aria-label={`Seconds for ${p.name}`} type="number" min={2} max={8} step={0.5} placeholder="auto" title="Leave empty: 2 s for a plain picture up to 3 s for a busy one" value={secText} onChange={e => { setSecText(e.target.value); const v = Number(e.target.value); if (e.target.value.trim() === '') { setWatch(false); setS({ ...s, seconds: null }) } else if (Number.isFinite(v) && v >= 2 && v <= 8) { setWatch(false); setS({ ...s, seconds: v }) } }} className="w-16 rounded-control border border-border bg-transparent px-1 py-0.5" /> s{s.seconds == null && plan ? ` (auto: ${plan.duration_s} s)` : ''}
-            <button aria-label={`Another take for ${p.name}`} title="Another take: the same style aimed or ordered differently" className="rounded-control border border-border px-1.5 py-0.5" onClick={() => { setWatch(false); setS({ ...s, seed: s.seed + 1 }) }}>⟳</button>
+            </NativeSelect>
+            <Input size="sm" aria-label={`Seconds for ${p.name}`} type="number" min={2} max={8} step={0.5} placeholder="auto" title="Leave empty: 2 s for a plain picture up to 3 s for a busy one" value={secText} onChange={e => { setSecText(e.target.value); const v = Number(e.target.value); if (e.target.value.trim() === '') { setWatch(false); setS({ ...s, seconds: null }) } else if (Number.isFinite(v) && v >= 2 && v <= 8) { setWatch(false); setS({ ...s, seconds: v }) } }} /> s{s.seconds == null && plan ? ` (auto: ${plan.duration_s} s)` : ''}
+            <Tooltip label="Another take: the same style aimed or ordered differently"><Button size="sm" aria-label={`Another take for ${p.name}`} onClick={() => { setWatch(false); setS({ ...s, seed: s.seed + 1 }) }}>⟳</Button></Tooltip>
           </div>
           {err && <p role="alert" className="text-danger">{err}</p>}
           {plan && (
@@ -41,8 +42,8 @@ export default function PhotoMotion({ folder, p, onChanged }: { folder: string; 
               </div>
               <div className="text-muted-foreground">{STYLES[plan.style]} · from the green window to the red one · zoom up to {plan.zmax.toFixed(2)}x · aimed at {plan.subjects.slice(0, 2).map(x => x.label).join(', ')}</div>
               <div className="flex items-center gap-3">
-                <button className="text-primary underline" onClick={() => setWatch(!watch)}>{watch ? 'Hide' : 'Watch'}</button>
-                <button disabled={!changed} className="rounded-control bg-primary px-2 py-0.5 text-primary-foreground disabled:opacity-40" onClick={use}>Use this move</button>
+                <Button variant="link" onClick={() => setWatch(!watch)}>{watch ? 'Hide' : 'Watch'}</Button>
+                <Button variant="default" size="sm" disabled={!changed} onClick={use}>Use this move</Button>
               </div>
               {watch && <StepVideo aria-label={`Move for ${p.name}`} className="w-72 rounded-control" autoPlay loop src={api.photoMotionVideo(folder, p.id, { style: plan.style, seconds: plan.duration_s, seed: s.seed })} />}
             </>

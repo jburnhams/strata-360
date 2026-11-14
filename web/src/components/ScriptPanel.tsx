@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import { usePoll } from '../usePoll'
 import { PanelSkeleton } from './Skeleton'
+import { Button, Textarea } from 'strata-react'
 
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').slice(-9)
 
@@ -34,7 +35,7 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
           <p className="mb-2">The script is written by {label}. Paste its API key: it is stored on the server in <code>secrets.env</code> (gitignored, readable only by you) and is never shown again.
             Only text is sent: your notes, what you say on camera, and race facts (pace, climb, time of day, places) for each segment. No video, audio or pictures.</p>
           <div className="flex gap-2"><input type="password" autoComplete="off" value={key} onChange={e => setKey(e.target.value)} placeholder={provider === 'vertex' ? 'AQ.…' : provider === 'gemini' ? 'AIza…' : 'sk-ant-…'} className={`${input} flex-1`} />
-            <button disabled={!key} onClick={save} className="rounded-surface bg-primary px-3 py-1.5 type-body-sm text-primary-foreground disabled:opacity-40">Save key</button></div>
+            <Button variant="default" disabled={!key} onClick={save}>Save key</Button></div>
         </div>
       ) : (
         <div className="mb-3 flex flex-wrap items-end gap-3 type-body-sm">
@@ -42,8 +43,8 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
           <label className="flex-1">Style<input value={style} onChange={e => setStyle(e.target.value)} placeholder="e.g. dry, understated, British" className={`${input} ml-2 w-full max-w-sm`} /></label>
           <label>Writer<select value={provider} onChange={e => { setProv(e.target.value); setModel(undefined) }} className={`${input} ml-2`}>{Object.keys(st.providers).map(p => <option key={p} value={p}>{({ vertex: 'Gemini Pro (Cloud)', gemini: 'Gemini (AI Studio)', anthropic: 'Claude' } as Record<string, string>)[p] ?? p}</option>)}</select></label>
           <label>Model<select value={(model && models.includes(model)) ? model : (provider === st.llm.provider ? st.llm.model : info?.default)} onChange={e => setModel(e.target.value)} className={`${input} ml-2`}>{models.map(m => <option key={m}>{m}</option>)}</select></label>
-          <button disabled={st.running} onClick={go} className="rounded-surface bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50">{st.running ? 'Writing…' : d ? 'Write another' : 'Write the script'}</button>
-          <button className="type-caption underline" onClick={() => api.setKey('', provider)}>remove key</button>
+          <Button variant="default" disabled={st.running} onClick={go}>{st.running ? 'Writing…' : d ? 'Write another' : 'Write the script'}</Button>
+          <Button variant="link" size="sm" onClick={() => api.setKey('', provider)}>remove key</Button>
         </div>
       )}
       {err && <p className="mb-2 type-body-sm text-danger">{err}</p>}
@@ -56,8 +57,8 @@ export default function ScriptPanel({ folder, onOpen }: { folder: string; onOpen
             {d.lines.map(l => (
               <li key={l.seg} className="flex gap-3 py-1.5">
                 <span className="w-16 shrink-0 font-mono type-caption text-muted-foreground">{Math.floor(l.film_start_s / 60)}:{String(Math.floor(l.film_start_s % 60)).padStart(2, '0')}<br />{l.seconds}s</span>
-                <button className="w-20 shrink-0 text-left font-mono type-caption text-primary underline" onClick={() => onOpen(l.clip)}>{short(l.clip)}</button>
-                {(l.text || l.budget_words > 0) ? <textarea defaultValue={l.text} key={d.file + l.seg} rows={Math.max(1, Math.ceil((l.text || '').length / 70))} placeholder="(nothing said here: type a line to add one)" onBlur={e => saveLine(l.seg, l.text, e.target.value)} title="edit the line: it is saved when you click away, and the voice-over is made again" className="min-w-0 flex-1 resize-none rounded-control border border-transparent bg-transparent px-1 hover:border-border focus:border-primary focus:outline-none" /> : <span className={l.text ? '' : 'text-muted-foreground'}>{l.text || (l.says?.length ? <span className="italic text-info" title="you speak here">💬 “{l.says.join(' … ')}”</span> : l.budget_words === 0 ? '(you speak here)' : '—')}</span>}
+                <Button variant="link" size="sm" className="shrink-0 text-left font-mono" onClick={() => onOpen(l.clip)}>{short(l.clip)}</Button>
+                {(l.text || l.budget_words > 0) ? <Textarea defaultValue={l.text} key={d.file + l.seg} rows={Math.max(1, Math.ceil((l.text || '').length / 70))} placeholder="(nothing said here: type a line to add one)" onBlur={e => saveLine(l.seg, l.text, e.target.value)} title="edit the line: it is saved when you click away, and the voice-over is made again" className="min-w-0 flex-1 resize-none" /> : <span className={l.text ? '' : 'text-muted-foreground'}>{l.text || (l.says?.length ? <span className="italic text-info" title="you speak here">💬 “{l.says.join(' … ')}”</span> : l.budget_words === 0 ? '(you speak here)' : '—')}</span>}
                 {l.text && <span className={`ml-auto shrink-0 type-caption ${l.words > l.budget_words ? 'text-danger' : 'text-muted-foreground'}`}>{l.words}/{l.budget_words}</span>}
               </li>
             ))}

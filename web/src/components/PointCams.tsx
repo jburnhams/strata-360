@@ -5,6 +5,7 @@ import { aimAt, drawAim } from '../aimOverlay'
 import { addPointCams } from '../mapLayers'
 import StepVideo from './FrameStep'
 import { LengthField } from './ItemPage'
+import { Button, Input } from 'strata-react'
 
 // Point cameras: a virtual camera that keeps one place in frame while a clip or a street view section goes past it (src/strata360/edit/pointcam.py). You arm the button, click the map near the path, and the camera looks at that point from wherever the
 // path is, panning round and zooming with the distance. The page suggests the stretch (metres before and after the closest approach), lets you change it with the zoom and the height of the point, renders a preview on demand, and offers the shot to
@@ -58,7 +59,7 @@ function NumField({ label, value, min, max, step = 1, unit, onCommit }: { label:
   const commit = () => { if (draft === undefined) return; const v = Number(draft); const ok = draft.trim() !== '' && Number.isFinite(v); setDraft(undefined); if (ok && v !== value) onCommit(v) }
   return (
     <label className="flex items-center gap-2"><span className="w-44 shrink-0 text-muted-foreground">{label}</span>
-      <input aria-label={label} type="number" min={min} max={max} step={step} value={text} onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} className="w-20 rounded-control border border-border bg-transparent px-1 py-0.5" /> <span className="type-caption text-muted-foreground">{unit}</span></label>
+      <Input size="sm" aria-label={label} type="number" min={min} max={max} step={step} value={text} onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} /> <span className="type-caption text-muted-foreground">{unit}</span></label>
   )
 }
 
@@ -67,7 +68,7 @@ export function NameField({ cam, onChange }: { cam: PointCam; onChange: (name: s
   const [name, setName] = useState<string>()
   return (
     <label className="flex items-center gap-2 sm:col-span-2"><span className="w-44 shrink-0 text-muted-foreground">What it looks at</span>
-      <input aria-label="What it looks at" value={name ?? cam.name ?? ''} placeholder="e.g. the old mill" onChange={e => setName(e.target.value)} onBlur={() => { if (name !== undefined && name !== (cam.name ?? '')) onChange(name || null); setName(undefined) }} className="min-w-0 flex-1 rounded-control border border-border bg-transparent px-1 py-0.5" /></label>
+      <Input size="sm" aria-label="What it looks at" value={name ?? cam.name ?? ''} placeholder="e.g. the old mill" onChange={e => setName(e.target.value)} onBlur={() => { if (name !== undefined && name !== (cam.name ?? '')) onChange(name || null); setName(undefined) }} className="min-w-0 flex-1" /></label>
   )
 }
 
@@ -118,7 +119,7 @@ export function PointCamPreview({ folder, cam }: { folder: string; cam: PointCam
   return (
     <div aria-label={`Preview of ${cam.label}`} className="space-y-1">
       {st?.exists && <StepVideo preload="metadata" src={api.pointCamVideoUrl(folder, cam.id, s)} className="max-h-[360px] rounded-control" aria-label={`Preview video of ${cam.label}`} />}
-      {st && !st.exists && !running && cam.ok && <div className="flex flex-wrap items-center gap-2"><button type="button" onClick={make} className="rounded-control bg-success px-3 py-1 type-body-sm text-white">Render a preview</button><span className="type-caption text-muted-foreground">made in the background and kept; {cam.source.kind === 'clip' ? 'from the clip’s preview video' : 'from the section’s pictures (360 sections only)'}</span></div>}
+      {st && !st.exists && !running && cam.ok && <div className="flex flex-wrap items-center gap-2"><Button variant="ghost" type="button" onClick={make}>Render a preview</Button><span className="type-caption text-muted-foreground">made in the background and kept; {cam.source.kind === 'clip' ? 'from the clip’s preview video' : 'from the section’s pictures (360 sections only)'}</span></div>}
       {running && (
         <div role="status" aria-label="Making the video" className="max-w-xl space-y-1 type-body-sm text-muted-foreground">
           <div className="flex items-center justify-between type-caption"><span>{pr ? `${pr.phase}: ${pr.done} of ${pr.total}` : 'starting…'}</span><span>{pr ? `${pr.pct}%` : ''}</span></div>
@@ -137,8 +138,8 @@ function PointCamCard({ folder, cam, pc }: { folder: string; cam: PointCam; pc: 
   return (
     <section aria-label={`Point camera ${cam.label}`} data-picked={on ? '' : undefined} className={`space-y-2 rounded-surface border-2 p-3 ${on ? 'border-success' : 'border-border'}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <button type="button" onClick={() => pc.setPicked(cam.id)} className="text-left type-body-sm font-semibold">Point camera {cam.label}{cam.name ? ` · ${cam.name}` : ''} <span className="type-caption font-normal text-muted-foreground">at {cam.lat.toFixed(5)}, {cam.lon.toFixed(5)}</span></button>
-        <button type="button" onClick={() => { if (window.confirm(`Remove point camera ${cam.label}?`)) pc.remove(cam.id) }} className="type-caption text-danger underline">Remove</button>
+        <Button variant="ghost" type="button" onClick={() => pc.setPicked(cam.id)} className="text-left">Point camera {cam.label}{cam.name ? ` · ${cam.name}` : ''} <span className="type-caption font-normal text-muted-foreground">at {cam.lat.toFixed(5)}, {cam.lon.toFixed(5)}</span></Button>
+        <Button variant="link" size="sm" type="button" onClick={() => { if (window.confirm(`Remove point camera ${cam.label}?`)) pc.remove(cam.id) }}>Remove</Button>
       </div>
       <PointCamFacts cam={cam} />
       <div className="grid gap-2 type-body-sm sm:grid-cols-2">
@@ -177,7 +178,7 @@ export function CamAimPicker({ pc, picked, onPick, onGo, note }: { pc: PointCamS
       <span className="text-muted-foreground">Show on the video</span>
       <label className="flex items-center gap-1"><input type="radio" name="aim-cam" aria-label="No camera" checked={!cur} onChange={() => onPick(undefined)} /> none</label>
       {cams.map(c => <label key={c.id} className="flex items-center gap-1"><input type="radio" name="aim-cam" aria-label={`Show ${c.label}`} checked={picked === c.id} onChange={() => onPick(c.id)} /> {c.label}{c.name ? ` · ${c.name}` : ''} <span className="type-caption text-muted-foreground">{c.facts?.seconds} s</span></label>)}
-      {cur && onGo && <button type="button" onClick={() => onGo(cur)} className="rounded-control border border-success px-2 py-0.5 type-caption text-success">Go to {cur.label}</button>}
+      {cur && onGo && <Button size="sm" type="button" onClick={() => onGo(cur)}>Go to {cur.label}</Button>}
       {cur && <span className="type-caption text-muted-foreground">● where it aims · the outline is the edge of its frame, while the video is inside its stretch</span>}
       {note && <span role="note" className="type-caption text-warning">{note}</span>}
     </div>

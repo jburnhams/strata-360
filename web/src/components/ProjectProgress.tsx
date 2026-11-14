@@ -4,6 +4,7 @@ import { useState } from 'react'
 import RedoDialog from './RedoDialog'
 import { PanelSkeleton } from './Skeleton'
 import Health from './Health'
+import { Button, Tooltip } from 'strata-react'
 
 const NEEDS: Record<string, string> = { wearer_profile: 'choose which face is you', camera_clock: 'confirm the camera clock', race_track: 'add the race track (a Garmin .fit or a .gpx): the places stage is paused until then' }
 const LABEL: Record<string, string> = { new: 'New', processing: 'Processing…', needs_input: 'Waiting for you', complete: 'Complete' }
@@ -27,7 +28,7 @@ export default function ProjectProgress({ folder, onResults }: { folder: string;
         <div key={s.name} className="my-1.5 type-body-sm">
           <div className="grid grid-cols-[110px_1fr_130px] items-center gap-3">
             <span title={s.note}>{s.name}{s.waiting && <span className="ml-1 type-caption text-warning" title={`paused: waiting for ${s.waiting}`}>⏸</span>}</span><Bar pct={(100 * s.done) / Math.max(s.total, 1)} />
-            <span className="text-muted-foreground">{s.done}/{s.total}{mins(s.eta_s)} <button className="ml-1 underline" onClick={() => setRedo(s.name)}>redo</button></span>
+            <span className="text-muted-foreground">{s.done}/{s.total}{mins(s.eta_s)} <Button variant="link" className="ml-1" onClick={() => setRedo(s.name)}>redo</Button></span>
           </div>
           <Health h={s.retry} className="ml-[122px]" />
           {!!s.running?.length && (
@@ -35,7 +36,7 @@ export default function ProjectProgress({ folder, onResults }: { folder: string;
               {s.running.map(r => (
                 <span key={r.pid} className="inline-flex items-center gap-1 rounded-pill bg-warning-subtle px-2 py-0.5 type-caption text-warning">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-pill bg-warning" />clip {r.clip.replace(/_D$/, '').slice(-4)}
-                  <button title={`stop this worker (pid ${r.pid})`} className="ml-1 font-bold" onClick={() => api.stop(folder, r.pid)}>×</button>
+                  <Tooltip label={`stop this worker (pid ${r.pid})`}><Button variant="ghost" className="ml-1" aria-label={`stop this worker (pid ${r.pid})`} onClick={() => api.stop(folder, r.pid)}>×</Button></Tooltip>
                 </span>
               ))}
             </div>
@@ -50,8 +51,8 @@ export default function ProjectProgress({ folder, onResults }: { folder: string;
       )}
       {!!p.needs?.length && <p className="mt-3 type-body-sm text-muted-foreground">To do: {p.needs.map(n => NEEDS[n] ?? n).join(', ')}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2 type-body-sm">
-        {p.state === 'complete' && <button className="rounded-surface bg-primary px-4 py-2 text-primary-foreground" onClick={onResults}>Go to results and export</button>}
-        {p.state !== 'complete' && !p.workers && (p.runnable ?? 0) > 0 && <button className="rounded-surface bg-primary px-4 py-2 text-primary-foreground" onClick={() => api.run(folder)}>Start processing</button>}
+        {p.state === 'complete' && <Button variant="default" onClick={onResults}>Go to results and export</Button>}
+        {p.state !== 'complete' && !p.workers && (p.runnable ?? 0) > 0 && <Button variant="default" onClick={() => api.run(folder)}>Start processing</Button>}
         {!!p.workers && (
           <span className="text-muted-foreground">
             {p.workers} worker{p.workers === 1 ? '' : 's'} running at the lowest priority
@@ -59,10 +60,10 @@ export default function ProjectProgress({ folder, onResults }: { folder: string;
           </span>
         )}
         {!!p.workers && !!p.can_add_worker && (p.runnable ?? 0) > 0 && (
-          <button className="rounded-surface border border-primary px-3 py-1.5 text-primary" onClick={() => api.run(folder)}>Add a worker ({p.runnable} items waiting)</button>
+          <Button onClick={() => api.run(folder)}>Add a worker ({p.runnable} items waiting)</Button>
         )}
-        {!!p.workers && <button className="rounded-surface border border-border px-3 py-1.5" onClick={() => api.stop(folder)}>Stop all</button>}
-        <button className="ml-auto underline" onClick={() => setRedo(null)}>Reprocess…</button>
+        {!!p.workers && <Button onClick={() => api.stop(folder)}>Stop all</Button>}
+        <Button variant="link" className="ml-auto" onClick={() => setRedo(null)}>Reprocess…</Button>
       </div>
       {redo !== undefined && <RedoDialog folder={folder} stage={redo ?? undefined} onClose={() => setRedo(undefined)} />}
       <pre className="mt-3 max-h-44 overflow-auto rounded-surface border border-border bg-card p-2 type-caption whitespace-pre-wrap">{(log?.lines ?? []).join('\n')}</pre>

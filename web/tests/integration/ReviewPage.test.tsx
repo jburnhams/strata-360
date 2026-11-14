@@ -198,6 +198,6 @@ describe('ReviewPage', () => {
 
   it('opens the clip at the phrase', async () => {
     const onOpen = vi.fn(); const { user } = setup(<ReviewPage folder="f" onOpen={onOpen} />)
-    await user.click(await screen.findByTitle('open the clip at this moment')); expect(onOpen).toHaveBeenCalledWith('CAM_20260101120000_0001_D', 3.2)
+    await user.click(await screen.findByRole('button', { name: /01\/01 12:00 · 0001 · 0:03/ })); expect(onOpen).toHaveBeenCalledWith('CAM_20260101120000_0001_D', 3.2)
   })
 })

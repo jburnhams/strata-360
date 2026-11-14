@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type MusicAnalysis } from '../api'
 import { usePoll } from '../usePoll'
 import LyricsPanel from './LyricsPanel'
+import { Button } from 'strata-react'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
@@ -23,7 +24,7 @@ export default function MusicPanel({ folder, onChanged }: { folder: string; onCh
         {st?.file ? <>
           <span className="max-w-[24rem] truncate type-body-sm" title={st.name ?? st.file}>{st.name ?? st.file}</span>
           {picker('change', 'type-caption text-primary underline')}
-          <button className="type-caption underline" onClick={async () => { await api.removeMusic(folder); setVer(v => v + 1); onChanged?.() }}>remove</button>
+          <Button variant="link" size="sm" onClick={async () => { await api.removeMusic(folder); setVer(v => v + 1); onChanged?.() }}>remove</Button>
         </> : st && picker('Upload a track', 'rounded-surface border border-border px-3 py-1.5 type-body-sm')}
         {a && <span className="type-body-sm text-muted-foreground">{a.bpm} bpm · first bar at {a.offset_s.toFixed(1)} s · {Math.round(a.duration_s)} s long{a.confidence < 0.4 && <span className="text-warning"> · the beat is uncertain (tempo may change in this track)</span>}</span>}
       </div>

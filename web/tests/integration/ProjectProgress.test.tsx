@@ -100,7 +100,7 @@ describe('ProjectProgress', () => {
     }))
     const seen = recordRequests('/api/stop')
     const { user } = mount()
-    await user.click(await screen.findByTitle('stop this worker (pid 123)'))
+    await user.click(await screen.findByRole('button', { name: 'stop this worker (pid 123)' }))
     expect(seen.find(r => r.method === 'POST')?.body).toMatchObject({ folder: '/data', pid: 123 })
   })
 

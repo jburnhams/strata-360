@@ -7,6 +7,7 @@ import StopsTable from './StopsTable'
 import TrackCharts, { type XMode } from './TrackCharts'
 import ClipCard from './ClipCard'
 import GapsPanel from './GapsPanel'
+import { Button, NativeSelect, Tooltip } from 'strata-react'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
 // Hover a marker for the clip's card, click it to open the clip.
@@ -36,7 +37,7 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, t
         {pick}
         <p className="mb-2">{t.error ? `Could not read the track: ${t.error}` : 'No race track yet.'}</p>
         <p className="mb-3 type-body-sm text-muted-foreground">Add the Garmin .fit or a .gpx file. It gives the map, pace and climb for every clip, and checks the camera clock.</p>
-        <button disabled={busy} className="rounded-surface bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Choose a file'}</button>
+        <Button variant="default" disabled={busy} onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Choose a file'}</Button>
         {err && <p className="mt-2 type-body-sm text-danger">{err}</p>}
       </div>
     )
@@ -50,7 +51,7 @@ export default function TrackPanel({ folder, onOpenClip = () => {}, onOpenGap, t
       {pick}
       <div className="mb-3 flex items-center justify-between">
         <div><b>Race track</b> <span className="type-body-sm text-muted-foreground">{t.file} · {t.start_utc?.slice(0, 10)} → {t.end_utc?.slice(0, 10)} UTC</span></div>
-        <button disabled={busy} className="type-body-sm text-primary underline" onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Replace'}</button>
+        <Button variant="link" disabled={busy} onClick={() => input.current?.click()}>{busy ? 'Reading…' : 'Replace'}</Button>
       </div>
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-9">
         {stat('Distance', t.distance_km, 'km')}{stat('Duration', t.duration_h, 'h')}{stat('Moving', t.moving_h, 'h')}
@@ -118,7 +119,7 @@ function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, s
         {tiles?.ok && tiles.credit && <span>{tiles.credit}</span>}
         <span>{clips.filter(c => c.covered).length} clips on the track{off.length ? ` · not on the track: ${off.map(c => c.label).join(', ')}` : ''}</span>
         <span className="ml-auto flex items-center gap-1">horizontal axis
-          <select aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)} className="rounded-control border border-border bg-transparent px-1 py-0.5"><option value="time">time</option><option value="km">distance</option></select></span>
+          <NativeSelect size="sm" aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)}><option value="time">time</option><option value="km">distance</option></NativeSelect></span>
       </div>
       <TrackCharts series={series} clips={clips} xMode={xMode} tz={tz} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} />
       <StopsTable pois={listing?.pois ?? []} tz={tz} onOpenGap={onOpenGap} onToggle={onStop} />
@@ -168,7 +169,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
       <input ref={input} type="file" accept=".fit,.gpx" multiple hidden aria-label="Add track files" onChange={e => { add(e.target.files); e.target.value = '' }} />
       <div className="flex items-center justify-between">
         <b>Tracks</b>
-        <button disabled={busy} className="text-primary underline disabled:opacity-50" onClick={() => input.current?.click()}>{busy ? 'Working…' : 'Add tracks'}</button>
+        <Button variant="link" disabled={busy} onClick={() => input.current?.click()}>{busy ? 'Working…' : 'Add tracks'}</Button>
       </div>
       <p className="mb-2 type-caption text-muted-foreground">Mark each file a run (the recording; several runs are merged into the race track) or a route (a planned or official course, shown on the map for planning only).</p>
       {rows.length === 0 && <p className="text-muted-foreground">No tracks listed.</p>}
@@ -177,19 +178,19 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
           <li data-highlighted={hot === x.id || pinned.includes(x.id) ? '' : undefined} onMouseEnter={() => setHot(x.id)} onMouseLeave={() => setHot(null)}
             className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-control px-1 ${hot === x.id || pinned.includes(x.id) ? 'bg-warning-subtle font-semibold text-black ring-1 ring-black' : ''}`}>
             {x.kind === 'route' && <span className="w-6 text-center type-caption font-semibold text-info" title={x.order ? `section ${x.order} of the race` : undefined}>{x.order ?? ''}</span>}
-            <button type="button" aria-pressed={pinned.includes(x.id)} aria-label={`Highlight ${x.name} on the map`} className="min-w-0 flex-1 cursor-pointer truncate text-left" title={`${x.name} (click to keep it highlighted on the map)`} onClick={() => toggle(x.id)}>{x.name}</button>
+            <Tooltip label={`${x.name} (click to keep it highlighted on the map)`}><Button variant="ghost" type="button" aria-pressed={pinned.includes(x.id)} aria-label={`Highlight ${x.name} on the map`} className="min-w-0 flex-1 truncate text-left" onClick={() => toggle(x.id)}>{x.name}</Button></Tooltip>
             {x.error ? <span className="text-danger">{x.error}</span> : <span className="type-caption text-muted-foreground">{x.distance_km} km{x.start_utc ? ` · ${x.start_utc.slice(0, 10)}` : ''}{x.pois ? ` · ${x.pois} POI` : ''}</span>}
             {x.time_s != null && <span className="type-body-sm tabular-nums" title="time on this route, from leaving the previous checkpoint to arriving at the next (the checkpoints' own time is not in it)">{hms(x.time_s)}{x.ran_km != null ? <span className="type-caption text-muted-foreground"> · {x.ran_km} km run{x.pace_s_km ? ` · ${pace(x.pace_s_km)} /km` : ''}{x.ascent_m != null ? ` · ↑${x.ascent_m} m ↓${x.descent_m} m` : ''}</span> : null}</span>}
-            <select aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))} className="rounded-control border border-border bg-transparent px-1 py-0.5">
+            <NativeSelect size="sm" aria-label={`Kind of ${x.name}`} value={x.kind} disabled={busy} onChange={e => act(() => api.setTrackKind(folder, x.id, e.target.value as TrackKind))}>
               <option value="run">run</option><option value="route">route</option>
-            </select>
-            <button disabled={busy} aria-label={`Remove ${x.name}`} className="text-muted-foreground hover:text-danger disabled:opacity-50" onClick={() => act(() => api.removeTrack(folder, x.id))}>Remove</button>
+            </NativeSelect>
+            <Button variant="ghost" disabled={busy} aria-label={`Remove ${x.name}`} onClick={() => act(() => api.removeTrack(folder, x.id))}>Remove</Button>
           </li>
           {x.order != null && listing?.timing?.checkpoints[String(x.order)] != null && (
             <li data-checkpoint-row="" data-highlighted={hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? '' : undefined} onMouseEnter={() => setHot(`cp:${x.order}`)} onMouseLeave={() => setHot(null)}
               className={`flex items-center gap-x-3 rounded-control px-1 type-caption ${hot === `cp:${x.order}` || pinned.includes(`cp:${x.order}`) ? 'bg-warning-subtle font-semibold text-black ring-1 ring-black' : 'text-info'}`}>
               <span className="w-6 text-center"><span className="inline-block h-4 min-w-4 rounded-pill bg-info px-1 text-center text-[10px] font-bold leading-4 text-white">{x.order}</span></span>
-              <button type="button" aria-pressed={pinned.includes(`cp:${x.order}`)} aria-label={`Highlight checkpoint ${x.order} on the map`} className="flex-1 cursor-pointer text-left" onClick={() => toggle(`cp:${x.order}`)}>Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-muted-foreground" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</button><CutoffBox label={`checkpoint ${x.order}`} cutoff={listing.cutoffs?.[`cp:${x.order}`]} save={setCut(`cp:${x.order}`)} /><span className="type-body-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
+              <Button variant="ghost" type="button" aria-pressed={pinned.includes(`cp:${x.order}`)} aria-label={`Highlight checkpoint ${x.order} on the map`} className="flex-1 text-left" onClick={() => toggle(`cp:${x.order}`)}>Checkpoint {x.order}{listing.timing.arrivals?.[String(x.order)] && <span className="ml-3 text-muted-foreground" title="where the run was when it arrived: distance and time since the start, and when">km {listing.timing.arrivals[String(x.order)].km} · {hms(listing.timing.arrivals[String(x.order)].elapsed_s)} since start · arrived {stamp(listing.timing.arrivals[String(x.order)].t, tz)}</span>}</Button><CutoffBox label={`checkpoint ${x.order}`} cutoff={listing.cutoffs?.[`cp:${x.order}`]} save={setCut(`cp:${x.order}`)} /><span className="type-body-sm tabular-nums">{hms(listing.timing.checkpoints[String(x.order)])}</span>
             </li>
           )}
           {tm && x.kind === 'run' && ix === lastRun && (
@@ -209,9 +210,9 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
           <li data-finish-row="" data-highlighted={hot === 'finish' || pinned.includes('finish') ? '' : undefined} onMouseEnter={() => setHot('finish')} onMouseLeave={() => setHot(null)}
             className={`flex items-center gap-x-3 rounded-control px-1 type-caption ${hot === 'finish' || pinned.includes('finish') ? 'bg-warning-subtle font-semibold text-black ring-1 ring-black' : 'text-foreground'}`}>
             <span className="w-6 text-center"><span className="inline-block h-4 w-4 rounded-pill align-middle" style={{ background: 'conic-gradient(#000 25%, #fff 0 50%, #000 0 75%, #fff 0)', border: '1.5px solid #78716c' }} /></span>
-            <button type="button" aria-pressed={pinned.includes('finish')} aria-label="Highlight the finish on the map" className="flex-1 cursor-pointer text-left" onClick={() => toggle('finish')}>
+            <Button variant="ghost" type="button" aria-pressed={pinned.includes('finish')} aria-label="Highlight the finish on the map" className="flex-1 text-left" onClick={() => toggle('finish')}>
               Finish{listing.finish.reached ? '' : ' (not reached)'}
-              <span className="ml-3 opacity-80" title="the finish line of the routes">{listing.finish.reached && listing.finish.km != null ? `km ${listing.finish.km} · ${hms(listing.finish.elapsed_s ?? 0)} since start · arrived ${stamp(listing.finish.t ?? 0, tz)} · ` : ''}routes {(listing.finish.route_m / 1000).toFixed(1)} km{listing.finish.reached ? '' : `, covered ${(listing.finish.covered_m / 1000).toFixed(1)} km`}</span></button>
+              <span className="ml-3 opacity-80" title="the finish line of the routes">{listing.finish.reached && listing.finish.km != null ? `km ${listing.finish.km} · ${hms(listing.finish.elapsed_s ?? 0)} since start · arrived ${stamp(listing.finish.t ?? 0, tz)} · ` : ''}routes {(listing.finish.route_m / 1000).toFixed(1)} km{listing.finish.reached ? '' : `, covered ${(listing.finish.covered_m / 1000).toFixed(1)} km`}</span></Button>
             <CutoffBox label="the finish" cutoff={listing.cutoffs?.finish} save={setCut('finish')} />
             {listing.finish.time_s != null && <span className="type-body-sm tabular-nums" title="time at the finish, to the end of the run">{hms(listing.finish.time_s)}</span>}
           </li>

@@ -104,7 +104,7 @@ describe('VoiceoverPanel', () => {
     const reqs = recordRequests('/api/voiceover/record')
     const { user } = setup(<VoiceoverPanel folder="/data" />)
 
-    const delBtn = await screen.findByTitle('Remove your recording')
+    const delBtn = await screen.findByRole('button', { name: 'Remove your recording' })
     await user.click(delBtn)
 
     await waitFor(() => expect(reqs).toHaveLength(1))

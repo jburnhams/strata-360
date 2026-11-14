@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type UIEvent } from 're
 import { api, type StillActive, type StillMeta } from '../api'
 import { dur } from './RenderProgress'
 import { clock, enlargeLabel, enlargeShort, sizeLabel } from './stillModes'
+import { Button, Checkbox, NativeSelect } from 'strata-react'
 
 const when = (m: StillMeta) => new Date(m.rendered ?? m.modified * 1000).toLocaleString()
 const mb = (b: number) => `${(b / 1e6).toFixed(1)} MB`
@@ -24,8 +25,8 @@ export default function StillGallery({ folder, stills, active, loading }: { fold
     <section className="mt-3" aria-label="Still gallery">
       <div className="mb-2 flex flex-wrap items-center gap-3 type-body-sm">
         <h5 className="font-semibold">All stills ({stills.length})</h5>
-        <label>Order <select className="rounded-control border border-border bg-card px-1 py-0.5" value={order} onChange={e => setOrder(e.target.value as 'newest' | 'film')}><option value="newest">newest first</option><option value="film">by film time</option></select></label>
-        {stills.some(s => !s.current) && <label><input type="checkbox" checked={onlyCurrent} onChange={e => setOnlyCurrent(e.target.checked)} /> Only the current plan</label>}
+        <label>Order <NativeSelect size="sm" value={order} onChange={e => setOrder(e.target.value as 'newest' | 'film')}><option value="newest">newest first</option><option value="film">by film time</option></NativeSelect></label>
+        {stills.some(s => !s.current) && <Checkbox label="Only the current plan" checked={onlyCurrent} onCheckedChange={(checked: boolean) => setOnlyCurrent(checked)} />}
         {picked.length > 0 && <button className={chip} onClick={() => setPicked([])}>clear comparison ({picked.length})</button>}
       </div>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -38,9 +39,9 @@ export default function StillGallery({ folder, stills, active, loading }: { fold
         ))}
         {shown.map(s => (
           <li key={s.name} className="rounded-surface border border-border p-2 type-caption">
-            <button className="block w-full" onClick={() => setOpen(s.name)} aria-label={`Open the still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`}, ${sizeLabel(s.size)}, ${enlargeShort(s.upscale) || 'made before details were kept'}`}>
+            <Button variant="ghost" className="block w-full" onClick={() => setOpen(s.name)} aria-label={`Open the still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`}, ${sizeLabel(s.size)}, ${enlargeShort(s.upscale) || 'made before details were kept'}`}>
               <img className="aspect-video w-full rounded-control bg-black object-cover" loading="lazy" src={api.filmStillThumbUrl(folder, s.name)} alt="" />
-            </button>
+            </Button>
             <p className="mt-1 font-medium">{s.t != null ? clock(s.t) : `frame ${s.frame}`}{s.size ? ` · ${sizeLabel(s.size)}` : ''}</p>
             <p className="text-muted-foreground">{s.legacy ? 'made before details were kept' : enlargeShort(s.upscale)}</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -95,7 +96,7 @@ function Viewer({ folder, s, onClose, onStep, many }: { folder: string; s: Still
       <div className="mb-2 flex items-center gap-2 type-body-sm">
         <span className="font-semibold">{s.t != null ? clock(s.t) : `frame ${s.frame}`} · {sizeLabel(s.size)} · {enlargeShort(s.upscale) || 'made before details were kept'}</span>
         <span className="ml-auto flex gap-2">
-          {many && <><button className="rounded-control border border-input px-2 py-0.5" onClick={() => onStep(-1)} aria-label="Previous still">◂</button><button className="rounded-control border border-input px-2 py-0.5" onClick={() => onStep(1)} aria-label="Next still">▸</button></>}
+          {many && <><Button size="sm" onClick={() => onStep(-1)} aria-label="Previous still">◂</Button><Button size="sm" onClick={() => onStep(1)} aria-label="Next still">▸</Button></>}
           <a className="rounded-control border border-input px-2 py-0.5" href={api.filmStillUrl(folder, s.name)} download={s.name}>download PNG</a>
           <button ref={close} className="rounded-control border border-input px-2 py-0.5" onClick={onClose}>close</button>
         </span>

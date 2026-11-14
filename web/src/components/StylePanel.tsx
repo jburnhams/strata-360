@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type PaletteSchemes, type TypoFont, type TypoScheme, type Typography } from '../api'
 import { PanelSkeleton } from './Skeleton'
+import { Button } from 'strata-react'
 
 // The look of the film's titles: its colour schemes (a few, shared by the clips) and its typography (one font for each role), both chosen from the film's vibes. The script writer proposes the vibes with its draft; your own choice replaces them.
 const ROLES: { id: string; name: string; hint: string; sample: string }[] = [
@@ -51,7 +52,7 @@ export default function StylePanel({ folder }: { folder: string }) {
         return <li key={v}><button aria-pressed={on} disabled={busy} onClick={() => toggle(v)} title={scheme.vibes[v] ? `weight ${scheme.vibes[v].toFixed(2)}` : undefined}
           className={`rounded-pill border px-3 py-1 type-caption ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-border hover:bg-muted'} disabled:opacity-50`}>{v}</button></li>
       })}</ul>
-      {scheme.basis === 'user' && <button disabled={busy} onClick={() => void apply({ style: [] })} className="mt-2 type-caption text-primary underline">{script_vibes.length ? `Use the script writer's choice again (${script_vibes.join(', ')})` : 'Clear my choice'}</button>}
+      {scheme.basis === 'user' && <Button variant="link" size="sm" disabled={busy} onClick={() => void apply({ style: [] })} className="mt-2">{script_vibes.length ? `Use the script writer's choice again (${script_vibes.join(', ')})` : 'Clear my choice'}</Button>}
 
       <h3 className="mt-4 type-body-sm font-semibold">Typography</h3>
       <ul className="mt-2 grid gap-3 md:grid-cols-2" aria-label="Fonts by role">{ROLES.map(r => {
@@ -63,8 +64,8 @@ export default function StylePanel({ folder }: { folder: string }) {
             <div className="mt-2 type-body-sm"><b>{f?.family ?? fid}</b> <span className="type-caption text-muted-foreground">{mine ? 'chosen by you' : 'chosen for the vibes'}</span></div>
             <p className="type-caption text-muted-foreground">{scheme.why[r.id]}</p>
             <div className="mt-2 flex gap-3 type-caption">
-              <button onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id} className="text-primary underline">{open === r.id ? 'Close' : 'Change font'}</button>
-              {scheme.overrides[r.id] && <button disabled={busy} onClick={() => void apply({ fonts: { [r.id]: null } })} className="text-primary underline">Back to automatic</button>}
+              <Button variant="link" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}>{open === r.id ? 'Close' : 'Change font'}</Button>
+              {scheme.overrides[r.id] && <Button variant="link" disabled={busy} onClick={() => void apply({ fonts: { [r.id]: null } })}>Back to automatic</Button>}
             </div>
             {open === r.id && <div className="mt-2" role="group" aria-label={`Fonts for ${r.name}`}>
               {[true, false].map(fit => {

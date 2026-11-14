@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { SeekBar, TimeReadout, Transport, useMediaElement } from 'strata-react'
+import { Button, SeekBar, TimeReadout, Transport, useMediaElement } from 'strata-react'
 import { PanoramaViewer, type PanoramaOverlayApi, type PanoramaView } from 'strata-react/panorama'
 import { aimAt, drawAim } from '../aimOverlay'
 import type { AimPath } from '../api'
@@ -34,7 +34,7 @@ export default function PanoPlayer({ src, label, maxPitch = 83, fps, aimPath }: 
       <Transport playing={m.playing} onPlayPause={m.toggle} onStepBack={() => stepFrame(video.current, -1, frameS())} onStepForward={() => stepFrame(video.current, 1, frameS())} className="mt-1">
         <SeekBar time={m.time} duration={m.duration} onSeek={m.seek} buffered={m.buffered} />
         <TimeReadout time={m.time} duration={m.duration} />
-        <button type="button" onClick={() => setView(HOME)} className="type-caption underline">Look along the road</button>
+        <Button variant="link" size="sm" type="button" onClick={() => setView(HOME)}>Look along the road</Button>
       </Transport>
     </div>
   )

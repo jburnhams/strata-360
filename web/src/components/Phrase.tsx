@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { api, type WordT } from '../api'
 import { STATE_CLASS, STATE_NAME, baseLine, wordState } from '../marks'
+import { Button } from 'strata-react'
 
 export type Mode = 'translated' | 'original' | 'both'
 const LANG: Record<string, string> = { en: 'English', fr: 'French', nl: 'Dutch', de: 'German', es: 'Spanish', it: 'Italian' }
@@ -30,11 +31,11 @@ function Words({ ctx }: { ctx: WordCtx }) {
             <input ref={input} defaultValue={w.w} autoFocus onKeyDown={e => { if (e.key === 'Enter') void save(i, e.currentTarget.value); if (e.key === 'Escape') setOpen(undefined) }} className="rounded-control border border-border bg-transparent px-1.5 py-1 type-body-sm" />
             <span className="text-muted-foreground">{w.e ? `original: “${w.e.orig}”` : 'empty removes the word'} · Enter saves, Esc cancels</span>
             <span className="flex flex-wrap gap-1">
-              <button className="rounded-control bg-primary px-2 py-0.5 text-primary-foreground" onClick={() => void save(i, input.current?.value ?? w.w)}>save</button>
-              {w.e && <button className="rounded-control border border-border px-2 py-0.5" onClick={() => void save(i, w.e!.orig)}>use the original</button>}
-              {w.e?.src === 'user' && w.e.gemini_text != null && <button className="rounded-control border border-border px-2 py-0.5" onClick={() => void save(i, null)}>use Gemini’s “{w.e.gemini_text || '∅'}”</button>}
-              {w.e?.src === 'user' && w.e.gemini_text == null && <button className="rounded-control border border-border px-2 py-0.5" onClick={() => void save(i, null)}>forget my edit</button>}
-              <button className="rounded-control border border-border px-2 py-0.5" onClick={() => setOpen(undefined)}>cancel</button>
+              <Button variant="default" size="sm" onClick={() => void save(i, input.current?.value ?? w.w)}>save</Button>
+              {w.e && <Button size="sm" onClick={() => void save(i, w.e!.orig)}>use the original</Button>}
+              {w.e?.src === 'user' && w.e.gemini_text != null && <Button size="sm" onClick={() => void save(i, null)}>use Gemini’s “{w.e.gemini_text || '∅'}”</Button>}
+              {w.e?.src === 'user' && w.e.gemini_text == null && <Button size="sm" onClick={() => void save(i, null)}>forget my edit</Button>}
+              <Button size="sm" onClick={() => setOpen(undefined)}>cancel</Button>
             </span>
           </span>)}
       </span>{' '}

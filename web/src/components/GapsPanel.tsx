@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { api, type Gap, type GapClip, type GapKind } from '../api'
 import { usePoll } from '../usePoll'
 import StepVideo from './FrameStep'
+import { Button, Input, NativeSelect, Tooltip } from 'strata-react'
 
 // The stretches of the race with no camera clip, and the generated clip that can fill each one: choose the kind (the animated 2D map, or a 3D terrain flyover in 4K) and how long it is in the film, generate it
 // (the camera follows the runner at a speed-up with the race overlay on top), watch it, and use it in the script as a clip labelled with the gap's name (G01 ...).
@@ -37,22 +38,22 @@ export default function GapsPanel({ folder, onOpen }: { folder: string; onOpen?:
           return (
             <li key={g.id} className="p-2">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                {onOpen ? <button className="w-10 text-left font-bold text-primary underline" title="Open the page for this gap" onClick={() => onOpen(g.id)}>{g.id}</button> : <b className="w-10">{g.id}</b>}
+                {onOpen ? <Tooltip label="Open the page for this gap"><Button variant="link" className="text-left" onClick={() => onOpen(g.id)}>{g.id}</Button></Tooltip> : <b className="w-10">{g.id}</b>}
                 <span>{g.local_start} → {g.local_end}</span>
                 <span className="text-muted-foreground">{hours(g)} · km {g.km_start}–{g.km_end} · +{g.ascent_m} m{g.daylight ? ` · ${g.daylight}` : ''}</span>
                 <span className="ml-auto flex items-center gap-2">
                   {c && <span className={`type-caption ${c.error && !c.rendering ? 'text-danger' : 'text-muted-foreground'}`} aria-label={`${g.id} state`}>{state(c)}</span>}
                   <label className="flex items-center gap-1 type-caption text-muted-foreground">seconds
-                    <input aria-label={`Seconds for ${g.id}`} type="number" min={2} step={1} className="w-16 rounded-control border border-border bg-transparent px-1 py-0.5"
+                    <Input size="sm" aria-label={`Seconds for ${g.id}`} type="number" min={2} step={1}
                       value={seconds[g.id] ?? String(c?.seconds ?? g.default_seconds)} onChange={e => setSeconds({ ...seconds, [g.id]: e.target.value })} />
                   </label>
-                  <select aria-label={`Kind for ${g.id}`} disabled={!!c?.rendering} className="rounded-control border border-border bg-transparent px-1 py-0.5 type-caption" value={kindOf(g)} onChange={e => setKinds({ ...kinds, [g.id]: e.target.value as GapKind })}>
+                  <NativeSelect size="sm" aria-label={`Kind for ${g.id}`} disabled={!!c?.rendering} value={kindOf(g)} onChange={e => setKinds({ ...kinds, [g.id]: e.target.value as GapKind })}>
                     <option value="map">{KIND_LABEL.map}</option>
                     <option value="flyover" disabled={!flyover.available} title={flyover.note || undefined}>{KIND_LABEL.flyover}{flyover.available ? '' : ' (not installed)'}</option>
-                  </select>
-                  <button disabled={!!c?.rendering} className="rounded-control bg-primary px-2 py-1 text-primary-foreground disabled:opacity-50" onClick={() => generate(g)}>{c?.exists ? 'Regenerate' : BUTTON[kindOf(g)]}</button>
-                  {c?.exists && <button className="text-primary underline" onClick={() => setOpen(open === g.id ? undefined : g.id)}>{open === g.id ? 'Hide' : 'Watch'}</button>}
-                  {c && !c.rendering && <button aria-label={`Remove ${g.id} clip`} className="text-muted-foreground underline" onClick={() => run(() => api.deleteGapClip(folder, c.id))}>Remove</button>}
+                  </NativeSelect>
+                  <Button variant="default" size="sm" disabled={!!c?.rendering} onClick={() => generate(g)}>{c?.exists ? 'Regenerate' : BUTTON[kindOf(g)]}</Button>
+                  {c?.exists && <Button variant="link" onClick={() => setOpen(open === g.id ? undefined : g.id)}>{open === g.id ? 'Hide' : 'Watch'}</Button>}
+                  {c && !c.rendering && <Button variant="link" aria-label={`Remove ${g.id} clip`} onClick={() => run(() => api.deleteGapClip(folder, c.id))}>Remove</Button>}
                 </span>
               </div>
               {open === g.id && c?.exists && <StepVideo aria-label={`${g.id} ${c.kind === 'flyover' ? 'flyover' : 'map clip'}`} className="mt-2 w-full max-w-2xl rounded-control" src={api.gapVideoUrl(folder, c.id)} />}

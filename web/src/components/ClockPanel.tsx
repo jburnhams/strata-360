@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api, type ClockState } from '../api'
 import { usePoll } from '../usePoll'
+import { Input } from 'strata-react'
 
 // The camera clock: how many seconds the camera is ahead of the real time (UTC). It decides which part of the race track belongs to each clip. Nudge it, or let the app suggest it from the moments
 // where both the camera and the GPS saw you start or stop running. Changing it re-times every clip and redoes the stages that use the track (places).
@@ -18,7 +19,7 @@ export default function ClockPanel({ folder }: { folder: string }) {
         <h3 className="mr-2 type-body-sm font-semibold">Camera clock</h3>
         <span>{cur >= 0 ? '+' : ''}{cur.toFixed(1)} s</span><span className={c.verified ? 'text-primary' : 'text-warning'}>{c.verified ? 'confirmed' : 'not confirmed yet'}</span>
         {[-10, -1, 1, 10].map(d => <button key={d} disabled={busy} className={btn} onClick={() => nudge(d)}>{d > 0 ? '+' : ''}{d} s</button>)}
-        <input value={val ?? ''} onChange={e => setVal(e.target.value)} placeholder="seconds" className="w-24 rounded-control border border-border bg-transparent px-2 py-0.5 type-body-sm" />
+        <Input size="sm" value={val ?? ''} onChange={e => setVal(e.target.value)} placeholder="seconds" />
         <button disabled={busy || val === undefined || isNaN(Number(val))} className={btn} onClick={() => apply(Number(val))}>set</button>
         <button disabled={busy || !c.has_track} className={btn} title="uses the moments both the camera and the GPS saw you start or stop running" onClick={async () => { setBusy(true); setErr(undefined); try { setSug((await api.clockSuggest(folder)).suggestions) } catch (e) { setErr((e as Error).message) } setBusy(false) }}>suggest</button>
         {busy && <span className="type-caption text-muted-foreground">working…</span>}

@@ -4,6 +4,7 @@ import { api } from '../api'
 import { usePoll } from '../usePoll'
 import StepVideo from './FrameStep'
 import FilmStill from './FilmStill'
+import { Button } from 'strata-react'
 
 // A rough preview of the whole planned film (cuts, camera moves, the voice-over track). It is rendered on the server as a stream and starts playing after the first couple of seconds;
 // it keeps buffering while the rest is made. A new plan or voice-over means a new preview.
@@ -30,8 +31,8 @@ export default function FilmPreview({ folder }: { folder: string }) {
         <h3 className="type-body-sm font-semibold">Film preview</h3>
         {st.state === 'noplan' ? <span className="type-body-sm text-muted-foreground">Make a plan first.</span> : busy
           ? <><span className="type-body-sm text-muted-foreground">{st.state === 'rendering' ? `rendering ${pct}% (${Math.round((st.frames_done ?? 0) / 25)} of ${Math.round(st.length_s ?? 0)} s)` : 'preparing the sound…'}</span>
-              <button className="rounded-control border border-border px-2 py-0.5 type-caption" onClick={() => api.stopFilm(folder)}>stop</button></>
-          : <button className="rounded-surface bg-primary px-3 py-1.5 type-body-sm text-primary-foreground" onClick={() => api.startFilm(folder, st.state === 'done')}>{st.state === 'done' ? 'Render again' : 'Render preview'}</button>}
+              <Button size="sm" onClick={() => api.stopFilm(folder)}>stop</Button></>
+          : <Button variant="default" onClick={() => api.startFilm(folder, st.state === 'done')}>{st.state === 'done' ? 'Render again' : 'Render preview'}</Button>}
         {st.state === 'error' && <span className="type-body-sm text-danger">{st.error || 'failed'}</span>}
         {err && <span className="type-body-sm text-danger">player: {err}</span>}
       </div>

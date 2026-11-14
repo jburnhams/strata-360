@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { api, type Photo, type PhotoJob } from '../api'
 import PhotoCard from './PhotoCard'
+import { Button, Tooltip } from 'strata-react'
 
 // The photos you took during the race: add them here (any common format; HEIC is converted). Each is placed in the race by the time stamp in the photo and on the map by its own GPS position, else by where the run was at that time;
 // when the two disagree it says so. They are listed under the clip or gap they fall in, and have an icon on the overview map.
@@ -25,9 +26,9 @@ export default function PhotosPanel({ folder, photos, tz, job, onChanged, onOpen
       <div className="mb-2 flex items-center justify-between type-body-sm">
         <b>Photos <span className="font-normal text-muted-foreground">({photos?.length ?? 0}{flagged ? `, ${flagged} to check` : ''})</span></b>
         <span className="flex items-center gap-3">
-          {(photos?.length ?? 0) > 0 && <button disabled={!!job?.running} className="text-primary underline disabled:opacity-50" title="Run the clip stages that make sense for a photo (exposure, quality, places, people, who is in it, face, scene, overlay); only what is out of date" onClick={() => analyse(false)}>{job?.running ? 'Analysing…' : analysed < (photos?.length ?? 0) ? 'Analyse photos' : 'Analyse again'}</button>}
-          {(photos?.length ?? 0) > 0 && analysed > 0 && !job?.running && <button className="text-muted-foreground underline" title="Redo every stage for every photo" onClick={() => analyse(true)}>Redo all</button>}
-          <button disabled={!!busy} className="text-primary underline disabled:opacity-50" onClick={() => input.current?.click()}>{busy ?? 'Add photos'}</button>
+          {(photos?.length ?? 0) > 0 && <Tooltip label="Run the clip stages that make sense for a photo (exposure, quality, places, people, who is in it, face, scene, overlay); only what is out of date"><Button variant="link" disabled={!!job?.running} onClick={() => analyse(false)}>{job?.running ? 'Analysing…' : analysed < (photos?.length ?? 0) ? 'Analyse photos' : 'Analyse again'}</Button></Tooltip>}
+          {(photos?.length ?? 0) > 0 && analysed > 0 && !job?.running && <Tooltip label="Redo every stage for every photo"><Button variant="link" onClick={() => analyse(true)}>Redo all</Button></Tooltip>}
+          <Button variant="link" disabled={!!busy} onClick={() => input.current?.click()}>{busy ?? 'Add photos'}</Button>
         </span>
       </div>
       {job?.running && <p data-job="" className="mb-2 type-caption text-muted-foreground">{job.log.at(-1) ?? 'starting…'}</p>}
