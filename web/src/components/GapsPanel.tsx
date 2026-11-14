@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api, type Gap, type GapClip, type GapKind } from '../api'
 import { usePoll } from '../usePoll'
 import StepVideo from './FrameStep'
-import { Button, Input, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, Input, NativeSelect, Tooltip } from 'strata-react'
 
 // The stretches of the race with no camera clip, and the generated clip that can fill each one: choose the kind (the animated 2D map, or a 3D terrain flyover in 4K) and how long it is in the film, generate it
 // (the camera follows the runner at a speed-up with the race overlay on top), watch it, and use it in the script as a clip labelled with the gap's name (G01 ...).
@@ -31,7 +31,7 @@ export default function GapsPanel({ folder, onOpen }: { folder: string; onOpen?:
   return (
     <div className="mt-4">
       <div className="mb-1 flex items-baseline gap-2"><b>Gaps in the footage</b><span className="type-caption text-muted-foreground">{data.gaps.length} · a generated clip can fill each one</span></div>
-      {err && <p role="alert" className="mb-1 type-body-sm text-danger">{err}</p>}
+      {err && <Alert tone="danger" announce className="mb-1">{err}</Alert>}
       <ul className="divide-y divide-border rounded-surface border border-border type-body-sm">
         {data.gaps.map(g => {
           const c = g.clips.find(x => x.id === g.id)

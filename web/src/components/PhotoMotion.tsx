@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type MotionPlan, type MotionSettings, type MotionStyle, type Photo } from '../api'
 import StepVideo from './FrameStep'
-import { Button, Input, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, Input, NativeSelect, Tooltip } from 'strata-react'
 
 // The pan and zoom for a photo, so it can be used in the film like a shot: choose the move (or leave it to "auto", which looks at the shape of the photo and what is in it), how long it lasts and a shuffle for another take;
 // the start (green) and end (red) windows are drawn on the picture, and "Watch" plays the move. "Use this move" keeps the choice for the photo.
@@ -30,7 +30,7 @@ export default function PhotoMotion({ folder, p, onChanged }: { folder: string; 
             <Input size="sm" aria-label={`Seconds for ${p.name}`} type="number" min={2} max={8} step={0.5} placeholder="auto" title="Leave empty: 2 s for a plain picture up to 3 s for a busy one" value={secText} onChange={e => { setSecText(e.target.value); const v = Number(e.target.value); if (e.target.value.trim() === '') { setWatch(false); setS({ ...s, seconds: null }) } else if (Number.isFinite(v) && v >= 2 && v <= 8) { setWatch(false); setS({ ...s, seconds: v }) } }} /> s{s.seconds == null && plan ? ` (auto: ${plan.duration_s} s)` : ''}
             <Tooltip label="Another take: the same style aimed or ordered differently"><Button size="sm" aria-label={`Another take for ${p.name}`} onClick={() => { setWatch(false); setS({ ...s, seed: s.seed + 1 }) }}>⟳</Button></Tooltip>
           </div>
-          {err && <p role="alert" className="text-danger">{err}</p>}
+          {err && <Alert tone="danger" announce>{err}</Alert>}
           {plan && (
             <>
               <div className="relative w-56">

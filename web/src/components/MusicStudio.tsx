@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type GeneratedPiece, type MusicScore, type ScorePlan, type ScoreSource, type StudioPreset, type StudioPreview, type StudioSettings } from '../api'
 import { usePoll } from '../usePoll'
-import { Button, Input, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, Input, NativeSelect, Slider, Tooltip } from 'strata-react'
 
 const LEVEL_NAMES = ['sparse', 'steady', 'driving', 'full'], LEVELS = [0.15, 0.4, 0.65, 0.9], PHRASE = 4
 const STEMS = ['drums', 'bass', 'other', 'vocals'] as const
@@ -48,7 +48,7 @@ export default function MusicStudio({ folder }: { folder: string }) {
           <Button disabled={busy} onClick={() => run(() => api.analyseMusic(folder))}>{busy ? 'analysing…' : grid ? 'Analyse again' : 'Analyse the track'}</Button>
         </div>
         {grid && grid.key.confidence < 0.3 && <p className="mt-1 type-caption text-warning">The key is a guess (low confidence).</p>}
-        {msg && <p role="alert" className="mt-2 type-body-sm text-warning">{msg}</p>}
+        {msg && <Alert tone="warning" announce className="mt-2">{msg}</Alert>}
         {grid && <BarEnergy energy={grid.energy} used={pv?.plan.bars} />}
       </section>
 
@@ -67,11 +67,11 @@ export default function MusicStudio({ folder }: { folder: string }) {
           <Button variant="default" disabled={st.building || busy || !!pvErr || !settings}
             onClick={() => run(async () => { if (!settings) return; const r = await api.buildMusic(folder, { ...settings, style, takes }); if (!r.started) throw new Error(r.reason || 'could not start') })}>{st.building ? 'Building…' : 'Build this music'}</Button>
           {st.building && <span className="type-caption text-muted-foreground">{st.log || 'starting (the first build separates the stems, which takes a few minutes)'}</span>}
-          {!st.building && st.error && <span role="alert" className="type-caption text-danger">The build failed: {st.error}</span>}
+          {!st.building && st.error && <Alert tone="danger" announce>The build failed: {st.error}</Alert>}
         </div>
       </section>}
 
-      {pvErr && <p role="alert" className="type-body-sm text-warning">{pvErr}</p>}
+      {pvErr && <Alert tone="warning" announce>{pvErr}</Alert>}
       {pv && <Preview pv={pv} setLevel={setLevel} pins={pins} setPin={(first, p) => { const n = { ...pins }; if (p) n[String(first)] = p; else delete n[String(first)]; setPins(n) }} generator={!!st.generator} style={style} />}
 
       {st.built && <Built folder={folder} score={st.built} v={`${st.built.length_s}-${st.built.worst_join}-${st.built.bars.join('').length}-${(st.built.generated ?? []).map(p => p.seed).join('')}`} takes={takes} setTakes={setTakes} />}
@@ -114,10 +114,9 @@ function Fidelity({ fidelity, setFidelity, style, setStyle, generator }: { fidel
   const stop = FIDELITY_STOPS.find(s => Math.abs(s[0] - fidelity) < 0.01)
   return (
     <div className="mt-3 space-y-2 type-body-sm">
-      <label className="flex flex-col gap-1">True to the track, or in its style: <span className="font-medium">{fidelityName(fidelity)}</span>
-        <input type="range" min={0} max={1} step={0.05} value={fidelity} onChange={e => setFidelity(Number(e.target.value))} aria-label="Fidelity" className="w-full max-w-md" list="fidelity-stops" />
-        <datalist id="fidelity-stops">{FIDELITY_STOPS.map(([v]) => <option key={v} value={v} />)}</datalist></label>
-      <div className="flex max-w-md justify-between type-caption text-muted-foreground">{[...FIDELITY_STOPS].reverse().map(([v, n]) => <button key={v} type="button" className={`underline-offset-2 hover:underline ${Math.abs(v - fidelity) < 0.01 ? 'font-semibold text-foreground' : ''}`} onClick={() => setFidelity(v)}>{n}</button>)}</div>
+      <div className="flex flex-col gap-1">True to the track, or in its style: <span className="font-medium">{fidelityName(fidelity)}</span>
+        <Slider aria-label="Fidelity" min={0} max={1} step={0.05} value={fidelity} onChange={setFidelity} hideValue className="max-w-md" /></div>
+      <div className="flex max-w-md justify-between type-caption text-muted-foreground">{[...FIDELITY_STOPS].reverse().map(([v, n]) => <Button key={v} variant="link" size="sm" type="button" className={Math.abs(v - fidelity) < 0.01 ? 'font-semibold' : ''} onClick={() => setFidelity(v)}>{n}</Button>)}</div>
       {stop && <p className="type-caption text-muted-foreground">{stop[2]}</p>}
       {fidelity < 1 && <label className="flex max-w-xl flex-col gap-1">The track's style, for the new bars (genre and instruments)
         <Input value={style} onChange={e => setStyle(e.target.value)} placeholder="e.g. rap rock, heavy distorted guitar riff, punchy live drums" /></label>}

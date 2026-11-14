@@ -7,7 +7,7 @@ import StopsTable from './StopsTable'
 import TrackCharts, { type XMode } from './TrackCharts'
 import ClipCard from './ClipCard'
 import GapsPanel from './GapsPanel'
-import { Button, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, NativeSelect, Tooltip } from 'strata-react'
 
 // The race track (Garmin FIT or GPX) saved in the project as track.fit / track.gpx: the main numbers, a zoomable map with a marker for every clip, and elevation and pace charts with the same markers; or an upload box.
 // Hover a marker for the clip's card, click it to open the clip.
@@ -104,7 +104,7 @@ function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, s
   if (!base || !series) return <div className="mt-3 h-[420px] animate-pulse rounded-surface bg-muted" aria-label="Loading the race map" />
   return (
     <div className="mt-3 space-y-2">
-      {tiles && !tiles.ok && <p role="alert" className="type-body-sm text-warning">The map background is off: {tiles.error}</p>}
+      {tiles && !tiles.ok && <Alert tone="warning" announce>The map background is off: {tiles.error}</Alert>}
       <TrackMap background={tiles?.ok ? { url: api.tileUrl(tiles.style), tilePx: tiles.tile_px ?? 256 } : undefined} base={base} clips={clips} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} fetchDetail={bbox => api.trackLine(folder, bbox, 4000)} extras={extras} pois={listing?.pois ?? []} divergences={listing?.divergences ?? []} highlight={highlight} onHoverTrack={setHot} onToggleTrack={toggle} tz={tz} ends={listing?.markers} highlightCheckpoints={cps} ringEnds={ids.includes('finish')} photos={photos} photoThumb={id => api.photoThumb(folder, id, 240)} onOpenPhoto={onOpenPhoto} />
       <div className="flex flex-wrap items-center gap-3 type-caption text-muted-foreground">
         <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-pill align-middle" style={{ background: '#16a34a' }} />{hasDraft ? 'played by the newest script draft' : 'clip'}</span>
@@ -147,8 +147,8 @@ function CutoffBox({ label, cutoff, save }: { label: string; cutoff?: Cutoff; sa
       <input aria-label={`Cut-off for ${label}`} value={draft} disabled={busy} placeholder="cut-off" title="Cut-off time: 27h (total), 5:30 from last, Sat 14:00, 21/02 08:30" size={9}
         onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') { setDraft(cutoff?.text ?? ''); setErr(undefined) } }}
         className="rounded-control border border-border bg-transparent px-1 py-0.5 text-black" />
-      {err && <span role="alert" className="text-danger">{err}</span>}
-      {!err && cutoff?.error && <span role="alert" className="text-danger">{cutoff.error}</span>}
+      {err && <Alert tone="danger" announce>{err}</Alert>}
+      {!err && cutoff?.error && <Alert tone="danger" announce>{cutoff.error}</Alert>}
       {!err && cutoff?.kind && cutoff.elapsed_s != null && (
         <span className="text-muted-foreground" data-cutoff-read="">read as {KIND_TEXT[cutoff.kind]}: {hms(cutoff.elapsed_s)} since the start
           {m != null && <b className={`ml-2 ${m >= 0 ? 'text-primary' : 'text-danger'}`}>{hms(Math.abs(m))} {m >= 0 ? 'to spare' : 'late'}</b>}</span>
@@ -219,7 +219,7 @@ function TracksList({ folder, listing, onChange, hot, setHot, pinned, toggle, tz
         )}
       </ul>
       {listing?.merged && <p className="mt-2 type-caption text-muted-foreground">Race track = {listing.merged.runs.length} runs merged · {listing.merged.distance_km} km · {listing.merged.samples.toLocaleString()} points</p>}
-      {err && <p role="alert" className="mt-2 text-danger">{err}</p>}
+      {err && <Alert tone="danger" announce className="mt-2">{err}</Alert>}
     </div>
   )
 }

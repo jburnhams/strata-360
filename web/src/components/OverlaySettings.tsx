@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type OverlaySettings as Settings, type OverlayState } from '../api'
-import { Button, Checkbox } from 'strata-react'
+import { Button, Checkbox, Disclosure } from 'strata-react'
 
 const STYLE_LABEL: Record<string, string> = { 'tf-outdoors': 'Outdoors (contours, paths)', 'tf-landscape': 'Landscape (towns, relief)', 'tf-cycle': 'Cycle', 'tf-transport': 'Transport', 'tf-atlas': 'Atlas', osm: 'OpenStreetMap (no key)' }
 const styleLabel = (s: { name: string; needs_key: boolean }) => STYLE_LABEL[s.name] ?? s.name
@@ -26,8 +26,7 @@ export default function OverlaySettings({ folder, disabled = false }: { folder: 
   const map = (label: string, k: 'route_style' | 'local_style') => (
     <label className="type-body-sm">{label} <select className={sel} value={draft[k]} onChange={e => set({ [k]: e.target.value })}>{st.styles.map(s => <option key={s.name} value={s.name}>{styleLabel(s)}</option>)}</select></label>)
   return (
-    <details className="mt-3 rounded-surface border border-border p-3">
-      <summary className="cursor-pointer type-body-sm font-medium">Overlay <span className="font-normal text-muted-foreground">· {draft.enabled ? `${draft.elements.length} elements` : 'off'}{keyNeeded && !st.key_set ? ' · map key missing' : ''}</span></summary>
+    <Disclosure className="mt-3 rounded-surface border border-border p-3" summary={<>Overlay <span className="font-normal text-muted-foreground">· {draft.enabled ? `${draft.elements.length} elements` : 'off'}{keyNeeded && !st.key_set ? ' · map key missing' : ''}</span></>}>
       <fieldset disabled={disabled || saving} className="mt-3 space-y-3">
         <legend className="sr-only">Overlay settings</legend>
         <Checkbox label="Draw the race overlay on the film" checked={draft.enabled} onCheckedChange={(checked: boolean) => set({ enabled: checked })} />
@@ -57,6 +56,6 @@ export default function OverlaySettings({ folder, disabled = false }: { folder: 
         </div>
         {err && <p className="type-body-sm text-danger">{err}</p>}
       </fieldset>
-    </details>
+    </Disclosure>
   )
 }

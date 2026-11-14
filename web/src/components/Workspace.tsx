@@ -46,12 +46,12 @@ export default function Workspace({ folder, onChange }: { folder: string; onChan
   return (
     <div className="grid gap-4 md:grid-cols-[260px_1fr]">
       <aside className="flex flex-col md:sticky md:top-4 md:h-[calc(100vh-2rem)]">
-        <button onClick={() => setSel(null)} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === null ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Overview</button>
-        <button onClick={() => setSel('@streetview')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@streetview' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Street view</button>
-        <button onClick={() => setSel('@timeline')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@timeline' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Timeline</button>
-        <button onClick={() => setSel('@music')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@music' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Music studio</button>
-        <button onClick={() => setSel('@review')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@review' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Review transcript</button>
-        <button onClick={() => setSel('@ask')} className={`mb-2 w-full shrink-0 rounded-surface px-3 py-2 text-left type-body-sm font-medium ${sel === '@ask' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-muted'}`}>Ask about the project</button>
+        <Button variant={sel === null ? 'default' : 'outline'} aria-pressed={sel === null} onClick={() => setSel(null)} className="mb-2 w-full shrink-0 justify-start">Overview</Button>
+        <Button variant={sel === '@streetview' ? 'default' : 'outline'} aria-pressed={sel === '@streetview'} onClick={() => setSel('@streetview')} className="mb-2 w-full shrink-0 justify-start">Street view</Button>
+        <Button variant={sel === '@timeline' ? 'default' : 'outline'} aria-pressed={sel === '@timeline'} onClick={() => setSel('@timeline')} className="mb-2 w-full shrink-0 justify-start">Timeline</Button>
+        <Button variant={sel === '@music' ? 'default' : 'outline'} aria-pressed={sel === '@music'} onClick={() => setSel('@music')} className="mb-2 w-full shrink-0 justify-start">Music studio</Button>
+        <Button variant={sel === '@review' ? 'default' : 'outline'} aria-pressed={sel === '@review'} onClick={() => setSel('@review')} className="mb-2 w-full shrink-0 justify-start">Review transcript</Button>
+        <Button variant={sel === '@ask' ? 'default' : 'outline'} aria-pressed={sel === '@ask'} onClick={() => setSel('@ask')} className="mb-2 w-full shrink-0 justify-start">Ask about the project</Button>
         <Checkbox label="Overlay on thumbnails" checked={overlay} onCheckedChange={(checked: boolean) => setOverlay(checked)} title="Show the thumbnails with the race overlay (clock, numbers, maps) as the film will have it, where the thumb_overlay stage has made one" />
         <ul className="min-h-0 flex-1 space-y-1 overflow-auto md:pr-1">
           {clips === undefined ? Array.from({ length: 8 }, (_, i) => <li key={i} className="flex gap-2 p-1.5"><Skeleton className="h-11 w-20 shrink-0" /><div className="flex-1 space-y-1.5"><Skeleton className="h-3 w-full" /><Skeleton className="h-3 w-1/2" /></div></li>)

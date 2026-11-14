@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api, type LyricPhrase } from '../api'
 import { usePoll } from '../usePoll'
-import { Button, Tooltip } from 'strata-react'
+import { Alert, Button, Tooltip } from 'strata-react'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
@@ -33,7 +33,7 @@ export default function LyricsPanel({ folder }: { folder: string }) {
         {ly.exists && !ly.building && <span className="type-caption text-muted-foreground">{ly.instrumental ? 'instrumental: no singing found' : `${ly.phrases} phrases, ${ly.sung_s} s sung${pct != null ? ` (${pct}%)` : ''}, ${ly.language}`}</span>}
         {ly.exists && ly.stale && !ly.building && <span className="type-caption text-warning">out of date: the track has changed since</span>}
         {ly.exists && !ly.building && <Tooltip label="forget the lyrics (your corrections are kept)"><Button variant="link" size="sm" onClick={() => void run(() => api.resetLyrics(folder))}>Reset</Button></Tooltip>}
-        {(err || (!ly.building && ly.error)) && <span role="alert" className="type-caption text-danger">{err ?? `Finding the lyrics failed: ${ly.error}`}</span>}
+        {(err || (!ly.building && ly.error)) && <Alert tone="danger" announce>{err ?? `Finding the lyrics failed: ${ly.error}`}</Alert>}
       </div>
       {ly.exists && ly.phrases_list.length > 0 && <ul className="mt-2 max-h-72 divide-y divide-border overflow-y-auto type-body-sm">{ly.phrases_list.map(row)}</ul>}
     </div>

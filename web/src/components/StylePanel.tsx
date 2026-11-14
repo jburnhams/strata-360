@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type PaletteSchemes, type TypoFont, type TypoScheme, type Typography } from '../api'
 import { PanelSkeleton } from './Skeleton'
-import { Button } from 'strata-react'
+import { Alert, Button } from 'strata-react'
 
 // The look of the film's titles: its colour schemes (a few, shared by the clips) and its typography (one font for each role), both chosen from the film's vibes. The script writer proposes the vibes with its draft; your own choice replaces them.
 const ROLES: { id: string; name: string; hint: string; sample: string }[] = [
@@ -78,7 +78,7 @@ export default function StylePanel({ folder }: { folder: string }) {
               })}</div>}
           </li>)
       })}</ul>
-      {err && <p role="alert" className="mt-2 type-body-sm text-danger">{err}</p>}
+      {err && <Alert tone="danger" announce className="mt-2">{err}</Alert>}
       <p className="mt-3 type-caption text-muted-foreground">Used by the film's text cards, and the opening and ending titles. Your choices are kept; a new script draft changes only what you have not chosen.</p>
     </section>
   )

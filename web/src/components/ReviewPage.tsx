@@ -3,7 +3,7 @@ import { api, type ReviewItem } from '../api'
 import { usePoll } from '../usePoll'
 import { diffPhrase } from '../phraseDiff'
 import { PanelSkeleton } from './Skeleton'
-import { Button, Checkbox, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, Checkbox, NativeSelect, Tooltip } from 'strata-react'
 
 const PAGE = 20
 const short = (id: string) => id.replace(/^CAM_/, '').replace(/_D$/, '').replace(/^(\d{8})(\d{6})_/, (_, d, t) => `${d.slice(6)}/${d.slice(4, 6)} ${t.slice(0, 2)}:${t.slice(2, 4)} · `)
@@ -67,7 +67,7 @@ export default function ReviewPage({ folder, onOpen }: { folder: string; onOpen?
       </div>
       <p className="mb-3 type-caption text-muted-foreground">Worst first: unsure words, speech faster than {data.fast_wps} words a second, and phrases the recogniser itself doubted. Press play (the slowed one plays fast speech at the normal {data.normal_wps} words a second), retype what you hear, press Enter.
         Keys in the box: Enter saves and moves on, Alt+1 plays at the original speed, Alt+2 slowed, Esc stops.</p>
-      {err && <p className="mb-2 type-body-sm text-danger" role="alert">{err}</p>}
+      {err && <Alert tone="danger" announce className="mb-2">{err}</Alert>}
       {list.length === 0 && <p className="type-body-sm text-muted-foreground">{data.total === 0 ? 'No speech recognised yet.' : 'Nothing left to look at.'}</p>}
       <ol className="space-y-3">
         {list.slice(0, limit).map((it, k) => <Card key={`${it.clip}:${it.si}:${it.t0}:${it.reviewed}:${it.hidden}`} folder={folder} it={it} kind={kind} first={k === 0} onOpen={onOpen} onChanged={refresh} onError={fail} />)}

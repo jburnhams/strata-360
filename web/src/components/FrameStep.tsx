@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, type RefObject, type VideoHTMLAttributes } from 'react'
+import { Button, Tooltip } from 'strata-react'
 
 // Stepping a video one frame at a time, wherever there is a player: pause, then a frame back or a frame forward. The length of a frame is learnt from the video itself (the gaps between the frames it shows); until then, 1/30 s.
 const DEFAULT_FRAME_S = 1 / 30
@@ -24,11 +25,10 @@ export function stepFrame(v: HTMLVideoElement | null, dir: -1 | 1, frameS: numbe
 }
 
 export function FrameStepButtons({ video, frameS, className = '' }: { video: RefObject<HTMLVideoElement | null>; frameS: () => number; className?: string }) {
-  const b = 'rounded-control border border-border px-2 py-0.5 type-caption'
   return (
     <span className={`inline-flex items-center gap-1 ${className}`} role="group" aria-label="Step one frame">
-      <button type="button" className={b} title="Pause and go back one frame" aria-label="Previous frame" onClick={() => stepFrame(video.current, -1, frameS())}>◂ frame</button>
-      <button type="button" className={b} title="Pause and go forward one frame" aria-label="Next frame" onClick={() => stepFrame(video.current, 1, frameS())}>frame ▸</button>
+      <Tooltip label="Pause and go back one frame"><Button size="sm" type="button" aria-label="Previous frame" onClick={() => stepFrame(video.current, -1, frameS())}>◂ frame</Button></Tooltip>
+      <Tooltip label="Pause and go forward one frame"><Button size="sm" type="button" aria-label="Next frame" onClick={() => stepFrame(video.current, 1, frameS())}>frame ▸</Button></Tooltip>
     </span>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { RenderProgress as Progress } from '../api'
+import { Disclosure } from 'strata-react'
 
 /** Seconds as "12.3 s" under a minute, "3:07" over. */
 export const dur = (s: number) => s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
@@ -11,6 +12,8 @@ const MARK = { running: '●', done: '✓', error: '✗' } as const
 // worker measured, not guesses.
 export default function RenderProgress({ progress, busy }: { progress?: Progress | null; busy: boolean }) {
   const [now, setNow] = useState(() => Date.now() / 1000)
+  const [logOpen, setLogOpen] = useState(busy)
+  useEffect(() => { setLogOpen(busy) }, [busy])                                                                      // open while rendering, closed when it finishes; the person can still fold it either way
   useEffect(() => { if (!busy) return; const id = setInterval(() => setNow(Date.now() / 1000), 1000); return () => clearInterval(id) }, [busy])
   if (!progress) return null
   const live = (s: Progress['stages'][number]) => s.state === 'running' && busy ? Math.max(s.seconds, now - s.started) : s.seconds
@@ -45,10 +48,9 @@ export default function RenderProgress({ progress, busy }: { progress?: Progress
       )}
       {progress.error && <p className="type-caption text-danger">{progress.error}</p>}
       {progress.log.length > 0 && (
-        <details open={busy}>
-          <summary className="cursor-pointer type-caption text-muted-foreground">Log ({progress.log.length} lines)</summary>
+        <Disclosure summary={`Log (${progress.log.length} lines)`} open={logOpen} onOpenChange={setLogOpen}>
           <pre className="mt-1 max-h-40 overflow-auto rounded-control bg-muted p-2 type-caption" tabIndex={0}>{progress.log.slice(-60).map(([t, m]) => `+${dur(t)}  ${m}`).join('\n')}</pre>
-        </details>
+        </Disclosure>
       )}
     </div>
   )

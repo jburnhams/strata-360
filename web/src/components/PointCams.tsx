@@ -5,7 +5,7 @@ import { aimAt, drawAim } from '../aimOverlay'
 import { addPointCams } from '../mapLayers'
 import StepVideo from './FrameStep'
 import { LengthField } from './ItemPage'
-import { Button, Input } from 'strata-react'
+import { Alert, Button, Input } from 'strata-react'
 
 // Point cameras: a virtual camera that keeps one place in frame while a clip or a street view section goes past it (src/strata360/edit/pointcam.py). You arm the button, click the map near the path, and the camera looks at that point from wherever the
 // path is, panning round and zooming with the distance. The page suggests the stretch (metres before and after the closest approach), lets you change it with the zoom and the height of the point, renders a preview on demand, and offers the shot to
@@ -47,7 +47,7 @@ export function PointCamTool({ folder, source, pc, map, unavailable }: { folder:
         <button type="button" aria-pressed={pc.armed} disabled={pc.busy} onClick={() => pc.setArmed(a => !a)} className={`rounded-control px-3 py-1 ${pc.armed ? 'bg-success text-white' : 'border border-success text-success'}`}>{pc.busy ? 'Making the camera…' : pc.armed ? 'Now click the map near the path' : 'Add a point camera'}</button>
         <span className="type-caption text-muted-foreground">A virtual camera that keeps one place in frame, panning and zooming, while {SOURCE_NAME(source)} goes past it. Arm the button and click the map within 400 m of the path.</span>
       </div>}
-      {pc.err && <p role="alert" className="type-body-sm text-danger">{pc.err}</p>}
+      {pc.err && <Alert tone="danger" announce>{pc.err}</Alert>}
       {pc.loaded && pc.cams.length === 0 && <p className="type-caption text-muted-foreground">No point cameras here yet.</p>}
       {pc.cams.map(c => <PointCamCard key={c.id} folder={folder} cam={c} pc={pc} />)}
     </div>
@@ -98,7 +98,7 @@ export function UseRadios({ cam, onChange }: { cam: PointCam; onChange: (u: Poin
 }
 
 export function PointCamFacts({ cam }: { cam: PointCam }) {
-  if (!cam.ok || !cam.facts) return <p role="alert" className="type-body-sm text-warning">This camera cannot give its shot: {cam.error ?? 'unknown'}</p>
+  if (!cam.ok || !cam.facts) return <Alert tone="warning" announce>This camera cannot give its shot: {cam.error ?? 'unknown'}</Alert>
   const f = cam.facts
   return (<>
     <p className="type-body-sm text-muted-foreground">{f.seconds} s of {cam.source.kind === 'clip' ? 'footage' : 'road'} · the point is {f.min_dist_m} m from the path at the closest, {f.max_dist_m} m at the furthest · the view turns {f.swing_deg}° (up to {f.max_pan_deg_s}° a second) · zoom {f.fov_min}° to {f.fov_max}°{cam.range ? ` · plays ${cam.range[0]} to ${cam.range[1]} s in the film` : ''}</p>
@@ -127,7 +127,7 @@ export function PointCamPreview({ folder, cam }: { folder: string; cam: PointCam
             <div className={`h-full rounded-control bg-success transition-[width] duration-500 ${pr ? '' : 'w-1/4 animate-pulse'}`} style={pr ? { width: `${pr.pct}%` } : undefined} /></div>
           <ul aria-label="What it is doing" className="max-h-32 overflow-auto rounded-control bg-muted p-1.5 font-mono text-[11px] leading-snug text-muted-foreground">{(st?.log ?? []).map((l, i) => <li key={i}>{l}</li>)}{!st?.log?.length && <li>waiting for the job to report…</li>}</ul>
         </div>)}
-      {(err || (st && !st.exists && !running && st.error)) && <p role="alert" className="type-body-sm text-danger">{err || st?.error}</p>}
+      {(err || (st && !st.exists && !running && st.error)) && <Alert tone="danger" announce>{err || st?.error}</Alert>}
     </div>
   )
 }

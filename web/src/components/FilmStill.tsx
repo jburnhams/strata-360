@@ -4,7 +4,7 @@ import { usePoll } from '../usePoll'
 import RenderProgress from './RenderProgress'
 import StillGallery from './StillGallery'
 import { ENLARGE, SIZES, clock, enlargeShort, sizeLabel } from './stillModes'
-import { Button, Tooltip } from 'strata-react'
+import { Alert, Button, Tooltip } from 'strata-react'
 
 // Final-quality stills of the film. They go through the final render's own pipeline (the original two-lens video, camera path, exposure match, map overlay, transitions), so they are slow (seconds, and a long first time for a clip it has not seen) and
 // run at the lowest priority, one after the other; the same frame at the same size and enlarging is only made once. "Auto" picks a series of differing moments through the film. Everything made is kept: the gallery below shows all of it.
@@ -27,7 +27,7 @@ export default function FilmStill({ folder, video, planKey }: { folder: string; 
         <Button variant="default" onClick={here}>Render still at the player position</Button>
         <Tooltip label="A series of differing moments spread over the film: 4 for a film of 2 minutes, up to 10 at 30 minutes and more. Each moment is the middle of a shot that differs from the others in clip, how tight it is and its kind."><Button disabled={!n} onClick={auto}>Auto: {n || '…'} differing moments</Button></Tooltip>
         {busy && <span className="type-body-sm text-muted-foreground" role="status">{queued} {queued === 1 ? 'still' : 'stills'} to go{running?.t !== undefined ? ` · now the frame at ${clock(running.t)}` : ''}{running?.upscale ? ` (${enlargeShort(running.upscale)})` : ''}{running?.size ? ` · ${sizeLabel(running.size)}` : ''}</span>}
-        {err && <span className="type-body-sm text-danger" role="alert">{err}</span>}
+        {err && <Alert tone="danger" announce>{err}</Alert>}
       </div>
       {failed.map(f => <p key={f.name} className="mt-1 type-body-sm text-danger" role="alert">{f.t !== undefined ? `The still at ${clock(f.t)} failed: ` : 'A still failed: '}{f.error || 'the render failed'}</p>)}
       {running && <RenderProgress progress={running.progress} busy />}

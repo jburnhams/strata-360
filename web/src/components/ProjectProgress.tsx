@@ -4,7 +4,7 @@ import { useState } from 'react'
 import RedoDialog from './RedoDialog'
 import { PanelSkeleton } from './Skeleton'
 import Health from './Health'
-import { Button, Tooltip } from 'strata-react'
+import { Button, Disclosure, Tooltip } from 'strata-react'
 
 const NEEDS: Record<string, string> = { wearer_profile: 'choose which face is you', camera_clock: 'confirm the camera clock', race_track: 'add the race track (a Garmin .fit or a .gpx): the places stage is paused until then' }
 const LABEL: Record<string, string> = { new: 'New', processing: 'Processing…', needs_input: 'Waiting for you', complete: 'Complete' }
@@ -44,10 +44,9 @@ export default function ProjectProgress({ folder, onResults }: { folder: string;
         </div>
       ))}
       {cov && !cov.complete && (
-        <details className="mt-3 type-body-sm">
-          <summary className="cursor-pointer">Data missing: {cov.missing.length} item{cov.missing.length === 1 ? '' : 's'} · blocks {Object.keys(cov.blocked).length} decision{Object.keys(cov.blocked).length === 1 ? '' : 's'}</summary>
-          <ul className="mt-1 list-disc pl-5 text-muted-foreground">{Object.entries(cov.blocked).map(([d, cs]) => <li key={d}>{d}: {cs.length} clip{cs.length === 1 ? '' : 's'}</li>)}</ul>
-        </details>
+        <Disclosure className="mt-3" summary={`Data missing: ${cov.missing.length} item${cov.missing.length === 1 ? '' : 's'} · blocks ${Object.keys(cov.blocked).length} decision${Object.keys(cov.blocked).length === 1 ? '' : 's'}`}>
+          <ul className="mt-1 list-disc pl-5 type-body-sm text-muted-foreground">{Object.entries(cov.blocked).map(([d, cs]) => <li key={d}>{d}: {cs.length} clip{cs.length === 1 ? '' : 's'}</li>)}</ul>
+        </Disclosure>
       )}
       {!!p.needs?.length && <p className="mt-3 type-body-sm text-muted-foreground">To do: {p.needs.map(n => NEEDS[n] ?? n).join(', ')}</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2 type-body-sm">

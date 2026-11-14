@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { GapScriptItem } from '../api'
 import NoteBox from './NoteBox'
-import { Input, NativeSelect } from 'strata-react'
+import { Alert, Input, NativeSelect } from 'strata-react'
 
 // The page of one thing the film can show that is not a camera clip: a gap, a photo or a street view section. They all have the same sections, so this is shared: the preview, how it is drawn and how long it is, what the script says over it,
 // and your notes with the voice-over you want inside it. Each kind brings its own preview and its own settings.
@@ -44,7 +44,7 @@ export default function ItemPage({ folder, heading, sub, err, preview, where, se
         <h2 className="type-heading font-semibold">{heading}</h2>
         {sub && <p className="type-body-sm text-muted-foreground">{sub}</p>}
       </div>
-      {err && <p role="alert" className="type-body-sm text-danger">{err}</p>}
+      {err && <Alert tone="danger" announce>{err}</Alert>}
       <Card title="Preview">{preview}</Card>
       {where && <Card title="Where on the route">{where}</Card>}
       {more}
