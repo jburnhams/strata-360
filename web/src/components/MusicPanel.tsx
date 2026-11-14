@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api, type MusicAnalysis } from '../api'
 import { usePoll } from '../usePoll'
 import LyricsPanel from './LyricsPanel'
-import { Button } from 'strata-react'
+import { Waveform, type WaveformMark, type WaveformSpan, Button } from 'strata-react'
 
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
@@ -44,24 +44,19 @@ function TrackView({ folder, a, peaks, spans, v }: { folder: string; a?: MusicAn
     let raf = 0; const tick = () => { setT(audio.current?.currentTime ?? 0); raf = requestAnimationFrame(tick) }; raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf)
   }, [playing])
   const dur = a?.duration_s ?? 0
-  const bars: number[] = []
-  if (a && dur > 0) { const bar = (60 / a.bpm) * (a.bar_beats ?? 4); for (let x = a.offset_s; x < dur && bars.length < 600; x += bar) bars.push(x / dur) }
-  const seek = (e: React.MouseEvent<HTMLDivElement>) => { const r = e.currentTarget.getBoundingClientRect(); if (audio.current && dur > 0) { audio.current.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * dur; setT(audio.current.currentTime) } }
-  const wave = peaks?.length ? 'M0 30 ' + peaks.map((p, i) => `L${(i * 1000) / peaks.length} ${30 - 29 * p}`).join(' ') + ` L1000 30 ` + [...peaks].reverse().map((p, i) => `L${1000 - (i * 1000) / peaks.length} ${30 + 29 * p}`).join(' ') + ' Z' : ''
+  const marks: WaveformMark[] = []                                                    // the bar lines, and the first downbeat among them
+  if (a && dur > 0) { const bar = (60 / a.bpm) * (a.bar_beats ?? 4); for (let x = a.offset_s; x < dur && marks.length < 600; x += bar) marks.push(marks.length === 0 ? { time: x, kind: 'downbeat', label: 'First downbeat' } : { time: x, kind: 'bar' }) }
+  const sung: WaveformSpan[] = (spans ?? []).map(([x, y]) => ({ from: x, to: y, tone: 'info', label: `sung ${mmss(x)}-${mmss(y)}` }))
+  const seek = (time: number) => { if (audio.current) { audio.current.currentTime = time; setT(time) } }
   return (
     <div className="mt-3 space-y-2">
       <audio ref={audio} controls preload="metadata" src={api.musicAudioUrl(folder)} className="h-9 w-full" aria-label="Music track"
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} onSeeked={() => setT(audio.current?.currentTime ?? 0)} />
       {a && <>
-        <div className="relative cursor-pointer select-none overflow-hidden rounded-surface bg-neutral-12" onClick={seek} title="click to jump there; thin lines are the bar lines, the brighter one is the first downbeat">
-          {wave && <svg viewBox="0 0 1000 60" preserveAspectRatio="none" role="img" aria-label="Waveform of the track" className="block h-14 w-full"><path d={wave} className="fill-primary" /></svg>}
-          <img src={api.musicSpectrogramUrl(folder, v)} alt="Spectrogram of the track: pitch up the side, time along" className="block h-24 w-full" draggable={false} />
-          <div className="pointer-events-none absolute inset-0">
-            {dur > 0 && spans?.map(([x, y], i) => <div key={`s${i}`} data-testid="sung" title={`sung ${mmss(x)}-${mmss(y)}`} className="absolute top-0 h-full bg-info/25" style={{ left: `${(x / dur) * 100}%`, width: `${((y - x) / dur) * 100}%` }} />)}
-            {bars.map((x, i) => <div key={i} className={`absolute top-0 h-full ${i === 0 ? 'w-0.5 bg-white/80' : 'w-px bg-white/25'}`} style={{ left: `${x * 100}%` }} />)}
-            <div data-testid="playhead" className="absolute top-0 h-full w-0.5 bg-warning" style={{ left: `${dur > 0 ? Math.min(100, (t / dur) * 100) : 0}%` }} />
-          </div>
-        </div>
+        {peaks?.length && dur > 0
+          ? <Waveform label="Waveform of the track" peaks={peaks} duration={dur} time={t} onSeek={seek} marks={marks} spans={sung}
+              underlay={<img src={api.musicSpectrogramUrl(folder, v)} alt="Spectrogram of the track: pitch up the side, time along" className="block h-24 w-full" draggable={false} />} />
+          : <img src={api.musicSpectrogramUrl(folder, v)} alt="Spectrogram of the track: pitch up the side, time along" className="block h-24 w-full rounded-surface" draggable={false} />}
         <div className="flex justify-between type-caption text-muted-foreground"><span>{mmss(t)}</span>{spans && spans.length > 0 && <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded-control bg-info/50 align-middle" />sung (from the lyrics)</span>}<span>{mmss(dur)}</span></div>
         <div className="flex h-3 w-full overflow-hidden rounded-control bg-muted" title="energy of the music, bar by bar: the film cuts faster and uses livelier shots where it is high">
           {a.sections.map(([s, e, en], i) => <div key={i} style={{ width: `${(100 * (e - s)) / a.usable_beats}%`, background: `hsl(150 60% ${75 - 40 * en}%)` }} />)}</div>
