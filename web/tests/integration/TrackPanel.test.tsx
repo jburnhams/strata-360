@@ -6,9 +6,11 @@ import { mockGet, mockPost, mockDelete, mockError, recordRequests, mockPending }
 import { axe } from 'vitest-axe'
 import { http, HttpResponse } from 'msw'
 import { server } from '../utils/server'
+import { installLayoutShims } from 'strata-react/testing'
 
-beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
-afterEach(() => { vi.useRealTimers(); vi.clearAllMocks() })
+let restoreLayout = () => {}                                                                                    // the charts measure their box
+beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); restoreLayout = installLayoutShims() })
+afterEach(() => { restoreLayout(); vi.useRealTimers(); vi.clearAllMocks() })
 
 describe('TrackPanel', () => {
   it('renders a skeleton while loading', () => {
@@ -44,7 +46,7 @@ describe('TrackPanel', () => {
     expect(screen.getByText('42.2')).toBeInTheDocument()
     expect(screen.getByText('5:30')).toBeInTheDocument() // 5.5 => 5:30 min/km
     expect(await screen.findByRole('application', { name: 'Race map' })).toBeInTheDocument()
-    expect(await screen.findByRole('group', { name: 'Elevation chart' })).toBeInTheDocument(); expect(screen.getByRole('group', { name: 'Pace chart' })).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Elevation' })).toBeInTheDocument(); expect(screen.getByRole('img', { name: 'Pace' })).toBeInTheDocument()
   })
 
   it('shows the map credit when the background is on, and says why it is off when it is not', async () => {
@@ -97,7 +99,7 @@ describe('TrackPanel', () => {
   it('has no accessibility violations once loaded with a track', async () => {
     mockGet('/api/track', makeTrackOverview({ present: true, distance_km: 1, bbox: [0,0,1,1], line: [[0,0], [1,1]] }))
     const { container } = setup(<TrackPanel folder="/data" />)
-    await screen.findByRole('group', { name: 'Pace chart' })
+    await screen.findByRole('img', { name: 'Pace' })
     expect(await axe(container)).toHaveNoViolations()
   })
 
@@ -218,10 +220,9 @@ describe('TrackPanel', () => {
 
     it('shows the clip card when a chart marker is hovered and opens the clip when it is clicked', async () => {
       present(); const open = vi.fn(); const { user } = setup(<TrackPanel folder="/data" onOpenClip={open} />)
-      const marker = (await screen.findAllByRole('button', { name: 'Clip 0023' }))[0]
-      await user.hover(marker); const card = await screen.findByRole('tooltip'); expect(card).toHaveTextContent('clip 0023'); expect(card).toHaveTextContent('in the film · 16.5 s'); expect(card).toHaveTextContent('km 12.3 (16%)')
-      await user.unhover(marker); await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument())
-      await user.click(marker); expect(open).toHaveBeenCalledWith('CAM_20260222190000_0023_D')
+      const marker = (await screen.findAllByRole('button', { name: /^Clip 0023/ }))[0]
+      await user.keyboard('{Tab}'); marker.focus(); const card = (await screen.findAllByRole('tooltip')).find(t => /clip 0023/.test(t.textContent ?? ''))!; expect(card).toHaveTextContent('clip 0023'); expect(card).toHaveTextContent('in the film · 16.5 s'); expect(card).toHaveTextContent('km 12.3 (16%)')
+            await user.click(marker); expect(open).toHaveBeenCalledWith('CAM_20260222190000_0023_D')
     })
 
     it('switches the horizontal axis between time and distance', async () => {

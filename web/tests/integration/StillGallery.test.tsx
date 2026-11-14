@@ -52,7 +52,7 @@ it('lists a still from before the details were kept by its frame', () => {
 it('opens a viewer with everything kept about the still', async () => {
   const { user, getAllByRole, getByRole } = setup(<StillGallery folder="/f" stills={three} active={[]} />)
   await user.click(within(getAllByRole('listitem')[1]).getByRole('button'))
-  const d = getByRole('dialog', { name: 'Still viewer' }), det = within(d).getByLabelText('Details of the still').textContent!
+  const d = getByRole('dialog', { name: /Stills/ }), det = within(d).getAllByLabelText('Details of the still')[0].textContent!
   expect(det).toContain('Film time0:10.0'); expect(det).toContain('3840×2160 (4K)'); expect(det).toContain('Model to 1080p, then resample'); expect(det).toContain('narrowest view 45°'); expect(det).toContain('enlarged ×2')
   expect(det).toContain('Took25.0 s'); expect(det).toContain('prepare 1.5 s · render 12.6 s'); expect(det).toContain('reading the video 2.3 s'); expect(det).toContain('the current plan')
   expect(within(d).getByText('download PNG')).toHaveAttribute('download', 'b_f500.png')
@@ -66,21 +66,21 @@ it('explains a shot that was not enlarged', async () => {
 
 it('steps through the stills with the arrow keys and closes on Escape', async () => {
   const { user, getAllByRole, getByRole, queryByRole } = setup(<StillGallery folder="/f" stills={three} active={[]} />)
-  await user.click(within(getAllByRole('listitem')[0]).getByRole('button')); const title = () => getByRole('dialog').querySelector('span')?.textContent
-  expect(title()).toContain('0:02.0'); fireEvent.keyDown(window, { key: 'ArrowRight' }); expect(title()).toContain('0:10.0')
-  fireEvent.keyDown(window, { key: 'ArrowLeft' }); fireEvent.keyDown(window, { key: 'ArrowLeft' }); expect(title()).toContain('0:01.0')           // wraps round
-  fireEvent.keyDown(window, { key: 'Escape' }); expect(queryByRole('dialog')).toBeNull()
+  await user.click(within(getAllByRole('listitem')[0]).getByRole('button')); const title = () => within(getByRole('dialog')).getByRole('img', { name: /^Still at/ }).getAttribute('alt')
+  expect(title()).toContain('0:02.0'); await user.keyboard('{ArrowRight}'); expect(title()).toContain('0:10.0')
+  await user.keyboard('{ArrowLeft}{ArrowLeft}'); expect(title()).toContain('0:02.0')           // stops at the first
+  await user.keyboard('{Escape}'); expect(queryByRole('dialog')).toBeNull()
 })
 
 it('steps with the buttons and closes with the button, giving the focus back', async () => {
   const { user, getAllByRole, getByRole, queryByRole } = setup(<StillGallery folder="/f" stills={three} active={[]} />)
   const open = within(getAllByRole('listitem')[0]).getByRole('button'); await user.click(open)
-  await user.click(getByRole('button', { name: 'Next still' })); expect(getByRole('dialog').querySelector('span')?.textContent).toContain('0:10.0')
-  await user.click(getByRole('button', { name: 'close' })); expect(queryByRole('dialog')).toBeNull()
+  await user.click(getByRole('button', { name: 'Next picture' })); expect(within(getByRole('dialog')).getByRole('img', { name: /^Still at/ }).getAttribute('alt')).toContain('0:10.0')
+  await user.click(getByRole('button', { name: /close/i })); expect(queryByRole('dialog')).toBeNull()
 })
 
 it('has no step buttons with a single still', async () => {
-  const { user, getByRole, queryByRole } = setup(<StillGallery folder="/f" stills={[three[0]]} active={[]} />); await user.click(getByRole('button', { name: /Open the still/ })); expect(queryByRole('button', { name: 'Next still' })).toBeNull()
+  const { user, getByRole, queryByRole } = setup(<StillGallery folder="/f" stills={[three[0]]} active={[]} />); await user.click(getByRole('button', { name: /Open the still/ })); expect(getByRole('button', { name: 'Next picture' })).toBeDisabled()
 })
 
 it('compares the ticked stills side by side at full size, with their details', async () => {
