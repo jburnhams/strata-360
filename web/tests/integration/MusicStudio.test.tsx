@@ -143,7 +143,7 @@ describe('MusicStudio', () => {
 describe('MusicStudio: true to the track, new bars and the checks', () => {
   it('previews at the fidelity on the slider and its named stops', async () => {
     const seen = recordRequests('/api/music/studio/preview'); const { user } = setup(<MusicStudio folder="/data" />)
-    await screen.findByLabelText('Preview of the build'); expect(seen.at(-1)?.body).toMatchObject({ fidelity: 0.75, pins: {} }); expect(screen.getByText('Extended', { selector: 'span' })).toBeInTheDocument()
+    await screen.findByLabelText('Preview of the build'); expect(seen.at(-1)?.body).toMatchObject({ fidelity: 0.75, pins: {} }); expect(screen.getByText('Extended', { selector: 'span.font-medium' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Remix' })); await waitFor(() => expect(seen.at(-1)?.body).toMatchObject({ fidelity: 0.5 }))
     expect(screen.getByText(/about half the bars new/)).toBeInTheDocument()
   })
@@ -168,7 +168,7 @@ describe('MusicStudio: true to the track, new bars and the checks', () => {
 
   it('starts from the last build\'s style and fidelity', async () => {
     mockGet('/api/music/studio', makeStudioState({ generator: true, built: makeMusicScore({ style: 'funk', fidelity: 0.5 }) })); setup(<MusicStudio folder="/data" />)
-    expect(await screen.findByDisplayValue('funk')).toBeInTheDocument(); expect(screen.getByLabelText('Fidelity')).toHaveValue('0.5')
+    expect(await screen.findByDisplayValue('funk')).toBeInTheDocument(); expect(screen.getByRole('slider', { name: 'Fidelity' })).toHaveValue('0.5')
   })
 
   it('draws the score and pins a section to the track, then to new bars, then lets it go', async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type GeneratedPiece, type MusicScore, type ScorePlan, type ScoreSource, type StudioPreset, type StudioPreview, type StudioSettings } from '../api'
 import { usePoll } from '../usePoll'
-import { Alert, Button, Input, NativeSelect, Tooltip } from 'strata-react'
+import { Alert, Button, Input, NativeSelect, Slider, Tooltip } from 'strata-react'
 
 const LEVEL_NAMES = ['sparse', 'steady', 'driving', 'full'], LEVELS = [0.15, 0.4, 0.65, 0.9], PHRASE = 4
 const STEMS = ['drums', 'bass', 'other', 'vocals'] as const
@@ -114,10 +114,9 @@ function Fidelity({ fidelity, setFidelity, style, setStyle, generator }: { fidel
   const stop = FIDELITY_STOPS.find(s => Math.abs(s[0] - fidelity) < 0.01)
   return (
     <div className="mt-3 space-y-2 type-body-sm">
-      <label className="flex flex-col gap-1">True to the track, or in its style: <span className="font-medium">{fidelityName(fidelity)}</span>
-        <input type="range" min={0} max={1} step={0.05} value={fidelity} onChange={e => setFidelity(Number(e.target.value))} aria-label="Fidelity" className="w-full max-w-md" list="fidelity-stops" />
-        <datalist id="fidelity-stops">{FIDELITY_STOPS.map(([v]) => <option key={v} value={v} />)}</datalist></label>
-      <div className="flex max-w-md justify-between type-caption text-muted-foreground">{[...FIDELITY_STOPS].reverse().map(([v, n]) => <button key={v} type="button" className={`underline-offset-2 hover:underline ${Math.abs(v - fidelity) < 0.01 ? 'font-semibold text-foreground' : ''}`} onClick={() => setFidelity(v)}>{n}</button>)}</div>
+      <div className="flex flex-col gap-1">True to the track, or in its style: <span className="font-medium">{fidelityName(fidelity)}</span>
+        <Slider aria-label="Fidelity" min={0} max={1} step={0.05} value={fidelity} onChange={setFidelity} hideValue className="max-w-md" /></div>
+      <div className="flex max-w-md justify-between type-caption text-muted-foreground">{[...FIDELITY_STOPS].reverse().map(([v, n]) => <Button key={v} variant="link" size="sm" type="button" className={Math.abs(v - fidelity) < 0.01 ? 'font-semibold' : ''} onClick={() => setFidelity(v)}>{n}</Button>)}</div>
       {stop && <p className="type-caption text-muted-foreground">{stop[2]}</p>}
       {fidelity < 1 && <label className="flex max-w-xl flex-col gap-1">The track's style, for the new bars (genre and instruments)
         <Input value={style} onChange={e => setStyle(e.target.value)} placeholder="e.g. rap rock, heavy distorted guitar riff, punchy live drums" /></label>}

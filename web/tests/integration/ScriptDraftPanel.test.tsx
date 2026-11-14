@@ -84,8 +84,8 @@ describe('ScriptDraftPanel', () => {
 
   it('lists the clips left out', async () => {
     mockGet('/api/script2', makeScript2State({ draft: makeScriptDraft({ skipped: [{ clip: '0001', why: 'indoors, no speech' }] }) }))
-    setup(<ScriptDraftPanel folder="/data" />)
-    expect(await screen.findByText('1 clip(s) left out')).toBeInTheDocument(); expect(screen.getByText(/indoors, no speech/)).toBeInTheDocument()
+    const { user } = setup(<ScriptDraftPanel folder="/data" />)
+    await user.click(await screen.findByRole('button', { name: '1 clip(s) left out' })); expect(screen.getByText(/indoors, no speech/)).toBeInTheDocument()
   })
 
   it('shows progress while a draft is being written and an error when it failed', async () => {

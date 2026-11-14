@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { axe } from 'vitest-axe'
 import { act } from '@testing-library/react'
-import { setup } from '../utils/render'
+import { setup, within } from '../utils/render'
 import RenderProgress, { dur } from '../../src/components/RenderProgress'
 import { makeRenderProgress } from '../utils/factories'
 
@@ -44,8 +44,8 @@ it('shows a failure', () => {
 })
 
 it('keeps the log open while busy and closed when finished', () => {
-  const a = setup(<RenderProgress progress={makeRenderProgress()} busy />); expect(a.container.querySelector('details')).toHaveAttribute('open'); a.unmount()
-  const b = setup(<RenderProgress progress={makeRenderProgress()} busy={false} />); expect(b.container.querySelector('details')).not.toHaveAttribute('open')
+  const a = setup(<RenderProgress progress={makeRenderProgress()} busy />); expect(within(a.container).getByRole('button', { name: /Log \(/ })).toHaveAttribute('aria-expanded', 'true'); a.unmount()
+  const b = setup(<RenderProgress progress={makeRenderProgress()} busy={false} />); expect(within(b.container).getByRole('button', { name: /Log \(/ })).toHaveAttribute('aria-expanded', 'false')
 })
 
 it('has no accessibility violations', async () => {

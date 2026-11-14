@@ -8,7 +8,7 @@ import { PanelSkeleton } from './Skeleton'
 import Phrase from './Phrase'
 import WordMarker from './WordMarker'
 import RoughMixPlayer from './RoughMixPlayer'
-import { Button, Checkbox, Input, NativeSelect, Textarea, Tooltip } from 'strata-react'
+import { Button, Checkbox, Disclosure, Input, NativeSelect, Textarea, Tooltip } from 'strata-react'
 
 const KIND: Record<ScriptItem['type'], { label: string; cls: string }> = {
   vo: { label: 'narration', cls: 'bg-info-subtle text-info' },
@@ -158,17 +158,17 @@ export default function ScriptDraftPanel({ folder }: { folder: string }) {
           </div>)}
         </div>
         {((pins.vo ?? []).length > 0 || (pins.vo_never ?? []).length > 0) && (
-          <details className="mt-3 type-body-sm"><summary className="cursor-pointer type-caption text-muted-foreground">Your narration pins ({(pins.vo ?? []).length + (pins.vo_never ?? []).length})</summary>
-            <ul className="mt-1 space-y-1">
+          <Disclosure className="mt-3" summary={`Your narration pins (${(pins.vo ?? []).length + (pins.vo_never ?? []).length})`}>
+            <ul className="mt-1 space-y-1 type-body-sm">
               {(pins.vo ?? []).map((p: VoPin) => (
                 <li key={p.id} className="flex flex-wrap items-center gap-2"><span className="rounded-control bg-primary-3 px-1 type-caption">say</span><span className="min-w-0 flex-1">{p.text}</span>
                   <NativeSelect size="sm" aria-label={`Where to say ${p.id}`} value={p.mode} onChange={e => void savePins(setMode(pins, p.id, e.target.value as VoPin['mode'], p.clip ?? draft.items.find(x => x.type === 'vo' && x.text?.includes(p.text))?.clip))}>
                     <option value="clip">in clip {p.clip ?? '…'}</option><option value="ordered">in order, anywhere</option><option value="anywhere">anywhere</option></NativeSelect>
                   <Button variant="link" size="sm" aria-label={`Remove pin ${p.id}`} onClick={() => void savePins(removePin(pins, p.id))}>remove</Button></li>))}
               {(pins.vo_never ?? []).map(ph => <li key={ph} className="flex items-center gap-2"><span className="rounded-control bg-danger-subtle px-1 type-caption">never</span><span className="min-w-0 flex-1">{ph}</span><Button variant="link" size="sm" aria-label={`Remove never-say ${ph}`} onClick={() => void savePins(removeNever(pins, ph))}>remove</Button></li>)}
-            </ul></details>)}
-        {diff.removed.length > 0 && <details className="mt-2 type-caption text-muted-foreground"><summary>{diff.removed.length} item(s) removed since the previous draft</summary><ul className="mt-1 list-disc pl-5">{diff.removed.map((it, i) => <li key={i}>{KIND[it.type].label} · clip {it.clip}: {it.text ?? it.why ?? `${it.from}–${it.to}`}</li>)}</ul></details>}
-        {draft.skipped.length > 0 && <details className="mt-2 type-caption text-muted-foreground"><summary>{draft.skipped.length} clip(s) left out</summary><ul className="mt-1 list-disc pl-5">{draft.skipped.map(s => <li key={s.clip}>clip {s.clip}: {s.why}</li>)}</ul></details>}
+            </ul></Disclosure>)}
+        {diff.removed.length > 0 && <Disclosure className="mt-2" summary={`${diff.removed.length} item(s) removed since the previous draft`}><ul className="mt-1 list-disc pl-5 type-caption text-muted-foreground">{diff.removed.map((it, i) => <li key={i}>{KIND[it.type].label} · clip {it.clip}: {it.text ?? it.why ?? `${it.from}–${it.to}`}</li>)}</ul></Disclosure>}
+        {draft.skipped.length > 0 && <Disclosure className="mt-2" summary={`${draft.skipped.length} clip(s) left out`}><ul className="mt-1 list-disc pl-5 type-caption text-muted-foreground">{draft.skipped.map(s => <li key={s.clip}>clip {s.clip}: {s.why}</li>)}</ul></Disclosure>}
         {draft.problems.length > 0 && <p className="mt-2 type-caption text-warning">The writer could not satisfy: {draft.problems.filter(p => !itemOf(p)).join('; ') || 'see the ⚠ marks'}</p>}
       </>)}
     </section>
