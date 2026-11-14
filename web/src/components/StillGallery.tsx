@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type UIEvent } from 're
 import { api, type StillActive, type StillMeta } from '../api'
 import { dur } from './RenderProgress'
 import { clock, enlargeLabel, enlargeShort, sizeLabel } from './stillModes'
-import { Button, Checkbox, NativeSelect } from 'strata-react'
+import { Button, Checkbox, Lightbox, NativeSelect, type LightboxItem } from 'strata-react'
 
 const when = (m: StillMeta) => new Date(m.rendered ?? m.modified * 1000).toLocaleString()
 const mb = (b: number) => `${(b / 1e6).toFixed(1)} MB`
@@ -16,18 +16,18 @@ export default function StillGallery({ folder, stills, active, loading }: { fold
     return [...l].sort(order === 'film' ? (a, b) => (a.t ?? a.frame / 50) - (b.t ?? b.frame / 50) || b.modified - a.modified : (a, b) => b.modified - a.modified)
   }, [stills, order, onlyCurrent])
   const idx = shown.findIndex(s => s.name === open)
+  const items = useMemo<LightboxItem[]>(() => shown.map(s => ({ id: s.name, src: api.filmStillUrl(folder, s.name), label: `Still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`}`, natural: s.size ? [s.size[0], s.size[1]] as const : undefined })), [shown, folder])
   const toggle = (name: string) => setPicked(p => p.includes(name) ? p.filter(x => x !== name) : [...p, name].slice(-4))
   useEffect(() => { setPicked(p => p.filter(n => stills.some(s => s.name === n))) }, [stills])
   if (loading) return null
   if (!stills.length && !active.length) return <p className="mt-3 type-body-sm text-muted-foreground">No stills yet. Render one at the player position, or let Auto pick differing moments.</p>
-  const chip = 'rounded-control border border-border px-2 py-0.5 type-caption'
   return (
     <section className="mt-3" aria-label="Still gallery">
       <div className="mb-2 flex flex-wrap items-center gap-3 type-body-sm">
         <h5 className="font-semibold">All stills ({stills.length})</h5>
         <label>Order <NativeSelect size="sm" value={order} onChange={e => setOrder(e.target.value as 'newest' | 'film')}><option value="newest">newest first</option><option value="film">by film time</option></NativeSelect></label>
         {stills.some(s => !s.current) && <Checkbox label="Only the current plan" checked={onlyCurrent} onCheckedChange={(checked: boolean) => setOnlyCurrent(checked)} />}
-        {picked.length > 0 && <button className={chip} onClick={() => setPicked([])}>clear comparison ({picked.length})</button>}
+        {picked.length > 0 && <Button variant="outline" size="sm" onClick={() => setPicked([])}>clear comparison ({picked.length})</Button>}
       </div>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {active.filter(a => a.state !== 'done').map(a => (
@@ -45,14 +45,15 @@ export default function StillGallery({ folder, stills, active, loading }: { fold
             <p className="mt-1 font-medium">{s.t != null ? clock(s.t) : `frame ${s.frame}`}{s.size ? ` · ${sizeLabel(s.size)}` : ''}</p>
             <p className="text-muted-foreground">{s.legacy ? 'made before details were kept' : enlargeShort(s.upscale)}</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <label className="text-muted-foreground"><input type="checkbox" checked={picked.includes(s.name)} onChange={() => toggle(s.name)} aria-label={`Compare the still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`} (${enlargeShort(s.upscale) || 'unknown'})`} /> compare</label>
+              <Checkbox label={`Compare the still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`} (${enlargeShort(s.upscale) || 'unknown'})`} hideLabel checked={picked.includes(s.name)} onCheckedChange={() => toggle(s.name)} detail="compare" />
               {!s.current && <span className="rounded-control bg-warning-subtle px-1 text-warning" title="Made from a plan, voice-over or overlay that has since changed">older plan</span>}
             </div>
           </li>
         ))}
       </ul>
       {picked.length > 1 && <Compare folder={folder} names={picked} stills={stills} />}
-      {open && idx >= 0 && <Viewer folder={folder} s={shown[idx]} onClose={() => setOpen(undefined)} onStep={d => setOpen(shown[(idx + d + shown.length) % shown.length].name)} many={shown.length > 1} />}
+      <Lightbox title="Stills" items={items} index={Math.max(idx, 0)} onIndexChange={i => setOpen(shown[i]?.name)} open={open !== undefined && idx >= 0} onOpenChange={o => { if (!o) setOpen(undefined) }} missing="This still could not be loaded." detailsLabel="Details of the still"
+        details={item => { const m = shown.find(x => x.name === item.id); return m ? <Details folder={folder} s={m} /> : null }} />
     </section>
   )
 }
@@ -81,29 +82,12 @@ function Compare({ folder, names, stills }: { folder: string; names: string[]; s
   )
 }
 
-function Viewer({ folder, s, onClose, onStep, many }: { folder: string; s: StillMeta; onClose: () => void; onStep: (d: -1 | 1) => void; many: boolean }) {
-  const close = useRef<HTMLButtonElement>(null)
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null; close.current?.focus()
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); else if (e.key === 'ArrowRight') onStep(1); else if (e.key === 'ArrowLeft') onStep(-1) }
-    window.addEventListener('keydown', key); return () => { window.removeEventListener('keydown', key); prev?.focus?.() }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+function Details({ folder, s }: { folder: string; s: StillMeta }) {
   const timings = Object.entries(s.timings ?? {}).sort((a, b) => b[1] - a[1])
   const row = (k: string, v: React.ReactNode) => <div className="flex gap-2"><dt className="w-28 shrink-0 text-muted-foreground">{k}</dt><dd>{v}</dd></div>
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black/90 p-3 text-white" role="dialog" aria-modal="true" aria-label="Still viewer">
-      <div className="mb-2 flex items-center gap-2 type-body-sm">
-        <span className="font-semibold">{s.t != null ? clock(s.t) : `frame ${s.frame}`} · {sizeLabel(s.size)} · {enlargeShort(s.upscale) || 'made before details were kept'}</span>
-        <span className="ml-auto flex gap-2">
-          {many && <><Button size="sm" onClick={() => onStep(-1)} aria-label="Previous still">◂</Button><Button size="sm" onClick={() => onStep(1)} aria-label="Next still">▸</Button></>}
-          <a className="rounded-control border border-input px-2 py-0.5" href={api.filmStillUrl(folder, s.name)} download={s.name}>download PNG</a>
-          <button ref={close} className="rounded-control border border-input px-2 py-0.5" onClick={onClose}>close</button>
-        </span>
-      </div>
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[1fr_20rem]">
-        <div className="min-h-0 overflow-auto rounded-control bg-black"><img className="mx-auto max-h-full max-w-full object-contain" src={api.filmStillUrl(folder, s.name)} alt={`Still at ${s.t != null ? clock(s.t) : `frame ${s.frame}`}`} /></div>
-        <div className="min-h-0 overflow-auto rounded-control bg-neutral-12 p-3 type-caption">
+    <div className="type-caption">
+      <a className="mb-2 inline-block rounded-control border border-input px-2 py-0.5" href={api.filmStillUrl(folder, s.name)} download={s.name}>download PNG</a>
         <dl className="space-y-1" aria-label="Details of the still">
           {row('Film time', s.t != null ? clock(s.t) : 'not kept')}
           {row('Frame', `${s.frame}${s.fps ? ` at ${s.fps} a second` : ''}`)}
@@ -121,8 +105,6 @@ function Viewer({ folder, s, onClose, onStep, many }: { folder: string; s: Still
         </dl>
         <p className="pt-2 text-muted-foreground">{s.name}</p>
         {s.legacy && <p className="pt-1 text-muted-foreground">Made before the details were kept; only what the file name says is known.</p>}
-        </div>
-      </div>
     </div>
   )
 }
