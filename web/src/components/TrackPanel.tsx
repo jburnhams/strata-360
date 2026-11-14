@@ -121,7 +121,7 @@ function RaceView({ folder, listing, onOpenClip, tz, photos, onOpenPhoto, hot, s
         <span className="ml-auto flex items-center gap-1">horizontal axis
           <NativeSelect size="sm" aria-label="Horizontal axis" value={xMode} onChange={e => setXMode(e.target.value as XMode)}><option value="time">time</option><option value="km">distance</option></NativeSelect></span>
       </div>
-      <TrackCharts series={series} clips={clips} xMode={xMode} tz={tz} cursor={cursor} onCursor={setCursor} onHoverClip={hoverClip} onOpenClip={onOpenClip} />
+      <TrackCharts series={series} clips={clips} xMode={xMode} tz={tz} cursor={cursor} onCursor={setCursor} renderClipCard={c => <ClipCard folder={folder} clip={c} overlay={overlay} />} onOpenClip={onOpenClip} />
       <StopsTable pois={listing?.pois ?? []} tz={tz} onOpenGap={onOpenGap} onToggle={onStop} />
       {hover && <div className="pointer-events-none fixed z-40" style={{ left: Math.min(hover.x + 16, window.innerWidth - 280), top: Math.min(hover.y + 16, window.innerHeight - 330) }}><ClipCard folder={folder} clip={hover.clip} overlay={overlay} /></div>}
     </div>

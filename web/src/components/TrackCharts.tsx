@@ -1,68 +1,59 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
+import { CursorScope, LineChartGroup, useSharedCursor, type ChartMark, type ChartSpan, type GroupedChart } from 'strata-react'
+import type { ReactNode } from 'react'
 import type { TrackClip, TrackSeries } from '../api'
-import { fmtLocal, fmtPace, hourStep, linear, logScale, nearestIndex, niceTicks, paceRange, paceTicks, range, runs } from '../trackMath'
+import { fmtLocal, fmtPace, hourStep, nearestIndex, niceTicks } from '../trackMath'
 
 export type XMode = 'time' | 'km'
-const W = 1000, H = 150, ML = 54, MR = 12, MT = 14, MB = 22, PW = W - ML - MR, PH = H - MT - MB
 
-// Two charts on one horizontal axis (elapsed time in clock time, or distance): elevation on a truncated axis, and pace in min/km on a log axis, faster at the top. Stops are shaded; every clip has the same marker on both
+// Two charts on one horizontal axis (elapsed time in clock time, or distance): elevation with the lowest and highest of each stretch, and pace in min/km on a log axis, faster at the top. Stops are shaded; every clip has the same marker on both
 // (green = the newest script draft plays it); the cursor is shared with the map; hover a marker for the clip's card, click it to open the clip.
-export default function TrackCharts({ series, clips, xMode, tz, cursor, onCursor, onHoverClip, onOpenClip }: {
+// The charts, the shared cursor, the markers and the shading are strata-react's (LineChartGroup); what stays here is the track's own axes, and carrying the cursor to and from the map.
+
+/** Carries the cursor between the charts' scope and the map: the pointer over a chart goes out as a time; the map's time goes in as a position. */
+function CursorBridge({ cursor, onCursor, toX, toT }: { cursor: number | null; onCursor: (t: number | null) => void; toX: (t: number) => number; toT: (x: number) => number }) {
+  const shared = useSharedCursor('map-bridge')
+  const other = shared?.other ?? null
+  useEffect(() => { onCursor(other == null ? null : toT(other)) }, [other])                          // eslint-disable-line react-hooks/exhaustive-deps
+  const setPlayback = shared?.setPlayback
+  useEffect(() => { setPlayback?.(cursor == null ? null : toX(cursor)) }, [cursor, setPlayback])    // eslint-disable-line react-hooks/exhaustive-deps
+  return null
+}
+
+export default function TrackCharts({ series, clips, xMode, tz, cursor, onCursor, renderClipCard, onOpenClip }: {
   series: TrackSeries; clips: TrackClip[]; xMode: XMode; tz: string; cursor: number | null; onCursor: (t: number | null) => void
-  onHoverClip: (c: TrackClip | null, x?: number, y?: number) => void; onOpenClip: (id: string) => void
+  renderClipCard?: (c: TrackClip) => ReactNode; onOpenClip: (id: string) => void
 }) {
   const xs = useMemo(() => { let last = 0; return (xMode === 'time' ? series.t : series.km.map(k => (k == null ? last : (last = k)))) as number[] }, [series, xMode])
-  const x0 = xs[0] ?? 0, x1 = xs[xs.length - 1] ?? 1, sx = linear(x0, x1, ML, ML + PW)
-  const xOfT = (t: number) => sx(xs[nearestIndex(series.t, t)])
-  const stops = useMemo(() => {                                                                    // runs of bins spent (nearly) standing still, as x ranges
-    const out: [number, number][] = []; let from: number | null = null
-    series.moving.forEach((m, i) => { const lo = m < 0.2; if (lo && from == null) from = i; if ((!lo || i === series.moving.length - 1) && from != null) { out.push([from, lo ? i : i - 1]); from = null } })
+  const toX = (t: number) => xs[nearestIndex(series.t, t)], toT = (x: number) => series.t[nearestIndex(xs, x)]
+  const t0 = Date.parse(series.start_utc)
+  const spans = useMemo<ChartSpan[]>(() => {                                                          // runs of bins spent (nearly) standing still
+    const out: ChartSpan[] = []; let from: number | null = null
+    series.moving.forEach((m, i) => { const lo = m < 0.2; if (lo && from == null) from = i; if ((!lo || i === series.moving.length - 1) && from != null) { out.push({ from: xs[from], to: xs[lo ? i : i - 1], label: 'Stopped', tone: 'neutral' }); from = null } })
     return out
-  }, [series])
-  const placed = clips.filter(c => c.covered && c.t_mid != null)
-  const svgs = [useRef<SVGSVGElement>(null), useRef<SVGSVGElement>(null)]
-  const move = (e: React.MouseEvent<SVGRectElement>, k: number) => {
-    const r = svgs[k].current?.getBoundingClientRect(); if (!r || r.width <= 0) return
-    const px = ((e.clientX - r.left) / r.width) * W, v = x0 + ((px - ML) / PW) * (x1 - x0); onCursor(series.t[nearestIndex(xs, v)])
+  }, [series, xs])
+  const placed = useMemo(() => clips.filter(c => c.covered && c.t_mid != null), [clips])
+  const marks = useMemo<ChartMark[]>(() => placed.map(c => ({ x: toX(c.t_mid!), label: `Clip ${c.label}`, colour: c.used ? 'var(--color-success)' : 'var(--color-muted-foreground)' })), [placed, xs])  // eslint-disable-line react-hooks/exhaustive-deps
+  const clipOf = (m: ChartMark) => placed.find(c => `Clip ${c.label}` === m.label)
+  const charts = useMemo<GroupedChart[]>(() => {
+    const mid = (i: number) => series.alt[i] ?? ((series.alt_lo[i] ?? 0) + (series.alt_hi[i] ?? 0)) / 2
+    const paced = xs.map((x, i) => ({ x, y: series.pace[i] })).filter((p): p is { x: number; y: number } => p.y != null && p.y > 0)
+    return [
+      { seriesLabel: 'Elevation', label: 'Elevation', series: xs.map((x, i) => ({ x, y: mid(i) })), formatY: v => `${Math.round(v)} m`, yMin: Math.floor(Math.min(...series.alt_lo.concat(series.alt).filter((v): v is number => v != null)) / 50) * 50,
+        range: { low: xs.map((_, i) => series.alt_lo[i] ?? mid(i)), high: xs.map((_, i) => series.alt_hi[i] ?? mid(i)), label: 'Lowest to highest in each stretch' } },
+      { seriesLabel: 'Pace', label: 'Pace', series: paced, formatY: v => `${fmtPace(v)} /km`, yScale: 'log', yInvert: true },
+    ]
+  }, [series, xs])
+  const hours = series.duration_s / 3600
+  const xTicks = ({ min, max }: { min: number; max: number }) => {
+    if (xMode === 'km') return niceTicks(min, max, 8)
+    const s = hourStep(hours) * 3600; const out: number[] = []; for (let t = Math.ceil(min / s) * s; t <= max; t += s) out.push(t); return out
   }
-  const ci = cursor == null ? null : nearestIndex(series.t, cursor)
-  const alt = range(series.alt_lo.concat(series.alt_hi)), [plo, phi] = paceRange(series.pace)
-  const sa = linear(alt[0], alt[1], MT + PH, MT), sp = logScale(plo, phi, MT, MT + PH)               // faster (smaller min/km) at the top
-  const hours = (series.duration_s / 3600), step = hourStep(hours), t0 = Date.parse(series.start_utc)
-  const xTicks = xMode === 'time' ? Array.from({ length: Math.floor(hours / step) + 1 }, (_, i) => i * step * 3600).map(t => ({ x: xOfT(t), label: fmtLocal(t0 + t * 1000, tz) })) : niceTicks(x0, x1, 8).map(v => ({ x: sx(v), label: `${v} km` }))
-  const marker = (c: TrackClip) => {
-    const x = xOfT(c.t_mid!), col = c.used ? '#16a34a' : '#78716c'
-    return (
-      <g key={c.id} role="button" tabIndex={0} aria-label={`Clip ${c.label}`} className="cursor-pointer outline-none" onClick={() => onOpenClip(c.id)} onKeyDown={e => { if (e.key === 'Enter') onOpenClip(c.id) }}
-        onMouseEnter={e => onHoverClip(c, e.clientX, e.clientY)} onMouseMove={e => onHoverClip(c, e.clientX, e.clientY)} onMouseLeave={() => onHoverClip(null)}>
-        <line x1={x} x2={x} y1={MT} y2={MT + PH} stroke={col} strokeWidth="1" strokeDasharray="3 3" opacity="0.7" />
-        <circle cx={x} cy={MT} r="4.5" fill={col} stroke="white" strokeWidth="1" />
-        <line x1={x} x2={x} y1={MT} y2={MT + PH} stroke="transparent" strokeWidth="10" />
-      </g>)
-  }
-  const pane = (k: number, title: string, label: string, body: React.ReactNode, yTicks: { y: number; label: string }[], readout: string | null) => (
-    <svg ref={svgs[k]} viewBox={`0 0 ${W} ${H}`} className="w-full" role="group" aria-label={label}>
-      <text x={ML} y={9} className="fill-muted-foreground text-[10px]">{title}</text>
-      {readout && <text x={W - MR} y={9} textAnchor="end" className="fill-muted-foreground text-[10px]">{readout}</text>}
-      {stops.map(([a, b], i) => <rect key={i} data-stop="" x={sx(xs[a])} width={Math.max(sx(xs[b]) - sx(xs[a]), 1)} y={MT} height={PH} className="fill-muted-foreground/40" />)}
-      {yTicks.map(t => <g key={t.label}><line x1={ML} x2={ML + PW} y1={t.y} y2={t.y} className="stroke-muted-foreground" /><text x={ML - 4} y={t.y + 3} textAnchor="end" className="fill-muted-foreground text-[10px]">{t.label}</text></g>)}
-      {xTicks.map(t => <text key={t.label + t.x} x={t.x} y={H - 6} textAnchor="middle" className="fill-muted-foreground text-[10px]">{t.label}</text>)}
-      {body}
-      {placed.map(marker)}
-      {ci != null && <line x1={xOfT(series.t[ci])} x2={xOfT(series.t[ci])} y1={MT} y2={MT + PH} className="stroke-warning" strokeWidth="1.2" data-cursor="" />}
-      <rect x={ML} y={MT} width={PW} height={PH} fill="transparent" onMouseMove={e => move(e, k)} onMouseLeave={() => onCursor(null)} />
-    </svg>
-  )
-  const line = (pts: [number, number][]) => pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('')
-  const band = (() => { const lo = xs.map((x, i) => [sx(x), sa(series.alt_lo[i] ?? series.alt[i] ?? alt[0])] as [number, number]), hi = xs.map((x, i) => [sx(x), sa(series.alt_hi[i] ?? series.alt[i] ?? alt[0])] as [number, number]); return line(hi) + line(lo.reverse()).replace(/^M/, 'L') + 'Z' })()
-  const altPath = line(xs.map((x, i) => series.alt[i] == null ? null : [sx(x), sa(series.alt[i]!)] as [number, number]).filter((p): p is [number, number] => p != null))
-  const pacePaths = runs(xs.map(sx), series.pace.map(p => (p == null ? null : sp(Math.min(Math.max(p, plo), phi)))))
   return (
-    <div className="space-y-1">
-      {pane(0, 'elevation (m)', 'Elevation chart', <><path d={band} className="fill-primary/15" /><path d={altPath} fill="none" className="stroke-primary" strokeWidth="1.4" /></>,
-        niceTicks(alt[0], alt[1], 4).map(v => ({ y: sa(v), label: String(Math.round(v)) })), ci != null && series.alt[ci] != null ? `${Math.round(series.alt[ci]!)} m` : null)}
-      {pane(1, 'pace (min/km, log scale, faster is higher)', 'Pace chart', pacePaths.map((r, i) => <path key={i} d={line(r)} fill="none" className="stroke-info" strokeWidth="1.2" />),
-        paceTicks(plo, phi).map(v => ({ y: sp(v), label: fmtPace(v) })), ci != null ? (series.pace[ci] != null ? `${fmtPace(series.pace[ci])} /km` : 'stopped') : null)}
-    </div>
+    <CursorScope>
+      <LineChartGroup label="Elevation and pace along the track" charts={charts} formatX={x => xMode === 'km' ? `${Math.round(x * 10) / 10} km` : fmtLocal(t0 + x * 1000, tz)} xLabel={xMode === 'km' ? 'Distance' : 'Time'}
+        xTicks={xTicks} spans={spans} marks={marks} onMarkSelect={m => { const c = clipOf(m); if (c) onOpenClip(c.id) }} renderMarkCard={m => { const c = clipOf(m); return c && renderClipCard ? renderClipCard(c) : m.label }} />
+      <CursorBridge cursor={cursor} onCursor={onCursor} toX={toX} toT={toT} />
+    </CursorScope>
   )
 }
