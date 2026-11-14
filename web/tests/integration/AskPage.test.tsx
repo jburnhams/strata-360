@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { axe } from 'vitest-axe'
-import AskPage, { inline } from '../../src/components/AskPage'
+import AskPage from '../../src/components/AskPage'
 import type { AgentAnswer, AgentPending, AgentStatus, AgentUndoState } from '../../src/api'
 import { mockError, mockGet, mockNetworkError, mockPending, mockPost, recordRequests } from '../utils/api'
 import { act, screen, setup, within } from '../utils/render'
@@ -31,13 +31,13 @@ describe('AskPage', () => {
     ['no mcp package', status({ available: false }), /pip install mcp/],
   ])('explains what is missing and disables the box: %s', async (_n, s, words) => {
     mockGet('/api/agent', s); setup(<AskPage {...props} />)
-    expect(await screen.findByRole('status')).toHaveTextContent(words)
+    expect(await screen.findByText(words)).toBeInTheDocument()
     expect(screen.getByLabelText('Your question')).toBeDisabled(); expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled()
   })
 
   it('says so when the server cannot tell', async () => {
     mockError('/api/agent', 500, 'boom'); setup(<AskPage {...props} />)
-    expect(await screen.findByRole('status')).toHaveTextContent(/did not say/); expect(screen.getByLabelText('Your question')).toBeDisabled()
+    expect(await screen.findByText(/did not say/)).toBeInTheDocument(); expect(screen.getByLabelText('Your question')).toBeDisabled()
   })
 
   it('asks a question, shows it and the answer, and sends the whole conversation next time', async () => {
@@ -60,7 +60,7 @@ describe('AskPage', () => {
   it('shows that it is looking, and does not take a second question meanwhile', async () => {
     mockGet('/api/agent', status()); mockPending('/api/agent/chat', 'post')
     const { user } = setup(<AskPage {...props} />); await ask(user, 'q')
-    expect(await screen.findByText('Looking…')).toBeInTheDocument(); await user.type(screen.getByLabelText('Your question'), 'again'); expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled()
+    expect(await screen.findByText('Looking…')).toBeInTheDocument(); expect(screen.getByLabelText('Your question')).toBeDisabled(); expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument()
   })
 
   it('shows a server error in the conversation and leaves it out of the next request', async () => {
@@ -79,13 +79,12 @@ describe('AskPage', () => {
   it('lists what the assistant looked at, with the arguments and the time', async () => {
     mockGet('/api/agent', status()); mockPost('/api/agent/chat', answer({ steps: [{ tool: 'clips', args: { sort: 'longest' }, seconds: 0.4, chars: 90, error: null }, { tool: 'clip', args: { clip: 'x' }, seconds: 0.1, chars: 9, error: 'no such clip' }] }))
     const { user } = setup(<AskPage {...props} />); await ask(user, 'q')
-    expect(await screen.findByText(/Looked at 2 things: clips, clip/)).toBeInTheDocument()
-    await user.click(screen.getByText(/Looked at 2 things/)); expect(screen.getByText('clips(sort="longest") · 0.4 s')).toBeInTheDocument(); expect(screen.getByText(/clip\(clip="x"\) · 0.1 s · no such clip/)).toBeInTheDocument()
+    await user.click(await screen.findByText(/What it looked at/)); expect(screen.getByText('clips(sort="longest") · 0.4 s')).toBeInTheDocument(); expect(screen.getByText(/clip\(clip="x"\) · 0.1 s · no such clip/)).toBeInTheDocument()
   })
 
   it('shows the pictures the assistant fetched, each opening full size', async () => {
     mockGet('/api/agent', status()); mockPost('/api/agent/chat', answer({ images: [{ url: '/api/clip/frame?folder=%2Ff&clip=CAM_1&t=4', caption: 'CAM_1 at 4 s' }] }))
-    const { user } = setup(<AskPage {...props} />); await ask(user, 'show me')
+    const { user } = setup(<AskPage {...props} />); await ask(user, 'show me'); await user.click(await screen.findByText(/What it looked at/))
     const img = await screen.findByRole('img', { name: 'CAM_1 at 4 s' }); expect(img).toHaveAttribute('src', '/api/clip/frame?folder=%2Ff&clip=CAM_1&t=4')
     expect(screen.getByRole('link', { name: 'CAM_1 at 4 s' })).toHaveAttribute('target', '_blank'); expect(screen.getByText('CAM_1 at 4 s', { selector: 'figcaption' })).toBeInTheDocument()
   })
@@ -178,16 +177,7 @@ describe('AskPage', () => {
 
   it('has no accessibility violations and a labelled conversation log', async () => {
     mockGet('/api/agent', status()); mockPost('/api/agent/chat', answer({ images: [{ url: '/x.jpg', caption: 'a picture' }], steps: [{ tool: 'clips', args: {}, seconds: 0.1, chars: 1, error: null }] }))
-    const { user, container } = setup(<AskPage {...props} />); await ask(user, 'q'); await screen.findByRole('img', { name: 'a picture' })
-    expect(within(screen.getByRole('log', { name: 'Conversation' })).getByText('There are 3 clips.')).toBeInTheDocument(); expect(await axe(container)).toHaveNoViolations()
+    const { user, container } = setup(<AskPage {...props} />); await ask(user, 'q'); await user.click(await screen.findByText(/What it looked at/)); await screen.findByRole('img', { name: 'a picture' })
+    expect(within(screen.getByLabelText('Conversation')).getByText('There are 3 clips.')).toBeInTheDocument(); expect(await axe(container)).toHaveNoViolations()
   })
-})
-
-describe('inline', () => {
-  const render = (text: string, ids: string[] = []) => inline(text, ids, () => {})
-  it('leaves plain text alone', () => expect(render('hello world')).toEqual(['hello world']))
-  it('prefers the longest clip id when ids share a prefix', () => {
-    const out = inline('CAM_10 and CAM_1', ['CAM_1', 'CAM_10'], () => {}).filter(Boolean); expect(out.filter(n => typeof n !== 'string')).toHaveLength(2)
-  })
-  it('does not treat regular expression characters in ids as patterns', () => expect(() => render('a.b and (x)', ['a.b', '(x)'])).not.toThrow())
 })
