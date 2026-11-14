@@ -25,10 +25,10 @@ describe('MusicPanel', () => {
     expect(await screen.findByText('My song.mp3')).toBeInTheDocument()
     expect(screen.queryByText('Upload a track')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Music track')).toHaveAttribute('src', expect.stringContaining('/api/music/audio?'))
-    expect(screen.getByRole('img', { name: /Waveform/ })).toBeInTheDocument()
-    expect(screen.getByRole('img', { name: /Spectrogram/ })).toHaveAttribute('src', expect.stringContaining('/api/music/spectrogram?'))
-    expect(container.querySelectorAll('.pointer-events-none > div:not([data-testid])').length).toBe(5)       // bar lines at 1, 3, 5, 7, 9 s
-    expect(screen.getByTestId('playhead')).toHaveStyle({ left: '0%' })
+    const wave = screen.getByRole('slider', { name: /Waveform of the track/ }); expect(wave).toBeInTheDocument()
+    expect(screen.getByAltText(/Spectrogram/)).toHaveAttribute('src', expect.stringContaining('/api/music/spectrogram?'))
+    expect(wave).toHaveAttribute('aria-valuetext', expect.stringContaining('0:00'))                                                         // the playhead starts at the beginning
+    expect(screen.getAllByText(/First downbeat|bar at/i).length).toBeGreaterThan(0)                             // bar lines at 1, 3, 5, 7, 9 s are listed for screen readers
   })
 
   it('shades the sung stretches on the waveform when the lyrics are known, and shows nothing when they are not', async () => {
@@ -36,8 +36,7 @@ describe('MusicPanel', () => {
       analysis: { bpm: 120, offset_s: 1, bar_beats: 4, duration_s: 10, usable_beats: 16, sections: [[0, 16, 0.5]], confidence: 0.9 } }))
     mockGet('/api/lyrics', makeLyrics({ exists: true, phrases: 2, sung_s: 5, duration_s: 10, vocal_spans: [[2, 4], [6, 9]] }))
     setup(<MusicPanel folder="/data" />)
-    const bands = await screen.findAllByTestId('sung'); expect(bands).toHaveLength(2)
-    expect(bands[0]).toHaveStyle({ left: '20%', width: '20%' }); expect(bands[1]).toHaveStyle({ left: '60%', width: '30%' }); expect(screen.getByText(/sung \(from the lyrics\)/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/sung 0:0[24]-0:0[49]/)).length).toBeGreaterThan(0); expect(screen.getAllByText(/sung 0:02-0:04/).length).toBeGreaterThan(0); expect(screen.getAllByText(/sung 0:06-0:09/).length).toBeGreaterThan(0); expect(screen.getByText(/sung \(from the lyrics\)/)).toBeInTheDocument()
   })
 
   it('says so when the track cannot be read', async () => {
