@@ -12,7 +12,7 @@ faster-whisper==1.2.1
 av==19.0.1              # also used directly: osv/recover.py decodes AAC frames to split audio runs (faster-whisper depends on it too)
 ctranslate2==4.8.2
 onnxruntime==1.23.2
-transformers==4.57.3
+transformers==5.22.2
 tokenizers==0.22.1
 sentencepiece==0.2.2
 sacremoses==0.2.0
