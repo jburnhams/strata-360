@@ -28,7 +28,7 @@ mcp>=2,<3               # the read-only agent tools (server/mcp_tools.py): /mcp 
 kokoro-onnx>=0.6        # the voice-over voice (Kokoro-82M, open model); model files: ./strata360 voiceover . --fetch
 librosa                 # TIGER-DnR (audio_background stage): model code fetched at a pinned commit by audio/background.py
 torch_complex
-typeguard<3
+typeguard<5
 spandrel==0.4.2       # loads the upscaling models (edit/upscale.py); optional: only an upscaled render needs it
 einops                # (needed by some spandrel architectures)
 numba                 # compiles the seam solver (render/seam.py solve_dp); optional: without it the numpy version is used (72 ms instead of 2 ms a frame)
