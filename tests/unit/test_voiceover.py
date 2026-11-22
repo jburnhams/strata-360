@@ -165,7 +165,7 @@ def test_pick_and_engines(monkeypatch):
 
     # test no engines available
     monkeypatch.setattr(V, "available_engines", lambda: [])
-    with pytest.raises(RuntimeError, match="voice model is not installed"):
+    with pytest.raises(RuntimeError, match="no voice"):
         V.pick({})
 
 
