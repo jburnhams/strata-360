@@ -6,7 +6,7 @@
 scipy==1.16.3
 opencv-python==4.12.0.88
 pillow==12.3.0          # the race overlay: text (FreeType) and map tiles (overlay/)
-torch==2.9.1
+torch==2.13.0
 torchaudio==2.9.1
 faster-whisper==1.2.1
 av==19.0.1              # also used directly: osv/recover.py decodes AAC frames to split audio runs (faster-whisper depends on it too)
