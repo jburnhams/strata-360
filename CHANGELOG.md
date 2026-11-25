@@ -2,6 +2,12 @@
 
 Newest first, grouped by day. One entry per change, in the same commit or PR as the change.
 
+## 2026-11-25
+
+**strata-models-client at strata-models main: normal jobs go through the bulk endpoint (branch `claude/models-bulk`)**
+strata-models now takes a normal or low priority job only on its bulk endpoint; the client at its newest commit sends them there, so the remote Whisper calls (normal priority) keep working after the service restarts.
+- `uv.lock`: `strata-models-client` moved to strata-models 1ea290a. strata-python is left where it was.
+
 ## 2026-11-09
 
 **Move the Python side to uv, ruff, pyright and the shared strata-python gate (branch `claude/project-thread-iw7199`)**
