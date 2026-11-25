@@ -2088,7 +2088,7 @@ dev = [
 [[package]]
 name = "strata-models-client"
 version = "0.1.0"
-source = { git = "https://github.com/jburnhams/strata-models?subdirectory=client#213d232305e6d1d436be0bea0df471c0429d56cb" }
+source = { git = "https://github.com/jburnhams/strata-models?subdirectory=client#1ea290ad86fe94f1015e2f802da763361000bbd5" }
 
 [[package]]
 name = "strata-python"
